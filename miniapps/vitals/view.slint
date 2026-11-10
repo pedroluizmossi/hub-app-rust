@@ -1,0 +1,106 @@
+// Tela do mini-app Sinais vitais: um cartão por recurso, cada um com sua mascote.
+import { Theme } from "../../ui/theme.slint";
+import { Mascot, SegBar, Sparkline } from "../../ui/widgets.slint";
+
+export struct VitalCard {
+    title: string,
+    mascot: image,
+    mood: string,
+    available: bool,
+    value: float,        // 0..100
+    value-text: string,  // "37%"
+    detail: string,      // "5.1G / 15.5G"
+    temp-text: string,   // "61 °C" ou ""
+    hot: bool,
+    spark: string,       // caminho SVG 1000×100
+}
+
+// Estado do mini-app, preenchido pelo Rust (src/apps/vitals.rs).
+export global VitalsApp {
+    in property <[VitalCard]> cards;
+    in property <string> net-text;
+}
+
+component Card inherits Rectangle {
+    in property <VitalCard> v;
+    property <color> tint: !v.available ? Theme.muted : Theme.mood-color(v.mood == "sleep" ? "idle" : v.mood);
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: v.mood == "alarm" ? Theme.alarm : tint.with-alpha(0.45);
+    background: Theme.bg0.with-alpha(0.55);
+    animate border-color { duration: 300ms; }
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            Mascot {
+                frame: v.mascot;
+                mood: v.mood;
+                width: 80px;
+                height: 70px;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 5px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                Text {
+                    text: v.title;
+                    color: Theme.sub;
+                    font-size: 11px;
+                    letter-spacing: 2px;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if v.temp-text != "": Text {
+                    text: (v.hot ? "♨ " : "") + v.temp-text;
+                    color: v.hot ? Theme.alarm : Theme.sub;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: v.available ? v.value-text : "—";
+                color: tint;
+                font-size: 26px;
+                font-weight: 800;
+            }
+            SegBar { value: v.value; tint: tint; }
+            Sparkline { commands: v.spark; tint: tint.with-alpha(0.8); }
+            Text {
+                text: v.available ? v.detail : "não encontrado";
+                color: Theme.sub;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+export component VitalsView inherits VerticalLayout {
+    spacing: 10px;
+
+    // quatro cartões fixos (CPU, RAM, GPU, disco) em 2×2
+    HorizontalLayout {
+        spacing: 10px;
+        vertical-stretch: 1;
+        Card { v: VitalsApp.cards[0]; }
+        Card { v: VitalsApp.cards[1]; }
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        vertical-stretch: 1;
+        Card { v: VitalsApp.cards[2]; }
+        Card { v: VitalsApp.cards[3]; }
+    }
+    Text {
+        text: VitalsApp.net-text;
+        color: Theme.sub;
+        font-size: 11px;
+        horizontal-alignment: center;
+    }
+}

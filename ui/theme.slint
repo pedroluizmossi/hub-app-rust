@@ -1,0 +1,31 @@
+// Cores do tema ativo (preenchidas pelo Rust a partir de src/mascot/themes.rs)
+// e o relógio de animação compartilhado pelas mascotes.
+
+export global Theme {
+    in property <color> fur: #ff2bd6;
+    in property <color> visor: #00f0ff;
+    in property <color> outline: #12061f;
+    in property <color> ok: #39ff14;
+    in property <color> warn: #fff200;
+    in property <color> alarm: #ff1744;
+    in property <color> sleep: #7a5cff;
+    in property <color> bg0: #14062a;
+    in property <color> bg1: #05020c;
+    in property <color> text: #f2e9ff;
+    in property <color> sub: #8f7bb3;
+    in property <color> muted: #5a4a78;
+
+    // cor de cada humor
+    public pure function mood-color(mood: string) -> color {
+        if mood == "alarm" { return alarm; }
+        if mood == "busy" { return warn; }
+        if mood == "happy" { return ok; }
+        if mood == "sleep" { return sleep; }
+        return visor;
+    }
+}
+
+// Quadro de animação (~8/s), avançado pelo Rust só com a janela visível.
+export global Anim {
+    in property <int> frame;
+}

@@ -1,0 +1,245 @@
+// Tela do mini-app Docker.
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../../ui/theme.slint";
+import { Mascot, NeonButton, Counter, SearchBox, Toggle } from "../../ui/widgets.slint";
+
+export struct ContainerRow {
+    name: string,
+    image: string,
+    status: string,
+    project: string,
+    running: bool,
+    problem: bool,
+    // texto do estado: "rodando", "parado (1)", "unhealthy"…
+    state-text: string,
+    cpu: float,
+    usage-text: string,
+    port-text: string,
+    url: string,
+}
+
+// Estado do mini-app, preenchido pelo Rust (src/apps/docker.rs).
+export global DockerApp {
+    in property <[ContainerRow]> rows;
+    in property <int> running;
+    in property <int> stopped;
+    in property <int> errors;
+    in property <bool> ok: true;
+    in property <string> error-text;
+    in property <image> mascot;
+    in property <string> mood: "sleep";
+    // o que a mascote está dizendo (último evento)
+    in property <string> speech;
+    in property <string> usage-text;
+    in property <bool> hide-stopped;
+    in-out property <string> search;
+
+    callback action(string /* verbo */, string /* container */);
+    callback search-edited(string);
+    callback toggle-hide-stopped();
+    callback open-url(string);
+    callback refresh();
+}
+
+component Row inherits Rectangle {
+    in property <ContainerRow> c;
+    property <color> state-color: c.problem ? Theme.alarm : c.running ? Theme.ok : Theme.muted;
+    height: 50px;
+    border-radius: 6px;
+    background: hover.has-hover ? Theme.visor.with-alpha(0.06) : transparent;
+    border-width: c.problem ? 1px : 0;
+    border-color: Theme.alarm.with-alpha(0.5);
+
+    hover := TouchArea { }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 10px;
+
+        // estado
+        Rectangle {
+            width: 14px;
+            // halo (sem blur, para o renderizador por software)
+            if c.running || c.problem: Rectangle {
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                background: state-color.with-alpha(0.22);
+            }
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: state-color;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: c.name;
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                if c.project != "": Rectangle {
+                    border-radius: 3px;
+                    background: Theme.fur.with-alpha(0.2);
+                    width: proj.preferred-width + 8px;
+                    proj := Text {
+                        text: c.project;
+                        color: Theme.fur.brighter(0.3);
+                        font-size: 10px;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Text {
+                text: c.state-text + " · " + c.image;
+                color: c.problem ? Theme.alarm : Theme.sub;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+
+        // uso
+        VerticalLayout {
+            alignment: center;
+            width: 96px;
+            Text {
+                text: c.usage-text;
+                color: c.cpu >= 60 ? Theme.warn : Theme.sub;
+                font-size: 11px;
+                font-family: "monospace";
+                horizontal-alignment: right;
+            }
+            if c.url != "": Text {
+                text: c.port-text;
+                color: link.has-hover ? Theme.visor.brighter(0.3) : Theme.visor;
+                font-size: 11px;
+                horizontal-alignment: right;
+                link := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { DockerApp.open-url(c.url); }
+                }
+            }
+        }
+
+        // ações
+        HorizontalLayout {
+            alignment: center;
+            spacing: 4px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            NeonButton {
+                text: c.running ? "■" : "▶";
+                tint: c.running ? Theme.alarm : Theme.ok;
+                width: 26px;
+                clicked => { DockerApp.action(c.running ? "stop" : "start", c.name); }
+            }
+            NeonButton {
+                text: "⟳";
+                width: 26px;
+                clicked => { DockerApp.action("restart", c.name); }
+            }
+            NeonButton {
+                text: "≡";
+                width: 26px;
+                clicked => { DockerApp.action("logs", c.name); }
+            }
+            NeonButton {
+                text: ">_";
+                width: 30px;
+                enabled: c.running;
+                clicked => { DockerApp.action("shell", c.name); }
+            }
+        }
+    }
+}
+
+export component DockerView inherits VerticalLayout {
+    spacing: 10px;
+
+    // mascote + fala + contadores
+    HorizontalLayout {
+        spacing: 12px;
+        Mascot {
+            frame: DockerApp.mascot;
+            mood: DockerApp.mood;
+            width: 72px;
+            height: 63px;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Text {
+                text: !DockerApp.ok ? "Docker fora do ar" : DockerApp.speech;
+                color: !DockerApp.ok || DockerApp.mood == "alarm" ? Theme.alarm : Theme.text;
+                font-size: 14px;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+            Text {
+                text: !DockerApp.ok ? DockerApp.error-text : DockerApp.usage-text;
+                color: Theme.sub;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+        }
+        Counter { label: "RUN"; value: DockerApp.running; tint: Theme.ok; width: 64px; }
+        Counter { label: "STOP"; value: DockerApp.stopped; tint: Theme.sub; width: 64px; }
+        Counter { label: "ERR"; value: DockerApp.errors; tint: Theme.alarm; width: 64px; }
+    }
+
+    // busca e filtros
+    HorizontalLayout {
+        spacing: 10px;
+        SearchBox {
+            text <=> DockerApp.search;
+            placeholder: "buscar por nome, imagem ou stack…";
+            horizontal-stretch: 1;
+            edited(t) => { DockerApp.search-edited(t); }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: center;
+            Toggle {
+                checked: DockerApp.hide-stopped;
+                toggled => { DockerApp.toggle-hide-stopped(); }
+            }
+            Text { text: "só ativos"; color: Theme.sub; font-size: 11px; vertical-alignment: center; }
+        }
+        NeonButton {
+            text: "⟳ atualizar";
+            clicked => { DockerApp.refresh(); }
+        }
+    }
+
+    // lista
+    Rectangle {
+        vertical-stretch: 1;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Theme.muted.with-alpha(0.5);
+        background: Theme.bg0.with-alpha(0.4);
+
+        if DockerApp.rows.length == 0: Text {
+            text: !DockerApp.ok ? "Sem conexão com o Docker." : DockerApp.search != "" ? "Nada encontrado." : "Nenhum container.";
+            color: Theme.muted;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        ListView {
+            for c in DockerApp.rows: Row { c: c; }
+        }
+    }
+}

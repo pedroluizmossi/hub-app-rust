@@ -1,0 +1,50 @@
+id = "cyber.docker"
+name = "Docker"
+description = "Containers e stacks com ações rápidas; a mascote reage quando algo cai."
+icon = "neko"
+api = 1
+uses = ["docker"]
+
+[permissions]
+exec = ["docker"]
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "neon"
+options = ["neon", "matrix", "synthwave", "vaporwave", "akira", "ghost"]
+
+[[settings]]
+key = "hide_stopped"
+label = "Esconder containers parados"
+type = "bool"
+default = false
+
+[[settings]]
+key = "notify"
+label = "Notificar quando um container cair"
+type = "bool"
+default = true
+
+[[settings]]
+key = "notify_recovery"
+label = "Notificar quando ele voltar"
+type = "bool"
+default = false
+
+[[settings]]
+key = "busy_cpu"
+label = "Mascote agitada com CPU de um container acima de (%)"
+type = "int"
+default = 60
+min = 10
+max = 100
+step = 10
+
+[[settings]]
+key = "mascot"
+label = "Mascote"
+type = "choice"
+default = "neko"
+options = ["neko", "robo", "kitsune", "usagi", "yurei", "hacker"]

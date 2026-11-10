@@ -1,0 +1,83 @@
+id = "cyber.vitals"
+name = "Sinais vitais"
+description = "CPU, RAM, GPU e disco, cada um com uma mascote que segue a carga."
+icon = "chip"
+api = 1
+uses = ["sys", "gpu"]
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "ghost"
+options = ["neon", "matrix", "synthwave", "vaporwave", "akira", "ghost"]
+
+[[settings]]
+key = "warn"
+label = "Mascote agitada a partir de (%)"
+type = "int"
+default = 60
+min = 10
+max = 95
+step = 5
+
+[[settings]]
+key = "alarm"
+label = "Mascote em alarme a partir de (%)"
+type = "int"
+default = 90
+min = 20
+max = 100
+step = 5
+
+[[settings]]
+key = "show_temps"
+label = "Mostrar temperaturas"
+type = "bool"
+default = true
+
+[[settings]]
+key = "temp_hot"
+label = "Temperatura quente (°C)"
+type = "int"
+default = 80
+min = 50
+max = 100
+step = 5
+
+[[settings]]
+key = "temp_critical"
+label = "Temperatura crítica (°C)"
+type = "int"
+default = 95
+min = 60
+max = 110
+step = 5
+
+[[settings]]
+key = "cpu_mascot"
+label = "Mascote da CPU"
+type = "choice"
+default = "chip"
+options = ["chip", "robo", "neko", "kitsune", "usagi", "yurei", "hacker", "sapo"]
+
+[[settings]]
+key = "ram_mascot"
+label = "Mascote da RAM"
+type = "choice"
+default = "sapo"
+options = ["sapo", "neko", "robo", "kitsune", "usagi", "yurei", "hacker", "chip"]
+
+[[settings]]
+key = "gpu_mascot"
+label = "Mascote da GPU"
+type = "choice"
+default = "auto"
+options = ["auto", "nvidia", "amd", "robo", "neko", "chip"]
+
+[[settings]]
+key = "disk_mascot"
+label = "Mascote do disco"
+type = "choice"
+default = "disquete"
+options = ["disquete", "robo", "neko", "yurei", "chip"]

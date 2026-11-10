@@ -1,0 +1,227 @@
+// Componentes reutilizáveis pelo hub e pelos mini-apps.
+import { Theme, Anim } from "theme.slint";
+
+// Mascote em pixel art. O quadro (piscar, LED, glitch) vem desenhado do Rust;
+// flutuar e pular são deslocamentos aqui, sem redesenhar a imagem.
+export component Mascot inherits Rectangle {
+    in property <image> frame;
+    in property <string> mood: "idle";
+    in property <bool> moving: true;
+    in property <bool> aura: true;
+    property <int> f: Anim.frame;
+    property <color> accent: Theme.mood-color(mood);
+    preferred-width: 64px;
+    preferred-height: 56px;
+
+    // aura neon: anéis concêntricos (funciona no renderizador por software, sem blur)
+    property <float> glow: mood == "alarm" && mod(f, 4) < 2 ? 1.6 : 1;
+    if aura && mood != "sleep": Rectangle {
+        for k in 3: Rectangle {
+            property <float> s: 1.1 - k * 0.2;
+            width: root.width * s;
+            height: root.height * s;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2 + root.height * 0.05;
+            border-radius: min(self.width, self.height) / 2;
+            background: accent.with-alpha(0.07 * glow);
+        }
+    }
+
+    Image {
+        source: frame;
+        image-rendering: pixelated;
+        width: parent.width;
+        height: parent.height;
+        x: !moving ? 0 : mood == "alarm" ? (mod(f, 2) == 0 ? -1px : 1px) : 0;
+        y: !moving ? 0
+            : mood == "busy" || mood == "happy" ? (mod(f, 4) < 2 ? -parent.height * 0.1 : 0)
+            : mood == "idle" ? (mod(f, 16) < 8 ? -parent.height * 0.04 : 0)
+            : 0;
+        animate y { duration: 110ms; easing: ease-out; }
+    }
+
+    // "z" do sono / "!" do alarme
+    if moving && mood == "sleep": Text {
+        text: "z";
+        x: parent.width * 0.8;
+        y: parent.height * 0.05 - mod(f, 16) * 1px;
+        opacity: 1 - mod(f, 16) / 16;
+        color: Theme.sleep;
+        font-size: parent.height * 0.22;
+        font-weight: 700;
+    }
+    if moving && mood == "alarm": Text {
+        text: "!";
+        x: parent.width * 0.86;
+        y: 0;
+        color: Theme.alarm;
+        font-size: parent.height * 0.3;
+        font-weight: 900;
+        opacity: mod(f, 4) < 2 ? 1 : 0.3;
+    }
+}
+
+// Botão neon pequeno.
+export component NeonButton inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Theme.visor;
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    in property <length> font-size: 12px;
+    callback clicked;
+    min-height: 24px;
+    min-width: label.preferred-width + 16px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: !enabled ? Theme.muted : touch.has-hover || active ? tint : tint.with-alpha(0.45);
+    background: active ? tint.with-alpha(0.22) : touch.pressed ? tint.with-alpha(0.3) : touch.has-hover ? tint.with-alpha(0.12) : transparent;
+    animate background, border-color { duration: 120ms; }
+
+    label := Text {
+        text: root.text;
+        color: !enabled ? Theme.muted : active || touch.has-hover ? tint : Theme.text;
+        font-size: root.font-size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Interruptor liga/desliga.
+export component Toggle inherits Rectangle {
+    in property <bool> checked;
+    callback toggled;
+    width: 34px;
+    height: 18px;
+    border-radius: 9px;
+    background: checked ? Theme.visor.with-alpha(0.35) : Theme.muted.with-alpha(0.4);
+    border-width: 1px;
+    border-color: checked ? Theme.visor : Theme.muted;
+    animate background { duration: 150ms; }
+
+    Rectangle {
+        width: 12px;
+        height: 12px;
+        y: 3px;
+        x: checked ? parent.width - 15px : 3px;
+        border-radius: 6px;
+        background: checked ? Theme.visor : Theme.sub;
+        animate x { duration: 150ms; easing: ease-in-out; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+}
+
+// Barra segmentada com a parte "destaque" (ex.: o que é do Docker) por cima.
+export component SegBar inherits Rectangle {
+    in property <float> value;     // 0..100
+    in property <float> part: 0;   // 0..100, desenhado por cima
+    in property <color> tint: Theme.visor;
+    in property <int> segments: 20;
+    height: 8px;
+
+    HorizontalLayout {
+        spacing: 2px;
+        for i in segments: Rectangle {
+            property <float> lit: (i + 0.5) * 100 / segments;
+            border-radius: 1px;
+            background: lit <= part ? tint
+                : lit <= value ? tint.with-alpha(0.55)
+                : Theme.muted.with-alpha(0.25);
+            animate background { duration: 300ms; }
+        }
+    }
+}
+
+// Linha de histórico. `commands` é um caminho SVG num quadro 1000×100 (o Path mantém
+// a proporção, então o quadro já é largo como o espaço onde ele aparece).
+export component Sparkline inherits Rectangle {
+    in property <string> commands;
+    in property <color> tint: Theme.visor;
+    height: 28px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        commands: root.commands;
+        viewbox-width: 1000;
+        viewbox-height: 100;
+        stroke: tint;
+        stroke-width: 1.5px;
+        fill: transparent;
+    }
+}
+
+// Quadro de contador (RUN / STOP / ERR).
+export component Counter inherits Rectangle {
+    in property <string> label;
+    in property <int> value;
+    in property <color> tint;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: value > 0 ? tint.with-alpha(0.6) : Theme.muted.with-alpha(0.5);
+    background: value > 0 ? tint.with-alpha(0.08) : transparent;
+    min-height: 46px;
+
+    VerticalLayout {
+        padding: 6px;
+        alignment: center;
+        Text {
+            text: value;
+            color: value > 0 ? tint : Theme.muted;
+            font-size: 20px;
+            font-weight: 800;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: label;
+            color: Theme.sub;
+            font-size: 10px;
+            letter-spacing: 2px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// Campo de busca simples no estilo do tema.
+export component SearchBox inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "buscar…";
+    callback edited(string);
+    min-height: 26px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.visor : Theme.muted;
+    background: Theme.bg0.with-alpha(0.6);
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+        Text { text: "⌕"; color: Theme.sub; vertical-alignment: center; }
+        Rectangle {
+            if text == "": Text {
+                text: placeholder;
+                color: Theme.muted;
+                font-size: 12px;
+                vertical-alignment: center;
+                width: 100%;
+                height: 100%;
+            }
+            input := TextInput {
+                text <=> root.text;
+                color: Theme.text;
+                font-size: 12px;
+                vertical-alignment: center;
+                single-line: true;
+                edited => { root.edited(self.text); }
+            }
+        }
+    }
+}
