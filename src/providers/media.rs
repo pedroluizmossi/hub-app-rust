@@ -28,7 +28,7 @@ fn connect() -> zbus::Result<Connection> {
 }
 
 /// O que está tocando, num instante.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct MediaSnapshot {
     /// O barramento respondeu (false = D-Bus fora do ar).
     pub ok: bool,

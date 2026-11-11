@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::core::exec;
 
 /// Uma porta escutando (endereços IPv4 e IPv6 do mesmo processo viram uma entrada só).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Listener {
     /// "tcp" | "udp"
     pub proto: String,
@@ -59,7 +59,7 @@ pub fn is_wildcard(a: &str) -> bool {
     matches!(a, "*" | "0.0.0.0" | "::" | "[::]")
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PortsSnapshot {
     pub ok: bool,
     /// O `ss` não está instalado.

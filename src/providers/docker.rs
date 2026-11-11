@@ -13,7 +13,7 @@ use serde_json::Value;
 use crate::core::bus::Poker;
 use crate::core::exec;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct Port {
     pub host: String,
     pub port: u16,
@@ -25,7 +25,7 @@ impl Port {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct Container {
     pub id: String,
     pub name: String,
@@ -54,13 +54,13 @@ pub struct Inspect {
     pub restarts: u32,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
 pub struct Stats {
     pub cpu: f32,
     pub mem: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DockerSnapshot {
     pub ok: bool,
     pub error: String,

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SysSnapshot {
     /// Uso de CPU em % desde a leitura anterior.
     pub cpu: f32,
@@ -33,7 +33,7 @@ pub struct SysSnapshot {
     pub disk_write: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct Disk {
     pub mount: String,
     pub used: u64,

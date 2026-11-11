@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::core::exec;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GpuSnapshot {
     pub available: bool,
     /// "nvidia" | "amd" | ""

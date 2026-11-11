@@ -17,6 +17,8 @@ export struct PluginCard {
     mascot: image,
     mood: string,
     reaction: string,
+    // id da mascote na conversa entre mascotes ("app:nome")
+    voice: string,
     // plugin com tela própria: a tela interpretada (src/apps/plugin.rs)
     has-view: bool,
     view: component-factory,
@@ -56,6 +58,7 @@ export component PluginView inherits Rectangle {
                     frame: card.mascot;
                     mood: card.mood;
                     reaction: card.reaction;
+                    voice: card.voice;
                     poked => { PluginApps.poked(card.id); }
                     width: parent.width - 8px;
                     height: parent.height - 8px;

@@ -8,9 +8,10 @@
 //!   configurada, índice adulterado é recusado. Sem chave, só um índice local é aceito;
 //! - o plugin não roda código nativo: o host executa o manifesto e, nos plugins com tela,
 //!   interpreta o `.slint` e o script Rhai isolados (ver `apps/plugin.rs`); só os arquivos
-//!   de `ALLOWED_FILES` são copiados;
-//! - as permissões que o índice anuncia têm de bater com as do manifesto, e aparecem antes
-//!   de instalar (numa atualização, as novas aparecem destacadas).
+//!   que `plugins::files` aceita são copiados;
+//! - as permissões que o índice anuncia (programas, domínios da rede e provedores lidos)
+//!   têm de bater com as do manifesto, e aparecem antes de instalar (numa atualização, as
+//!   novas aparecem destacadas).
 //!
 //! Linha de comando em `USAGE`; a janela usa a mesma lógica (aba Loja, `hub/store.rs`).
 
@@ -23,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::config::Config;
 use crate::core::exec;
-use crate::core::plugins::{self, ALLOWED_FILES, Plugin};
+use crate::core::plugins::{self, Plugin};
 
 pub const USAGE: &str = "\
 loja de plugins:
@@ -102,6 +103,29 @@ pub struct Entry {
     /// Programas que o plugin executa (tem de bater com o manifesto).
     #[serde(default)]
     pub permissions: Vec<String>,
+    /// Domínios que o plugin consulta (`[permissions] net`).
+    #[serde(default)]
+    pub net: Vec<String>,
+    /// Provedores que o plugin lê (`uses`).
+    #[serde(default)]
+    pub uses: Vec<String>,
+}
+
+impl Entry {
+    /// "executa: ps · rede: api.x.com · lê: sys".
+    pub fn grants_text(&self) -> String {
+        plugins::describe_grants(&self.permissions, &self.net, &self.uses)
+    }
+}
+
+/// Cada permissão com o tipo na frente ("ps", "rede: api.x.com", "lê: sys"), para comparar
+/// versões.
+fn grant_list(exec: &[String], net: &[String], uses: &[String]) -> Vec<String> {
+    exec.iter()
+        .cloned()
+        .chain(net.iter().map(|h| format!("rede: {h}")))
+        .chain(uses.iter().map(|t| format!("lê: {t}")))
+        .collect()
 }
 
 /// O que fica gravado ao lado do plugin instalado.
@@ -113,6 +137,10 @@ pub struct Installed {
     pub commit: String,
     #[serde(default)]
     pub permissions: Vec<String>,
+    #[serde(default)]
+    pub net: Vec<String>,
+    #[serde(default)]
+    pub uses: Vec<String>,
 }
 
 /// Como o índice foi conferido.
@@ -137,10 +165,12 @@ impl Status {
         self.installed.as_ref().is_some_and(|i| !i.commit.eq_ignore_ascii_case(&self.entry.commit))
     }
 
-    /// Programas que a versão do índice pede e a instalada não pedia.
+    /// Permissões que a versão do índice pede e a instalada não pedia ("who", "rede:
+    /// api.x.com", "lê: agents").
     pub fn new_permissions(&self) -> Vec<String> {
-        let had = self.installed.as_ref().map(|i| i.permissions.clone()).unwrap_or_default();
-        self.entry.permissions.iter().filter(|p| !had.contains(p)).cloned().collect()
+        let had = self.installed.as_ref().map(|i| grant_list(&i.permissions, &i.net, &i.uses)).unwrap_or_default();
+        let e = &self.entry;
+        grant_list(&e.permissions, &e.net, &e.uses).into_iter().filter(|p| !had.contains(p)).collect()
     }
 }
 
@@ -231,14 +261,14 @@ fn list(src: &Source, root: &Path) -> Result<String, String> {
             Some(i) => format!("instalado {}", i.version),
         };
         out.push_str(&format!(
-            "\n  {}  {} {}  ({}, {})  [{state}]\n    {}\n    executa: {}\n",
+            "\n  {}  {} {}  ({}, {})  [{state}]\n    {}\n    {}\n",
             e.id,
             e.name,
             e.version,
             if e.author.is_empty() { "sem autor" } else { &e.author },
             e.license,
             e.description,
-            if e.permissions.is_empty() { "nada".into() } else { e.permissions.join(", ") }
+            e.grants_text()
         ));
     }
     Ok(out)
@@ -438,8 +468,11 @@ fn fetch_and_install(
         crate::apps::plugin::check_files(&src, ui).map_err(|err| format!("{}: {err}", e.id))?;
     }
 
-    let new_perms: Vec<&String> = match previous {
-        Some(p) => e.permissions.iter().filter(|x| !p.permissions.contains(x)).collect(),
+    let new_perms: Vec<String> = match previous {
+        Some(p) => {
+            let had = grant_list(&p.permissions, &p.net, &p.uses);
+            grant_list(&e.permissions, &e.net, &e.uses).into_iter().filter(|x| !had.contains(x)).collect()
+        }
         None => Vec::new(),
     };
     let what = match (&plugin.run, &plugin.ui) {
@@ -448,7 +481,7 @@ fn fetch_and_install(
         (None, None) => String::new(),
     };
     let summary = format!(
-        "\n{} {}  ({})\n  {}\n  autor: {}   licença: {}\n  repositório: {}\n  commit: {}\n  índice: {}\n  {}executa: {}  ({what})\n{}",
+        "\n{} {}  ({})\n  {}\n  autor: {}   licença: {}\n  repositório: {}\n  commit: {}\n  índice: {}\n  {}{}  ({what})\n{}",
         plugin.manifest.name,
         e.version,
         e.id,
@@ -462,32 +495,22 @@ fn fetch_and_install(
             Some(p) => format!("atualização de {} para {}\n  ", p.version, e.version),
             None => String::new(),
         },
-        if plugin.manifest.permissions.exec.is_empty() { "nada".into() } else { plugin.manifest.permissions.exec.join(", ") },
-        if new_perms.is_empty() {
-            String::new()
-        } else {
-            format!("  ATENÇÃO, permissão nova: {}\n", new_perms.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
-        },
+        plugin.grants(),
+        if new_perms.is_empty() { String::new() } else { format!("  ATENÇÃO, permissão nova: {}\n", new_perms.join(", ")) },
     );
     if !confirm(&summary) {
         return Err("instalação cancelada".into());
     }
 
-    // só os arquivos permitidos, e só arquivos de verdade (nada de link ou pasta)
+    // só os arquivos permitidos, e só arquivos de verdade (nada de link)
     let staged = tmp.join("plugin");
     std::fs::create_dir_all(&staged).map_err(|err| err.to_string())?;
-    for name in ALLOWED_FILES {
-        let from = src.join(name);
-        match std::fs::symlink_metadata(&from) {
-            Ok(meta) if meta.file_type().is_file() => {
-                if meta.len() > 1 << 20 {
-                    return Err(format!("{}: {name} passa de 1 MiB", e.id));
-                }
-                std::fs::copy(&from, staged.join(name)).map_err(|err| format!("{name}: {err}"))?;
-            }
-            Ok(_) => return Err(format!("{}: {name} não é um arquivo comum", e.id)),
-            Err(_) => {}
+    for rel in plugins::files(&src).map_err(|err| format!("{}: {err}", e.id))? {
+        let to = staged.join(&rel);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
+        std::fs::copy(src.join(&rel), &to).map_err(|err| format!("{}: {err}", rel.display()))?;
     }
     let installed = Installed {
         id: e.id.clone(),
@@ -495,6 +518,8 @@ fn fetch_and_install(
         repo: e.repo.clone(),
         commit: e.commit.clone(),
         permissions: plugin.manifest.permissions.exec.clone(),
+        net: plugin.manifest.permissions.net.clone(),
+        uses: plugin.manifest.uses.iter().map(|t| t.name().to_string()).collect(),
     };
     let meta = serde_json::to_string_pretty(&installed).map_err(|err| err.to_string())?;
     std::fs::write(staged.join("installed.json"), meta).map_err(|err| err.to_string())?;
@@ -517,12 +542,23 @@ fn check_matches(e: &Entry, p: &Plugin) -> Result<(), String> {
     if p.manifest.id != e.id {
         return Err(format!("o manifesto diz id \"{}\", o índice \"{}\"", p.manifest.id, e.id));
     }
-    let mut want = e.permissions.clone();
-    let mut got = p.manifest.permissions.exec.clone();
-    want.sort();
-    got.sort();
-    if want != got {
-        return Err(format!("{}: o índice anuncia executar {want:?}, mas o manifesto pede {got:?}", e.id));
+    let sorted = |v: &[String]| {
+        let mut v = v.to_vec();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let uses: Vec<String> = p.manifest.uses.iter().map(|t| t.name().to_string()).collect();
+    let pairs = [
+        ("executar", &e.permissions, &p.manifest.permissions.exec),
+        ("consultar (net)", &e.net, &p.manifest.permissions.net),
+        ("ler (uses)", &e.uses, &uses),
+    ];
+    for (what, want, got) in pairs {
+        let (want, got) = (sorted(want), sorted(got));
+        if want != got {
+            return Err(format!("{}: o índice anuncia {what} {want:?}, mas o manifesto pede {got:?}", e.id));
+        }
     }
     Ok(())
 }
@@ -534,6 +570,8 @@ pub fn remove(id: &str, root: &Path) -> Result<String, String> {
         return Err(format!("\"{id}\" não está instalado"));
     }
     std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // os dados que o script gravou vão junto
+    let _ = std::fs::remove_file(plugins::data_file(root, id));
     Ok(format!("{id} removido"))
 }
 

@@ -186,7 +186,7 @@ impl Hub {
             .map(|s| {
                 let e = &s.entry;
                 let verb = armed.filter(|(i, _, _)| *i == e.id).map(|(_, v, _)| v.as_str()).unwrap_or("");
-                let perms = if e.permissions.is_empty() { "não executa programas".into() } else { format!("executa: {}", e.permissions.join(", ")) };
+                let perms = e.grants_text();
                 let new_perms = s.new_permissions();
                 let state = match &s.installed {
                     None => "não instalado".to_string(),
@@ -194,7 +194,7 @@ impl Hub {
                     Some(i) => format!("instalado {}", i.version),
                 };
                 let confirm = match verb {
-                    "install" => format!("Clique de novo para instalar. O plugin vai poder {perms}."),
+                    "install" => format!("Clique de novo para instalar. O plugin pede: {perms}."),
                     "update" if !new_perms.is_empty() => format!("Clique de novo para atualizar e permitir também: {}.", new_perms.join(", ")),
                     "update" => "Clique de novo para atualizar (sem permissão nova).".into(),
                     "remove" => format!("Clique de novo para remover {}.", e.name),
@@ -211,7 +211,7 @@ impl Hub {
                     installed: s.installed.is_some(),
                     update: s.has_update(),
                     warning: if s.has_update() && !new_perms.is_empty() {
-                        format!("ATENÇÃO: a versão nova pede permissão para executar {}", new_perms.join(", ")).into()
+                        format!("ATENÇÃO: a versão nova pede permissão nova: {}", new_perms.join(", ")).into()
                     } else {
                         "".into()
                     },

@@ -33,7 +33,8 @@ const TAIL: u64 = 256 * 1024;
 /// Máximo de sessões por ferramenta (subagentes entram na conta no Codex e no OpenCode).
 const LIMIT: usize = 40;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Tool {
     Claude,
     Codex,
@@ -50,7 +51,8 @@ impl Tool {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum State {
     /// No meio de um turno.
     Working,
@@ -61,7 +63,7 @@ pub enum State {
 }
 
 /// Tokens gastos numa sessão, somados de todas as respostas.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Tokens {
     pub input: u64,
     pub output: u64,
@@ -71,7 +73,7 @@ pub struct Tokens {
 
 /// O que uma ferramenta sabe a mais sobre uma sessão. Tudo opcional ("" ou `None` = a
 /// ferramenta não informa, ou a fonte dela ainda não lê).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Details {
     /// Último pedido do usuário (texto dele: só aparece quando ele abre a linha).
     pub last_prompt: String,
@@ -92,7 +94,7 @@ pub struct Details {
 }
 
 /// Uma sessão de agente.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Agent {
     pub tool: Tool,
     /// Id da sessão na ferramenta (estável enquanto ela existir).
@@ -112,7 +114,7 @@ pub struct Agent {
     pub details: Details,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AgentsSnapshot {
     pub agents: Vec<Agent>,
     /// Ferramentas instaladas (com pasta de estado) nesta máquina.

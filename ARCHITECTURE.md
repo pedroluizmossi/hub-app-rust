@@ -352,11 +352,21 @@ e `src/store.rs`):
   - **com tela própria** (`[ui]`): `view.slint` interpretado pelo `slint-interpreter` e
     encaixado na célula por um `ComponentContainer` (recurso experimental do Slint 1.18,
     ligado em `ui/build.rs`); a lógica é um `main.rhai` numa thread só dele, com limite de
-    operações, sem acesso a arquivo (`no_module`) e só com a API do host (mudar
-    propriedades da tela, humor, rodar programas da allowlist, notificar). A tela só
-    importa `std-widgets.slint` e `miniutils.slint` (o `Theme`, servido pelo host, com as
-    cores do tema do app e as fontes do visual); o host a encaixa como janela de fundo
-    transparente e com a fonte da interface do visual.
+    operações, sem acesso a arquivo (`no_module`) e só com a API do host: mudar
+    propriedades da tela, humor, rodar programas da allowlist (`run` ou `run_async`, que
+    não trava o script), consultar por HTTPS os domínios de `[permissions] net`
+    (`http_get`, com prazo, limite de 1 MiB e redirecionamento só para domínio
+    permitido), receber as leituras dos provedores de `uses` (`fn on_event(topic, data)`,
+    o mesmo barramento dos apps embutidos), guardar dados (`store_get`/`store_set`, um
+    JSON por plugin em `plugins/.data/`, gravado pelo host e apagado ao remover), contar
+    fatos para a conversa entre mascotes (`fact`) e notificar. A tela importa
+    `std-widgets.slint`, `miniutils.slint` (o `Theme`, servido pelo host, com as cores do
+    tema do app e as fontes do visual) e as telas de `ui/` do próprio plugin; imagens só de
+    `assets/`. O host a encaixa como janela de fundo transparente e com a fonte da
+    interface do visual.
+- Desenvolvimento: `miniutils --plugin-dev <pasta>` carrega o plugin direto da pasta (já
+  ligado, na primeira página), recarrega ao salvar e mostra no terminal os erros da tela e
+  do script.
 - Loja na janela (Configurações > Loja de plugins, `ui/store.slint`, `src/hub/store.rs`) e
   na linha de comando (`miniutils --help`): listar, instalar, atualizar e remover sem
   reiniciar (o app aberto relê a pasta; a linha de comando avisa pelo socket da instância).
@@ -366,14 +376,17 @@ e `src/store.rs`):
   `store::OFFICIAL_INDEX`/`OFFICIAL_KEY`); a config (`store_index`, `store_key`) troca por
   outra. Índice que não é o oficial, sem chave, só é aceito se for local. A instalação clona sem
   hooks, confere o commit, valida manifesto, tela e script, confere que as permissões
-  anunciadas batem com as pedidas e mostra o que o plugin vai executar (numa atualização,
+  anunciadas (`permissions`, `net`, `uses` no índice) batem com as pedidas e mostra o que o
+  plugin vai executar, consultar e ler (numa atualização,
   as permissões novas aparecem em destaque) antes do segundo clique.
 - Exemplos: `examples/plugin-uptime/` (simples), `examples/plugin-top/` (tela e script) e
   `examples/loja/preparar.sh` (repositório, índice e chave; `--nova-versao` para testar a
   atualização).
-- Limites conhecidos: a tela de um plugin pode ler imagens do disco (`@image-url`); o
-  script não tem rede (de propósito); um plugin com tela custa a compilação do `.slint` ao
-  ligar e alguns MB de memória.
+- Limites conhecidos: um plugin com tela custa a compilação do `.slint` ao ligar e alguns
+  MB de memória; o `tick` é de no mínimo 1 s; o script tem limite de 5 milhões de
+  operações por chamada; um plugin não traz falas próprias para a conversa (usa as
+  genéricas do hub). Quem lê `agents` e tem rede pode mandar para fora os pedidos feitos
+  aos agentes: a loja mostra as duas permissões antes de instalar.
 
 **Fase 2** (resto) — widget flutuante na área de trabalho (layer-shell no KDE/wlroots;
 janela comum no GNOME).

@@ -18,7 +18,7 @@ pub const SOURCES: [&str; 4] = ["Codex", "Claude", "Kiro", "OpenCode Go"];
 const KIRO_MIN_POLL: Duration = Duration::from_secs(900);
 const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(300);
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct UsageWindow {
     pub label: String,
     pub used: f64,
@@ -27,7 +27,7 @@ pub struct UsageWindow {
     pub reset_date: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct UsageCard {
     pub name: String,
     pub status: String,
@@ -37,7 +37,7 @@ pub struct UsageCard {
     pub stale: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct UsageSnapshot {
     pub cards: Vec<UsageCard>,
 }
