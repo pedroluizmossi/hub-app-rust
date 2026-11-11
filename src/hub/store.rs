@@ -136,6 +136,8 @@ impl Hub {
         if !confirmed {
             return;
         }
+        // app externo: o processo para antes de a pasta ser trocada (`store_done` religa)
+        crate::apps::plugin::suspend(id);
         let src = Source::from_config(&self.host.config.borrow());
         let (id, verb) = (id.to_string(), verb.to_string());
         let spawned = std::thread::Builder::new().name("loja".into()).spawn(move || {
@@ -173,6 +175,8 @@ impl Hub {
                 st.failed = true;
             }
         }
+        // app externo parado pelo `suspend` e que não foi trocado: volta a rodar
+        crate::apps::plugin::resume(id);
         self.store_push();
     }
 
@@ -194,6 +198,9 @@ impl Hub {
                     Some(i) => format!("instalado {}", i.version),
                 };
                 let confirm = match verb {
+                    "install" if e.full_access => {
+                        "Clique de novo para instalar com ACESSO TOTAL: o app roda com as permissões do seu usuário.".to_string()
+                    }
                     "install" => format!("Clique de novo para instalar. O plugin pede: {perms}."),
                     "update" if !new_perms.is_empty() => format!("Clique de novo para atualizar e permitir também: {}.", new_perms.join(", ")),
                     "update" => "Clique de novo para atualizar (sem permissão nova).".into(),
@@ -212,6 +219,9 @@ impl Hub {
                     update: s.has_update(),
                     warning: if s.has_update() && !new_perms.is_empty() {
                         format!("ATENÇÃO: a versão nova pede permissão nova: {}", new_perms.join(", ")).into()
+                    } else if e.full_access && s.installed.is_none() {
+                        "ATENÇÃO: app com acesso total. Lê e grava seus arquivos, usa a rede e roda outros programas. Instale só se confia no autor."
+                            .into()
                     } else {
                         "".into()
                     },

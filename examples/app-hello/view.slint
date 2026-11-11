@@ -1,0 +1,68 @@
+// Tela do app externo de exemplo. O host preenche theme, mascot e mood; o resto vem do
+// executável, com {"type":"set","prop":"…","value":…}.
+import { Theme } from "miniutils.slint";
+
+component Button inherits Rectangle {
+    in property <Theme> theme;
+    in property <string> label;
+    callback clicked;
+    width: 84px;
+    height: 28px;
+    background: touch.has-hover ? theme.fur.with-alpha(0.2) : transparent;
+    border-width: 1px;
+    border-color: theme.fur;
+    Text { text: label; color: theme.text; font-size: 12px; }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component Main inherits Rectangle {
+    in property <Theme> theme;
+    in property <image> mascot;
+    in property <string> mood;
+    in property <string> status: "iniciando…";
+    in property <string> home: "";
+    in property <string> cpu: "–";
+    in property <int> count;
+    in property <string> clock: "";
+    callback action(string, string);
+
+    VerticalLayout {
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Image {
+                source: mascot;
+                width: 56px;
+                height: 49px;
+                image-rendering: pixelated;
+                image-fit: contain;
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: "Olá, app externo"; color: theme.text; font-family: theme.font-title; font-size: 17px; font-weight: 700; }
+                Text { text: status; color: theme.sub; font-size: 12px; overflow: elide; }
+            }
+            Text { text: clock; color: theme.sub; font-family: theme.font-mono; font-size: 12px; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            Text { text: "CPU"; color: theme.sub; font-size: 13px; width: 64px; }
+            Text { text: cpu; color: theme.text; font-family: theme.font-mono; font-size: 13px; }
+        }
+        if home != "": HorizontalLayout {
+            spacing: 10px;
+            Text { text: "Pasta"; color: theme.sub; font-size: 13px; width: 64px; }
+            Text { text: home; color: theme.text; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            Text { text: "Cliques"; color: theme.sub; font-size: 13px; width: 64px; vertical-alignment: center; }
+            Text { text: count; color: theme.text; font-family: theme.font-mono; font-size: 13px; width: 40px; vertical-alignment: center; }
+            Button { theme: theme; label: "Contar"; clicked => { root.action("count", ""); } }
+            Button { theme: theme; label: "Zerar"; clicked => { root.action("reset", ""); } }
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+}

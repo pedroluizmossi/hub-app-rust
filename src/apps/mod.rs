@@ -3,6 +3,7 @@ pub mod agents;
 pub mod ai_usage;
 pub mod cdplayer;
 pub mod docker;
+pub mod external;
 pub mod kit;
 pub mod plugin;
 pub mod ports;

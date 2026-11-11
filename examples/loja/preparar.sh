@@ -1,8 +1,10 @@
 #!/bin/sh
 # Monta uma loja de exemplo para testar plugins sem internet:
-#   1. um repositório git (o "repo da comunidade") com os dois plugins de examples/, cada
-#      um numa subpasta: plugin-uptime (simples) e plugin-top (tela e script próprios);
-#   2. um registry.json (o "índice") fixando o commit de cada plugin;
+#   1. um repositório git (o "repo da comunidade") com os plugins de examples/, cada um
+#      numa subpasta: plugin-uptime (simples), plugin-top (tela e script próprios) e
+#      app-hello (app externo, com acesso total);
+#   2. um registry.json (o "índice") fixando o commit de cada plugin e, para o app externo,
+#      o executável compilado aqui (fora do repositório) com o SHA-256 dele;
 #   3. uma chave ed25519 e a assinatura do índice (registry.json.sig).
 #
 # Uso:
@@ -36,9 +38,10 @@ if $nova; then
     uptime_perms='"uptime", "who"'
 else
     rm -rf "$dest"
-    mkdir -p "$repo/uptime" "$repo/top"
+    mkdir -p "$repo/uptime" "$repo/top" "$repo/hello"
     for f in manifest.toml README.md LICENSE; do cp "$here/plugin-uptime/$f" "$repo/uptime/"; done
     for f in manifest.toml view.slint main.rhai README.md LICENSE; do cp "$here/plugin-top/$f" "$repo/top/"; done
+    for f in manifest.toml view.slint README.md LICENSE; do cp "$here/app-hello/$f" "$repo/hello/"; done
     git -C "$repo" init --quiet
     commit_all "plugins de exemplo"
     uptime_version=0.1.0
@@ -48,6 +51,13 @@ else
 fi
 commit=$(git -C "$repo" rev-parse HEAD)
 top_commit=$(git -C "$repo" log -n 1 --format=%H -- top)
+hello_commit=$(git -C "$repo" log -n 1 --format=%H -- hello)
+
+# o executável do app externo: compilado aqui, publicado fora do repositório (numa loja de
+# verdade, o CI da loja compila a partir do commit revisado e publica num release)
+cargo build -q --release -p app-hello --manifest-path "$here/../Cargo.toml"
+cp "$here/../target/release/app-hello" "$dest/app-hello"
+hello_sha=$(sha256sum "$dest/app-hello" | cut -d' ' -f1)
 
 cat > "$dest/registry.json" <<JSON
 {
@@ -76,6 +86,22 @@ cat > "$dest/registry.json" <<JSON
       "path": "top",
       "commit": "$top_commit",
       "permissions": ["ps"]
+    },
+    {
+      "id": "io.github.pedroluizmossi.app-hello",
+      "name": "Olá, app externo",
+      "description": "App externo de exemplo: um executável próprio, com acesso total.",
+      "author": "exemplo",
+      "license": "MIT",
+      "version": "0.1.0",
+      "repo": "$repo",
+      "path": "hello",
+      "commit": "$hello_commit",
+      "uses": ["sys"],
+      "full_access": true,
+      "binaries": {
+        "linux": { "url": "$dest/app-hello", "sha256": "$hello_sha" }
+      }
     }
   ]
 }

@@ -21,6 +21,8 @@ está em [DESIGN.md](DESIGN.md).
    comandos, configuração, temas, mascotes e notificações são do host.
 5. **Seguro por padrão.** Mini-app só executa os programas declarados no manifesto
    (`permissions.exec`). Argumentos são passados sem shell — nada de interpolar strings.
+   A exceção é declarada: o app externo (`[app]`) tem acesso total, e a loja o anuncia
+   assim, com o hash do executável conferido (ver "Plugins e loja").
 6. **Plataforma depois dos produtos.** O contrato de plugin nasce dos mini-apps reais, não o
    contrário. Por isso a fase 1 compila os mini-apps junto; plugins externos vêm depois.
 7. **Aparência é dado, não código.** Visuais da janela e temas dos apps são tabelas de
@@ -59,7 +61,8 @@ hub-app-rust/
   DESIGN.md                   visuais, temas, telas, apps e mascotes: como criar
   tools/sprite-import/        converte PNG (folha de quadros 16×14) em animação de mascote,
                               pela paleta cor -> papel; `cargo run -p sprite-import -- --help`
-  examples/                   plugin de exemplo (plugin-uptime) e a loja de teste (loja/preparar.sh)
+  examples/                   plugins de exemplo (plugin-uptime, plugin-top), app externo de
+                              exemplo (app-hello, em Rust) e a loja de teste (loja/preparar.sh)
   ui/                         crate `miniutils-ui`: só a interface, compilada à parte
     Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
                               dos mini-apps); src/lib.rs reexporta os tipos gerados
@@ -151,6 +154,10 @@ hub-app-rust/
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
       todo.rs                 To-do rápido: lista salva em ~/.config/miniutils/todo.json
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou
+      plugin.rs               plugins da comunidade: tela genérica, tela interpretada + Rhai,
+                              ou tela interpretada + processo do app externo
+      external.rs             app externo: protocolo JSON por linha e o processo (iniciar,
+                              ler, escrever, encerrar o grupo)
 ```
 
 ## O mini-app
@@ -377,7 +384,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 
 **Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin.rs`
 e `src/store.rs`):
-- Dois tipos de plugin, nenhum com código nativo:
+- Três tipos de plugin; os dois primeiros sem código nativo:
   - **simples** (`[run]`): o host roda um comando da allowlist a cada N segundos e mostra a
     saída numa tela genérica (`ui/plugin.slint`);
   - **com tela própria** (`[ui]`): `view.slint` interpretado pelo `slint-interpreter` e
@@ -395,6 +402,17 @@ e `src/store.rs`):
     tema do app e as fontes do visual) e as telas de `ui/` do próprio plugin; imagens só de
     `assets/`. O host a encaixa como janela de fundo transparente e com a fonte da
     interface do visual.
+- **App externo** (`[app]`, acesso total; `src/apps/external.rs`): para o que um script não
+  alcança. A lógica é um executável próprio (qualquer linguagem; o exemplo é Rust), que o host
+  inicia ao ligar o app e encerra (com o grupo de processos) ao desligar. Conversam por JSON,
+  uma mensagem por linha: o host manda `start`, `tick`, `action`, `event` (provedores de
+  `uses`), `settings`, `shown` e `stop`; o app manda `set`, `image`, `mood`, `summary`,
+  `notify`, `fact` e `error`. A saída de erro do app vai para o registro. A tela é o mesmo
+  `view.slint` interpretado dos plugins com tela, e humor, bandeja e conversa também são
+  os mesmos. O app roda com as permissões do usuário, então não declara `[permissions]`. Se
+  sair sozinho, o cartão fica em alarme e o botão de atualizar o inicia de novo. O processo
+  isola: um app que trava ou cai não derruba o hub. Custa um processo a mais por app
+  ligado (exceção ao princípio 1, só para apps externos).
 - Desenvolvimento: `miniutils --plugin-dev <pasta>` carrega o plugin direto da pasta (já
   ligado, na primeira página), recarrega ao salvar e mostra no terminal os erros da tela e
   do script.
@@ -410,7 +428,14 @@ e `src/store.rs`):
   anunciadas (`permissions`, `net`, `uses` no índice) batem com as pedidas e mostra o que o
   plugin vai executar, consultar e ler (numa atualização,
   as permissões novas aparecem em destaque) antes do segundo clique.
-- Exemplos: `examples/plugin-uptime/` (simples), `examples/plugin-top/` (tela e script) e
+- Na loja, o app externo é anunciado com `full_access` e, por sistema, o endereço e o
+  SHA-256 do executável (`binaries`). O executável não vem do repositório: é baixado do
+  endereço do índice (o ideal é o CI da loja compilar a partir do commit revisado) e só
+  entra se o hash bater. A confirmação mostra "ACESSO TOTAL" em destaque, e uma atualização
+  que passa a pedir acesso total aparece como permissão nova. Antes de atualizar ou remover
+  pela janela, o hub para o processo (no Windows, um executável rodando trava a pasta).
+- Exemplos: `examples/plugin-uptime/` (simples), `examples/plugin-top/` (tela e script),
+  `examples/app-hello/` (app externo em Rust; desenvolvimento no README dele) e
   `examples/loja/preparar.sh` (repositório, índice e chave; `--nova-versao` para testar a
   atualização).
 - Limites conhecidos: um plugin com tela custa a compilação do `.slint` ao ligar e alguns

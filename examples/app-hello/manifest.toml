@@ -1,0 +1,21 @@
+# App externo de exemplo: um executável próprio (src/main.rs), com acesso total.
+# Formato: topo de src/core/plugins.rs; protocolo: topo de src/apps/external.rs.
+id = "io.github.pedroluizmossi.app-hello"
+name = "Olá, app externo"
+description = "Exemplo de app externo: lê a pasta pessoal, guarda um contador num arquivo e mostra a CPU. Funciona no Linux e no Windows."
+icon = "robo"
+api = 1
+# a leitura do provedor chega ao app como {"type":"event","topic":"sys",...}
+uses = ["sys"]
+
+[app]
+view = "view.slint"
+linux = "bin/app-hello"
+windows = "bin/app-hello.exe"
+every = 5
+
+[[settings]]
+key = "show_home"
+label = "Mostrar a pasta pessoal"
+type = "bool"
+default = true

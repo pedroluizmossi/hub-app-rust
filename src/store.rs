@@ -9,13 +9,19 @@
 //! - o plugin não roda código nativo: o host executa o manifesto e, nos plugins com tela,
 //!   interpreta o `.slint` e o script Rhai isolados (ver `apps/plugin.rs`); só os arquivos
 //!   que `plugins::files` aceita são copiados;
+//! - a exceção é o **app externo** (`[app]`, acesso total): o índice tem de anunciá-lo
+//!   (`full_access`) e fixar, por sistema, de onde vem o executável e o SHA-256 dele
+//!   (`binaries`). O executável não vem do repositório: é baixado do endereço do índice
+//!   (de preferência compilado pela própria loja a partir do commit revisado) e só entra se
+//!   o hash bater. A confirmação avisa, em destaque, que o app tem acesso total;
 //! - as permissões que o índice anuncia (programas, domínios da rede e provedores lidos)
 //!   têm de bater com as do manifesto, e aparecem antes de instalar (numa atualização, as
 //!   novas aparecem destacadas).
 //!
 //! Linha de comando em `USAGE`; a janela usa a mesma lógica (aba Loja, `hub/store.rs`).
 
-use std::io::{BufRead, Write};
+use std::collections::BTreeMap;
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -109,20 +115,42 @@ pub struct Entry {
     /// Provedores que o plugin lê (`uses`).
     #[serde(default)]
     pub uses: Vec<String>,
+    /// App externo (`[app]`): roda um executável próprio com as permissões do usuário.
+    #[serde(default)]
+    pub full_access: bool,
+    /// Executável de um app externo, por sistema ("linux", "windows").
+    #[serde(default)]
+    pub binaries: BTreeMap<String, Binary>,
+}
+
+/// De onde baixar o executável de um app externo e o hash que ele tem de ter.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Binary {
+    /// `https://…` (ou um caminho absoluto, para testes com índice local).
+    pub url: String,
+    /// SHA-256 do arquivo, em hex (64 caracteres).
+    pub sha256: String,
 }
 
 impl Entry {
-    /// "executa: ps · rede: api.x.com · lê: sys".
+    /// "executa: ps · rede: api.x.com · lê: sys" (ou "ACESSO TOTAL: …").
     pub fn grants_text(&self) -> String {
+        if self.full_access {
+            return plugins::describe_full_access(&self.uses);
+        }
         plugins::describe_grants(&self.permissions, &self.net, &self.uses)
     }
 }
 
-/// Cada permissão com o tipo na frente ("ps", "rede: api.x.com", "lê: sys"), para comparar
-/// versões.
-fn grant_list(exec: &[String], net: &[String], uses: &[String]) -> Vec<String> {
-    exec.iter()
-        .cloned()
+/// O que se perde ao dar acesso total, na lista de permissões novas de uma atualização.
+const FULL_ACCESS: &str = "ACESSO TOTAL";
+
+/// Cada permissão com o tipo na frente ("ps", "rede: api.x.com", "lê: sys", "ACESSO
+/// TOTAL"), para comparar versões.
+fn grant_list(exec: &[String], net: &[String], uses: &[String], full: bool) -> Vec<String> {
+    full.then(|| FULL_ACCESS.to_string())
+        .into_iter()
+        .chain(exec.iter().cloned())
         .chain(net.iter().map(|h| format!("rede: {h}")))
         .chain(uses.iter().map(|t| format!("lê: {t}")))
         .collect()
@@ -141,6 +169,8 @@ pub struct Installed {
     pub net: Vec<String>,
     #[serde(default)]
     pub uses: Vec<String>,
+    #[serde(default)]
+    pub full_access: bool,
 }
 
 /// Como o índice foi conferido.
@@ -168,9 +198,9 @@ impl Status {
     /// Permissões que a versão do índice pede e a instalada não pedia ("who", "rede:
     /// api.x.com", "lê: agents").
     pub fn new_permissions(&self) -> Vec<String> {
-        let had = self.installed.as_ref().map(|i| grant_list(&i.permissions, &i.net, &i.uses)).unwrap_or_default();
+        let had = self.installed.as_ref().map(|i| grant_list(&i.permissions, &i.net, &i.uses, i.full_access)).unwrap_or_default();
         let e = &self.entry;
-        grant_list(&e.permissions, &e.net, &e.uses).into_iter().filter(|p| !had.contains(p)).collect()
+        grant_list(&e.permissions, &e.net, &e.uses, e.full_access).into_iter().filter(|p| !had.contains(p)).collect()
     }
 }
 
@@ -430,6 +460,74 @@ fn check_entry(e: &Entry) -> Result<(), String> {
     if e.license.trim().is_empty() {
         return Err(format!("{}: o índice não declara a licença", e.id));
     }
+    if !e.full_access && !e.binaries.is_empty() {
+        return Err(format!("{}: só um app com full_access traz executável (binaries)", e.id));
+    }
+    for (os, b) in &e.binaries {
+        if !["linux", "windows"].contains(&os.as_str()) {
+            return Err(format!("{}: binaries.{os}: use linux ou windows", e.id));
+        }
+        if !(b.url.starts_with("https://") || Path::new(&b.url).is_absolute()) {
+            return Err(format!("{}: binaries.{os}: o endereço precisa ser https:// (ou um caminho local, para testes)", e.id));
+        }
+        if b.sha256.len() != 64 || !b.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!("{}: binaries.{os}: sha256 precisa ter 64 caracteres hex", e.id));
+        }
+    }
+    Ok(())
+}
+
+/// Baixa (ou copia, se for um caminho local) o executável para `to`, conferindo tamanho e
+/// SHA-256. Hash errado: o arquivo é apagado e a instalação para.
+fn download_verified(b: &Binary, to: &Path) -> Result<(), String> {
+    let mut reader: Box<dyn Read> = if b.url.starts_with("https://") {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client.get(&b.url).send().and_then(|r| r.error_for_status()).map_err(|e| format!("{}: {e}", b.url))?;
+        Box::new(resp)
+    } else {
+        Box::new(std::fs::File::open(&b.url).map_err(|e| format!("{}: {e}", b.url))?)
+    };
+    let mut file = std::fs::File::create(to).map_err(|e| format!("{}: {e}", to.display()))?;
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buf = vec![0u8; 64 << 10];
+    let mut total = 0u64;
+    let result = loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break Ok(()),
+            Ok(n) => n,
+            Err(e) => break Err(format!("{}: {e}", b.url)),
+        };
+        total += n as u64;
+        if total > plugins::MAX_BIN {
+            break Err(format!("{}: o executável passa de {} MiB", b.url, plugins::MAX_BIN >> 20));
+        }
+        digest.update(&buf[..n]);
+        if let Err(e) = file.write_all(&buf[..n]) {
+            break Err(format!("{}: {e}", to.display()));
+        }
+    };
+    let got = to_hex(digest.finish().as_ref());
+    let result = result.and_then(|_| {
+        if got.eq_ignore_ascii_case(&b.sha256) {
+            Ok(())
+        } else {
+            Err(format!("o executável baixado tem SHA-256 {got}, não o {} do índice", b.sha256))
+        }
+    });
+    drop(file);
+    if result.is_err() {
+        let _ = std::fs::remove_file(to);
+    }
+    result?;
+    // executável para o dono (e leitura para os outros), como um binário instalado
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -463,21 +561,39 @@ fn fetch_and_install(
         // a tela e o script também precisam abrir antes de instalar
         crate::apps::plugin::check_files(&src, ui).map_err(|err| format!("{}: {err}", e.id))?;
     }
+    // app externo: a tela abre, e há executável para este sistema
+    let binary = match &plugin.app {
+        Some(app) => {
+            crate::apps::plugin::check_view(&src).map_err(|err| format!("{}: {err}", e.id))?;
+            let os = plugins::this_os();
+            let (Some(name), Some(b)) = (app.binary(), e.binaries.get(os)) else {
+                return Err(format!("{}: este app não tem versão para {os}", e.id));
+            };
+            Some((name.to_string(), b.clone()))
+        }
+        None => None,
+    };
 
     let new_perms: Vec<String> = match previous {
         Some(p) => {
-            let had = grant_list(&p.permissions, &p.net, &p.uses);
-            grant_list(&e.permissions, &e.net, &e.uses).into_iter().filter(|x| !had.contains(x)).collect()
+            let had = grant_list(&p.permissions, &p.net, &p.uses, p.full_access);
+            grant_list(&e.permissions, &e.net, &e.uses, e.full_access).into_iter().filter(|x| !had.contains(x)).collect()
         }
         None => Vec::new(),
     };
-    let what = match (&plugin.run, &plugin.ui) {
-        (_, Some(ui)) => format!("tela própria e script ({}, {})", ui.view, ui.script),
-        (Some(run), None) => format!("a cada {} s: {}", run.every, run.command.join(" ")),
-        (None, None) => String::new(),
+    let what = match (&plugin.run, &plugin.ui, &binary) {
+        (_, _, Some((name, b))) => format!("executável {name}, sha256 {}…", &b.sha256[..12]),
+        (_, Some(ui), _) => format!("tela própria e script ({}, {})", ui.view, ui.script),
+        (Some(run), None, _) => format!("a cada {} s: {}", run.every, run.command.join(" ")),
+        (None, None, None) => String::new(),
+    };
+    let danger = if plugin.full_access() {
+        "  ATENÇÃO: ACESSO TOTAL. Este app roda um programa próprio com as permissões do seu\n  usuário: lê e grava seus arquivos, usa a rede e roda outros programas. Instale só\n  se confia no autor e na loja.\n"
+    } else {
+        ""
     };
     let summary = format!(
-        "\n{} {}  ({})\n  {}\n  autor: {}   licença: {}\n  repositório: {}\n  commit: {}\n  índice: {}\n  {}{}  ({what})\n{}",
+        "\n{} {}  ({})\n  {}\n  autor: {}   licença: {}\n  repositório: {}\n  commit: {}\n  índice: {}\n  {}{}  ({what})\n{}{danger}",
         plugin.manifest.name,
         e.version,
         e.id,
@@ -502,11 +618,22 @@ fn fetch_and_install(
     let staged = tmp.join("plugin");
     std::fs::create_dir_all(&staged).map_err(|err| err.to_string())?;
     for rel in plugins::files(&src).map_err(|err| format!("{}: {err}", e.id))? {
+        // o executável vem do endereço do índice, conferido pelo hash, nunca do repositório
+        if plugins::is_bin(&rel) {
+            continue;
+        }
         let to = staged.join(&rel);
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
         std::fs::copy(src.join(&rel), &to).map_err(|err| format!("{}: {err}", rel.display()))?;
+    }
+    if let Some((name, b)) = &binary {
+        let to = staged.join(name);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+        }
+        download_verified(b, &to).map_err(|err| format!("{}: {err}", e.id))?;
     }
     let installed = Installed {
         id: e.id.clone(),
@@ -516,6 +643,7 @@ fn fetch_and_install(
         permissions: plugin.manifest.permissions.exec.clone(),
         net: plugin.manifest.permissions.net.clone(),
         uses: plugin.manifest.uses.iter().map(|t| t.name().to_string()).collect(),
+        full_access: plugin.full_access(),
     };
     let meta = serde_json::to_string_pretty(&installed).map_err(|err| err.to_string())?;
     std::fs::write(staged.join("installed.json"), meta).map_err(|err| err.to_string())?;
@@ -524,7 +652,10 @@ fn fetch_and_install(
     let dest = root.join(&e.id);
     let old = tmp.join("antigo");
     if dest.exists() {
-        std::fs::rename(&dest, &old).map_err(|err| format!("{}: {err}", dest.display()))?;
+        // no Windows, um executável rodando trava a pasta: o hub para o app antes de
+        // atualizar pela janela, mas a linha de comando não tem como
+        let hint = if plugin.full_access() { " (desligue o app no hub e tente de novo)" } else { "" };
+        std::fs::rename(&dest, &old).map_err(|err| format!("{}: {err}{hint}", dest.display()))?;
     }
     if let Err(err) = std::fs::rename(&staged, &dest) {
         let _ = std::fs::rename(&old, &dest);
@@ -544,6 +675,21 @@ fn check_matches(e: &Entry, p: &Plugin) -> Result<(), String> {
         v.dedup();
         v
     };
+    if e.full_access != p.full_access() {
+        return Err(if p.full_access() {
+            format!("{}: o manifesto é de um app com acesso total ([app]), mas o índice não anuncia full_access", e.id)
+        } else {
+            format!("{}: o índice anuncia full_access, mas o manifesto não é de um app externo ([app])", e.id)
+        });
+    }
+    // o índice pode publicar menos sistemas que o manifesto (a instalação diz qual falta),
+    // nunca um que o manifesto não declara
+    if let Some(app) = &p.app {
+        let declared: Vec<&str> = app.binaries().into_iter().map(|(os, _)| os).collect();
+        if let Some(os) = e.binaries.keys().find(|os| !declared.contains(&os.as_str())) {
+            return Err(format!("{}: o índice traz executável para {os}, que o manifesto não declara", e.id));
+        }
+    }
     let uses: Vec<String> = p.manifest.uses.iter().map(|t| t.name().to_string()).collect();
     let pairs = [
         ("executar", &e.permissions, &p.manifest.permissions.exec),
@@ -566,8 +712,9 @@ pub fn remove(id: &str, root: &Path) -> Result<String, String> {
         return Err(format!("\"{id}\" não está instalado"));
     }
     std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    // os dados que o script gravou vão junto
+    // os dados que o script (ou o app externo) gravou vão junto
     let _ = std::fs::remove_file(plugins::data_file(root, id));
+    let _ = std::fs::remove_dir_all(plugins::data_dir(root, id));
     Ok(format!("{id} removido"))
 }
 
@@ -708,6 +855,113 @@ mod tests {
         let ok = loja.index(&loja.commit, "0.1.0", r#""uptime""#);
         assert!(install(&ok, id, &root, &mut |_| false).unwrap_err().contains("cancelada"));
         assert!(plugins::load_installed(&root).is_empty());
+    }
+
+    /// Índice com um app externo: o repositório traz manifesto e tela; o executável vem de
+    /// um arquivo à parte, fixado pelo SHA-256 no índice.
+    #[test]
+    fn app_externo_baixa_o_binario_e_confere_o_hash() {
+        if !exec::which("git") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("miniutils-loja-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(repo.join("bin")).unwrap();
+        let exemplo = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/app-hello");
+        for f in ["manifest.toml", "view.slint", "README.md"] {
+            std::fs::copy(exemplo.join(f), repo.join(f)).unwrap();
+        }
+        // um binário no repositório não é usado: o que vale é o do índice
+        std::fs::write(repo.join("bin/app-hello"), "do repositório").unwrap();
+        let commit = Loja::commit(&repo, "app");
+        let binario = dir.join("app-hello-publicado");
+        std::fs::write(&binario, "binário compilado pela loja").unwrap();
+        let hash = to_hex(ring::digest::digest(&ring::digest::SHA256, b"bin\xc3\xa1rio compilado pela loja").as_ref());
+        let indice = |full: bool, sha: &str| -> Source {
+            let path = dir.join("registry.json");
+            let url = serde_json::to_string(&binario.to_string_lossy()).unwrap();
+            let repo = serde_json::to_string(&repo.to_string_lossy()).unwrap();
+            let bins = format!(r#"{{"linux":{{"url":{url},"sha256":"{sha}"}},"windows":{{"url":{url},"sha256":"{sha}"}}}}"#);
+            let extra = if full { format!(r#","full_access":true,"binaries":{bins}"#) } else { String::new() };
+            let json = format!(
+                r#"{{"schema":1,"plugins":[{{"id":"io.github.pedroluizmossi.app-hello","name":"Olá","license":"MIT","version":"0.1.0","repo":{repo},"commit":"{commit}","uses":["sys"]{extra}}}]}}"#
+            );
+            std::fs::write(&path, json).unwrap();
+            Source { index: path.to_string_lossy().to_string(), key: String::new() }
+        };
+        let root = dir.join("plugins");
+        let id = "io.github.pedroluizmossi.app-hello";
+        // índice escondendo o acesso total
+        assert!(install(&indice(false, &hash), id, &root, &mut |_| true).unwrap_err().contains("full_access"));
+        // hash que não bate: nada instalado
+        let errado = "0".repeat(64);
+        assert!(install(&indice(true, &errado), id, &root, &mut |_| true).unwrap_err().contains("SHA-256"));
+        assert!(plugins::load_installed(&root).is_empty());
+        // certo: o aviso aparece e o binário instalado é o do índice
+        let mut resumo = String::new();
+        let dest = install(&indice(true, &hash), id, &root, &mut |s| {
+            resumo = s.to_string();
+            true
+        })
+        .unwrap();
+        assert!(resumo.contains("ACESSO TOTAL"), "{resumo}");
+        let nome = if cfg!(windows) { "bin/app-hello.exe" } else { "bin/app-hello" };
+        assert_eq!(std::fs::read_to_string(dest.join(nome)).unwrap(), "binário compilado pela loja");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(dest.join(nome)).unwrap().permissions().mode() & 0o777, 0o755);
+        }
+        let inst = installed(&root, id).unwrap();
+        assert!(inst.full_access);
+        let p = &plugins::load_installed(&root)[0];
+        assert!(p.full_access() && p.binary_path().unwrap().is_file());
+        // remover leva também a pasta de dados do app
+        std::fs::create_dir_all(plugins::data_dir(&root, id)).unwrap();
+        remove(id, &root).unwrap();
+        assert!(!plugins::data_dir(&root, id).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn acesso_total_numa_atualizacao_e_permissao_nova() {
+        let entry = |full: bool| Entry {
+            id: "a.b".into(),
+            name: "x".into(),
+            description: String::new(),
+            author: String::new(),
+            license: "MIT".into(),
+            version: "2".into(),
+            repo: "https://x".into(),
+            commit: "a".repeat(40),
+            path: String::new(),
+            permissions: vec![],
+            net: vec![],
+            uses: vec!["sys".into()],
+            full_access: full,
+            binaries: BTreeMap::new(),
+        };
+        let antes = Installed {
+            id: "a.b".into(),
+            version: "1".into(),
+            repo: "https://x".into(),
+            commit: "b".repeat(40),
+            permissions: vec![],
+            net: vec![],
+            uses: vec!["sys".into()],
+            full_access: false,
+        };
+        let st = Status { entry: entry(true), installed: Some(antes) };
+        assert_eq!(st.new_permissions(), [FULL_ACCESS]);
+        assert!(st.entry.grants_text().starts_with("ACESSO TOTAL"));
+        // binário em índice que não anuncia acesso total
+        let mut e = entry(false);
+        e.binaries.insert("linux".into(), Binary { url: "https://x/b".into(), sha256: "0".repeat(64) });
+        assert!(check_entry(&e).unwrap_err().contains("full_access"));
+        let mut e = entry(true);
+        e.binaries.insert("linux".into(), Binary { url: "http://x/b".into(), sha256: "0".repeat(64) });
+        assert!(check_entry(&e).unwrap_err().contains("https"));
     }
 
     #[test]

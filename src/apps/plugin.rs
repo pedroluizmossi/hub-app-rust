@@ -1,6 +1,9 @@
 //! Mini-apps dos plugins da comunidade (ver `core/plugins.rs` e `store.rs`).
 //!
-//! Dois tipos, nenhum com código nativo:
+//! O app externo (`[app]`, acesso total) usa a mesma tela e o mesmo estado dos plugins com
+//! tela; no lugar do script, um processo próprio (`apps/external.rs`).
+//!
+//! Dois tipos sem código nativo:
 //! - **simples** (`[run]`): o host roda o comando do manifesto (allowlist, sem shell) a cada
 //!   `every` segundos e mostra a saída na tela genérica (`ui/plugin.slint`);
 //! - **com tela própria** (`[ui]`): o `view.slint` do plugin é interpretado
@@ -46,7 +49,7 @@
 //! O fundo da tela é transparente e o texto já usa a fonte da interface do visual (ver
 //! `compile_view`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -60,6 +63,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
 use slint_interpreter::{ComponentDefinition, ComponentInstance, Value};
 
+use super::external::{self, FromApp, Incoming, ToApp};
 use super::kit::HeaderMascot;
 use crate::core::bus::Event;
 use crate::core::chatter::{self, Fact, FactKind, Voice};
@@ -186,7 +190,13 @@ fn stamp(dir: &Path) -> u64 {
     std::fs::read(dir.join("manifest.toml")).ok().hash(&mut h);
     for rel in plugins::files(dir).unwrap_or_default() {
         rel.hash(&mut h);
-        std::fs::read(dir.join(&rel)).ok().hash(&mut h);
+        if plugins::is_bin(&rel) {
+            // executável: tamanho e data bastam (e não lê megabytes a cada segundo)
+            let meta = std::fs::metadata(dir.join(&rel)).ok();
+            meta.map(|m| (m.len(), m.modified().ok())).hash(&mut h);
+        } else {
+            std::fs::read(dir.join(&rel)).ok().hash(&mut h);
+        }
     }
     h.finish()
 }
@@ -204,6 +214,31 @@ fn watch_dev(dir: &'static Path) -> Timer {
         }
     });
     timer
+}
+
+/// Para o processo de um app externo antes de a loja trocar ou apagar a pasta dele (no
+/// Windows, um executável rodando trava a pasta). Ver `resume`.
+pub fn suspend(id: &str) {
+    if let Some(a) = find_app(id) {
+        let a = a.borrow();
+        if let (Some(full), Some(_)) = (&a.full, &a.plugin.app) {
+            full.stop();
+        }
+    }
+}
+
+/// Depois da loja: religa um app externo ligado que ficou parado (a loja falhou, ou não
+/// trocou nada). Se a loja trocou o app, o novo já está rodando e nada acontece.
+pub fn resume(id: &str) {
+    let Some(a) = find_app(id) else { return };
+    let mut a = a.borrow_mut();
+    let stopped = a.full.as_ref().is_some_and(|f| !f.running());
+    if a.plugin.app.is_some() && stopped && a.host.config.borrow().is_enabled(id) {
+        a.start_logic();
+        if let Some(ui) = crate::hub::ui_handle() {
+            a.push(&ui);
+        }
+    }
 }
 
 /// Os callbacks de `PluginApps` são de todos os plugins: o id diz de qual.
@@ -225,7 +260,7 @@ fn bind(ui: &HubWindow) {
     g.on_refresh(move |id| {
         if let (Some(a), Some(ui)) = (find_app(&id), w.upgrade()) {
             let mut a = a.borrow_mut();
-            a.refresh_now();
+            a.refresh_button();
             a.push(&ui);
         }
     });
@@ -373,10 +408,15 @@ fn build_view(dir: &Path, source: String) -> Result<ComponentDefinition, String>
     result.component("Main").ok_or_else(|| "view.slint precisa exportar `component Main`".to_string())
 }
 
+/// Confere a tela de um app externo antes de instalar (a loja chama).
+pub fn check_view(dir: &Path) -> Result<(), String> {
+    let view = std::fs::read_to_string(dir.join("view.slint")).map_err(|e| format!("view.slint: {e}"))?;
+    compile_view(dir, view).map(|_| ())
+}
+
 /// Confere tela e script antes de instalar (a loja chama).
 pub fn check_files(dir: &Path, _ui: &Ui) -> Result<(), String> {
-    let view = std::fs::read_to_string(dir.join("view.slint")).map_err(|e| format!("view.slint: {e}"))?;
-    compile_view(dir, view)?;
+    check_view(dir)?;
     let script = std::fs::read_to_string(dir.join("main.rhai")).map_err(|e| format!("main.rhai: {e}"))?;
     let env = ScriptEnv { exec: Exec::new("check", &[]), net: Vec::new(), data: None, back: None };
     engine(Default::default(), env, Default::default(), Default::default())
@@ -424,6 +464,8 @@ enum PValue {
     Bool(bool),
     List(Vec<PValue>),
     Map(Vec<(String, PValue)>),
+    /// Imagem lida do disco (só o app externo manda).
+    Image(PathBuf),
 }
 
 impl PValue {
@@ -443,6 +485,19 @@ impl PValue {
         }
     }
 
+    /// Do JSON de um app externo (`null` vira texto vazio).
+    fn from_json(v: &serde_json::Value) -> PValue {
+        use serde_json::Value as J;
+        match v {
+            J::Null => PValue::Str(String::new()),
+            J::Bool(b) => PValue::Bool(*b),
+            J::Number(n) => PValue::Num(n.as_f64().unwrap_or(0.0)),
+            J::String(s) => PValue::Str(s.clone()),
+            J::Array(a) => PValue::List(a.iter().map(PValue::from_json).collect()),
+            J::Object(o) => PValue::Map(o.iter().map(|(k, v)| (k.clone(), PValue::from_json(v))).collect()),
+        }
+    }
+
     /// Para a tela (na thread da UI).
     fn to_value(&self) -> Value {
         match self {
@@ -451,6 +506,7 @@ impl PValue {
             PValue::Bool(b) => Value::Bool(*b),
             PValue::List(l) => Value::Model(ModelRc::new(VecModel::from(l.iter().map(PValue::to_value).collect::<Vec<_>>()))),
             PValue::Map(m) => Value::Struct(m.iter().map(|(k, v)| (k.clone(), v.to_value())).collect()),
+            PValue::Image(p) => Value::Image(slint::Image::load_from_path(p).unwrap_or_default()),
         }
     }
 }
@@ -464,7 +520,10 @@ enum ScriptOut {
     Notify(String, String),
     /// Fato para a conversa entre mascotes: tipo, assunto e número.
     Fact(FactKind, String, Option<f32>),
+    /// Erro na célula (texto vazio = o app externo diz que passou).
     Error(String),
+    /// O processo do app externo saiu sem o host pedir.
+    Exited(String),
 }
 
 /// Da UI (ou de uma tarefa assíncrona) para o script.
@@ -682,6 +741,30 @@ fn spawn_async(env: &ScriptEnv, pending: &Arc<AtomicUsize>, cb: String, job: imp
     spawned.is_ok()
 }
 
+/// Um fato para a conversa ("strain", "CPU", 93), do script ou do app externo.
+fn fact_out(kind: &str, subject: &str, value: Option<f32>) -> Result<ScriptOut, String> {
+    let k = FactKind::ALL
+        .into_iter()
+        .find(|k| k.key() == kind && *k != FactKind::Idle)
+        .ok_or_else(|| format!("fact: tipo \"{kind}\" desconhecido (trouble, strain, forecast, recovered, poked)"))?;
+    Ok(ScriptOut::Fact(k, subject.to_string(), value))
+}
+
+/// Mensagem do app externo → o que a UI aplica (o mesmo que o script manda).
+fn from_app(msg: FromApp) -> ScriptOut {
+    match msg {
+        FromApp::Set { prop, value } => ScriptOut::Set(prop, PValue::from_json(&value)),
+        FromApp::Image { prop, path } => ScriptOut::Set(prop, PValue::Image(PathBuf::from(path))),
+        FromApp::Mood { mood } => ScriptOut::Mood(mood),
+        FromApp::Summary { text } => ScriptOut::Summary(text),
+        FromApp::Notify { title, body } => ScriptOut::Notify(title, body),
+        FromApp::Fact { kind, subject, value } => {
+            fact_out(&kind, &subject, value.map(|v| v as f32)).unwrap_or_else(ScriptOut::Error)
+        }
+        FromApp::Error { message } => ScriptOut::Error(message),
+    }
+}
+
 /// O interpretador com a API do host e os limites (um script em loop não trava nada:
 /// estoura o limite de operações e vira erro na tela).
 fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: Arc<Mutex<rhai::Map>>, store: Arc<Mutex<Store>>) -> rhai::Engine {
@@ -717,11 +800,7 @@ fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: Arc<Mutex<r
     // conversa entre mascotes: fact("strain", "CPU", 93)
     type Res<T> = Result<T, Box<rhai::EvalAltResult>>;
     let fact = move |kind: &str, subject: &str, value: Option<f32>| -> Res<()> {
-        let k = FactKind::ALL
-            .into_iter()
-            .find(|k| k.key() == kind && *k != FactKind::Idle)
-            .ok_or_else(|| format!("fact: tipo \"{kind}\" desconhecido (trouble, strain, forecast, recovered, poked)"))?;
-        push(ScriptOut::Fact(k, subject.to_string(), value));
+        push(fact_out(kind, subject, value)?);
         Ok(())
     };
     let f = fact.clone();
@@ -848,32 +927,90 @@ fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, rx: Receiver
 
 // ---- o mini-app ---------------------------------------------------------------------
 
-/// O que só um plugin com tela própria tem.
+/// O que o host manda à lógica de um plugin com tela (script ou app externo).
+enum Input {
+    Tick,
+    Action(String, String),
+    /// As opções do app, num objeto JSON.
+    Settings(serde_json::Value),
+    /// Leitura de um provedor de `uses`: nome do tópico e dados.
+    Event(String, serde_json::Value),
+    /// A janela abriu (só o app externo recebe).
+    Shown,
+}
+
+/// Para onde vão as entradas: a thread do script ou o processo do app externo.
+enum Sink {
+    Script(Sender<ScriptIn>),
+    Process(external::Process),
+}
+
+impl Sink {
+    fn send(&self, msg: Input) {
+        match self {
+            Sink::Script(tx) => {
+                let m = match msg {
+                    Input::Tick => ScriptIn::Tick,
+                    Input::Action(n, a) => ScriptIn::Action(n, a),
+                    Input::Settings(v) => ScriptIn::Settings(json_to_dyn(v).try_cast::<rhai::Map>().unwrap_or_default()),
+                    Input::Event(topic, data) => ScriptIn::Event(topic, json_to_dyn(data)),
+                    Input::Shown => return,
+                };
+                let _ = tx.send(m);
+            }
+            Sink::Process(p) => p.send(&match msg {
+                Input::Tick => ToApp::Tick,
+                Input::Action(name, arg) => ToApp::Action { name, arg },
+                Input::Settings(settings) => ToApp::Settings { settings },
+                Input::Event(topic, data) => ToApp::Event { topic, data },
+                Input::Shown => ToApp::Shown,
+            }),
+        }
+    }
+
+    /// Para: a thread do script (as tarefas assíncronas dela também têm o canal, então
+    /// fechar o nosso lado não basta) ou o processo (`stop`, e encerra se não sair).
+    fn stop(self) {
+        match self {
+            Sink::Script(tx) => {
+                let _ = tx.send(ScriptIn::Stop);
+            }
+            Sink::Process(mut p) => p.stop(),
+        }
+    }
+}
+
+/// O que só um plugin com tela própria (ou um app externo) tem.
 struct Full {
     def: ComponentDefinition,
-    source: String,
+    /// O `main.rhai` (`None` = app externo).
+    source: Option<String>,
     /// A instância que está na tela agora (o container recria ao trocar de página).
     instance: Rc<RefCell<Option<ComponentInstance>>>,
     /// Últimos valores postos na tela, para repor numa instância nova.
     values: Rc<RefCell<HashMap<String, Value>>>,
-    /// Canal para a thread do script (fechado = desligado).
-    tx: Rc<RefCell<Option<Sender<ScriptIn>>>>,
+    /// A lógica rodando (`None` = desligado, ou o processo saiu).
+    sink: Rc<RefCell<Option<Sink>>>,
+    /// Muda a cada início: recados de um processo antigo são ignorados.
+    generation: Rc<Cell<u64>>,
     factory: slint::ComponentFactory,
 }
 
 impl Full {
-    fn send(&self, msg: ScriptIn) {
-        if let Some(tx) = self.tx.borrow().as_ref() {
-            let _ = tx.send(msg);
+    fn send(&self, msg: Input) {
+        if let Some(sink) = self.sink.borrow().as_ref() {
+            sink.send(msg);
         }
     }
 
-    /// Encerra a thread do script (as tarefas assíncronas dela também têm o canal, então
-    /// fechar o nosso lado não basta).
     fn stop(&self) {
-        if let Some(tx) = self.tx.borrow_mut().take() {
-            let _ = tx.send(ScriptIn::Stop);
+        if let Some(sink) = self.sink.borrow_mut().take() {
+            sink.stop();
         }
+    }
+
+    fn running(&self) -> bool {
+        self.sink.borrow().is_some()
     }
 }
 
@@ -902,8 +1039,12 @@ impl PluginMini {
     fn create(host: Rc<Host>, plugin: Plugin, dir: &Path, cards: Rc<VecModel<PluginCard>>, waker: Waker) -> Rc<RefCell<Self>> {
         let seed = 20 + cards.row_count() as u32;
         let mut error: Option<String> = None;
-        let full = plugin.ui.as_ref().and_then(|_| {
-            let source = std::fs::read_to_string(dir.join("main.rhai")).map_err(|e| format!("main.rhai: {e}"));
+        let full = (plugin.ui.is_some() || plugin.app.is_some()).then_some(()).and_then(|_| {
+            // app externo: sem script (a lógica é o executável)
+            let source = match plugin.ui {
+                Some(_) => std::fs::read_to_string(dir.join("main.rhai")).map(Some).map_err(|e| format!("main.rhai: {e}")),
+                None => Ok(None),
+            };
             let view = std::fs::read_to_string(dir.join("view.slint"))
                 .map_err(|e| format!("view.slint: {e}"))
                 .and_then(|v| compile_view(dir, v));
@@ -913,7 +1054,8 @@ impl PluginMini {
                     source,
                     instance: Default::default(),
                     values: Default::default(),
-                    tx: Default::default(),
+                    sink: Default::default(),
+                    generation: Default::default(),
                     factory: slint::ComponentFactory::default(),
                 }),
                 (Err(e), _) | (_, Err(e)) => {
@@ -943,21 +1085,21 @@ impl PluginMini {
         {
             let mut a = app.borrow_mut();
             if let Some(full) = a.full.as_mut() {
-                let (def, slot, values, tx) = (full.def.clone(), full.instance.clone(), full.values.clone(), full.tx.clone());
+                let (def, slot, values, sink) = (full.def.clone(), full.instance.clone(), full.values.clone(), full.sink.clone());
                 full.factory = slint::ComponentFactory::new(move |ctx| {
                     let inst = def.create_embedded(ctx).ok()?;
                     for (k, v) in values.borrow().iter() {
                         let _ = inst.set_property(k, v.clone());
                     }
-                    let tx = tx.clone();
+                    let sink = sink.clone();
                     let _ = inst.set_callback("action", move |args: &[Value]| {
                         let s = |i: usize| match args.get(i) {
                             Some(Value::String(s)) => s.to_string(),
                             Some(Value::Number(n)) => n.to_string(),
                             _ => String::new(),
                         };
-                        if let Some(tx) = tx.borrow().as_ref() {
-                            let _ = tx.send(ScriptIn::Action(s(0), s(1)));
+                        if let Some(sink) = sink.borrow().as_ref() {
+                            sink.send(Input::Action(s(0), s(1)));
                         }
                         Value::Void
                     });
@@ -966,11 +1108,15 @@ impl PluginMini {
                 });
             }
         }
-        // o relógio do plugin: comando (simples) ou `tick()` (com tela)
-        let every = match (&app.borrow().plugin.run, &app.borrow().plugin.ui) {
-            (Some(run), _) => Some(run.every),
-            (None, Some(ui)) => ui.every,
-            _ => None,
+        // o relógio do plugin: comando (simples), `tick()` (com tela) ou "tick" (app externo)
+        let every = {
+            let p = &app.borrow().plugin;
+            match (&p.run, &p.ui, &p.app) {
+                (Some(run), _, _) => Some(run.every),
+                (None, Some(ui), _) => ui.every,
+                (None, None, Some(a)) => a.every,
+                _ => None,
+            }
         };
         if let Some(every) = every {
             let weak: Weak<RefCell<PluginMini>> = Rc::downgrade(&app);
@@ -989,7 +1135,7 @@ impl PluginMini {
     /// Roda já: o comando (simples) ou o `tick()` do script (com tela).
     fn refresh_now(&mut self) {
         if let Some(full) = &self.full {
-            full.send(ScriptIn::Tick);
+            full.send(Input::Tick);
             return;
         }
         let Some(run) = &self.plugin.run else { return };
@@ -1005,10 +1151,42 @@ impl PluginMini {
         });
     }
 
-    /// Liga a thread do script (plugin com tela).
-    fn start_script(&mut self) {
+    /// Botão de atualizar do cartão: um app externo que parou (ou deu erro) começa de
+    /// novo; o resto roda já.
+    fn refresh_button(&mut self) {
+        let stopped = self.full.as_ref().is_some_and(|f| !f.running());
+        if self.plugin.app.is_some() && (stopped || self.error.is_some()) {
+            self.start_logic();
+            self.mood_changed(self.mood);
+        } else {
+            self.refresh_now();
+        }
+    }
+
+    /// Liga a lógica de um plugin com tela: a thread do script ou o processo do app externo.
+    fn start_logic(&mut self) {
         let Some(full) = &self.full else { return };
         full.stop();
+        let generation = full.generation.get() + 1;
+        full.generation.set(generation);
+        self.error = None;
+        let result = match &full.source {
+            Some(source) => self.start_script(source.clone()),
+            None => self.start_process(generation),
+        };
+        if let Some(full) = &self.full {
+            match result {
+                Ok(sink) => *full.sink.borrow_mut() = Some(sink),
+                Err(e) => {
+                    log::warn!("plugin {}: {e}", self.plugin.manifest.id);
+                    self.error = Some(e);
+                }
+            }
+        }
+    }
+
+    /// A thread do script (plugin com tela).
+    fn start_script(&self, source: String) -> Result<Sink, String> {
         let (tx, rx) = channel();
         let m = &self.plugin.manifest;
         let env = ScriptEnv {
@@ -1017,39 +1195,80 @@ impl PluginMini {
             data: Some(plugins::data_file(&plugins::dir(), &m.id)),
             back: Some(tx.clone()),
         };
-        *full.tx.borrow_mut() = Some(tx);
         let id = m.id.clone();
-        let settings = self.settings_map();
-        let source = full.source.clone();
+        let settings = json_to_dyn(self.settings_json()).try_cast::<rhai::Map>().unwrap_or_default();
         let waker = self.waker.clone();
-        let spawned = std::thread::Builder::new().name(format!("plugin-{id}")).spawn(move || {
-            script_loop(source, env, settings, rx, move |batch| {
-                let id = id.clone();
-                let _ = slint::invoke_from_event_loop(move || deliver(&id, batch));
-                // o hub atualiza humor e bandeja mesmo com a janela fechada
-                waker.wake();
+        std::thread::Builder::new()
+            .name(format!("plugin-{id}"))
+            .spawn(move || {
+                script_loop(source, env, settings, rx, move |batch| {
+                    let id = id.clone();
+                    let _ = slint::invoke_from_event_loop(move || deliver(&id, None, batch));
+                    // o hub atualiza humor e bandeja mesmo com a janela fechada
+                    waker.wake();
+                })
             })
-        });
-        if let Err(e) = spawned {
-            self.error = Some(format!("sem thread para o script: {e}"));
-        }
+            .map_err(|e| format!("sem thread para o script: {e}"))?;
+        Ok(Sink::Script(tx))
     }
 
-    /// As opções do app, para o script.
-    fn settings_map(&self) -> rhai::Map {
+    /// O processo do app externo. As mensagens dele se juntam numa leva e vão para a
+    /// thread da UI de uma vez (um app que manda muitas linhas não enche o event loop).
+    fn start_process(&self, generation: u64) -> Result<Sink, String> {
+        let m = &self.plugin.manifest;
+        let program = self
+            .plugin
+            .binary_path()
+            .ok_or_else(|| format!("este app não tem versão para {}", plugins::this_os()))?;
+        let data_dir = plugins::data_dir(&plugins::dir(), &m.id);
+        let launch = external::Launch { id: &m.id, program: &program, dir: &self.plugin.dir, data_dir: &data_dir };
+        let pending: Arc<Mutex<Vec<ScriptOut>>> = Default::default();
+        let (id, waker) = (m.id.clone(), self.waker.clone());
+        let process = external::Process::spawn(&launch, move |incoming| {
+            let out = match incoming {
+                Incoming::Msg(msg) => from_app(msg),
+                Incoming::Exited(e) => ScriptOut::Exited(e),
+            };
+            let first = match pending.lock() {
+                Ok(mut v) => {
+                    v.push(out);
+                    v.len() == 1
+                }
+                Err(_) => false,
+            };
+            if first {
+                let (id, pending) = (id.clone(), pending.clone());
+                let _ = slint::invoke_from_event_loop(move || {
+                    let batch = pending.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+                    deliver(&id, Some(generation), batch);
+                });
+                waker.wake();
+            }
+        })?;
+        process.send(&ToApp::Start {
+            api: external::PROTOCOL,
+            id: m.id.clone(),
+            os: plugins::this_os(),
+            data_dir: data_dir.to_string_lossy().into_owned(),
+            settings: self.settings_json(),
+        });
+        Ok(Sink::Process(process))
+    }
+
+    /// As opções do app, para o script ou o app externo (objeto JSON).
+    fn settings_json(&self) -> serde_json::Value {
         let cfg = self.host.config.borrow();
-        let mut m = rhai::Map::new();
+        let mut m = serde_json::Map::new();
         for s in &self.plugin.manifest.settings {
-            let v = cfg.value(&self.plugin.manifest, &s.key);
-            let d: rhai::Dynamic = match v {
+            let v = match cfg.value(&self.plugin.manifest, &s.key) {
                 toml::Value::Boolean(b) => b.into(),
                 toml::Value::Integer(i) => i.into(),
                 toml::Value::Float(f) => f.into(),
                 other => other.as_str().unwrap_or_default().to_string().into(),
             };
-            m.insert(s.key.as_str().into(), d);
+            m.insert(s.key.clone(), v);
         }
-        m
+        serde_json::Value::Object(m)
     }
 
     /// Aplica o que o script mandou (thread da UI).
@@ -1068,9 +1287,17 @@ impl PluginMini {
                     let key = format!("plugin:{}", self.plugin.manifest.id);
                     self.host.notifier.borrow_mut().send(&key, &t, &b, false);
                 }
+                ScriptOut::Error(e) if e.is_empty() => self.error = None,
                 ScriptOut::Error(e) => {
                     log::warn!("plugin {}: {e}", self.plugin.manifest.id);
                     self.error = Some(e);
+                }
+                ScriptOut::Exited(e) => {
+                    log::warn!("app {}: {e}", self.plugin.manifest.id);
+                    self.error = Some(e);
+                    if let Some(full) = &self.full {
+                        full.stop();
+                    }
                 }
             }
         }
@@ -1133,7 +1360,7 @@ impl PluginMini {
         if self.error.is_some() {
             return Mood::Alarm;
         }
-        if self.plugin.ui.is_some() {
+        if self.plugin.run.is_none() {
             return self.script_mood;
         }
         match &self.last {
@@ -1209,9 +1436,14 @@ impl PluginMini {
     }
 }
 
-/// Entrega o que o script mandou ao app dele (na thread da UI).
-fn deliver(id: &str, batch: Vec<ScriptOut>) {
+/// Entrega o que o script (ou o processo da geração `generation`) mandou ao app dele, na
+/// thread da UI. Recado de um processo que já foi trocado por outro é descartado.
+fn deliver(id: &str, generation: Option<u64>, batch: Vec<ScriptOut>) {
     let Some(app) = find_app(id) else { return };
+    let current = app.borrow().full.as_ref().map(|f| f.generation.get());
+    if generation.is_some() && generation != current {
+        return;
+    }
     let ui = SET.with(|_| crate::hub::ui_handle());
     if let Some(ui) = ui {
         app.borrow_mut().apply(batch, &ui);
@@ -1236,7 +1468,7 @@ impl MiniApp for PluginMini {
     fn enable(&mut self, ui: &HubWindow) {
         self.timer.restart();
         if self.full.is_some() {
-            self.start_script();
+            self.start_logic();
         } else {
             self.refresh_now();
         }
@@ -1252,10 +1484,17 @@ impl MiniApp for PluginMini {
         self.facts.clear();
     }
 
-    /// Leitura de um provedor de `uses`: vai ao `on_event` do script, como mapa.
+    /// Leitura de um provedor de `uses`: vai ao `on_event` do script, como mapa (ou ao app
+    /// externo, como mensagem "event").
     fn on_event(&mut self, ev: &Event, _ui: &HubWindow) {
         if let Some(full) = &self.full {
-            full.send(ScriptIn::Event(ev.topic().name().into(), json_to_dyn(event_data(ev))));
+            full.send(Input::Event(ev.topic().name().into(), event_data(ev)));
+        }
+    }
+
+    fn window_shown(&mut self, _ui: &HubWindow) {
+        if let Some(full) = &self.full {
+            full.send(Input::Shown);
         }
     }
 
@@ -1283,7 +1522,7 @@ impl MiniApp for PluginMini {
 
     fn settings_changed(&mut self, ui: &HubWindow) {
         if let Some(full) = &self.full {
-            full.send(ScriptIn::Settings(self.settings_map()));
+            full.send(Input::Settings(self.settings_json()));
         }
         self.push(ui);
     }
@@ -1305,7 +1544,7 @@ impl MiniApp for PluginMini {
     }
 
     fn summary(&self) -> String {
-        let line = if self.plugin.ui.is_some() && self.error.is_none() {
+        let line = if self.plugin.run.is_none() && self.error.is_none() {
             self.script_summary.lines().next().unwrap_or_default().to_string()
         } else {
             self.text().lines().next().unwrap_or_default().to_string()
@@ -1346,6 +1585,25 @@ mod tests {
 
     fn rodar(script: &str, entradas: Vec<ScriptIn>) -> Vec<ScriptOut> {
         rodar_com(script, env(&["echo"], None), entradas)
+    }
+
+    #[test]
+    fn tela_do_app_externo_de_exemplo_compila() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/app-hello");
+        check_view(&dir).unwrap();
+    }
+
+    #[test]
+    fn mensagens_do_app_externo_viram_as_do_script() {
+        let set = from_app(FromApp::Set { prop: "n".into(), value: serde_json::json!({"a": [1, true]}) });
+        assert!(matches!(&set, ScriptOut::Set(p, PValue::Map(m)) if p == "n" && matches!(&m[0].1, PValue::List(l) if l.len() == 2)));
+        assert!(matches!(from_app(FromApp::Image { prop: "g".into(), path: "/x.png".into() }), ScriptOut::Set(_, PValue::Image(_))));
+        assert!(matches!(
+            from_app(FromApp::Fact { kind: "strain".into(), subject: "CPU".into(), value: Some(93.0) }),
+            ScriptOut::Fact(FactKind::Strain, s, Some(_)) if s == "CPU"
+        ));
+        // tipo de fato desconhecido vira erro na célula, não pânico
+        assert!(matches!(from_app(FromApp::Fact { kind: "x".into(), subject: String::new(), value: None }), ScriptOut::Error(e) if e.contains("desconhecido")));
     }
 
     #[test]

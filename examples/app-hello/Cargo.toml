@@ -1,0 +1,10 @@
+[package]
+name = "app-hello"
+version = "0.1.0"
+edition = "2024"
+description = "App externo de exemplo do MiniUtils: um executável próprio, com acesso total"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde_json = "1.0.154"

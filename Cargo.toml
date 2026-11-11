@@ -1,6 +1,6 @@
 [package]
 name = "miniutils"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Hub de mini-apps para o desktop (Linux e Windows), com mascotes em pixel art e visuais trocáveis"
 license = "MIT"
@@ -65,7 +65,7 @@ windows = { version = "0.62", features = [
 ] }
 
 [workspace]
-members = ["ui", "tools/sprite-import"]
+members = ["ui", "tools/sprite-import", "examples/app-hello"]
 
 [workspace.dependencies]
 # Só o renderizador por software: ~30 MB em uso, contra ~270 MB carregando o driver OpenGL

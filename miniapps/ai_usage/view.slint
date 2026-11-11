@@ -157,6 +157,19 @@ export component AiUsageView inherits Rectangle {
     // um por célula, e os que sobram vão para a linha de baixo
     in property <int> span: 1;
     property <Colors> t: AiUsageApp.theme;
+    // cópia invisível dos cartões (forma cheia) só para medir a largura mínima deles.
+    // Fica num Flickable porque ele não repassa o mínimo do conteúdo: solta no
+    // Rectangle, a medida viraria o mínimo da tela inteira.
+    Flickable {
+        width: 0;
+        height: 0;
+        visible: false;
+        probe := Rectangle {
+            VerticalLayout {
+                for card[i] in AiUsageApp.cards: AccountCard { account: card; index: i; t: root.t; }
+            }
+        }
+    }
     VerticalLayout {
         spacing: 8px;
         HorizontalLayout {
@@ -169,7 +182,9 @@ export component AiUsageView inherits Rectangle {
             property <length> gap: 8px;
             property <length> area: self.visible-width;
             property <int> n: AiUsageApp.cards.length;
-            property <int> cols: max(1, min(n, root.span));
+            // um cartão por célula, mas só quantos cabem na largura sem cortar o conteúdo
+            property <int> fit: floor((area + gap) / (probe.min-width + gap));
+            property <int> cols: max(1, min(n, min(root.span, fit)));
             property <length> cw: (area - (cols - 1) * gap) / cols;
             // altura que cada linha de cartões teria sem rolar; abaixo de `full-h` os
             // cartões ficam densos (1x2 com os quatro em lista, 2x1 com duas linhas)

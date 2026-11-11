@@ -1,10 +1,25 @@
 //! Plugins da comunidade (prova de conceito): mini-apps instalados de um repositório.
 //!
-//! Há dois tipos de plugin, os dois sem código nativo:
+//! Há três tipos de plugin. Os dois primeiros não têm código nativo:
 //! - **simples**: o `manifest.toml` diz que comando rodar e como mostrar (abaixo); o host
 //!   roda e mostra numa tela genérica;
 //! - **com tela própria**: `[ui]` aponta um `view.slint` (interpretado em tempo de execução)
 //!   e um `main.rhai` (lógica, num interpretador isolado). Ver `apps/plugin.rs`.
+//!
+//! O terceiro, **app externo** (`[app]`), tem **acesso total**: a lógica é um executável
+//! próprio (qualquer linguagem), que o host inicia ao ligar o app e com quem conversa por
+//! JSON na entrada e na saída padrão (protocolo em `apps/external.rs`). Roda com as
+//! permissões do usuário, por isso não declara `[permissions]`; a loja o anuncia como
+//! acesso total e confere o hash do binário (ver `store.rs`).
+//!
+//! ```toml
+//! uses = ["sys"]               # provedores repassados ao app (mensagem "event")
+//! [app]
+//! view = "view.slint"          # a tela, como num plugin com [ui]
+//! linux = "bin/meu-app"        # o executável de cada sistema, em bin/ (um basta)
+//! windows = "bin/meu-app.exe"
+//! every = 10                   # mensagem "tick" a cada N segundos (opcional; 1 a 3600)
+//! ```
 //!
 //! O `manifest.toml` é o mesmo formato dos mini-apps embutidos, com seções a mais:
 //!
@@ -42,8 +57,9 @@
 //!
 //! Arquivos de um plugin (`files`): os de `TOP_FILES` na raiz, mais `ui/*.slint` (telas que o
 //! `view.slint` importa) e `assets/*.png|jpg|svg` (imagens, por `@image-url`). Nada de
-//! link, binário ou outra pasta. Os dados que o script grava (`store_set`) ficam fora da
-//! pasta do plugin (`data_file`), para sobreviver a uma atualização.
+//! link ou outra pasta; binário só em `bin/` de um app externo. Os dados que o script grava
+//! (`store_set`) ficam fora da pasta do plugin (`data_file`; o app externo ganha a pasta
+//! `data_dir`), para sobreviver a uma atualização.
 //!
 //! Instalados ficam em `~/.local/share/miniutils/plugins/<id>/` (ver `store.rs`). Com
 //! `miniutils --plugin-dev <pasta>`, um plugin em desenvolvimento entra junto (`set_dev`).
@@ -65,6 +81,10 @@ const SUBDIRS: &[(&str, &[&str])] = &[("ui", &["slint"]), ("assets", &["png", "j
 pub const MAX_FILE: u64 = 1 << 20;
 const MAX_TOTAL: u64 = 8 << 20;
 const MAX_FILES: usize = 64;
+/// Executáveis de um app externo (`bin/`): por arquivo. Ficam fora do total acima.
+pub const MAX_BIN: u64 = 256 << 20;
+/// A pasta dos executáveis de um app externo.
+const BIN_DIR: &str = "bin";
 
 /// Um plugin pronto para o host rodar.
 #[derive(Debug, Clone)]
@@ -76,6 +96,8 @@ pub struct Plugin {
     pub run: Option<Run>,
     /// Plugin com tela própria e script.
     pub ui: Option<Ui>,
+    /// App externo, com acesso total.
+    pub app: Option<AppSpec>,
     pub display: Display,
     pub moods: Vec<MoodRule>,
 }
@@ -94,6 +116,40 @@ pub struct Ui {
     pub script: String,
     /// Intervalo do `tick()` do script, em segundos (sem = nunca).
     pub every: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppSpec {
+    pub view: String,
+    /// Executável no Linux (`bin/<nome>`, relativo à pasta do app).
+    #[serde(default)]
+    pub linux: Option<String>,
+    /// Executável no Windows (`bin/<nome>.exe`).
+    #[serde(default)]
+    pub windows: Option<String>,
+    /// Intervalo da mensagem `tick`, em segundos (sem = nunca).
+    pub every: Option<u64>,
+}
+
+impl AppSpec {
+    /// O executável deste sistema (relativo à pasta do app), se o app tiver um.
+    pub fn binary(&self) -> Option<&str> {
+        if cfg!(windows) { self.windows.as_deref() } else { self.linux.as_deref() }
+    }
+
+    /// Os executáveis declarados, com o sistema de cada um ("linux", "windows").
+    pub fn binaries(&self) -> Vec<(&'static str, &str)> {
+        [("linux", &self.linux), ("windows", &self.windows)]
+            .into_iter()
+            .filter_map(|(os, b)| b.as_deref().map(|b| (os, b)))
+            .collect()
+    }
+}
+
+/// O sistema em que este binário roda, como o manifesto e o índice o chamam.
+pub fn this_os() -> &'static str {
+    if cfg!(windows) { "windows" } else { "linux" }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -119,6 +175,7 @@ pub struct MoodRule {
 struct Extra {
     run: Option<Run>,
     ui: Option<Ui>,
+    app: Option<AppSpec>,
     #[serde(default)]
     display: Display,
     #[serde(default)]
@@ -137,14 +194,34 @@ impl Plugin {
         if let Some(h) = manifest.permissions.net.iter().find(|h| !valid_host(h)) {
             return Err(format!("[permissions] net: \"{h}\" não é um domínio (ex.: api.exemplo.com, sem https:// nem caminho)"));
         }
-        match (&extra.run, &extra.ui) {
-            (None, None) => return Err("falta a seção [run] (plugin simples) ou [ui] (tela própria)".into()),
-            (Some(_), Some(_)) => return Err("use [run] ou [ui], não os dois".into()),
-            _ => {}
+        match [extra.run.is_some(), extra.ui.is_some(), extra.app.is_some()].iter().filter(|s| **s).count() {
+            0 => {
+                return Err("falta a seção [run] (plugin simples), [ui] (tela própria) ou [app] (app com acesso total)".into());
+            }
+            1 => {}
+            _ => return Err("use só uma das seções [run], [ui] ou [app]".into()),
         }
-        // provedores e rede chegam ao script: o plugin simples não tem quem os use
-        if extra.ui.is_none() && !manifest.uses.is_empty() {
-            return Err("uses só vale para plugin com [ui] (o script recebe em fn on_event)".into());
+        if let Some(app) = &extra.app {
+            // o executável roda com as permissões do usuário: uma allowlist não diria a verdade
+            if !manifest.permissions.exec.is_empty() || !manifest.permissions.net.is_empty() {
+                return Err("[app] tem acesso total: não declare [permissions] (a loja o anuncia como acesso total)".into());
+            }
+            if app.view != "view.slint" {
+                return Err("[app] use view = \"view.slint\"".into());
+            }
+            if app.every.is_some_and(|e| !(1..=3600).contains(&e)) {
+                return Err("[app] every: use de 1 a 3600 segundos".into());
+            }
+            if app.binaries().is_empty() {
+                return Err("[app] falta o executável: linux = \"bin/<nome>\" e/ou windows = \"bin/<nome>.exe\"".into());
+            }
+            if let Some((os, b)) = app.binaries().into_iter().find(|(_, b)| !valid_bin(b)) {
+                return Err(format!("[app] {os} = \"{b}\": o executável fica em bin/ (ex.: bin/meu-app)"));
+            }
+        }
+        // provedores e rede chegam ao script (ou ao app): o plugin simples não tem quem os use
+        if extra.run.is_some() && !manifest.uses.is_empty() {
+            return Err("uses só vale para plugin com [ui] ou [app] (o script recebe em fn on_event)".into());
         }
         if extra.ui.is_none() && !manifest.permissions.net.is_empty() {
             return Err("[permissions] net só vale para plugin com [ui] (o script usa http_get)".into());
@@ -183,7 +260,15 @@ impl Plugin {
             return Err(format!("icon = \"{}\": não há essa mascote", manifest.icon));
         }
         add_standard_settings(&mut manifest);
-        Ok(Plugin { dir: PathBuf::new(), manifest, run: extra.run, ui: extra.ui, display: extra.display, moods: extra.mood })
+        Ok(Plugin {
+            dir: PathBuf::new(),
+            manifest,
+            run: extra.run,
+            ui: extra.ui,
+            app: extra.app,
+            display: extra.display,
+            moods: extra.mood,
+        })
     }
 
     /// Lê o plugin da pasta `dir`.
@@ -198,7 +283,20 @@ impl Plugin {
     /// api.x.com · lê: sys").
     pub fn grants(&self) -> String {
         let uses: Vec<String> = self.manifest.uses.iter().map(|t| t.name().to_string()).collect();
+        if self.app.is_some() {
+            return describe_full_access(&uses);
+        }
         describe_grants(&self.manifest.permissions.exec, &self.manifest.permissions.net, &uses)
+    }
+
+    /// App externo: roda um executável próprio com as permissões do usuário.
+    pub fn full_access(&self) -> bool {
+        self.app.is_some()
+    }
+
+    /// O executável deste sistema (caminho completo), num app externo.
+    pub fn binary_path(&self) -> Option<PathBuf> {
+        self.app.as_ref()?.binary().map(|b| self.dir.join(b))
     }
 
     pub fn title(&self) -> &str {
@@ -248,6 +346,33 @@ pub fn describe_grants(exec: &[String], net: &[String], uses: &[String]) -> Stri
     if parts.is_empty() { "não executa programas nem usa a rede".into() } else { parts.join(" · ") }
 }
 
+/// Texto das permissões de um app externo: "ACESSO TOTAL: … · lê: sys".
+pub fn describe_full_access(uses: &[String]) -> String {
+    let mut out = String::from("ACESSO TOTAL: roda um programa próprio com as permissões do seu usuário");
+    if !uses.is_empty() {
+        out.push_str(&format!(" · lê: {}", uses.join(", ")));
+    }
+    out
+}
+
+/// Executável de app externo: `bin/<nome>`, com nome simples (sem subpasta nem `..`).
+fn valid_bin(path: &str) -> bool {
+    path.strip_prefix("bin/").is_some_and(safe_name)
+}
+
+/// Nome de arquivo simples: letras, números, `-`, `_` e `.`, sem começar por ponto.
+fn safe_name(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('.') && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// O manifesto em `dir` declara um app externo (`[app]`)?
+fn declares_app(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join("manifest.toml"))
+        .ok()
+        .and_then(|t| toml::from_str::<Extra>(&t).ok())
+        .is_some_and(|e| e.app.is_some())
+}
+
 /// Os arquivos do plugin em `dir` (caminhos relativos), conferidos: só arquivos comuns
 /// (nada de link), dentro dos limites. Arquivos de outros tipos são ignorados.
 pub fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -283,12 +408,13 @@ pub fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
         names.sort();
         for name in names {
             let ext = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
-            let safe = !name.starts_with('.')
-                && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-            if safe && exts.contains(&ext.as_str()) {
+            if safe_name(&name) && exts.contains(&ext.as_str()) {
                 take(Path::new(sub).join(&name))?;
             }
         }
+    }
+    if declares_app(dir) {
+        out.extend(bin_files(dir)?);
     }
     if out.len() > MAX_FILES {
         return Err(format!("arquivos demais ({}; o limite é {MAX_FILES})", out.len()));
@@ -299,10 +425,53 @@ pub fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
+/// Os executáveis de um app externo (`bin/`), conferidos: arquivos comuns de nome simples,
+/// até `MAX_BIN` cada. No modo dev vale um link (para o `target/` do projeto do app).
+fn bin_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let bin = dir.join(BIN_DIR);
+    let Ok(meta) = std::fs::symlink_metadata(&bin) else { return Ok(Vec::new()) };
+    if !meta.is_dir() {
+        return Err(format!("{BIN_DIR}/ não é uma pasta"));
+    }
+    let dev = dev_dir() == Some(dir);
+    let mut names: Vec<String> = std::fs::read_dir(&bin)
+        .map_err(|e| format!("{BIN_DIR}/: {e}"))?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| safe_name(n))
+        .collect();
+    names.sort();
+    let mut out = Vec::new();
+    for name in names {
+        let rel = Path::new(BIN_DIR).join(&name);
+        let path = dir.join(&rel);
+        let meta = if dev { std::fs::metadata(&path) } else { std::fs::symlink_metadata(&path) }
+            .map_err(|e| format!("{}: {e}", rel.display()))?;
+        if !meta.file_type().is_file() {
+            return Err(format!("{} não é um arquivo comum", rel.display()));
+        }
+        if meta.len() > MAX_BIN {
+            return Err(format!("{} passa de {} MiB", rel.display(), MAX_BIN >> 20));
+        }
+        out.push(rel);
+    }
+    Ok(out)
+}
+
+/// Arquivo dentro de `bin/` (executável de app externo)?
+pub fn is_bin(rel: &Path) -> bool {
+    rel.starts_with(BIN_DIR)
+}
+
 /// Onde ficam os dados que o script grava (`store_set`): fora da pasta do plugin, que é
 /// trocada inteira numa atualização.
 pub fn data_file(root: &Path, id: &str) -> PathBuf {
     root.join(".data").join(format!("{id}.json"))
+}
+
+/// A pasta de dados de um app externo (o host cria e passa ao app; sai ao remover).
+pub fn data_dir(root: &Path, id: &str) -> PathBuf {
+    root.join(".data").join(id)
 }
 
 /// Plugin em desenvolvimento (`miniutils --plugin-dev <pasta>`).
@@ -433,6 +602,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn app_externo_valido_e_recusas() {
+        let ok = Plugin::parse(include_str!("../../examples/app-hello/manifest.toml")).unwrap();
+        let app = ok.app.as_ref().unwrap();
+        assert!(ok.full_access());
+        assert_eq!(app.binaries(), [("linux", "bin/app-hello"), ("windows", "bin/app-hello.exe")]);
+        assert!(ok.grants().starts_with("ACESSO TOTAL"));
+        assert!(ok.grants().ends_with("lê: sys"));
+        let base = "name='x'\napi=1\nid='a.b'\n";
+        let caso = |extra: &str| Plugin::parse(&format!("{base}{extra}")).unwrap_err();
+        let app = "[app]\nview='view.slint'\nlinux='bin/x'";
+        assert!(caso(&format!("[permissions]\nexec=['ls']\n{app}")).contains("acesso total"));
+        assert!(caso(&format!("[permissions]\nnet=['a.com']\n{app}")).contains("acesso total"));
+        assert!(caso("[app]\nview='view.slint'").contains("executável"));
+        assert!(caso("[app]\nview='view.slint'\nlinux='/usr/bin/x'").contains("bin/"));
+        assert!(caso("[app]\nview='view.slint'\nlinux='bin/../x'").contains("bin/"));
+        assert!(caso("[app]\nview='view.slint'\nlinux='bin/sub/x'").contains("bin/"));
+        assert!(caso(&format!("{app}\nevery=0")).contains("every"));
+        assert!(caso(&format!("{app}\n[ui]\nview='view.slint'\nscript='main.rhai'")).contains("só uma"));
+    }
+
+    #[test]
     fn arquivos_do_plugin_so_os_permitidos() {
         let dir = std::env::temp_dir().join(format!("miniutils-arquivos-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -451,6 +641,30 @@ pub(crate) mod tests {
         {
             std::os::unix::fs::symlink("/etc/hostname", dir.join("ui/fora.slint")).unwrap();
             assert!(files(&dir).unwrap_err().contains("ui/fora.slint"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bin_so_entra_em_app_externo() {
+        let dir = std::env::temp_dir().join(format!("miniutils-bin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        std::fs::write(dir.join("bin/meu-app"), "x").unwrap();
+        std::fs::write(dir.join("bin/.oculto"), "x").unwrap();
+        let manifesto = |secao: &str| std::fs::write(dir.join("manifest.toml"), format!("id='a.b'\nname='x'\napi=1\n{secao}")).unwrap();
+        let nomes = || -> Vec<String> { files(&dir).unwrap().iter().map(|p| p.display().to_string().replace('\\', "/")).collect() };
+        // plugin com script: bin/ fica de fora
+        manifesto("[ui]\nview='view.slint'\nscript='main.rhai'");
+        assert_eq!(nomes(), ["manifest.toml"]);
+        manifesto("[app]\nview='view.slint'\nlinux='bin/meu-app'");
+        assert_eq!(nomes(), ["manifest.toml", "bin/meu-app"]);
+        assert!(is_bin(Path::new("bin/meu-app")) && !is_bin(Path::new("binario.slint")));
+        // fora do modo dev, link em bin/ é recusado
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/bin/sh", dir.join("bin/sh")).unwrap();
+            assert!(files(&dir).unwrap_err().contains("bin/sh"));
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

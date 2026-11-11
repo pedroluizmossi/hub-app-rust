@@ -247,8 +247,21 @@ pub fn command(program: &str) -> Command {
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// `Command` para um executável dado pelo caminho (o de um app externo): sem procurar no
+/// PATH e, no Windows, sem janela de console.
+pub fn command_path(path: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// Mata o filho e o grupo dele, e recolhe o processo.
-fn kill_group(child: &mut std::process::Child) {
+pub(crate) fn kill_group(child: &mut std::process::Child) {
     // SAFETY: `kill` só envia um sinal; o pid é o do filho que ainda não recolhemos, que é
     // líder do próprio grupo (`process_group(0)`).
     #[cfg(unix)]
