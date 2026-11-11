@@ -17,10 +17,12 @@ impl Notifier {
         }
         self.last.insert(key.to_string(), now);
         let (title, body) = (title.to_string(), body.to_string());
-        // o envio fala com o D-Bus e pode demorar: fora da thread da UI
+        // o envio fala com o sistema (D-Bus no Linux) e pode demorar: fora da thread da UI
         std::thread::spawn(move || {
             let mut n = notify_rust::Notification::new();
             n.appname(&crate::core::config::display_name()).summary(&title).body(&body).icon("utilities-system-monitor");
+            // urgência só existe nas notificações do Linux
+            #[cfg(target_os = "linux")]
             n.urgency(if urgent { notify_rust::Urgency::Normal } else { notify_rust::Urgency::Low });
             if !urgent {
                 n.timeout(8000);

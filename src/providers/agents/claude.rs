@@ -144,13 +144,21 @@ fn parse_session(text: &str) -> Option<(u32, String, Agent)> {
 
 /// O processo existe e é o mesmo que gravou o arquivo (`procStart` é o campo 22 do
 /// `/proc/<pid>/stat`). Sem `procStart`, basta existir.
+#[cfg(not(windows))]
 fn process_alive(pid: u32, proc_start: &str) -> bool {
     let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
     proc_start.is_empty() || stat_start(&stat).is_none_or(|s| s == proc_start)
 }
 
+/// No Windows não há `/proc` (nem `procStart` comparável): basta o processo existir.
+#[cfg(windows)]
+fn process_alive(pid: u32, _proc_start: &str) -> bool {
+    crate::core::os::alive(pid)
+}
+
 /// Campo 22 (starttime) de um `/proc/<pid>/stat`. O nome do programa (campo 2) pode ter
 /// espaços e parênteses: conta a partir do último `)`.
+#[cfg(any(not(windows), test))]
 fn stat_start(stat: &str) -> Option<&str> {
     stat.rsplit_once(')')?.1.split_whitespace().nth(19)
 }

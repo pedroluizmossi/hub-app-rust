@@ -4,8 +4,11 @@
 //! (`$DISPLAY`), o hub roda como cliente X11 — o mesmo vale direto em sessões X11 (XFCE,
 //! Cinnamon, MATE). Com `MINIUTILS_NATIVE_WAYLAND=1` ele fica no Wayland nativo: sem
 //! moldura e fechando ao perder o foco, mas onde o compositor quiser.
+//!
+//! No Windows a janela se posiciona sem restrição; o que muda é como pedir "fora da barra
+//! de tarefas" e a opacidade do fade (ver os blocos `#[cfg(windows)]`).
 
-use slint::winit_030::{SlintEvent, WinitWindowAccessor, winit};
+use slint::winit_030::{WinitWindowAccessor, winit};
 use winit::dpi::PhysicalPosition;
 
 /// Distância entre o popup e o ponto clicado / bordas da tela.
@@ -13,15 +16,24 @@ const GAP: i32 = 10;
 /// Metade de um painel típico: o clique cai no meio dele.
 const PANEL_HALF: i32 = 24;
 
+/// Escolhe o backend (winit + renderizador por software). No Windows o popup sempre pode
+/// ser posicionado.
+#[cfg(windows)]
+pub fn select_backend() -> anyhow::Result<bool> {
+    slint::BackendSelector::new().backend_name("winit-software".into()).select()?;
+    Ok(true)
+}
+
 /// Escolhe o backend (winit + renderizador por software) e, se possível, o X11.
 /// Devolve `true` quando o popup pode ser posicionado.
+#[cfg(target_os = "linux")]
 pub fn select_backend() -> anyhow::Result<bool> {
     let native_wayland = std::env::var_os("MINIUTILS_NATIVE_WAYLAND").is_some();
     let x11 = std::env::var_os("DISPLAY").is_some() && !native_wayland;
     let mut selector = slint::BackendSelector::new().backend_name("winit-software".into());
     if x11 {
         use winit::platform::x11::EventLoopBuilderExtX11;
-        let mut builder = winit::event_loop::EventLoop::<SlintEvent>::with_user_event();
+        let mut builder = winit::event_loop::EventLoop::<slint::winit_030::SlintEvent>::with_user_event();
         builder.with_x11();
         selector = selector.with_winit_event_loop_builder(builder);
     }
@@ -39,17 +51,30 @@ pub struct Monitor {
     pub scale: f64,
 }
 
+/// A bandeja entrega o ponto clicado em pixels lógicos (o SNI, no Linux) ou físicos (o
+/// Windows)?
+const ANCHOR_LOGICAL: bool = cfg!(not(windows));
+
+/// Posição do popup com a âncora em pixels lógicos (ver `position_with`).
+#[cfg(test)]
+pub fn popup_position(anchor: Option<(i32, i32)>, win: (i32, i32), monitors: &[Monitor], fallback: usize) -> Option<(i32, i32)> {
+    position_with(anchor, true, win, monitors, fallback)
+}
+
 /// Posição física (canto superior esquerdo) do popup. Função pura, para testar.
-/// - `anchor`: ponto clicado na bandeja, em pixels **lógicos** (é assim que o SNI entrega).
+/// - `anchor`: ponto clicado na bandeja; `anchor_logical` diz se vem em pixels lógicos
+///   (convertidos pela escala de cada monitor) ou já em físicos.
 /// - `win`: tamanho físico da janela.
 /// - `fallback`: índice do monitor usado sem âncora ou quando ela não cai em nenhum monitor.
-pub fn popup_position(
+pub fn position_with(
     anchor: Option<(i32, i32)>,
+    anchor_logical: bool,
     win: (i32, i32),
     monitors: &[Monitor],
     fallback: usize,
 ) -> Option<(i32, i32)> {
     let (pw, ph) = win;
+    let to_physical = |a: (i32, i32), scale: f64| if anchor_logical { to_physical(a, scale) } else { a };
     // o monitor que contém a âncora (cada um converte o ponto pela própria escala)
     let found = anchor.and_then(|a| {
         monitors.iter().find_map(|m| {
@@ -86,7 +111,7 @@ fn contains(m: &Monitor, (x, y): (i32, i32)) -> bool {
     x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h
 }
 
-/// Põe a janela junto de `anchor` (ponto clicado na bandeja, em pixels lógicos).
+/// Põe a janela junto de `anchor` (ponto clicado na bandeja, como a bandeja o entrega).
 /// Sem âncora, vai para o canto inferior direito, onde costuma ficar a bandeja.
 pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
     window.with_winit_window(|w| {
@@ -102,7 +127,8 @@ pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
         // o monitor atual (ou o primário) é o reserva quando a âncora não cai em nenhum
         let current = w.current_monitor().or_else(|| w.primary_monitor());
         let fallback = current.and_then(|c| handles.iter().position(|m| m.position() == c.position())).unwrap_or(0);
-        if let Some((x, y)) = popup_position(anchor, (size.width as i32, size.height as i32), &monitors, fallback) {
+        let win = (size.width as i32, size.height as i32);
+        if let Some((x, y)) = position_with(anchor, ANCHOR_LOGICAL, win, &monitors, fallback) {
             w.set_outer_position(PhysicalPosition::new(x, y));
         }
     });
@@ -139,7 +165,42 @@ pub fn has_window(window: &slint::Window) -> bool {
     window.has_winit_window()
 }
 
+/// Opacidade da janela inteira (0..1), como janela em camadas (`WS_EX_LAYERED`).
+#[cfg(windows)]
+pub fn set_opacity(window: &slint::Window, alpha: f32) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::{COLORREF, HWND};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW, WS_EX_LAYERED,
+    };
+    window.with_winit_window(|w| {
+        let Ok(handle) = w.window_handle() else { return };
+        let RawWindowHandle::Win32(h) = handle.as_raw() else { return };
+        let hwnd = HWND(h.hwnd.get() as *mut std::ffi::c_void);
+        let layered = WS_EX_LAYERED.0 as isize;
+        // SAFETY: `hwnd` é a janela viva do winit, e estamos na thread dela.
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if style & layered == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | layered);
+            }
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), (alpha.clamp(0.0, 1.0) * 255.0) as u8, LWA_ALPHA);
+        }
+    });
+}
+
+/// Tira a janela da barra de tarefas e a mantém por cima (o winit já sabe pedir isso).
+#[cfg(windows)]
+pub fn skip_taskbar(window: &slint::Window) {
+    use winit::platform::windows::WindowExtWindows;
+    window.with_winit_window(|w| {
+        w.set_skip_taskbar(true);
+        w.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
+    });
+}
+
 /// Opacidade da janela inteira (0..1), via `_NET_WM_WINDOW_OPACITY` do compositor.
+#[cfg(target_os = "linux")]
 pub fn set_opacity(window: &slint::Window, alpha: f32) {
     window.with_winit_window(|w| {
         if let Some(id) = x11_id(w) {
@@ -148,6 +209,7 @@ pub fn set_opacity(window: &slint::Window, alpha: f32) {
     });
 }
 
+#[cfg(target_os = "linux")]
 fn x11_id(w: &winit::window::Window) -> Option<u32> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match w.window_handle().ok()?.as_raw() {
@@ -158,6 +220,7 @@ fn x11_id(w: &winit::window::Window) -> Option<u32> {
 }
 
 /// Tira a janela da barra de tarefas e do alternador e a mantém por cima (EWMH, X11).
+#[cfg(target_os = "linux")]
 pub fn skip_taskbar(window: &slint::Window) {
     let done = window.with_winit_window(|w| {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -179,6 +242,7 @@ pub fn skip_taskbar(window: &slint::Window) {
     }
 }
 
+#[cfg(target_os = "linux")]
 mod x11 {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{
@@ -261,6 +325,16 @@ mod tests {
         let m1 = [mon(0, 0, 1920, 1080, 1.0)];
         assert_eq!(popup_position(Some((1200, 1070)), (400, 500), &m1, 0), Some((1000, 536)));
         assert_eq!((x, y), (1000 * 3 / 2, 536 * 3 / 2));
+    }
+
+    #[test]
+    fn ancora_em_pixels_fisicos_nao_e_convertida() {
+        // o Windows entrega o clique já em físicos: a 1,5 o ponto (2700, 1600) fica onde está
+        let m = [mon(0, 0, 2880, 1620, 1.5)];
+        let (x, y) = position_with(Some((2700, 1600)), false, (600, 750), &m, 0).unwrap();
+        assert_eq!((x, y), (2880 - 600 - 15, 1600 - 36 - 15 - 750));
+        // em lógicos o mesmo ponto cairia fora do monitor
+        assert_ne!(popup_position(Some((2700, 1600)), (600, 750), &m, 0), Some((x, y)));
     }
 
     #[test]

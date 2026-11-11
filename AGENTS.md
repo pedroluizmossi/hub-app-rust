@@ -30,6 +30,37 @@ Regras para agentes de código (Claude Code, Codex etc.). Arquitetura em
 - Tipos gerados pelo Slint vivem em outro crate: não dá para escrever `impl Trait for
   HubWindow` (ou outro tipo gerado) com um trait de fora; use função livre ou newtype.
 
+## Plataformas (Linux e Windows)
+
+O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos dois (o CI em
+`.github/workflows/ci.yml` roda `cargo check` e `cargo test` em Ubuntu e Windows).
+
+- **Chamada de sistema não fica solta no código.** Tudo que depende do sistema mora atrás
+  de uma interface comum, com uma implementação por sistema escolhida por `#[cfg]`:
+  - módulo com `linux.rs` e `windows.rs`: `src/instance/`, `src/tray/`,
+    `src/providers/sys/`, `src/providers/media/` (o arquivo de fora, ex. `src/tray.rs`, só
+    escolhe a implementação e guarda o que é comum);
+  - blocos `#[cfg(...)]` no próprio arquivo quando é pouco: `src/popup.rs`,
+    `src/core/exec.rs`, `src/providers/ports.rs`;
+  - o resto (encerrar processo, arquivo só do dono, pasta XDG): `src/core/os.rs`.
+- **Recurso novo nasce nos dois.** Se um sistema não tem como (ex.: carga média no
+  Windows), o campo fica vazio/zero e o comentário do campo diz isso; nada de `todo!()`.
+- **Dependência só de um sistema** vai em `[target.'cfg(...)'.dependencies]` no
+  `Cargo.toml` (`ksni`, `zbus`, `x11rb`, `libc` no Linux; `tray-icon`, `sysinfo`,
+  `windows` no Windows).
+- **Rodar programa:** sempre por `exec::command`/`exec::run_timeout`, nunca
+  `Command::new` direto. No Windows é o que acha os `.cmd` do npm (`codex`, `claude`) e
+  evita a janela de console piscando.
+- **Caminhos:** `Path::join` e `dirs::*`, nunca `$HOME` nem `/` montado em string. Em
+  teste, compare caminhos trocando `\` por `/`.
+- **Testes:** o que usa `sh`, `echo` ou link simbólico leva `#[cfg(unix)]`. Leitores de
+  saída de comando (`parse_netstat`, `windows_file_names`) são funções puras compiladas
+  também nos testes do Linux (`#[cfg(any(windows, test))]`): teste-os aqui.
+- **Conferir o Windows a partir do Linux:** `rustup target add x86_64-pc-windows-gnu`,
+  o pacote `mingw-w64-gcc` e `cargo check --target x86_64-pc-windows-gnu` pegam erro de
+  compilação. Comportamento (bandeja, popup, mídia) só num Windows de verdade: peça ao
+  usuário para conferir.
+
 ## Interface (Slint)
 
 - **Você não vê a janela.** Para qualquer mudança visual: diga ao usuário que não viu o

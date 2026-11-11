@@ -357,11 +357,8 @@ fn pace_key(source: &str, w: &UsageWindow) -> String {
 }
 
 /// Data e hora locais de um instante.
-fn local(at: i64) -> Option<libc::tm> {
-    let time = at as libc::time_t;
-    let mut local: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: ponteiros válidos para dados locais; a saída pertence à chamada.
-    (!unsafe { libc::localtime_r(&time, &mut local) }.is_null()).then_some(local)
+fn local(at: i64) -> Option<chrono::DateTime<chrono::Local>> {
+    chrono::DateTime::from_timestamp(at, 0).map(|utc| utc.with_timezone(&chrono::Local))
 }
 
 fn reset_text(w: &UsageWindow, relative: bool) -> String {
@@ -369,17 +366,14 @@ fn reset_text(w: &UsageWindow, relative: bool) -> String {
     let Some(at) = w.resets_at.filter(|t| *t > 0) else { return String::new() };
     if relative { return format!("Renova em {}", remaining(at - now())); }
     let Some(local) = local(at) else { return String::new() };
-    format!("Renova {:02}/{:02} às {:02}:{:02}", local.tm_mday, local.tm_mon + 1, local.tm_hour, local.tm_min)
+    local.format("Renova %d/%m às %H:%M").to_string()
 }
 
 /// Hora curta: "16:10" se for hoje, "12/11 16:10" se for outro dia.
 fn clock(at: i64) -> String {
     let (Some(t), Some(today)) = (local(at), local(now())) else { return String::new() };
-    if (t.tm_year, t.tm_yday) == (today.tm_year, today.tm_yday) {
-        format!("{:02}:{:02}", t.tm_hour, t.tm_min)
-    } else {
-        format!("{:02}/{:02} {:02}:{:02}", t.tm_mday, t.tm_mon + 1, t.tm_hour, t.tm_min)
-    }
+    let format = if t.date_naive() == today.date_naive() { "%H:%M" } else { "%d/%m %H:%M" };
+    t.format(format).to_string()
 }
 
 /// Texto da janela que, nesse ritmo, acaba antes de renovar. O fim vem primeiro: se a

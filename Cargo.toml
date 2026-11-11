@@ -2,25 +2,20 @@
 name = "miniutils"
 version = "0.1.0"
 edition = "2024"
-description = "Hub de mini-apps para o desktop Linux, com mascotes em pixel art e visuais trocáveis"
+description = "Hub de mini-apps para o desktop (Linux e Windows), com mascotes em pixel art e visuais trocáveis"
 license = "MIT"
 
 [dependencies]
 anyhow = "1.0.104"
 dirs = "7.0.0"
-ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
-libc = "0.2.191"
 notify-rust = "4.19.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 slint = { workspace = true }
 # a interface (código gerado pelo Slint), num crate à parte: ver ui/Cargo.toml
 miniutils-ui = { path = "ui" }
-# janela popup: tirar da barra de tarefas (X11 / XWayland)
-x11rb = "0.13"
+# identificador nativo da janela (X11 no Linux, HWND no Windows): ver popup.rs
 raw-window-handle = "0.6"
-# MPRIS (o que está tocando) pelo mesmo zbus que o ksni já traz; sem dependência nova
-zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 toml = "1.2.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -34,6 +29,37 @@ slint-interpreter = { version = "=1.18.1", default-features = false, features = 
 rhai = { version = "1", features = ["no_module", "sync"] }
 # assinatura do índice da loja (ed25519); já vinha com o HTTPS (rustls)
 ring = "0.17"
+
+# Só Linux: bandeja (StatusNotifierItem), X11 e D-Bus. Nada disto compila no Windows; o
+# código que os usa fica em módulos `linux.rs` (ver "Plataformas" no AGENTS.md).
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
+libc = "0.2.191"
+# janela popup: tirar da barra de tarefas (X11 / XWayland)
+x11rb = "0.13"
+# MPRIS (o que está tocando) pelo mesmo zbus que o ksni já traz; sem dependência nova
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+
+# Só Windows: o equivalente de cada um acima, em módulos `windows.rs`.
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.26"
+# CPU, memória, discos, rede e processos (no Linux isso vem direto de /proc e /sys)
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "network"] }
+# Win32 (pipe da instância única, processos, shell, janela) e WinRT (o que está tocando)
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Media_Control",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [workspace]
 members = ["ui", "tools/sprite-import"]

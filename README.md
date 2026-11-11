@@ -1,6 +1,6 @@
 # MiniUtils
 
-Hub de mini-apps para o desktop Linux, com mascotes em pixel art que reagem ao que está
+Hub de mini-apps para o desktop (Linux e Windows), com mascotes em pixel art que reagem ao que está
 acontecendo. Fica na bandeja do sistema e hospeda apps que você liga e desliga à vontade.
 É a reescrita do plasmoid [CyberDock](../anime-cyber-docker) em **Rust + Slint**, sem depender do KDE.
 
@@ -114,6 +114,8 @@ MINIUTILS_DEBUG=1            mostra eventos de foco e de janela no terminal
 
 ## Requisitos em tempo de execução
 
+### Linux
+
 - Uma bandeja do sistema (StatusNotifierItem): KDE, XFCE, Cinnamon e MATE já têm. No GNOME,
   instale a extensão *AppIndicator*. Sem bandeja, o hub continua funcionando como janela.
 - Docker acessível sem `sudo` (usuário no grupo `docker`).
@@ -122,6 +124,24 @@ MINIUTILS_DEBUG=1            mostra eventos de foco e de janela no terminal
 - `nvidia-smi` para GPUs NVIDIA. Placas AMD são lidas direto do driver `amdgpu`.
 - Um terminal para os botões de logs e shell: usa `$TERMINAL`, ou detecta konsole,
   gnome-terminal, kgx, xfce4-terminal, alacritty, kitty, foot e outros.
+
+### Windows
+
+Windows 10 ou 11. O mesmo código, com o equivalente nativo de cada parte:
+
+- Ícone na área de notificação (clique abre o popup; clique direito abre o menu).
+- Docker Desktop para o app Docker (`docker` no PATH).
+- CD Player pelos controles de mídia do sistema: o que aparece no painel de volume
+  (Spotify, navegadores, players).
+- `nvidia-smi` para GPUs NVIDIA. Placas AMD e Intel ainda não são lidas no Windows.
+- Sinais vitais sem carga média e sem temperatura da CPU (o Windows não as entrega sem
+  driver ou privilégio).
+- Portas abertas pelo `netstat`; "encerrar" fecha o processo na hora (não há o pedido
+  educado do Linux).
+- Logs e shell abrem no Windows Terminal (`wt`); sem ele, no console clássico.
+
+Compilar: `cargo build --release` num Windows com o Rust instalado gera
+`target\release\miniutils.exe`.
 
 ## Testes
 

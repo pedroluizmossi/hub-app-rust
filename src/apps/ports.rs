@@ -9,6 +9,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::core::bus::{Event, Topic};
 use crate::core::exec;
+use crate::core::os;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
 use super::kit::{HeaderMascot, Speech, plural};
@@ -119,7 +120,7 @@ impl PortsMini {
         });
     }
 
-    /// Primeiro clique arma; o segundo, dentro de `ARM_TTL`, manda SIGTERM.
+    /// Primeiro clique arma; o segundo, dentro de `ARM_TTL`, pede para encerrar (`os::terminate`).
     fn kill(&mut self, pid: u32, ui: &HubWindow) {
         // só pids que estão na leitura atual (nada de pid vindo de fora) e nunca o próprio hub
         let Some(l) = self.snap.listeners.iter().find(|l| l.pid == pid && pid > 1) else { return };
@@ -128,18 +129,13 @@ impl PortsMini {
             self.speech.say("Esse sou eu! Não vou me encerrar.".into());
         } else if self.armed.is_some_and(|(p, at)| p == pid && at.elapsed() < ARM_TTL) {
             self.armed = None;
-            // SAFETY: `kill` só envia um sinal a um processo; o kernel recusa se não for do usuário.
-            let r = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-            if r == 0 {
-                self.speech.say(format!("Pedi para {name} encerrar."));
-                self.face.react(Reaction::Celebrate);
-            } else {
-                let e = std::io::Error::last_os_error();
-                self.speech.say(if e.raw_os_error() == Some(libc::EPERM) {
-                    format!("Sem permissão para encerrar {name}.")
-                } else {
-                    format!("Não consegui encerrar {name}: {e}")
-                });
+            match os::terminate(pid) {
+                Ok(()) => {
+                    self.speech.say(format!("Pedi para {name} encerrar."));
+                    self.face.react(Reaction::Celebrate);
+                }
+                Err(os::KillError::Denied) => self.speech.say(format!("Sem permissão para encerrar {name}.")),
+                Err(os::KillError::Other(e)) => self.speech.say(format!("Não consegui encerrar {name}: {e}")),
             }
             self.host.bus.poke(Topic::Ports);
         } else {

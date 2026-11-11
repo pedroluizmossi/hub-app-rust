@@ -325,20 +325,29 @@ impl Cache {
     }
 }
 
-/// Quadro quadrado ampliado `scale`× em ARGB32 big-endian (formato do ícone de bandeja SNI).
-pub fn argb_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
+/// Quadro quadrado ampliado `scale`× em RGBA: o lado e os pixels. Base dos ícones de bandeja.
+pub fn rgba_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
     let px = render(sprite, theme, mood, frame);
     let side = W * scale;
     let top = (W - H) / 2 * scale; // centraliza as 14 linhas num quadrado de 16
     let mut data = vec![0u8; side * side * 4];
     for y in 0..H * scale {
         for x in 0..side {
-            let [r, g, b, a] = px[(y / scale) * W + x / scale];
             let i = ((y + top) * side + x) * 4;
-            data[i..i + 4].copy_from_slice(&[a, r, g, b]);
+            data[i..i + 4].copy_from_slice(&px[(y / scale) * W + x / scale]);
         }
     }
     (side as i32, data)
+}
+
+/// Como `rgba_square`, em ARGB32 big-endian (formato do ícone de bandeja SNI, no Linux).
+#[cfg_attr(windows, allow(dead_code))]
+pub fn argb_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
+    let (side, mut data) = rgba_square(sprite, theme, mood, frame, scale);
+    for px in data.chunks_exact_mut(4) {
+        px.rotate_right(1); // [r, g, b, a] -> [a, r, g, b]
+    }
+    (side, data)
 }
 
 /// Cores do tema para a UI (cada app manda as suas).

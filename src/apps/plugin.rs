@@ -1381,6 +1381,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // roda o `echo`, que no Windows não é um programa (é comando do cmd)
     fn run_async_responde_sem_travar_o_script() {
         let (tx, rx) = channel();
         let mut e = env(&["echo"], None);
@@ -1463,6 +1464,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // roda o `echo`, que no Windows não é um programa (é comando do cmd)
     fn script_so_roda_o_que_o_manifesto_permite_e_nao_trava() {
         let s = r#"
             fn start() {

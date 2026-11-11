@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -285,7 +285,7 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
     let mut first = true;
     while poker.subscribed() {
         let started = Instant::now();
-        let spawned = Command::new("docker")
+        let spawned = crate::core::exec::command("docker")
             .args(events_args())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

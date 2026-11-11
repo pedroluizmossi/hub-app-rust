@@ -7,6 +7,7 @@ pub mod layout;
 pub mod manifest;
 pub mod miniapp;
 pub mod notify;
+pub mod os;
 pub mod plugins;
 pub mod registry;
 pub mod wake;

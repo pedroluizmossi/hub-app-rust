@@ -3,8 +3,6 @@
 //! Renova credenciais Claude quando necessário; não imprime erros brutos ou tokens.
 use std::io::Read;
 use std::io::Write;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -13,6 +11,7 @@ use reqwest::redirect::Policy;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 use super::{UsageCard, UsageWindow};
+use crate::core::os::owner_only;
 
 fn client() -> Result<&'static Client, String> {
     static CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
@@ -87,9 +86,9 @@ fn refresh_claude(path: &Path, endpoint: &str) -> Result<Value, String> {
         return Err("Login Claude é um link; renove pelo Claude Code".into());
     }
     let lock_path = parent.join(".miniutils-refresh.lock");
-    let lock = std::fs::OpenOptions::new().write(true).create(true).mode(0o600).open(lock_path).map_err(|_| "Bloqueio Claude indisponível")?;
-    // SAFETY: o descritor pertence a `lock`, que permanece aberto até o fim da função.
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    let lock = owner_only(std::fs::OpenOptions::new().write(true).create(true)).open(lock_path).map_err(|_| "Bloqueio Claude indisponível")?;
+    // a trava vale enquanto `lock` estiver aberto, ou seja, até o fim da função
+    if lock.try_lock().is_err() {
         return Err("Outra atualização Claude em andamento".into());
     }
     let original = std::fs::read(path).map_err(|_| "Login Claude indisponível")?;
@@ -98,7 +97,7 @@ fn refresh_claude(path: &Path, endpoint: &str) -> Result<Value, String> {
     if oauth["expiresAt"].as_i64().is_some_and(|t| t / 1000 > epoch() + 60) { return Ok(data); }
     let refresh = nonempty(&oauth["refreshToken"]).ok_or("Renove o login no Claude Code")?.to_string();
     let tmp = parent.join(format!(".miniutils-credentials-{}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)
+    let mut file = owner_only(std::fs::OpenOptions::new().write(true).create_new(true)).open(&tmp)
         .map_err(|_| "Não foi possível preparar a renovação Claude")?;
     let result = (|| -> Result<Value, String> {
         let response = get_json(client()?.post(endpoint).header("anthropic-beta", "oauth-2025-04-20")
@@ -164,7 +163,7 @@ fn database(path: &Path) -> Result<Connection, String> {
     conn.busy_timeout(Duration::from_millis(500)).map_err(|_| "Banco de autenticação indisponível")?;
     Ok(conn)
 }
-fn data_dir() -> Result<PathBuf, String> { dirs::data_dir().ok_or_else(|| "Diretório de dados indisponível".into()) }
+fn data_dir() -> Result<PathBuf, String> { crate::core::os::xdg_data_dir().ok_or_else(|| "Diretório de dados indisponível".into()) }
 
 struct OpenCodeAuth { token: String, org: Option<String> }
 
@@ -318,8 +317,11 @@ mod tests {
         assert_eq!(result["claudeAiOauth"]["refreshToken"], "rotated");
         assert_eq!(result["other"]["keep"], true);
         assert_eq!(object(&path).unwrap(), result);
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_file(dir.join(".miniutils-refresh.lock")).unwrap();
         std::fs::remove_dir(dir).unwrap();

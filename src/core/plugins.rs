@@ -442,11 +442,16 @@ pub(crate) mod tests {
         for f in ["manifest.toml", "view.slint", "main.rhai", "ui/barra.slint", "ui/notas.txt", "assets/logo.png", "assets/.oculto.png", "outra/x.slint", "build.rs"] {
             std::fs::write(dir.join(f), "x").unwrap();
         }
-        let got: Vec<String> = files(&dir).unwrap().iter().map(|p| p.display().to_string()).collect();
+        // o separador de pastas muda com o sistema: compara com `/`
+        let got: Vec<String> = files(&dir).unwrap().iter().map(|p| p.display().to_string().replace('\\', "/")).collect();
         assert_eq!(got, ["manifest.toml", "view.slint", "main.rhai", "ui/barra.slint", "assets/logo.png"]);
-        // link com nome permitido: recusa (não segue para fora da pasta)
-        std::os::unix::fs::symlink("/etc/hostname", dir.join("ui/fora.slint")).unwrap();
-        assert!(files(&dir).unwrap_err().contains("ui/fora.slint"));
+        // link com nome permitido: recusa (não segue para fora da pasta). Só no Unix:
+        // criar link no Windows pede privilégio
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/etc/hostname", dir.join("ui/fora.slint")).unwrap();
+            assert!(files(&dir).unwrap_err().contains("ui/fora.slint"));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

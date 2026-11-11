@@ -1,4 +1,7 @@
-//! MiniUtils — hub de mini-apps para o desktop Linux. Ver ARCHITECTURE.md.
+//! MiniUtils — hub de mini-apps para o desktop (Linux e Windows). Ver ARCHITECTURE.md.
+
+// No Windows, a versão final não abre uma janela de console junto do app (ver `console`).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod apps;
 mod core;
@@ -13,6 +16,8 @@ mod tray;
 mod ui;
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    console::attach();
     let args: Vec<String> = std::env::args().skip(1).collect();
     // loja de plugins (linha de comando): não abre janela nem bandeja
     if let Some(code) = store::run_cli(&args) {
@@ -81,4 +86,48 @@ fn main() -> anyhow::Result<()> {
     // a configuração é gravada numa thread: termina o que estiver pendente antes de sair
     core::config::flush_saves();
     Ok(())
+}
+
+/// Saída de texto no Windows para um app sem console.
+#[cfg(windows)]
+mod console {
+    use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
+    use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+    use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle};
+    use windows::core::w;
+
+    /// Um app de janela (`windows_subsystem = "windows"`) nasce sem console: `--help`, a
+    /// loja e a `--previa` não mostrariam nada. Aqui ele se liga ao console de quem o
+    /// chamou (se foi um terminal). Saída redirecionada (`> arquivo`, pipe) já chega
+    /// pronta e não é mexida.
+    pub fn attach() {
+        // SAFETY: chamadas simples de console, no começo do `main`, antes de qualquer escrita.
+        unsafe {
+            if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+                return; // aberto pelo menu ou pelo Explorer: não há terminal
+            }
+            for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+                if !usable(which) {
+                    let console = CreateFileW(
+                        w!("CONOUT$"),
+                        (GENERIC_READ | GENERIC_WRITE).0,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        None,
+                        OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL,
+                        None,
+                    );
+                    if let Ok(console) = console {
+                        let _ = SetStdHandle(which, console);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A saída já aponta para algum lugar (arquivo, pipe ou console)?
+    unsafe fn usable(which: STD_HANDLE) -> bool {
+        // SAFETY: só consulta o identificador; não o usa.
+        unsafe { GetStdHandle(which) }.is_ok_and(|h: HANDLE| !h.is_invalid() && !h.0.is_null())
+    }
 }

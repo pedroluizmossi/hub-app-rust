@@ -6,7 +6,7 @@
 use std::ffi::OsStr;
 use std::fmt;
 use std::io::Read;
-use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -103,31 +103,20 @@ impl Exec {
     }
 
     /// Como `open_terminal`, começando na pasta `dir` (`None` = a pasta pessoal).
-    pub fn open_terminal_in(&self, title: &str, dir: Option<&std::path::Path>, argv: &[&str]) -> anyhow::Result<()> {
+    pub fn open_terminal_in(&self, title: &str, dir: Option<&Path>, argv: &[&str]) -> anyhow::Result<()> {
         let program = argv.first().ok_or_else(|| anyhow::anyhow!("comando vazio"))?;
         self.check(program)?;
         // caminho completo: o terminal pode não ter as pastas do usuário no PATH
         let path = locate(program).ok_or_else(|| ExecError::NotFound(program.to_string()))?;
-        let (term, prefix) = terminal().ok_or_else(|| anyhow::anyhow!("nenhum terminal encontrado (defina $TERMINAL)"))?;
-        let mut cmd = Command::new(&term);
-        if term.ends_with("konsole") {
-            cmd.args(["-p", &format!("tabtitle={title}")]);
-        } else if term.ends_with("xfce4-terminal") || term.ends_with("gnome-terminal") {
-            cmd.args(["--title", title]);
-        }
         let dir = dir.filter(|d| d.is_dir());
-        // o konsole pode reaproveitar um processo já aberto, com outra pasta: pede a pasta nele
-        if let (Some(dir), true) = (dir, term.ends_with("konsole")) {
-            cmd.arg("--workdir").arg(dir);
-        }
-        cmd.args(prefix).arg(&path).args(&argv[1..]);
+        let mut cmd = terminal_command(title, dir, Some((&path, &argv[1..])))?;
         // sem pasta pedida, começa na pessoal, não na pasta de onde o app foi aberto
         match dir {
             Some(dir) => {
                 cmd.current_dir(dir);
             }
             None => {
-                if let Some(home) = std::env::var_os("HOME") {
+                if let Some(home) = dirs::home_dir() {
                     cmd.current_dir(home);
                 }
             }
@@ -163,15 +152,15 @@ pub fn run_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duration) 
 /// Como `run_timeout`, mas devolve a saída mesmo quando o programa sai com erro (o
 /// `docker inspect` de vários ids falha se um sumiu, e os outros vêm no stdout).
 ///
-/// O filho ganha um grupo de processos próprio: ao estourar o prazo o grupo inteiro
-/// morre, e nenhum neto fica segurando os pipes (o que prenderia as leitoras).
+/// O filho ganha um grupo de processos próprio (no Windows, a árvore dele): ao estourar o
+/// prazo o grupo inteiro morre, e nenhum neto fica segurando os pipes (o que prenderia as
+/// leitoras).
 pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duration) -> Result<Output, ExecError> {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
+    let mut cmd = command(program);
+    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let mut child = cmd
         .spawn()
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => ExecError::NotFound(program.to_string()),
@@ -234,12 +223,49 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
     })
 }
 
+/// `Command` para um programa que roda em segundo plano (provedores, ações dos apps).
+///
+/// No Windows faz duas coisas que o `Command::new` não faz: acha os programas que são
+/// `.cmd`/`.bat` (as CLIs instaladas pelo npm: `codex`, `claude`, `opencode`), que só
+/// rodam pelo caminho completo, e não abre uma janela de console a cada execução.
+pub fn command(program: &str) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = match find(program) {
+            Some(path) => Command::new(path),
+            None => Command::new(program),
+        };
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
+    }
+    #[cfg(not(windows))]
+    Command::new(program)
+}
+
+/// `CREATE_NO_WINDOW`: programa de console sem janela (senão ela pisca na tela).
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// Mata o filho e o grupo dele, e recolhe o processo.
 fn kill_group(child: &mut std::process::Child) {
     // SAFETY: `kill` só envia um sinal; o pid é o do filho que ainda não recolhemos, que é
     // líder do próprio grupo (`process_group(0)`).
+    #[cfg(unix)]
     unsafe {
         libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    // o Windows não tem grupo para sinalizar: o `taskkill /T` encerra o filho e os netos
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -250,15 +276,32 @@ pub fn open_url(url: &str) {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return;
     }
-    let _ = spawn_detached(Command::new("xdg-open").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()));
+    shell_open(OsStr::new(url));
 }
 
 /// Abre uma pasta no gerenciador de arquivos padrão (serviço do host, fora da allowlist).
 /// Só pastas que existem: nada de abrir arquivo ou endereço por este caminho.
-pub fn open_dir(dir: &std::path::Path) -> bool {
-    dir.is_absolute()
-        && dir.is_dir()
-        && spawn_detached(Command::new("xdg-open").arg(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())).is_ok()
+pub fn open_dir(dir: &Path) -> bool {
+    dir.is_absolute() && dir.is_dir() && shell_open(dir.as_os_str())
+}
+
+/// Entrega um endereço ou pasta ao programa padrão do sistema.
+#[cfg(not(windows))]
+fn shell_open(target: &OsStr) -> bool {
+    spawn_detached(Command::new("xdg-open").arg(target).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())).is_ok()
+}
+
+/// Entrega um endereço ou pasta ao programa padrão do sistema. Pelo `ShellExecute`, e não
+/// por `cmd /c start`: assim nada do endereço é interpretado como comando.
+#[cfg(windows)]
+fn shell_open(target: &OsStr) -> bool {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{HSTRING, PCWSTR, w};
+    let target = HSTRING::from(target);
+    // SAFETY: as strings vivem até a chamada voltar; o resultado é só um código (> 32 = abriu).
+    let code = unsafe { ShellExecuteW(None, w!("open"), &target, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
+    code.0 as isize > 32
 }
 
 /// Lança um programa que segue sozinho (navegador, terminal, gerenciador de arquivos).
@@ -274,40 +317,161 @@ fn spawn_detached(cmd: &mut Command) -> std::io::Result<()> {
 
 /// Abre um terminal na pasta `dir`, com o shell do usuário (serviço do host, fora da
 /// allowlist: não roda nenhum programa escolhido pelo mini-app).
-pub fn open_terminal_at(dir: &std::path::Path) -> anyhow::Result<()> {
+pub fn open_terminal_at(dir: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(dir.is_absolute() && dir.is_dir(), "pasta não encontrada: {}", dir.display());
-    let (term, _) = terminal().ok_or_else(|| anyhow::anyhow!("nenhum terminal encontrado (defina $TERMINAL)"))?;
-    let mut cmd = Command::new(&term);
-    // o konsole pode reaproveitar um processo já aberto, com outra pasta: pede a pasta nele
-    if term.ends_with("konsole") {
-        cmd.arg("--workdir").arg(dir);
-    }
+    let mut cmd = terminal_command("", Some(dir), None)?;
     cmd.current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     spawn_detached(&mut cmd)?;
     Ok(())
 }
 
+/// Monta o comando que abre um terminal: em `dir` (se pedida) e rodando `run` (programa já
+/// com o caminho completo, e os argumentos) ou, sem `run`, o shell do usuário.
+#[cfg(not(windows))]
+fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str])>) -> anyhow::Result<Command> {
+    let (term, prefix) = terminal().ok_or_else(|| anyhow::anyhow!("nenhum terminal encontrado (defina $TERMINAL)"))?;
+    let mut cmd = Command::new(&term);
+    if !title.is_empty() {
+        if term.ends_with("konsole") {
+            cmd.args(["-p", &format!("tabtitle={title}")]);
+        } else if term.ends_with("xfce4-terminal") || term.ends_with("gnome-terminal") {
+            cmd.args(["--title", title]);
+        }
+    }
+    // o konsole pode reaproveitar um processo já aberto, com outra pasta: pede a pasta nele
+    if let (Some(dir), true) = (dir, term.ends_with("konsole")) {
+        cmd.arg("--workdir").arg(dir);
+    }
+    if let Some((path, args)) = run {
+        cmd.args(prefix).arg(path).args(args);
+    }
+    Ok(cmd)
+}
+
+/// Monta o comando que abre um terminal no Windows: o Windows Terminal (`wt`) quando
+/// existe; senão o console clássico (`conhost`). Os dois recebem o programa e os
+/// argumentos direto, sem passar pelo `cmd` — nada de interpolar strings.
+#[cfg(windows)]
+fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str])>) -> anyhow::Result<Command> {
+    let (path, args): (PathBuf, Vec<String>) = match run {
+        Some((path, args)) => (path.to_path_buf(), args.iter().map(|a| a.to_string()).collect()),
+        None => (default_shell(), Vec::new()),
+    };
+    // um `.cmd`/`.bat` é sempre executado pelo `cmd`, que interpretaria estes caracteres
+    if is_batch(&path) && args.iter().any(|a| a.contains(CMD_SPECIAL)) {
+        anyhow::bail!("argumento com caractere especial do cmd: não abro {} assim", path.display());
+    }
+    let home = dirs::home_dir();
+    let dir = dir.or(home.as_deref());
+    let mut cmd = match find("wt") {
+        Some(wt) => {
+            let mut cmd = Command::new(wt);
+            cmd.arg("new-tab");
+            if !title.is_empty() {
+                cmd.args(["--title", title]);
+            }
+            if let Some(dir) = dir {
+                cmd.arg("-d").arg(dir);
+            }
+            // para o `wt`, `;` separa comandos: escapado, vira texto
+            cmd.arg(&path).args(args.iter().map(|a| a.replace(';', "\\;")));
+            cmd
+        }
+        None => {
+            let mut cmd = Command::new("conhost.exe");
+            cmd.arg(&path).args(&args);
+            cmd
+        }
+    };
+    if let Some(dir) = dir {
+        cmd.current_dir(dir);
+    }
+    Ok(cmd)
+}
+
+/// Caracteres que o `cmd` interpreta numa linha de comando.
+#[cfg(windows)]
+const CMD_SPECIAL: &[char] = &['&', '|', '<', '>', '^', '%', '"', '!', '(', ')', '\n', '\r'];
+
+#[cfg(windows)]
+fn is_batch(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+}
+
+/// Shell para o "abrir terminal aqui": PowerShell novo, o que vem no Windows, ou o `cmd`.
+#[cfg(windows)]
+fn default_shell() -> PathBuf {
+    find("pwsh")
+        .or_else(|| find("powershell"))
+        .or_else(|| std::env::var_os("COMSPEC").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("cmd.exe"))
+}
+
 pub fn which(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|d| d.join(program).is_file()))
-        .unwrap_or(false)
+    find(program).is_some()
+}
+
+/// Caminho de um programa no PATH.
+pub fn find(program: &str) -> Option<PathBuf> {
+    find_in(path_dirs(), program)
+}
+
+fn path_dirs() -> Vec<PathBuf> {
+    std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default()
+}
+
+fn find_in(dirs: Vec<PathBuf>, program: &str) -> Option<PathBuf> {
+    let names = file_names(program);
+    dirs.into_iter().find_map(|d| names.iter().map(|n| d.join(n)).find(|p| p.is_file()))
+}
+
+/// Nomes de arquivo que um programa pode ter: no Linux, o próprio nome.
+#[cfg(not(windows))]
+fn file_names(program: &str) -> Vec<String> {
+    vec![program.to_string()]
+}
+
+/// Nomes de arquivo que um programa pode ter: no Windows, o nome com cada extensão
+/// executável do `PATHEXT` (`docker` → `docker.exe`, `codex` → `codex.cmd`).
+#[cfg(windows)]
+fn file_names(program: &str) -> Vec<String> {
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    windows_file_names(program, &pathext)
+}
+
+/// Separado do ambiente para poder ser testado em qualquer sistema.
+#[cfg(any(windows, test))]
+fn windows_file_names(program: &str, pathext: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    // já veio com extensão (`wt.exe`): esse nome primeiro
+    if Path::new(program).extension().is_some() {
+        names.push(program.to_string());
+    }
+    names.extend(pathext.split(';').filter(|e| e.starts_with('.') && e.len() > 1).map(|e| format!("{program}{}", e.to_ascii_lowercase())));
+    names
 }
 
 /// Caminho de um programa: no PATH ou nas pastas onde instaladores de CLI costumam pôr
 /// binários do usuário. Aberto pelo menu do sistema, o app pode não ter essas pastas no
 /// PATH (elas entram pelo `.bashrc`/`.zshrc`), e o terminal não acharia o programa.
-fn locate(program: &str) -> Option<std::path::PathBuf> {
-    let mut dirs: Vec<std::path::PathBuf> =
-        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-        for d in [".local/bin", ".opencode/bin", ".cargo/bin", ".bun/bin", ".npm-global/bin", ".volta/bin"] {
+fn locate(program: &str) -> Option<PathBuf> {
+    let mut dirs = path_dirs();
+    if let Some(home) = dirs::home_dir() {
+        for d in USER_BIN_DIRS {
             dirs.push(home.join(d));
         }
     }
-    dirs.into_iter().map(|d| d.join(program)).find(|p| p.is_file())
+    find_in(dirs, program)
 }
 
+#[cfg(not(windows))]
+const USER_BIN_DIRS: &[&str] = &[".local/bin", ".opencode/bin", ".cargo/bin", ".bun/bin", ".npm-global/bin", ".volta/bin"];
+#[cfg(windows)]
+const USER_BIN_DIRS: &[&str] =
+    &["AppData/Roaming/npm", ".local/bin", ".opencode/bin", ".cargo/bin", ".bun/bin", "AppData/Local/Volta/bin", "scoop/shims"];
+
 /// Terminais conhecidos e o argumento que separa o comando a executar.
+#[cfg(any(not(windows), test))]
 const KNOWN_TERMINALS: &[(&str, &[&str])] = &[
     ("konsole", &["-e"]),
     ("gnome-terminal", &["--"]),
@@ -326,15 +490,17 @@ const KNOWN_TERMINALS: &[(&str, &[&str])] = &[
 
 /// Argumento que separa o comando para o terminal `term` (nome ou caminho). Terminal fora
 /// da lista recebe `-e`, o mais comum.
+#[cfg(any(not(windows), test))]
 fn terminal_prefix(term: &str) -> &'static [&'static str] {
-    let name = std::path::Path::new(term).file_name().and_then(|n| n.to_str()).unwrap_or(term);
+    let name = Path::new(term).file_name().and_then(|n| n.to_str()).unwrap_or(term);
     KNOWN_TERMINALS.iter().find(|(t, _)| *t == name).map_or(&["-e"], |(_, p)| *p)
 }
 
 /// Terminal disponível e o argumento que separa o comando a executar.
+#[cfg(not(windows))]
 fn terminal() -> Option<(String, &'static [&'static str])> {
     if let Ok(t) = std::env::var("TERMINAL") {
-        if which(&t) || std::path::Path::new(&t).is_file() {
+        if which(&t) || Path::new(&t).is_file() {
             let prefix = terminal_prefix(&t);
             return Some((t, prefix));
         }
@@ -355,6 +521,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn devolve_saida_erro_e_programa_ausente() {
         let limit = Duration::from_secs(5);
         assert_eq!(run_timeout("sh", &["-c", "echo oi"], limit).unwrap(), "oi\n");
@@ -372,12 +539,45 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn mata_o_que_passa_do_prazo() {
         let inicio = Instant::now();
         // o `sleep` é neto (filho do sh): morre junto, senão seguraria o pipe por 30 s
         let r = run_timeout("sh", &["-c", "sleep 30; echo tarde"], Duration::from_millis(200));
         assert!(matches!(r, Err(ExecError::Timeout { .. })), "{r:?}");
         assert!(inicio.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_devolve_saida_erro_e_programa_ausente() {
+        let limit = Duration::from_secs(10);
+        assert_eq!(run_timeout("cmd", &["/c", "echo oi"], limit).unwrap().trim(), "oi");
+        let out = output_timeout("cmd", &["/c", "echo parte& exit 1"], limit).unwrap();
+        assert!(!out.success);
+        assert_eq!(out.stdout.trim(), "parte");
+        assert!(run_timeout("miniutils-programa-que-nao-existe", &[""; 0], limit).unwrap_err().not_found());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_mata_a_arvore_que_passa_do_prazo() {
+        let inicio = Instant::now();
+        // o `ping` é neto (filho do cmd): morre junto, senão seguraria o pipe por 30 s
+        let r = run_timeout("cmd", &["/c", "ping -n 30 127.0.0.1"], Duration::from_millis(500));
+        assert!(matches!(r, Err(ExecError::Timeout { .. })), "{r:?}");
+        assert!(inicio.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn nomes_de_programa_no_windows() {
+        let ext = ".COM;.EXE;.BAT;.CMD";
+        assert_eq!(windows_file_names("docker", ext), ["docker.com", "docker.exe", "docker.bat", "docker.cmd"]);
+        // com extensão, o próprio nome vem primeiro
+        assert_eq!(windows_file_names("wt.exe", ".EXE")[0], "wt.exe");
+        // nome com ponto que não é extensão executável ainda ganha as do PATHEXT
+        assert!(windows_file_names("python3.12", ext).contains(&"python3.12.exe".to_string()));
+        assert_eq!(windows_file_names("x", ";;"), Vec::<String>::new());
     }
 
     #[test]
@@ -389,6 +589,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn saida_grande_nao_trava() {
         // mais que o buffer de um pipe (64 KiB) nos dois canais
         let out = run_timeout("sh", &["-c", "head -c 300000 /dev/zero | tr '\\0' a; head -c 300000 /dev/zero | tr '\\0' b >&2"], Duration::from_secs(10)).unwrap();

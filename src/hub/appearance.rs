@@ -229,13 +229,7 @@ impl Hub {
 
 /// Hora e minuto locais.
 fn local_time() -> (i32, i32) {
-    // SAFETY: time e localtime_r só escrevem no `tm` que passamos
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&now, &mut tm).is_null() {
-            return (0, 0);
-        }
-        (tm.tm_hour, tm.tm_min)
-    }
+    use chrono::Timelike;
+    let now = chrono::Local::now();
+    (now.hour() as i32, now.minute() as i32)
 }

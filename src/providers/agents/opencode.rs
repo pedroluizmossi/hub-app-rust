@@ -16,7 +16,7 @@ impl Source for OpenCode {
     }
 
     fn home(&self) -> Option<PathBuf> {
-        dirs::data_dir().map(|d| d.join("opencode"))
+        crate::core::os::xdg_data_dir().map(|d| d.join("opencode"))
     }
 
     fn collect(&mut self, home: &Path, now: i64) -> Result<Vec<Agent>, String> {

@@ -3,7 +3,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -189,7 +189,7 @@ impl Drop for Nvidia {
 /// Thread leitora: roda o `nvidia-smi -l` e entrega cada linha. Termina quando o
 /// processo acaba, quando o provedor some ou quando ninguém pede leitura há um tempo.
 fn watch(tx: Sender<GpuSnapshot>, stream: Arc<Stream>) {
-    let spawned = Command::new("nvidia-smi")
+    let spawned = exec::command("nvidia-smi")
         .args([
             "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
             "--format=csv,noheader,nounits",

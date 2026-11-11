@@ -1,6 +1,6 @@
 # MiniUtils — arquitetura
 
-MiniUtils é um **hub de mini-apps** para o desktop Linux: um único binário Rust que fica na
+MiniUtils é um **hub de mini-apps** para o desktop (Linux e Windows): um único binário Rust que fica na
 bandeja do sistema e hospeda pequenos apps (Docker, sinais vitais, música, …) que você liga,
 desliga e arruma numa grade. Cada app tem uma mascote em pixel art que reage ao estado dele.
 Nasceu como reescrita do plasmoid CyberDock, mas não depende do KDE: roda em KDE, XFCE,
@@ -45,6 +45,7 @@ está em [DESIGN.md](DESIGN.md).
  │                           (thread própria, coleta 1×, distribui)               │
  └────────────────────────────────────────────────────────────────────────────────┘
    /proc + /sys + hwmon     nvidia-smi / amdgpu      docker CLI      D-Bus (MPRIS)
+   (no Windows: sysinfo · nvidia-smi · docker CLI · controles de mídia do sistema)
                                                                     * = fase 2
 ```
 
@@ -82,10 +83,13 @@ hub-app-rust/
       grid.rs                 grade do painel e modo de edição (mover, redimensionar)
       settings.rs             Configurações: lista de apps e formulário do manifesto
       bind.rs                 callbacks da tela e eventos da janela
-    instance.rs               instância única por socket Unix (a 2ª só pede para abrir)
+    instance.rs, instance/    instância única (a 2ª só pede para abrir): socket Unix no Linux,
+                              named pipe no Windows
     ui.rs                     tipos gerados do Slint
-    tray.rs                   ícone na bandeja com a mascote do app em pior estado
-    popup.rs                  popup de bandeja: posição, fora da barra de tarefas, X11/XWayland
+    tray.rs, tray/            ícone na bandeja com a mascote do app em pior estado: SNI (ksni)
+                              no Linux, área de notificação (tray-icon) no Windows
+    popup.rs                  popup de bandeja: posição, fora da barra de tarefas, fade;
+                              X11/XWayland no Linux, Win32 no Windows
     core/
       miniapp.rs              o trait MiniApp, o Host (serviços) e o Reporter (recado de
                               uma ação em segundo plano para o app que a pediu)
@@ -96,19 +100,24 @@ hub-app-rust/
       exec.rs                 executor com allowlist; todo comando tem prazo (`run_timeout`)
                               e erro tipado (`ExecError`: negado, ausente, prazo, falhou)
       notify.rs               notificações (no máximo 1/min por evento)
+      os.rs                   miudezas por sistema: encerrar processo, arquivo só do dono,
+                              pasta de dados XDG
       bus.rs                  provedores em threads (`Topic`), assinaturas, "poke" para
                               ler já, janela visível ou escondida
       wake.rs                 despertador da thread da UI: leitura ou recado novo agenda
                               uma atualização (sem timer de varredura)
     providers/
       mod.rs                  `spawn_all`: registra todos os provedores no barramento
-      sys.rs                  CPU (uso, GHz, carga), RAM e swap, temperatura, rede
+      sys.rs, sys/            (/proc e /sys no Linux; crate sysinfo no Windows)
+                              CPU (uso, GHz, carga), RAM e swap, temperatura, rede
                               (interface, IP), partições e leitura/escrita dos discos
       gpu.rs                  NVIDIA por um `nvidia-smi -l` de vida longa; senão amdgpu via sysfs
       docker.rs               docker ps / stats / events
-      media.rs                MPRIS pelo D-Bus: o que está tocando e comandos do player
+      media.rs, media/        o que está tocando e comandos do player: MPRIS pelo D-Bus no
+                              Linux, controles de mídia do sistema no Windows
       ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go)
-      ports.rs                portas escutando, pelo `ss -lntup` + /proc/<pid>/cmdline
+      ports.rs                portas escutando: `ss -lntup` + /proc/<pid>/cmdline no Linux,
+                              `netstat -ano` + sysinfo no Windows
       agents/                 sessões dos codificadores de IA e o estado de cada uma, lido dos
                               arquivos que as ferramentas já gravam (só leitura). Uma fonte por
                               ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`) atrás do trait
@@ -411,4 +420,5 @@ janela comum no GNOME).
 | Popup de bandeja via X11/XWayland | O Wayland não deixa o app escolher onde a janela abre. Com `$DISPLAY` o hub roda como cliente X11: abre junto do ícone clicado, sem moldura, fora da barra de tarefas e some ao perder o foco ou com Esc. `MINIUTILS_NATIVE_WAYLAND=1` força Wayland nativo (sem posição) |
 | Instância única por socket | Abrir de novo (atalho, autostart) só traz a janela da instância que já roda |
 | `ksni` para a bandeja | StatusNotifierItem puro em Rust (D-Bus); funciona em KDE, XFCE, Cinnamon, MATE e GNOME com AppIndicator |
+| Uma implementação por sistema atrás da mesma interface (`linux.rs` / `windows.rs`) | O Linux segue lendo `/proc`, D-Bus e X11 direto (leve e já testado); o Windows ganha o equivalente nativo (`sysinfo`, `tray-icon`, Win32/WinRT pelo crate `windows`) sem camada genérica no meio. As regras estão em "Plataformas" no AGENTS.md |
 | Licença do Slint | Usado sob a *Royalty-free Desktop License* (exige crédito ao Slint no "Sobre"); alternativa: GPLv3 |

@@ -340,11 +340,7 @@ fn keygen(path: &Path) -> Result<String, String> {
     let rng = ring::rand::SystemRandom::new();
     let pkcs8 = signature::Ed25519KeyPair::generate_pkcs8(&rng).map_err(|_| "não consegui gerar a chave")?;
     let pair = signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).map_err(|_| "chave gerada inválida")?;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut f = crate::core::os::owner_only(std::fs::OpenOptions::new().write(true).create_new(true))
         .open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     f.write_all(to_hex(pkcs8.as_ref()).as_bytes()).map_err(|e| e.to_string())?;
