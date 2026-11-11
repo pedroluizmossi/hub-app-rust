@@ -236,8 +236,68 @@ Regras para qualquer pixel art:
 - Contorno fechado e escuro: a mascote aparece sobre fundos claros e escuros.
 - Olho de 1–2 pixels, longe da borda: a animação de alarme desloca as linhas 4–7 em 1 pixel.
 - Nada de detalhe de 1 pixel isolado que só funcione numa cor: o humor e o tema mudam cores.
-- Flutuar, pular e tremer são do Slint (`Mascot`); piscar, LED e glitch são do Rust. Não
-  desenhe quadros de animação no sprite.
+- Flutuar, pular e tremer são do Slint (`Mascot`); piscar, LED e glitch são do Rust. O
+  `grid` do sprite é a pose base; poses e movimento desenhados vão nas animações (abaixo).
+
+### Animações (poses quadro a quadro)
+
+Uma mascote pode ter animações em `src/mascot/clips/<chave>.toml` (registre o arquivo em
+`SOURCES`, em `src/mascot/clips.rs`). Cada animação é uma sequência de quadros no mesmo
+formato do `grid` (14 linhas, mesmos papéis ou letras da paleta). Piscada, LED, olhos do
+humor e glitch continuam sendo aplicados por cima de cada quadro.
+
+```toml
+[idle]
+durations = [1600, 120, 120]   # ms de cada quadro: segura uma pose, mexe rápido
+variants = ["coca", "olha"]    # de vez em quando, uma delas no lugar do loop
+every = [8, 20]                # a cada 8 a 20 s (sorteado)
+exit = "acorda"                # toca uma vez ao sair deste humor
+frames = [ ... ]
+
+[sleep]
+fps = 1                        # ou quadros por segundo, todos iguais
+enter = "boceja"               # toca uma vez ao entrar, antes do loop
+frames = [ ... ]
+
+[boceja]                       # transição: toca uma vez (sem loop)
+durations = [200, 400, 200]
+frames = [ ... ]
+```
+
+- Com o nome de um **humor** (`sleep`, `idle`, `happy`, `busy`, `alarm`), toca sempre que a
+  mascote está nele (repete por padrão), com `enter`, `exit` e `variants`.
+- Com o nome de uma **reação** (`celebrate`, `surprised`), toca enquanto a reação dura.
+- Outros nomes são transições e variações (citadas por um humor) ou ficam disponíveis por
+  `clips::of(chave)` para quem pedir (um jogo, um palco).
+- Com "Reduzir movimento" ligado, a mascote fica na pose base.
+- Quadros de até 33 ms (30/s): enquanto uma animação com quadros curtos está na tela, o hub
+  acelera o timer de animação, e volta ao ritmo calmo quando ela para.
+
+O olho fechado (piscada, dormindo) é desenhado na última linha de olho **de cada quadro**,
+então uma pose pode mexer a cabeça. `cargo test` confere tamanho, cores, durações e nomes
+citados de todos os arquivos (`arquivos_de_animacao_validos`).
+
+**Desenhar sem recompilar:** rode com `MINIUTILS_CLIPS=src/mascot/clips cargo run`. O app
+lê os `.toml` da pasta (todos, sem precisar registrar em `SOURCES`) e recarrega ao salvar;
+erros aparecem no terminal e o arquivo com erro fica de fora até ser corrigido.
+
+**Prévia em GIF:** `cargo run -- --previa neko sleep` grava `neko-sleep.gif` com a animação
+em todos os temas, ampliada (sem o nome da animação, todas em sequência; `--saida` escolhe
+o arquivo). Funciona junto com `MINIUTILS_CLIPS`.
+
+**Desenhar num editor** (Aseprite, LibreSprite, Piskel): exporte uma folha PNG com quadros
+de 16 × 14 lado a lado e converta:
+
+```sh
+cargo run -p sprite-import -- sleep.png > paleta.toml        # modelo com as cores do PNG
+# troque cada ? em paleta.toml pelo papel da cor (K contorno, P principal, E olho…)
+cargo run -p sprite-import -- sleep.png --paleta paleta.toml --fps 2 >> src/mascot/clips/neko.toml
+```
+
+A paleta é por cor, então desenhe com uma cor por papel (a cor real vem do tema do app).
+Para uma mascote "pixel", use as letras da paleta dela e `e` no olho. Pacotes prontos (itch.io,
+OpenGameArt, Kenney) funcionam do mesmo jeito se o quadro for 16 × 14; confira a licença
+(CC0 é o ideal; CC-BY pede crédito em `THIRD_PARTY_NOTICES.md`).
 
 ### Pôr a mascote em uso
 

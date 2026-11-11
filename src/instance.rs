@@ -12,6 +12,8 @@ use std::time::Duration;
 pub enum Command {
     /// Mostra o popup; com aba (`show apps`), abre nela.
     Show(Option<String>),
+    /// Os plugins instalados mudaram (a loja pela linha de comando): relê a pasta.
+    ReloadPlugins,
 }
 
 /// Lê uma linha do socket. Comando vazio ou desconhecido vira `None`.
@@ -19,6 +21,7 @@ pub fn parse(line: &str) -> Option<Command> {
     let mut words = line.split_whitespace();
     match words.next()? {
         "show" => Some(Command::Show(words.next().map(str::to_string))),
+        "plugins" => Some(Command::ReloadPlugins),
         _ => None,
     }
 }
@@ -28,6 +31,14 @@ pub fn show_message(tab: Option<&str>) -> String {
     match tab {
         Some(t) => format!("show {t}"),
         None => "show".to_string(),
+    }
+}
+
+/// Avisa a instância rodando (se houver) que os plugins mudaram. Sem instância, nada.
+pub fn notify_plugins_changed() {
+    if let Ok(mut stream) = UnixStream::connect(socket_path()) {
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+        let _ = stream.write_all(b"plugins\n");
     }
 }
 
@@ -140,6 +151,7 @@ mod tests {
         assert_eq!(parse("show\n"), Some(Command::Show(None)));
         assert_eq!(parse("  show apps \n"), Some(Command::Show(Some("apps".into()))));
         assert_eq!(parse("show cyber.vitals"), Some(Command::Show(Some("cyber.vitals".into()))));
+        assert_eq!(parse("plugins\n"), Some(Command::ReloadPlugins));
     }
 
     #[test]

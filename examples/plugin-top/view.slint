@@ -1,0 +1,69 @@
+// Tela do plugin "Top processos". O host preenche theme, mascot e mood; o script
+// (main.rhai) preenche o resto com ui("propriedade", valor).
+import { Theme } from "miniutils.slint";
+
+export struct Proc {
+    name: string,
+    cpu: string,
+    mem: string,
+    hot: bool,
+}
+
+component Tab inherits Rectangle {
+    in property <Theme> theme;
+    in property <string> label;
+    in property <bool> on;
+    callback clicked;
+    width: 64px;
+    height: 26px;
+    background: on ? theme.fur.with-alpha(0.25) : touch.has-hover ? theme.fur.with-alpha(0.1) : transparent;
+    border-width: 1px;
+    border-color: on ? theme.fur : theme.muted;
+    Text { text: label; color: on ? theme.text : theme.sub; font-size: 12px; }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component Main inherits Rectangle {
+    in property <Theme> theme;
+    in property <image> mascot;
+    in property <string> mood;
+    in property <string> subtitle: "lendo…";
+    in property <string> sort: "cpu";
+    in property <[Proc]> rows;
+    callback action(string, string);
+
+    VerticalLayout {
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Image {
+                source: mascot;
+                width: 56px;
+                height: 49px;
+                image-rendering: pixelated;
+                image-fit: contain;
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: "Top processos"; color: theme.text; font-family: theme.font-title; font-size: 17px; font-weight: 700; }
+                Text { text: subtitle; color: theme.sub; font-size: 12px; overflow: elide; }
+            }
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Tab { theme: theme; label: "CPU"; on: sort == "cpu"; clicked => { root.action("sort", "cpu"); } }
+                    Tab { theme: theme; label: "Memória"; on: sort == "mem"; clicked => { root.action("sort", "mem"); } }
+                }
+            }
+        }
+        for p in rows: HorizontalLayout {
+            spacing: 10px;
+            Text { text: p.name; color: p.hot ? theme.warn : theme.text; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+            Text { text: p.cpu; color: sort == "cpu" ? theme.text : theme.sub; font-family: theme.font-mono; font-size: 13px; width: 64px; horizontal-alignment: right; }
+            Text { text: p.mem; color: sort == "mem" ? theme.text : theme.sub; font-family: theme.font-mono; font-size: 13px; width: 64px; horizontal-alignment: right; }
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+}

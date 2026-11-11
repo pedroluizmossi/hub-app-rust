@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Timer};
 
-use super::{FRAME_COLD, FRAME_HOT, Hub};
+use super::Hub;
 use crate::instance;
 use crate::popup;
 use crate::tray::Tray;
@@ -63,9 +63,14 @@ impl Hub {
     pub fn serve_commands(&self, server: &instance::Server) {
         let weak = self.ui.as_weak();
         let served = server.serve(move |cmd| {
-            let instance::Command::Show(tab) = cmd;
-            let tab = tab.unwrap_or_default();
-            let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
+            match cmd {
+                instance::Command::Show(tab) => {
+                    let tab = tab.unwrap_or_default();
+                    let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
+                }
+                // a loja pela linha de comando instalou ou removeu um plugin
+                instance::Command::ReloadPlugins => super::request_plugin_reload(),
+            }
         });
         if let Err(e) = served {
             eprintln!("miniutils: não consegui atender outras instâncias ({e})");
@@ -115,7 +120,7 @@ impl Hub {
     /// Muda o intervalo do quadro conforme o mouse está (ou não) sobre a janela.
     pub(super) fn set_hovered(&self, on: bool) {
         if self.hovered.replace(on) != on {
-            self.anim.set_interval(if on { FRAME_HOT } else { FRAME_COLD });
+            self.pace_frames();
         }
     }
 

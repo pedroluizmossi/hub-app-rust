@@ -28,7 +28,7 @@ impl HeaderMascot {
 
     /// Redesenha o quadro de agora; `true` se a imagem ou a reação mudaram.
     pub fn refresh(&mut self, sprite: &Sprite, theme: &Theme, mood: Mood) -> bool {
-        let look = self.anim.look(mood, Instant::now());
+        let look = self.anim.look_with(sprite, mood, Instant::now());
         let reaction_changed = std::mem::replace(&mut self.reaction, look.reaction) != look.reaction;
         self.cache.update_look(sprite, theme, &look) || reaction_changed
     }

@@ -12,6 +12,7 @@ mod chatter;
 mod grid;
 mod pages;
 mod settings;
+mod store;
 mod window;
 
 use std::cell::{Cell, RefCell};
@@ -37,6 +38,8 @@ const RESIZE_QUIET: Duration = Duration::from_millis(800);
 /// janela, 8 quadros/s; fora dela, 4/s: cada quadro é desenhado na CPU.
 const FRAME_HOT: Duration = Duration::from_millis(125);
 const FRAME_COLD: Duration = Duration::from_millis(250);
+/// Quadro mais rápido que uma animação desenhada pode pedir (30/s): só enquanto ela toca.
+const FRAME_FASTEST: Duration = Duration::from_millis(33);
 
 thread_local! {
     /// O hub da thread da UI, para quem chega de outra thread pelo event loop
@@ -49,6 +52,16 @@ fn with_hub(f: impl FnOnce(&Hub)) {
     if let Some(hub) = CURRENT.with(|c| c.borrow().upgrade()) {
         f(&hub);
     }
+}
+
+/// A janela do hub (só na thread da UI): para quem recebe mensagens de outras threads.
+pub fn ui_handle() -> Option<HubWindow> {
+    CURRENT.with(|c| c.borrow().upgrade()).map(|h| h.ui.clone_strong())
+}
+
+/// Os plugins instalados mudaram (de outra thread ou instância): relê na thread da UI.
+pub fn request_plugin_reload() {
+    let _ = slint::invoke_from_event_loop(|| with_hub(Hub::reload_plugins));
 }
 
 /// Comando de mídia escolhido no menu da bandeja (chamado na thread do ksni): vai para o
@@ -82,8 +95,11 @@ pub struct Hub {
     last_tray: RefCell<Option<(TrayState, Instant)>>,
     /// O mouse está sobre a janela (`CursorEntered`/`CursorLeft` do winit).
     hovered: Cell<bool>,
-    /// Relógio do quadro de animação; o intervalo segue `hovered` (ver `FRAME_HOT`).
+    /// Relógio do quadro de animação; o intervalo segue `hovered` (ver `FRAME_HOT`) e acelera
+    /// enquanto uma animação desenhada pede quadros curtos (ver `pace_frames`).
     anim: Timer,
+    /// Quadro mais curto pedido pelas animações no último quadro (ms).
+    frame_wanted: Cell<Option<u32>>,
     /// Arrasto em curso no modo de edição.
     drag: RefCell<Option<Drag>>,
     /// Tamanho (lógico) da área do painel, para desenhar o fundo; e a geração do pedido
@@ -105,6 +121,8 @@ pub struct Hub {
     chat_timer: Timer,
     /// Tooltip adiado (ver `TOOLTIP_EVERY`): manda o texto quando o prazo vence.
     tray_later: Timer,
+    /// Tela da loja de plugins (ver `store.rs`).
+    store: RefCell<store::StoreState>,
 }
 
 /// De quanto em quanto tempo o tooltip da bandeja acompanha números que só mudam de valor
@@ -135,14 +153,16 @@ impl Hub {
         let host = Rc::new(Host::new(Config::load(), bus));
         let ui = HubWindow::new()?;
 
-        let mut registry = Registry::new(host.clone());
-        registry.add(crate::apps::docker::DockerMini::create(host.clone(), &ui) as AppRef);
-        registry.add(crate::apps::vitals::VitalsMini::create(host.clone(), &ui) as AppRef);
-        registry.add(crate::apps::cdplayer::CdPlayerMini::create(host.clone(), &ui) as AppRef);
-        registry.add(crate::apps::ai_usage::AiUsageMini::create(host.clone(), &ui) as AppRef);
-        registry.add(crate::apps::ports::PortsMini::create(host.clone(), &ui) as AppRef);
-        registry.add(crate::apps::todo::TodoMini::create(host.clone(), &ui) as AppRef);
-        registry.add(crate::apps::agents::AgentsMini::create(host.clone(), &ui) as AppRef);
+        let registry = Registry::new(host.clone());
+        registry.add(crate::apps::docker::DockerMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::vitals::VitalsMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::cdplayer::CdPlayerMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::ai_usage::AiUsageMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::ports::PortsMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::todo::TodoMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::agents::AgentsMini::create(host.clone(), &ui) as AppRef, None);
+        // plugins da comunidade instalados (ver `store.rs`)
+        crate::apps::plugin::sync(&host, &ui, &registry, true);
 
         let hub = Rc::new(Hub {
             host,
@@ -161,6 +181,7 @@ impl Hub {
             last_tray: RefCell::new(None),
             hovered: Cell::new(false),
             anim: Timer::default(),
+            frame_wanted: Cell::new(None),
             drag: RefCell::new(None),
             backdrop_size: Cell::new((0.0, 0.0)),
             backdrop: Default::default(),
@@ -172,6 +193,7 @@ impl Hub {
             chat_shown: Cell::new(None),
             chat_timer: Timer::default(),
             tray_later: Timer::default(),
+            store: Default::default(),
         });
         hub.ui.set_max_columns(layout::MAX_COLS as i32);
         hub.ui.set_max_rows(layout::MAX_ROWS as i32);
@@ -180,6 +202,7 @@ impl Hub {
         hub.open_tab(tab.as_deref().unwrap_or_default());
         hub.rebuild_lists();
         Self::bind(&hub);
+        Self::bind_store(&hub);
         hub.load_lines();
 
         // bandeja: enquanto não houver painel (subindo, ou GNOME sem AppIndicator), a
@@ -250,6 +273,16 @@ impl Hub {
         self.sync_tray();
         // conversa entre mascotes: fatos novos e a fala que está sendo "digitada"
         self.chat_tick();
+    }
+
+    /// Relê a pasta dos plugins (instalou, atualizou ou removeu) e redesenha o que mostra apps.
+    fn reload_plugins(&self) {
+        if crate::apps::plugin::sync(&self.host, &self.ui, &self.registry, false) {
+            self.rebuild_lists();
+            self.rebuild_grid();
+            self.rebuild_pages(true);
+            self.refresh_derived();
+        }
     }
 
     /// Comando de mídia do menu da bandeja: vai ao app que deu as informações de mídia.
@@ -337,10 +370,25 @@ impl Hub {
         // no painel, só os apps da página aberta estão visíveis e animam
         if self.ui.get_current() == "panel" {
             let ids = self.host.config.borrow().page_apps(self.current_page());
-            for app in ids.iter().filter_map(|id| self.registry.find(id).cloned()) {
+            for app in ids.iter().filter_map(|id| self.registry.find(id)) {
                 app.borrow_mut().tick(f, &self.ui);
             }
         }
+        self.frame_wanted.set(crate::mascot::anim::take_requested_frame_ms());
+        self.pace_frames();
         self.refresh_derived();
+    }
+
+    /// Ritmo do quadro: 8/s com o mouse na janela, 4/s fora, e mais rápido (até 30/s) só
+    /// enquanto uma animação desenhada na tela tem quadros mais curtos que isso.
+    fn pace_frames(&self) {
+        let base = if self.hovered.get() { FRAME_HOT } else { FRAME_COLD };
+        let interval = match self.frame_wanted.get() {
+            Some(ms) => base.min(Duration::from_millis(ms as u64).max(FRAME_FASTEST)),
+            None => base,
+        };
+        if self.anim.interval() != interval {
+            self.anim.set_interval(interval);
+        }
     }
 }

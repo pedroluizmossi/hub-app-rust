@@ -8,9 +8,42 @@
 //! (ver `FRAME_HOT` em `hub.rs`), e uma reação contada em quadros duraria o dobro. Pelo mesmo
 //! motivo, uma reação disparada com a mascote fora da tela expira sozinha.
 
+use std::cell::Cell;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use super::Mood;
+use super::clips::{self, Clips, Grid};
+use super::sprites::Sprite;
+
+/// "Reduzir movimento" (config global): as animações desenhadas ficam na pose base.
+static CALM: AtomicBool = AtomicBool::new(false);
+
+/// Liga ou desliga "reduzir movimento" para as animações desenhadas.
+pub fn set_calm(on: bool) {
+    CALM.store(on, Ordering::Relaxed);
+}
+
+thread_local! {
+    /// Menor quadro (ms) pedido pelas mascotes desenhadas desde a última leitura do hub.
+    static WANT_MS: Cell<u32> = const { Cell::new(0) };
+}
+
+fn request_frame_ms(ms: u32) {
+    WANT_MS.with(|w| {
+        if w.get() == 0 || ms < w.get() {
+            w.set(ms);
+        }
+    });
+}
+
+/// O quadro mais curto que alguma animação na tela pediu desde a última chamada (o hub
+/// acelera o timer só enquanto precisa). `None` = ninguém pediu.
+pub fn take_requested_frame_ms() -> Option<u32> {
+    let ms = WANT_MS.with(|w| w.replace(0));
+    (ms > 0).then_some(ms)
+}
 
 /// Quadro "virtual" de 125 ms: o desenho anima no mesmo ritmo com o timer rápido ou lento.
 const FRAME: Duration = Duration::from_millis(125);
@@ -73,12 +106,14 @@ pub struct Look {
     pub blink: bool,
     /// Quadro virtual (LED, olhos do alerta, glitch).
     pub frame: u32,
+    /// Quadro de uma animação desenhada (`clips.rs`); `None` = o desenho base.
+    pub pose: Option<Grid>,
 }
 
 impl Look {
     /// Sem `Animator`: piscada e quadro vêm do contador global (bandeja, ícones das listas).
     pub fn from_frame(mood: Mood, frame: u32) -> Self {
-        Look { mood, reaction: None, blink: frame % 25 == 0, frame }
+        Look { mood, reaction: None, blink: frame % 25 == 0, frame, pose: None }
     }
 }
 
@@ -92,6 +127,7 @@ pub struct Animator {
     active: Option<(Reaction, Instant)>,
     last: [Option<Instant>; 2],
     pokes: Vec<Instant>,
+    player: Player,
 }
 
 impl Animator {
@@ -105,6 +141,7 @@ impl Animator {
             active: None,
             last: [None; 2],
             pokes: Vec::new(),
+            player: Player { rng: s as u64 | 1, ..Default::default() },
         }
     }
 
@@ -155,7 +192,117 @@ impl Animator {
         let frame = (t.as_millis() / FRAME.as_millis()) as u32;
         let in_cycle = t.as_millis() % self.blink_every.as_millis();
         let blink = reaction.is_none() && matches!(mood, Mood::Idle | Mood::Happy) && in_cycle < BLINK.as_millis();
-        Look { mood, reaction, blink, frame }
+        Look { mood, reaction, blink, frame, pose: None }
+    }
+
+    /// Como `look`, com o quadro da animação desenhada de `sprite`, se ela tiver (ver
+    /// `clips.rs`): a da reação enquanto ela dura; senão a do humor, com transições e
+    /// variações. Com "reduzir movimento", fica na pose base.
+    pub fn look_with(&mut self, sprite: &Sprite, mood: Mood, now: Instant) -> Look {
+        let mut look = self.look(mood, now);
+        if CALM.load(Ordering::Relaxed) {
+            return look;
+        }
+        let Some(clips) = clips::of(sprite.key) else { return look };
+        let reaction_clip = match (look.reaction, self.active) {
+            (Some(r), Some((_, t0))) => clips.get(r.as_str()).map(|c| (c, now.duration_since(t0))),
+            _ => None,
+        };
+        let pose = match reaction_clip {
+            Some((clip, t)) => Some((*clip.frame_at(t.as_millis() as u64), clip)),
+            None => self.player.pose(&clips, mood, now),
+        };
+        if let Some((grid, clip)) = pose {
+            if clip.frames.len() > 1 {
+                request_frame_ms(clip.shortest_ms());
+            }
+            look.pose = Some(grid);
+        }
+        look
+    }
+}
+
+/// Qual animação desenhada toca agora: o loop do humor, a transição de entrada ou saída e,
+/// de vez em quando, uma variação (ver `clips.rs`).
+#[derive(Default)]
+struct Player {
+    /// Humor da última vez (para saber quando mudou).
+    mood: Option<Mood>,
+    /// Desde quando o loop do humor está tocando.
+    loop_since: Option<Instant>,
+    /// Transição ou variação tocando uma vez, e quando começou.
+    once: Option<(String, Instant)>,
+    queue: VecDeque<String>,
+    next_variant: Option<Instant>,
+    rng: u64,
+}
+
+impl Player {
+    fn pose<'c>(&mut self, clips: &'c Clips, mood: Mood, now: Instant) -> Option<(Grid, &'c clips::Clip)> {
+        if self.mood != Some(mood) {
+            // mudou de humor: sai do antigo, entra no novo, e o loop recomeça
+            self.queue.clear();
+            self.once = None;
+            let exit = self.mood.and_then(|m| clips.get(m.as_str())).and_then(|c| c.exit.clone());
+            let enter = clips.get(mood.as_str()).and_then(|c| c.enter.clone());
+            self.queue.extend(exit.into_iter().chain(enter));
+            self.mood = Some(mood);
+            self.loop_since = None;
+            self.next_variant = None;
+        }
+        loop {
+            if let Some((name, t0)) = &self.once {
+                let t = now.duration_since(*t0).as_millis() as u64;
+                match clips.get(name) {
+                    Some(c) if !c.done_at(t) => return Some((*c.frame_at(t), c)),
+                    // terminou (ou sumiu numa recarga): o loop recomeça do primeiro quadro
+                    _ => {
+                        self.once = None;
+                        self.loop_since = Some(now);
+                    }
+                }
+            }
+            match self.queue.pop_front() {
+                Some(next) => self.once = Some((next, now)),
+                None => break,
+            }
+        }
+        let clip = clips.get(mood.as_str())?;
+        let since = *self.loop_since.get_or_insert(now);
+        if !clip.variants.is_empty() {
+            let next = match self.next_variant {
+                Some(t) => t,
+                None => {
+                    let t = now + self.wait(clip.every);
+                    self.next_variant = Some(t);
+                    t
+                }
+            };
+            if now >= next {
+                let pick = clip.variants[(self.roll() % clip.variants.len() as u64) as usize].clone();
+                self.next_variant = Some(now + self.wait(clip.every));
+                self.once = Some((pick, now));
+                return self.pose(clips, mood, now);
+            }
+        }
+        let t = now.duration_since(since).as_millis() as u64;
+        Some((*clip.frame_at(t), clip))
+    }
+
+    /// Espera sorteada entre `min` e `max` segundos.
+    fn wait(&mut self, (min, max): (u32, u32)) -> Duration {
+        let span = (max - min) as u64 * 1000;
+        Duration::from_millis(min as u64 * 1000 + if span == 0 { 0 } else { self.roll() % (span + 1) })
+    }
+
+    /// Sorteio simples (xorshift): variação não precisa de mais que isso.
+    fn roll(&mut self) -> u64 {
+        let mut x = self.rng.max(1);
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        x
     }
 }
 
@@ -165,6 +312,67 @@ mod tests {
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    /// Animações de teste na neko: cada uma com a 1ª linha marcada, para saber qual tocou.
+    fn clips_de_teste() -> Clips {
+        let neko = crate::mascot::sprites::get("neko");
+        let q = |marca: &str| {
+            let mut rows: Vec<&str> = neko.grid.to_vec();
+            rows[0] = marca;
+            crate::mascot::clips::tests::frame(&rows)
+        };
+        let (a, b, c, d, e) = (q("K..............."), q(".K.............."), q("..K............."), q("...K............"), q("....K..........."));
+        let src = format!(
+            "[idle]\nfps = 1\nexit = \"acorda\"\nvariants = [\"coca\"]\nevery = [5, 5]\nframes = [{a}]\n\
+             [sleep]\nfps = 1\nenter = \"boceja\"\nframes = [{b}]\n\
+             [boceja]\ndurations = [300]\nframes = [{c}]\n\
+             [acorda]\ndurations = [200]\nframes = [{d}]\n\
+             [coca]\ndurations = [400]\nframes = [{e}]\n"
+        );
+        crate::mascot::clips::parse(neko, &src).unwrap()
+    }
+
+    fn marca(p: &mut Player, clips: &Clips, mood: Mood, t: Instant) -> &'static str {
+        p.pose(clips, mood, t).map(|(g, _)| g[0]).unwrap_or("base")
+    }
+
+    #[test]
+    fn transicoes_ao_mudar_de_humor() {
+        let clips = clips_de_teste();
+        let mut p = Player { rng: 1, ..Default::default() };
+        let t0 = Instant::now();
+        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0), "K...............");
+        // idle -> sleep: sai do idle (acorda, 200 ms), entra no sleep (boceja, 300 ms), loop
+        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1000)), "...K............");
+        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1150)), "...K............");
+        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1250)), "..K.............");
+        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1600)), ".K..............");
+        // humor sem animação: o desenho base
+        assert_eq!(marca(&mut p, &clips, Mood::Busy, t0 + ms(2000)), "base");
+    }
+
+    #[test]
+    fn variacao_de_vez_em_quando() {
+        let clips = clips_de_teste();
+        let mut p = Player { rng: 1, ..Default::default() };
+        let t0 = Instant::now();
+        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0), "K...............");
+        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(4900)), "K...............");
+        // every = [5, 5]: aos 5 s entra a variação (400 ms) e depois volta ao loop
+        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(5000)), "....K...........");
+        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(5300)), "....K...........");
+        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(5500)), "K...............");
+    }
+
+    #[test]
+    fn reduzir_movimento_fica_na_pose_base() {
+        let neko = crate::mascot::sprites::get("neko");
+        let mut a = Animator::new(0);
+        set_calm(true);
+        let calmo = a.look_with(neko, Mood::Sleep, Instant::now()).pose;
+        set_calm(false);
+        assert_eq!(calmo, None);
     }
 
     #[test]

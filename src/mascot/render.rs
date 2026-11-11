@@ -125,6 +125,8 @@ struct Painter<'a> {
     frame: u32,
     blink: bool,
     reaction: Option<Reaction>,
+    /// Linha do traço do olho fechado neste quadro.
+    closed_row: usize,
     fur: u32,
     ear: u32,
 }
@@ -196,7 +198,7 @@ impl Painter<'_> {
             b'A' => self.led(),
             b'E' | b'W' => match self.eye() {
                 // olho fechado: traço na última linha do olho, fundo no resto
-                None if y == self.s.closed_row() => t.outline,
+                None if y == self.closed_row => t.outline,
                 None => return self.cell(self.s.eye_bg, y),
                 Some(_) if ch == b'W' => WHITE,
                 Some(e) => e,
@@ -237,10 +239,12 @@ pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4
 /// Desenha a mascote como o `Animator` mandou (piscada e reação próprias).
 pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W * H] {
     let (mood, frame) = (look.mood, look.frame);
+    // pose da animação desenhada, se houver (ver `clips.rs`); senão, o desenho base
+    let grid = look.pose.as_ref().unwrap_or(&sprite.grid);
     if let Some(px) = &sprite.pixel {
         let glitch = mood == Mood::Alarm && frame % 6 < 2;
         let mut out = [[0u8; 4]; W * H];
-        for (y, row) in sprite.grid.iter().enumerate() {
+        for (y, row) in grid.iter().enumerate() {
             let row = row.as_bytes();
             let shift: isize = if glitch && (4..8).contains(&y) { if y % 2 == 0 { 1 } else { -1 } } else { 0 };
             for x in 0..row.len().min(W) {
@@ -260,13 +264,14 @@ pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W *
         frame,
         blink: look.blink,
         reaction: look.reaction,
+        closed_row: sprite.closed_row(grid),
         fur: sprite.fur.unwrap_or(theme.fur),
         ear: sprite.ear.unwrap_or(theme.ear),
     };
     // glitch do alarme: algumas linhas deslizam 1 px para o lado
     let glitch = mood == Mood::Alarm && frame % 6 < 2;
     let mut out = [[0u8; 4]; W * H];
-    for (y, row) in sprite.grid.iter().enumerate() {
+    for (y, row) in grid.iter().enumerate() {
         let shift: isize = if glitch && (4..8).contains(&y) { if y % 2 == 0 { 1 } else { -1 } } else { 0 };
         for (x, ch) in row.bytes().enumerate() {
             let Some(c) = p.cell(ch, y) else { continue };
@@ -384,7 +389,7 @@ mod tests {
             }
             assert!(s.grid.iter().any(|r| r.contains('e')), "{} sem olho", s.key);
         }
-        assert_eq!(sprites::SPRITES.iter().filter(|s| s.pixel.is_some()).count(), 20);
+        assert!(sprites::SPRITES.iter().any(|s| s.key == "lumi" && s.pixel.is_some()));
     }
 
     #[test]

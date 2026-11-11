@@ -56,6 +56,9 @@ hub-app-rust/
   AGENTS.md                   regras para agentes de código (compilar, validar, UI)
   ARCHITECTURE.md             este documento
   DESIGN.md                   visuais, temas, telas, apps e mascotes: como criar
+  tools/sprite-import/        converte PNG (folha de quadros 16×14) em animação de mascote,
+                              pela paleta cor -> papel; `cargo run -p sprite-import -- --help`
+  examples/                   plugin de exemplo (plugin-uptime) e a loja de teste (loja/preparar.sh)
   ui/                         crate `miniutils-ui`: só a interface, compilada à parte
     Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
                               dos mini-apps); src/lib.rs reexporta os tipos gerados
@@ -118,6 +121,10 @@ hub-app-rust/
       themes.rs               temas de cor dos apps
       render.rs               sprite + tema + humor + quadro -> imagem RGBA 16×14
       anim.rs                 piscada e reações curtas (`Animator`, `Reaction`)
+      clips.rs, clips/        animações quadro a quadro por mascote (`<chave>.toml`): humor
+                              com entrada/saída/variações, reação, duração por quadro;
+                              `MINIUTILS_CLIPS=<pasta>` lê do disco e recarrega ao salvar
+      preview.rs              `miniutils --previa <mascote> [animação]`: GIF em todos os temas
       disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
     apps/
       kit.rs                  peças comuns: mascote do cabeçalho (`HeaderMascot`), fala
@@ -337,10 +344,39 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 
-**Fase 2** — plugins externos sem recompilar:
-- Views em `.slint` carregadas pelo `slint-interpreter` a partir de `~/.local/share/miniutils/miniapps/`
-- Lógica em Rhai, com acesso só aos serviços do host (executor com allowlist, config, notify)
-- Widget flutuante na área de trabalho (layer-shell no KDE/wlroots; janela comum no GNOME)
+**Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin.rs`
+e `src/store.rs`):
+- Dois tipos de plugin, nenhum com código nativo:
+  - **simples** (`[run]`): o host roda um comando da allowlist a cada N segundos e mostra a
+    saída numa tela genérica (`ui/plugin.slint`);
+  - **com tela própria** (`[ui]`): `view.slint` interpretado pelo `slint-interpreter` e
+    encaixado na célula por um `ComponentContainer` (recurso experimental do Slint 1.18,
+    ligado em `ui/build.rs`); a lógica é um `main.rhai` numa thread só dele, com limite de
+    operações, sem acesso a arquivo (`no_module`) e só com a API do host (mudar
+    propriedades da tela, humor, rodar programas da allowlist, notificar). A tela só
+    importa `std-widgets.slint` e `miniutils.slint` (o `Theme`, servido pelo host, com as
+    cores do tema do app e as fontes do visual); o host a encaixa como janela de fundo
+    transparente e com a fonte da interface do visual.
+- Loja na janela (Configurações > Loja de plugins, `ui/store.slint`, `src/hub/store.rs`) e
+  na linha de comando (`miniutils --help`): listar, instalar, atualizar e remover sem
+  reiniciar (o app aberto relê a pasta; a linha de comando avisa pelo socket da instância).
+- O índice (`registry.json`, no modelo do marketplace do Omarchy) fixa o commit revisado de
+  cada plugin e é assinado com ed25519 (`registry.json.sig`). Por padrão vale a loja
+  oficial (github.com/pedroluizmossi/miniutils-store; índice e chave em
+  `store::OFFICIAL_INDEX`/`OFFICIAL_KEY`); a config (`store_index`, `store_key`) troca por
+  outra. Índice que não é o oficial, sem chave, só é aceito se for local. A instalação clona sem
+  hooks, confere o commit, valida manifesto, tela e script, confere que as permissões
+  anunciadas batem com as pedidas e mostra o que o plugin vai executar (numa atualização,
+  as permissões novas aparecem em destaque) antes do segundo clique.
+- Exemplos: `examples/plugin-uptime/` (simples), `examples/plugin-top/` (tela e script) e
+  `examples/loja/preparar.sh` (repositório, índice e chave; `--nova-versao` para testar a
+  atualização).
+- Limites conhecidos: a tela de um plugin pode ler imagens do disco (`@image-url`); o
+  script não tem rede (de propósito); um plugin com tela custa a compilação do `.slint` ao
+  ligar e alguns MB de memória.
+
+**Fase 2** (resto) — widget flutuante na área de trabalho (layer-shell no KDE/wlroots;
+janela comum no GNOME).
 
 **Fase 3 (talvez)** — expor o hub por D-Bus para cascas nativas (plasmoid, extensão GNOME).
 

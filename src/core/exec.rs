@@ -75,6 +75,13 @@ impl Exec {
         }
     }
 
+    /// Roda e espera (com prazo), na thread de quem chama: para quem já está numa thread
+    /// própria (o script de um plugin). Nunca na thread da UI.
+    pub fn run_blocking(&self, program: &str, args: &[&str], limit: Duration) -> Result<String, ExecError> {
+        self.check(program)?;
+        run_timeout(program, args, limit)
+    }
+
     /// Roda em segundo plano (thread própria) e chama `done` com o stdout, ou com o erro.
     /// O comando é morto se passar de `ACTION_TIMEOUT`.
     pub fn run_async<F>(&self, program: &str, args: &[&str], done: F)

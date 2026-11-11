@@ -98,6 +98,7 @@ impl Hub {
     /// reações (eles leem `reduce_motion` da config).
     pub(super) fn apply_motion(&self) {
         let calm = self.host.config.borrow().reduce_motion;
+        crate::mascot::anim::set_calm(calm);
         self.ui.set_reduce_motion(calm);
         self.ui.global::<Anim>().set_calm(calm);
     }

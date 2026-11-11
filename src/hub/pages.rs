@@ -19,8 +19,11 @@ impl Hub {
 
     /// Abre uma aba pelo nome: "apps" (configurações), "panel" ou o nome de uma página.
     pub(super) fn open_tab(&self, tab: &str) {
-        if tab == "apps" {
-            self.ui.set_current("apps".into());
+        if tab == "apps" || tab == "store" {
+            self.ui.set_current(tab.into());
+            if tab == "store" {
+                self.store_reload();
+            }
             return;
         }
         let found = {

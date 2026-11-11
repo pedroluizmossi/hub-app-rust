@@ -1,0 +1,211 @@
+// Loja de plugins (src/hub/store.rs): de onde vem o índice, a lista com o estado de cada
+// plugin e as ações. Instalar, atualizar e remover pedem um segundo clique, que mostra o
+// que o plugin vai executar.
+import { ScrollView } from "std-widgets.slint";
+import { Skin, Icons } from "theme.slint";
+import { Icon, TextButton } from "widgets.slint";
+
+export struct StoreRow {
+    id: string,
+    name: string,
+    version: string,
+    // "autor · licença"
+    byline: string,
+    description: string,
+    // "executa: uptime" (ou "não executa programas")
+    permissions: string,
+    // "não instalado", "instalado 0.1.0", "atualização: 0.1.0 → 0.2.0"
+    state: string,
+    installed: bool,
+    update: bool,
+    // "ATENÇÃO, permissão nova: who" numa atualização
+    warning: string,
+    // ação esperando o segundo clique: "" | "install" | "update" | "remove"
+    armed: string,
+    // texto do segundo clique ("Confirmar: instalar e permitir uptime")
+    confirm: string,
+    busy: bool,
+}
+
+export global StoreApp {
+    // índice (registry.json: caminho ou https://) e a chave pública que o assina
+    in-out property <string> index;
+    in-out property <string> key;
+    in property <[StoreRow]> rows;
+    // situação: "assinatura conferida · 2 plugins", ou o erro
+    in property <string> status;
+    in property <bool> failed;
+    in property <bool> loading;
+    callback reload();
+    callback save-source(string /* índice */, string /* chave */);
+    callback act(string /* id */, string /* install | update | remove */);
+}
+
+// Campo de texto de uma linha, nas cores da janela.
+component Field inherits Rectangle {
+    in property <string> label;
+    in property <string> placeholder;
+    in-out property <string> text;
+    callback accepted();
+    height: 34px;
+    background: Skin.field;
+    border-width: 1px;
+    border-color: input.has-focus ? Skin.accent : Skin.field-edge;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Rectangle {
+            if text == "": Text {
+                text: placeholder;
+                color: Skin.dim;
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                width: 100%;
+                height: 100%;
+            }
+            input := TextInput {
+                text <=> root.text;
+                color: Skin.ink;
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                vertical-alignment: center;
+                single-line: true;
+                accessible-label: label;
+                accepted => { root.accepted(); }
+            }
+        }
+    }
+}
+
+component PluginRow inherits Rectangle {
+    in property <StoreRow> item;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: item.armed != "" ? Skin.accent : Skin.surface-edge;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: item.name + "  " + item.version;
+                color: Skin.ink;
+                font-size: 16px;
+                font-weight: 700;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Text {
+                text: item.state;
+                color: item.update ? Skin.accent2 : item.installed ? Skin.accent : Skin.dim;
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+        }
+        Text { text: item.byline + " · " + item.id; color: Skin.dim; font-family: Skin.font-mono; font-size: 11px; overflow: elide; }
+        if item.description != "": Text { text: item.description; color: Skin.sub; font-size: 13px; wrap: word-wrap; }
+        Text { text: item.permissions; color: Skin.sub; font-family: Skin.font-mono; font-size: 12px; wrap: word-wrap; }
+        if item.warning != "": Text { text: item.warning; color: Skin.danger; font-size: 13px; font-weight: 700; wrap: word-wrap; }
+        if item.armed != "": Text { text: item.confirm; color: Skin.accent; font-size: 13px; wrap: word-wrap; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            if item.busy: Text { text: "trabalhando…"; color: Skin.dim; font-size: 12px; vertical-alignment: center; }
+            if !item.busy && item.installed: TextButton {
+                text: item.armed == "remove" ? "Confirmar remoção" : "Remover";
+                icon: Icons.close;
+                ink: Skin.danger;
+                edge: Skin.danger-edge;
+                font-size: 13px;
+                clicked => { StoreApp.act(item.id, "remove"); }
+            }
+            if !item.busy && item.update: TextButton {
+                text: item.armed == "update" ? "Confirmar atualização" : "Atualizar";
+                icon: Icons.refresh;
+                ink: Skin.accent;
+                font-size: 13px;
+                clicked => { StoreApp.act(item.id, "update"); }
+            }
+            if !item.busy && !item.installed: TextButton {
+                text: item.armed == "install" ? "Confirmar instalação" : "Instalar";
+                icon: Icons.plus;
+                ink: Skin.accent;
+                font-size: 13px;
+                clicked => { StoreApp.act(item.id, "install"); }
+            }
+        }
+    }
+}
+
+export component StoreView inherits ScrollView {
+    VerticalLayout {
+        alignment: start;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 16px;
+        spacing: 12px;
+
+        // de onde vem a loja
+        Rectangle {
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.surface-edge;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                Text { text: "Índice da loja"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                Text {
+                    text: "Um registry.json (endereço https:// ou caminho) e a chave pública de quem o assina. Apague os dois campos e salve para voltar à loja oficial do MiniUtils.";
+                    color: Skin.sub;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                index := Field {
+                    label: "Índice";
+                    placeholder: "https://…/registry.json";
+                    text: StoreApp.index;
+                    accepted => { StoreApp.save-source(index.text, key.text); }
+                }
+                key := Field {
+                    label: "Chave pública";
+                    placeholder: "chave pública (64 caracteres hex)";
+                    text: StoreApp.key;
+                    accepted => { StoreApp.save-source(index.text, key.text); }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text {
+                        text: StoreApp.loading ? "carregando…" : StoreApp.status;
+                        color: StoreApp.failed ? Skin.danger : Skin.sub;
+                        font-family: Skin.font-mono;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    TextButton {
+                        text: "Salvar e carregar";
+                        icon: Icons.refresh;
+                        ink: Skin.accent;
+                        font-size: 13px;
+                        clicked => { StoreApp.save-source(index.text, key.text); }
+                    }
+                }
+            }
+        }
+
+        for r in StoreApp.rows: PluginRow { item: r; }
+
+        if StoreApp.rows.length == 0 && !StoreApp.loading: Text {
+            text: "Nenhum plugin para mostrar.";
+            color: Skin.dim;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}

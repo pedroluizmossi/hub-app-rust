@@ -33,7 +33,7 @@ impl Hub {
         let cfg = self.host.config.borrow();
         let (cols, rows) = (cfg.pages[page].columns, cfg.pages[page].rows);
         let rects = cfg.rects(page);
-        let apps: Vec<AppRef> = cfg.page_apps(page).iter().filter_map(|id| self.registry.find(id).cloned()).collect();
+        let apps: Vec<AppRef> = cfg.page_apps(page).iter().filter_map(|id| self.registry.find(id)).collect();
         let cells: Vec<GridCell> = apps
             .iter()
             .zip(&rects)

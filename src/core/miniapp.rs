@@ -31,6 +31,8 @@ pub enum Report {
     Done,
     /// Falhou; a mensagem já vem pronta para a tela.
     Error(String),
+    /// Terminou bem e devolveu um texto (a saída de um comando).
+    Output(String),
 }
 
 /// Alça que a thread de uma ação leva consigo para avisar o app do resultado.
@@ -52,6 +54,10 @@ impl Reporter {
 
     pub fn error(&self, msg: impl Into<String>) {
         self.send(Report::Error(msg.into()));
+    }
+
+    pub fn output(&self, text: impl Into<String>) {
+        self.send(Report::Output(text.into()));
     }
 
     fn send(&self, report: Report) {

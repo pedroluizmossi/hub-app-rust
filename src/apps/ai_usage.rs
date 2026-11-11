@@ -234,7 +234,7 @@ impl AiUsageMini {
     fn refresh_mascot(&mut self, i: usize) -> bool {
         let mood = self.card_mood(i);
         let Some(sprite) = ai_mascots::get(&self.snap.cards[i].name) else { return false };
-        let look = self.anims[i].look(mood, Instant::now());
+        let look = self.anims[i].look_with(sprite, mood, Instant::now());
         let changed = std::mem::replace(&mut self.reactions[i], look.reaction) != look.reaction;
         self.mascots[i].update_look(sprite, self.host.theme_for(&self.manifest), &look) || changed
     }

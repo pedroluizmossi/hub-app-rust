@@ -691,7 +691,7 @@ impl MiniApp for DockerMini {
             // a falha fica na fala (com o prazo normal), em vez de sumir na próxima leitura
             Report::Error(msg) => self.speech.say(msg.clone()),
             // deu certo: tira o "Parando X…", a menos que outra fala já tenha entrado
-            Report::Done => {
+            Report::Done | Report::Output(_) => {
                 if working.is_some_and(|w| self.speech.is(&w)) {
                     self.speech.clear();
                 }

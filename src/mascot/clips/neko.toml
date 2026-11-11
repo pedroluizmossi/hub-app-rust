@@ -1,0 +1,98 @@
+# Animações da Neko ciborgue. Formato: topo de src/mascot/clips.rs.
+# Cada quadro tem 14 linhas de 16 caracteres, com os papéis de cor de sprites.rs.
+
+# Dormindo: orelhas e topo da cabeça baixam 1 pixel e voltam, como quem respira
+# (olhos e base ficam no lugar).
+# Exemplo para testar o caminho de ponta a ponta; troque por um desenho de verdade.
+[sleep]
+enter = "boceja"
+fps = 1
+frames = [
+"""
+.K............K.
+KMK..........KMK
+KMPK..KKKK..KPMK
+KPPPKKPPPPKKPPPK
+KPPPPPPPPPPPPPPK
+KPHPPPPPPPPPPHPK
+KCCCCCCCCCCCCCCK
+KCEEWCCCCCCEEWCK
+KCEEECCCCCCEEECK
+KCCCCCCCCCCCCCCK
+KPBBPPPPPPPPBBPK
+KPPPPPPTTPPPPPPK
+.KPPPPPPPPPPPPK.
+..KKKKKKKKKKKK..
+""",
+"""
+................
+.K............K.
+KMK..........KMK
+KMPK..KKKK..KPMK
+KPPPKKPPPPKKPPPK
+KPHPPPPPPPPPPHPK
+KCCCCCCCCCCCCCCK
+KCEEWCCCCCCEEWCK
+KCEEECCCCCCEEECK
+KCCCCCCCCCCCCCCK
+KPBBPPPPPPPPBBPK
+KPPPPPPTTPPPPPPK
+.KPPPPPPPPPPPPK.
+..KKKKKKKKKKKK..
+""",
+]
+
+# Ao entrar no sono: a boca se alarga, abre (linhas 10 e 11, longe do queixo) e fecha;
+# depois entra o loop de [sleep]. Origem: assets/mascot/neko-boceja.png (+ neko-paleta.toml).
+[boceja]
+durations = [250, 600, 250]
+frames = [
+"""
+.K............K.
+KMK..........KMK
+KMPK..KKKK..KPMK
+KPPPKKPPPPKKPPPK
+KPPPPPPPPPPPPPPK
+KPHPPPPPPPPPPHPK
+KCCCCCCCCCCCCCCK
+KCEEWCCCCCCEEWCK
+KCEEECCCCCCEEECK
+KCCCCCCCCCCCCCCK
+KPBBPPPPPPPPBBPK
+KPPPPPTTTTPPPPPK
+.KPPPPPPPPPPPPK.
+..KKKKKKKKKKKK..
+""",
+"""
+.K............K.
+KMK..........KMK
+KMPK..KKKK..KPMK
+KPPPKKPPPPKKPPPK
+KPPPPPPPPPPPPPPK
+KPHPPPPPPPPPPHPK
+KCCCCCCCCCCCCCCK
+KCEEWCCCCCCEEWCK
+KCEEECCCCCCEEECK
+KCCCCCCCCCCCCCCK
+KPBBPPTTTTPPBBPK
+KPPPPPTTTTPPPPPK
+.KPPPPPPPPPPPPK.
+..KKKKKKKKKKKK..
+""",
+"""
+.K............K.
+KMK..........KMK
+KMPK..KKKK..KPMK
+KPPPKKPPPPKKPPPK
+KPPPPPPPPPPPPPPK
+KPHPPPPPPPPPPHPK
+KCCCCCCCCCCCCCCK
+KCEEWCCCCCCEEWCK
+KCEEECCCCCCEEECK
+KCCCCCCCCCCCCCCK
+KPBBPPPPPPPPBBPK
+KPPPPPTTTTPPPPPK
+.KPPPPPPPPPPPPK.
+..KKKKKKKKKKKK..
+""",
+]

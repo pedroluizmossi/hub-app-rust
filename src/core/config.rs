@@ -53,6 +53,12 @@ pub struct Config {
     pub enabled: Vec<String>,
     /// Configurações de cada mini-app: `[apps."cyber.docker"]`.
     pub apps: BTreeMap<String, toml::Table>,
+    /// Índice da loja de plugins (`registry.json`: caminho ou https://). Vazio = a loja
+    /// oficial (`store::OFFICIAL_INDEX`).
+    pub store_index: String,
+    /// Chave pública (ed25519, hex) que assina o índice da loja. Vazia = a oficial, se o
+    /// índice for o oficial; para outro índice, sem conferência (só aceito se for local).
+    pub store_key: String,
     /// Como salvar, conforme o arquivo lido (não vai para o TOML).
     #[serde(skip)]
     estado: Estado,
@@ -110,6 +116,8 @@ impl Default for Config {
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
             apps: BTreeMap::new(),
+            store_index: String::new(),
+            store_key: String::new(),
             estado: Estado::Normal,
         }
     }

@@ -1,0 +1,27 @@
+# Plugin de exemplo do MiniUtils: mostra há quanto tempo o computador está ligado.
+# Formato: topo de src/core/plugins.rs no repositório do MiniUtils.
+id = "io.github.exemplo.uptime"
+name = "Tempo ligado"
+description = "Há quanto tempo o computador está ligado (uptime -p). Plugin de exemplo da loja."
+icon = "coruja"
+api = 1
+
+[permissions]
+exec = ["uptime"]
+
+[run]
+command = ["uptime", "-p"]
+every = 30
+
+[display]
+title = "Ligado há"
+lines = 2
+
+# a coruja fica contente depois de um dia ligado, e cansada depois de uma semana
+[[mood]]
+contains = "week"
+mood = "busy"
+
+[[mood]]
+contains = "day"
+mood = "happy"

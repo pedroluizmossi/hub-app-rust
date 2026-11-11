@@ -38,12 +38,12 @@ impl Pixel {
 }
 
 impl Sprite {
-    /// Última linha que contém um olho: onde vai o traço do olho fechado.
-    pub fn closed_row(&self) -> usize {
-        if self.pixel.is_some() {
-            return self.grid.iter().rposition(|r| r.contains('e')).unwrap_or(0);
-        }
-        self.grid.iter().rposition(|r| r.contains('E')).unwrap_or(0)
+    /// Última linha de `grid` (o desenho base ou um quadro de animação) que contém um
+    /// olho: onde vai o traço do olho fechado. Calculada por quadro, para uma pose que
+    /// mexe a cabeça fechar o olho no lugar certo.
+    pub fn closed_row(&self, grid: &[&str; 14]) -> usize {
+        let eye = if self.pixel.is_some() { 'e' } else { 'E' };
+        grid.iter().rposition(|r| r.contains(eye)).unwrap_or(0)
     }
 }
 
@@ -71,6 +71,36 @@ pub static SPRITES: &[Sprite] = &[
             "KPPPPPPTTPPPPPPK",
             ".KPPPPPPPPPPPPK.",
             "..KKKKKKKKKKKK..",
+        ],
+    },
+    // Lumi, mariposinha de paleta própria.
+    Sprite {
+        key: "lumi",
+        label: "Lumi, mariposinha",
+        eye_bg: b'b',
+        shade_from: 99,
+        fur: None,
+        ear: None,
+        pixel: Some(Pixel {
+            eye: 0x392640,
+            pal: &[(b'a', 0x392640), (b'b', 0xd6addb), (b'c', 0xffe8c6),
+                   (b'd', 0x9ed5bd), (b'g', 0xfbcf61)],
+        }),
+        grid: [
+            "...aa......aa...",
+            "....aa....aa....",
+            ".....a....a.....",
+            ".....aaaaaa.....",
+            "..aaaabbbbaaaa..",
+            ".addabbbbbbadda.",
+            "adgdabebebadgda.",
+            "adddabbbbbbaddda",
+            ".adaabcbcbaadaa.",
+            "..aaabbbbbbaaa..",
+            ".addaaaccaaadda.",
+            ".adgdaccccadgda.",
+            "..aaacaaacaaa...",
+            ".....aa..aa.....",
         ],
     },
     Sprite {

@@ -1,0 +1,12 @@
+[package]
+name = "sprite-import"
+version = "0.1.0"
+edition = "2024"
+description = "Converte PNG em quadros de animação das mascotes do MiniUtils (src/mascot/clips)"
+license = "MIT"
+publish = false
+
+[dependencies]
+# as mesmas versões que o app já usa (estão no Cargo.lock): nada novo para baixar
+png = "0.18"
+toml = "1.2.1"
