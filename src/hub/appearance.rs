@@ -103,6 +103,29 @@ impl Hub {
         self.ui.global::<Anim>().set_calm(calm);
     }
 
+    /// Cartão "Sistema" das configurações: iniciar com o sistema, versão e registros. Relido
+    /// ao abrir as configurações (o autostart pode ter mudado por fora, no sistema).
+    pub(super) fn apply_system(&self) {
+        self.ui.set_autostart(crate::autostart::is_enabled());
+        self.ui.set_version(crate::core::about::version_line().into());
+        let dir = crate::core::os::log_dir().map(|d| d.display().to_string()).unwrap_or_default();
+        self.ui.set_log_dir(dir.into());
+    }
+
+    /// O erro, se houver, vai para o registro; o interruptor mostra o estado de verdade.
+    pub(super) fn toggle_autostart(&self) {
+        let _ = crate::autostart::set(!crate::autostart::is_enabled());
+        self.ui.set_autostart(crate::autostart::is_enabled());
+    }
+
+    pub(super) fn open_logs(&self) {
+        if let Some(dir) = crate::core::os::log_dir()
+            && !crate::core::exec::open_dir(&dir)
+        {
+            log::warn!("não consegui abrir {}", dir.display());
+        }
+    }
+
     pub(super) fn toggle_motion(&self) {
         {
             let mut cfg = self.host.config.borrow_mut();
@@ -204,7 +227,7 @@ impl Hub {
                 });
             });
             if let Err(e) = spawned {
-                eprintln!("miniutils: sem thread para o fundo ({e})");
+                log::warn!("sem thread para o fundo ({e})");
             }
         });
     }

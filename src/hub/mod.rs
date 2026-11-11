@@ -198,6 +198,7 @@ impl Hub {
         hub.ui.set_max_columns(layout::MAX_COLS as i32);
         hub.ui.set_max_rows(layout::MAX_ROWS as i32);
         hub.apply_skin();
+        hub.apply_system();
         hub.registry.start(&hub.ui);
         hub.open_tab(tab.as_deref().unwrap_or_default());
         hub.rebuild_lists();
@@ -209,7 +210,7 @@ impl Hub {
         // janela fica aberta; o ícone aparece sozinho quando o painel surgir
         match Tray::spawn(hub.ui.as_weak(), sprites::get("neko"), themes::get("neon"), Mood::Sleep) {
             Ok(t) => *hub.tray.borrow_mut() = Some(t),
-            Err(e) => eprintln!("miniutils: sem bandeja do sistema ({e}); a janela fica aberta"),
+            Err(e) => log::warn!("sem bandeja do sistema ({e}); a janela fica aberta"),
         }
 
         // tamanho lembrado da última vez (lógico: o Slint converte pela escala da tela)

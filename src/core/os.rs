@@ -80,3 +80,14 @@ pub fn xdg_data_dir() -> Option<std::path::PathBuf> {
         dirs::data_dir()
     }
 }
+
+/// Pasta dos arquivos de registro (`core::logging`): `~/.local/state/miniutils` no Linux
+/// (XDG_STATE_HOME, onde ficam registros e histórico) e `%LOCALAPPDATA%\miniutils\logs`
+/// no Windows (fora do perfil que viaja entre máquinas).
+pub fn log_dir() -> Option<std::path::PathBuf> {
+    if cfg!(windows) {
+        dirs::data_local_dir().map(|d| d.join("miniutils").join("logs"))
+    } else {
+        dirs::state_dir().or_else(dirs::data_dir).map(|d| d.join("miniutils"))
+    }
+}

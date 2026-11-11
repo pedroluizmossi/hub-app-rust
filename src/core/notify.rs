@@ -28,7 +28,7 @@ impl Notifier {
                 n.timeout(8000);
             }
             if let Err(e) = n.show() {
-                eprintln!("miniutils: notificação falhou: {e}");
+                log::warn!("notificação falhou: {e}");
             }
         });
     }

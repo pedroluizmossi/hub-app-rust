@@ -98,7 +98,7 @@ impl Tray {
     fn rebuild_menu(&self) {
         match menu(self.pinned.get(), self.media.borrow().as_ref()) {
             Ok(menu) => self.icon.set_menu(Some(Box::new(menu))),
-            Err(e) => eprintln!("miniutils: menu da bandeja falhou: {e}"),
+            Err(e) => log::warn!("menu da bandeja falhou: {e}"),
         }
     }
 }

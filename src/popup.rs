@@ -150,7 +150,7 @@ pub fn drag_resize(window: &slint::Window, dir: &str) {
     };
     window.with_winit_window(|w| {
         if let Err(e) = w.drag_resize_window(d) {
-            eprintln!("miniutils: não deu para redimensionar: {e}");
+            log::warn!("não deu para redimensionar: {e}");
         }
     });
 }
@@ -230,15 +230,13 @@ pub fn skip_taskbar(window: &slint::Window) {
             RawWindowHandle::Xcb(h) => h.window.get(),
             _ => return, // Wayland nativo: não há como pedir isso
         };
-        if std::env::var_os("MINIUTILS_DEBUG").is_some() {
-            eprintln!("miniutils: estados EWMH na janela 0x{id:x}");
-        }
+        log::debug!("estados EWMH na janela 0x{id:x}");
         if let Err(e) = x11::set_states(id) {
-            eprintln!("miniutils: não consegui tirar da barra de tarefas: {e}");
+            log::warn!("não consegui tirar da barra de tarefas: {e}");
         }
     });
-    if done.is_none() && std::env::var_os("MINIUTILS_DEBUG").is_some() {
-        eprintln!("miniutils: janela winit ainda não existe");
+    if done.is_none() {
+        log::debug!("janela winit ainda não existe");
     }
 }
 

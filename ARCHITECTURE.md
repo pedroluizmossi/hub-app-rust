@@ -101,7 +101,10 @@ hub-app-rust/
                               e erro tipado (`ExecError`: negado, ausente, prazo, falhou)
       notify.rs               notificações (no máximo 1/min por evento)
       os.rs                   miudezas por sistema: encerrar processo, arquivo só do dono,
-                              pasta de dados XDG
+                              pasta de dados XDG, pasta dos registros
+      logging.rs              registro em arquivo + saída de erro (crate `log`) e pânico
+                              registrado com a pilha; ver "Registro" abaixo
+      about.rs                versão (`--version`, registro e Configurações › Sistema)
       bus.rs                  provedores em threads (`Topic`), assinaturas, "poke" para
                               ler já, janela visível ou escondida
       wake.rs                 despertador da thread da UI: leitura ou recado novo agenda
@@ -118,6 +121,9 @@ hub-app-rust/
       ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go)
       ports.rs                portas escutando: `ss -lntup` + /proc/<pid>/cmdline no Linux,
                               `netstat -ano` + sysinfo no Windows
+      procs.rs, procs/        processos mais pesados (por CPU e por memória), só para
+                              plugins (`uses = ["procs"]`): /proc no Linux, sysinfo no
+                              Windows. Existe para plugin nenhum depender do `ps`
       agents/                 sessões dos codificadores de IA e o estado de cada uma, lido dos
                               arquivos que as ferramentas já gravam (só leitura). Uma fonte por
                               ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`) atrás do trait
@@ -172,7 +178,7 @@ options = ["auto", "neon", "matrix", "aconchego"]
 ```
 
 - `uses` liga os provedores quando o app é ativado e os solta quando é desativado. Os nomes
-  são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`, `ports`, `agents`): um nome desconhecido
+  são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`, `ports`, `agents`, `procs`): um nome desconhecido
   faz o manifesto falhar no parse, e no Rust o provedor é sempre `Topic::…`, nunca uma string.
 - `permissions.exec` é a allowlist do executor para aquele app.
 - `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice`). Um
@@ -339,6 +345,22 @@ anterior intacto. Arquivo vazio conta como ausente, não como versão 0 a migrar
 Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se faltar), `skin`,
 `nav` (`"side"` ou `"top"`), `reduce_motion`, `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
 Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copiada.
+
+## Registro e iniciar com o sistema
+
+- **Registro** (`core/logging.rs`): o código usa `log::warn!`, `log::info!`… Cada linha
+  vai para a saída de erro e para `miniutils.log`, em `~/.local/state/miniutils/` no
+  Linux e `%LOCALAPPDATA%\miniutils\logs\` no Windows (a versão final do Windows não tem
+  console: sem o arquivo, um erro sumiria). Passando de 1 MiB, vira `miniutils.1.log`.
+  Do MiniUtils entra a partir de `info` (`debug` com `MINIUTILS_DEBUG=1` ou
+  `--plugin-dev`); das bibliotecas, só avisos e erros. Um pânico em qualquer thread é
+  registrado com o lugar e a pilha. Os comandos de terminal (loja, `--help`) seguem com
+  `println!`/`eprintln!`, porque a saída é a resposta deles.
+- **Iniciar com o sistema** (`src/autostart.rs`, Configurações › Sistema): quem guarda o
+  estado é o sistema, não a config. No Linux, `~/.config/autostart/miniutils.desktop`
+  (XDG); no Windows, o valor `MiniUtils` em `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+  Os dois abrem com `--hidden`. Ao abrir, se o executável mudou de lugar, a entrada é
+  regravada.
 
 ## Roteiro
 

@@ -1,15 +1,13 @@
 # Plugin de exemplo com tela e script próprios: os processos mais pesados do momento.
 # Formato: topo de src/core/plugins.rs e src/apps/plugin.rs no repositório do MiniUtils.
-id = "io.github.exemplo.top"
+id = "io.github.pedroluizmossi.top-processes"
 name = "Top processos"
-description = "Os processos que mais usam CPU ou memória (ps), com tela e script próprios. Plugin de exemplo da loja."
+description = "Os processos que mais usam CPU ou memória, com tela e script próprios. Funciona no Linux e no Windows. Plugin de exemplo da loja do MiniUtils."
 icon = "robo"
 api = 1
-
-[permissions]
-exec = ["ps"]
+# a lista de processos chega em fn on_event("procs", dados); não executa nada
+uses = ["procs"]
 
 [ui]
 view = "view.slint"
 script = "main.rhai"
-every = 5

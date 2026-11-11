@@ -80,6 +80,15 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
 - **Opções de app** vêm do `manifest.toml` de cada mini-app (`bool`, `int`, `choice`).
   Para escolha entre duas opções, prefira `bool`.
 
+## Registro
+
+- **Mensagem para o registro: `log::warn!`/`log::info!`/`log::debug!`, nunca `eprintln!`.**
+  Vai para o arquivo (`core/logging.rs`) e para o terminal; no Windows não há console, então
+  um `eprintln!` some. `println!`/`eprintln!` só nos comandos de terminal (`--help`, loja,
+  `--previa`), em que a saída é a resposta.
+- Plugin que precisa de processos usa `uses = ["procs"]`, não `ps` (que não existe no
+  Windows).
+
 ## Hábitos
 
 - Leia o código antes de propor; confira o que um resumo afirma (ex.: "todos os apps

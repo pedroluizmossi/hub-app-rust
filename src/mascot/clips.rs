@@ -131,7 +131,7 @@ fn load_embedded() -> Library {
             Ok(clips) => {
                 lib.insert(key.to_string(), Arc::new(clips));
             }
-            Err(e) => eprintln!("miniutils: animações de {key} inválidas: {e}"),
+            Err(e) => log::warn!("animações de {key} inválidas: {e}"),
         }
     }
     lib
@@ -149,13 +149,13 @@ fn dev_dir() -> Option<PathBuf> {
 fn load_dir(dir: &Path) -> Library {
     let mut lib = Library::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
-        eprintln!("miniutils: MINIUTILS_CLIPS={} não é uma pasta legível", dir.display());
+        log::warn!("MINIUTILS_CLIPS={} não é uma pasta legível", dir.display());
         return lib;
     };
     for path in entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "toml")) {
         let Some(key) = path.file_stem().and_then(|s| s.to_str()) else { continue };
         let Some(sprite) = SPRITES.iter().find(|s| s.key == key) else {
-            eprintln!("miniutils: {}: não há mascote \"{key}\" em sprites.rs", path.display());
+            log::warn!("{}: não há mascote \"{key}\" em sprites.rs", path.display());
             continue;
         };
         let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|src| parse(sprite, &src));
@@ -163,7 +163,7 @@ fn load_dir(dir: &Path) -> Library {
             Ok(clips) => {
                 lib.insert(key.to_string(), Arc::new(clips));
             }
-            Err(e) => eprintln!("miniutils: {}: {e}", path.display()),
+            Err(e) => log::warn!("{}: {e}", path.display()),
         }
     }
     lib
@@ -186,7 +186,7 @@ fn watch(dir: PathBuf) {
     };
     let spawned = std::thread::Builder::new().name("miniutils-clips".into()).spawn(move || {
         let mut last = stamp(&dir);
-        eprintln!("miniutils: animações de {} (recarregam ao salvar)", dir.display());
+        log::info!("animações de {} (recarregam ao salvar)", dir.display());
         loop {
             std::thread::sleep(Duration::from_millis(500));
             let now = stamp(&dir);
@@ -195,14 +195,14 @@ fn watch(dir: PathBuf) {
             }
             last = now;
             let lib = load_dir(&dir);
-            eprintln!("miniutils: animações recarregadas ({} mascote(s))", lib.len());
+            log::info!("animações recarregadas ({} mascote(s))", lib.len());
             if let Ok(mut l) = library().write() {
                 *l = Arc::new(lib);
             }
         }
     });
     if let Err(e) = spawned {
-        eprintln!("miniutils: sem thread para recarregar animações ({e})");
+        log::warn!("sem thread para recarregar animações ({e})");
     }
 }
 

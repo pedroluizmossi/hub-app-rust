@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use super::wake::Waker;
 
-use crate::providers::{agents::AgentsSnapshot, ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, ports::PortsSnapshot, sys::SysSnapshot};
+use crate::providers::{agents::AgentsSnapshot, ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, ports::PortsSnapshot, procs::ProcsSnapshot, sys::SysSnapshot};
 
 /// Um provedor de dados. É o nome usado em `uses` no manifesto (em snake_case) e a chave
 /// de tudo no barramento: um nome errado não compila (ou não passa do parse do manifesto).
@@ -28,6 +28,8 @@ pub enum Topic {
     AiUsage,
     Ports,
     Agents,
+    /// Processos mais pesados: só para plugins (os apps embutidos não usam).
+    Procs,
 }
 
 impl Topic {
@@ -40,6 +42,7 @@ impl Topic {
             Topic::AiUsage => "ai_usage",
             Topic::Ports => "ports",
             Topic::Agents => "agents",
+            Topic::Procs => "procs",
         }
     }
 }
@@ -54,6 +57,7 @@ pub enum Event {
     AiUsage(UsageSnapshot),
     Ports(PortsSnapshot),
     Agents(AgentsSnapshot),
+    Procs(ProcsSnapshot),
 }
 
 impl Event {
@@ -67,6 +71,7 @@ impl Event {
             Event::AiUsage(_) => Topic::AiUsage,
             Event::Ports(_) => Topic::Ports,
             Event::Agents(_) => Topic::Agents,
+            Event::Procs(_) => Topic::Procs,
         }
     }
 }

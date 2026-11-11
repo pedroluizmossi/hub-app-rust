@@ -18,13 +18,15 @@
 //! fn start()                  ao ligar          this.settings = opções do app (mapa)
 //! fn tick()                   a cada [ui] every
 //! fn action(name, arg)        a tela chamou `callback action(string, string)`
-//! fn on_event(topic, data)    leitura de um provedor de `uses` ("sys", "docker"…), em mapa
+//! fn on_event(topic, data)    leitura de um provedor de `uses` ("sys", "docker"…), em mapa;
+//!                             "procs" traz os processos mais pesados (by_cpu, by_mem e
+//!                             count), igual no Linux e no Windows: use-o em vez do `ps`
 //! fn settings()               o usuário mudou uma opção (this.settings já é a nova)
 //! ui("prop", valor)           muda uma propriedade da tela (texto, número, bool, lista, mapa)
 //! mood("happy")               humor: sleep, idle, happy, busy, alarm
 //! summary("texto")            linha do tooltip da bandeja
-//! run(["ps", "-e"])           roda um programa da allowlist: #{ ok, out, err } (até 30 s)
-//! run_async(["ps"], "fim")    o mesmo sem esperar: chama fn fim(result) depois
+//! run(["git", "status"])     roda um programa da allowlist: #{ ok, out, err } (até 30 s)
+//! run_async(["git"], "fim")   o mesmo sem esperar: chama fn fim(result) depois
 //! http_get(url)               GET https num domínio de net: #{ ok, status, body, err }
 //! http_get_async(url, "fim")  o mesmo sem esperar (até 4 tarefas ao mesmo tempo)
 //! parse_json(texto)  to_json(valor)
@@ -157,7 +159,7 @@ pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool)
         }
         // o plugin em desenvolvimento já entra ligado, na primeira página
         if plugins::dev_dir() == Some(plugin.dir.as_path()) {
-            eprintln!("plugin-dev: {id} carregado de {}", plugin.dir.display());
+            log::info!("plugin-dev: {id} carregado de {}", plugin.dir.display());
             let mut cfg = host.config.borrow_mut();
             if cfg.page_of(&id).is_none() {
                 cfg.move_to_page(&id, 0);
@@ -197,7 +199,7 @@ fn watch_dev(dir: &'static Path) -> Timer {
     timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
         let now = stamp(dir);
         if now != last.replace(now) {
-            eprintln!("plugin-dev: arquivos mudaram, recarregando");
+            log::info!("plugin-dev: arquivos mudaram, recarregando");
             crate::hub::request_plugin_reload();
         }
     });
@@ -581,6 +583,7 @@ fn event_data(ev: &Event) -> serde_json::Value {
         Event::AiUsage(s) => serde_json::to_value(s),
         Event::Ports(s) => serde_json::to_value(s),
         Event::Agents(s) => serde_json::to_value(s),
+        Event::Procs(s) => serde_json::to_value(s),
     };
     v.unwrap_or(serde_json::Value::Null)
 }
@@ -705,7 +708,7 @@ fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: Arc<Mutex<r
     e.register_fn("notify", move |t: &str, b: &str| p(ScriptOut::Notify(t.to_string(), b.to_string())));
     let p = push.clone();
     e.on_print(move |s| p(ScriptOut::Summary(s.to_string())));
-    e.on_debug(|s, _, _| eprintln!("plugin: {s}"));
+    e.on_debug(|s, _, _| log::debug!("plugin: {s}"));
     e.register_fn("now", || crate::apps::kit::unix_now());
     e.register_fn("setting", move |key: &str| -> rhai::Dynamic {
         settings.lock().ok().and_then(|m| m.get(key).cloned()).unwrap_or(rhai::Dynamic::UNIT)
@@ -914,7 +917,7 @@ impl PluginMini {
                     factory: slint::ComponentFactory::default(),
                 }),
                 (Err(e), _) | (_, Err(e)) => {
-                    eprintln!("miniutils: plugin {}: {e}", plugin.manifest.id);
+                    log::warn!("plugin {}: {e}", plugin.manifest.id);
                     error = Some(e);
                     None
                 }
@@ -1066,7 +1069,7 @@ impl PluginMini {
                     self.host.notifier.borrow_mut().send(&key, &t, &b, false);
                 }
                 ScriptOut::Error(e) => {
-                    eprintln!("miniutils: plugin {}: {e}", self.plugin.manifest.id);
+                    log::warn!("plugin {}: {e}", self.plugin.manifest.id);
                     self.error = Some(e);
                 }
             }
@@ -1104,7 +1107,7 @@ impl PluginMini {
         let Some(full) = &self.full else { return };
         if let Some(inst) = full.instance.borrow().as_ref() {
             if let Err(e) = inst.set_property(name, v.clone()) {
-                eprintln!("miniutils: plugin {}: propriedade {name}: {e}", self.plugin.manifest.id);
+                log::warn!("plugin {}: propriedade {name}: {e}", self.plugin.manifest.id);
             }
         }
         full.values.borrow_mut().insert(name.to_string(), v);
@@ -1493,12 +1496,12 @@ mod tests {
         let def = compile_view(dir, std::fs::read_to_string(dir.join("view.slint")).unwrap()).unwrap();
         let props: Vec<String> = def.properties().map(|(n, _)| n).collect();
         assert!(props.iter().any(|n| n == "rows") && props.iter().any(|n| n == "theme"), "{props:?}");
-        // O script usa o `ps` do Linux (`-eo`, `--sort`); no Windows o `ps` que vem com o
-        // Git não aceita essas opções, então só a parte da tela é testada lá.
-        if cfg!(not(unix)) || !crate::core::exec::which("ps") {
-            return;
-        }
+        // o script recebe os processos do provedor `procs` (aqui, uma leitura de mentira)
+        assert_eq!(p.manifest.uses, [crate::core::bus::Topic::Procs]);
+        let proc = |pid, name: &str, cpu, mem| crate::providers::procs::Proc { pid, name: name.into(), cpu, mem, mem_bytes: 1 };
+        let snap = crate::providers::procs::snapshot(vec![proc(1, "firefox", 30.0, 12.5), proc(2, "code", 2.0, 20.0)]);
         let (tx, rx) = channel();
+        tx.send(ScriptIn::Event("procs".into(), json_to_dyn(event_data(&Event::Procs(snap))))).unwrap();
         tx.send(ScriptIn::Action("sort".into(), "mem".into())).unwrap();
         drop(tx);
         let saida = Arc::new(Mutex::new(Vec::new()));
@@ -1510,6 +1513,9 @@ mod tests {
         assert!(!txt.contains("Error("), "{txt}");
         assert!(txt.contains(r#"Set("rows", List([Map("#), "{txt}");
         assert!(txt.contains(r#"Set("sort", Str("mem"))"#), "{txt}");
+        assert!(txt.contains(r#"Str("30%")"#) || txt.contains(r#"Str("30.0%")"#), "{txt}");
+        assert!(txt.contains("2 processos"), "{txt}");
+        assert!(txt.contains(r#"Summary("code 20.0% de memória")"#) || txt.contains(r#"Summary("code 20% de memória")"#), "{txt}");
     }
 
     #[test]

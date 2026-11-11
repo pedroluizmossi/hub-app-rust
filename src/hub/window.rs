@@ -73,7 +73,7 @@ impl Hub {
             }
         });
         if let Err(e) = served {
-            eprintln!("miniutils: não consegui atender outras instâncias ({e})");
+            log::warn!("não consegui atender outras instâncias ({e})");
         }
     }
 

@@ -30,9 +30,9 @@
 //! Plugin com tela própria, no lugar de `[run]`:
 //!
 //! ```toml
-//! uses = ["sys"]          # provedores que o script recebe em fn on_event(topic, data)
+//! uses = ["sys", "procs"] # provedores que o script recebe em fn on_event(topic, data)
 //! [permissions]
-//! exec = ["ps"]
+//! exec = ["git"]
 //! net = ["api.exemplo.com"]   # domínios que http_get() pode consultar (só https)
 //! [ui]
 //! view = "view.slint"     # a tela: exporta `component Main`
@@ -326,7 +326,7 @@ pub fn load_all(root: &Path) -> Vec<Plugin> {
                 list.retain(|o| o.manifest.id != p.manifest.id);
                 list.push(p);
             }
-            Err(e) => eprintln!("plugin-dev: {}: {e}", dev.display()),
+            Err(e) => log::warn!("plugin-dev: {}: {e}", dev.display()),
         }
     }
     list
@@ -390,8 +390,8 @@ pub fn load_installed(dir: &Path) -> Vec<Plugin> {
                     out.push(p);
                 }
             }
-            Ok(p) => eprintln!("miniutils: plugin em {} tem o id {}, diferente da pasta", d.display(), p.manifest.id),
-            Err(e) => eprintln!("miniutils: plugin em {} ignorado: {e}", d.display()),
+            Ok(p) => log::warn!("plugin em {} tem o id {}, diferente da pasta", d.display(), p.manifest.id),
+            Err(e) => log::warn!("plugin em {} ignorado: {e}", d.display()),
         }
     }
     out

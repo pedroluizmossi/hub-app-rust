@@ -3156,6 +3156,7 @@ dependencies = [
  "gif",
  "ksni",
  "libc",
+ "log",
  "miniutils-ui",
  "notify-rust",
  "raw-window-handle",

@@ -16,6 +16,9 @@ impl Hub {
         ui.on_select_tab(move |id| {
             if let Some(h) = w.upgrade() {
                 let store = id == "store";
+                if id == "apps" {
+                    h.apply_system();
+                }
                 h.ui.set_current(id);
                 if store {
                     h.store_reload();
@@ -78,6 +81,20 @@ impl Hub {
         ui.on_reduce_motion_toggled(move || {
             if let Some(h) = w.upgrade() {
                 h.toggle_motion();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_autostart_toggled(move || {
+            if let Some(h) = w.upgrade() {
+                h.toggle_autostart();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_open_logs(move || {
+            if let Some(h) = w.upgrade() {
+                h.open_logs();
             }
         });
 
@@ -259,10 +276,8 @@ impl Hub {
         {
             use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
             ui.window().on_winit_window_event(move |_, ev| {
-                if std::env::var_os("MINIUTILS_DEBUG").is_some() {
-                    if let WindowEvent::Focused(f) = ev {
-                        eprintln!("miniutils: foco {f}");
-                    }
+                if let WindowEvent::Focused(f) = ev {
+                    log::debug!("foco {f}");
                 }
                 let Some(h) = w.upgrade() else { return EventResult::Propagate };
                 match ev {

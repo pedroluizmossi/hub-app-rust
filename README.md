@@ -84,7 +84,23 @@ Opções:
 ```text
 --hidden     inicia só na bandeja (para o autostart)
 --tab <nome> abre numa página do painel (pelo nome, ex.: Geral) ou em apps (configurações)
+--version    mostra a versão (também em Configurações › Sistema)
 ```
+
+Para abrir junto com o sistema, ligue **Configurações › Sistema › Iniciar com o sistema**
+(só na bandeja). No Linux isso grava `~/.config/autostart/miniutils.desktop`; no Windows,
+a entrada "MiniUtils" em Gerenciador de Tarefas › Inicializar.
+
+### Registros (logs)
+
+Avisos, erros e travamentos vão para um arquivo, além do terminal:
+
+- Linux: `~/.local/state/miniutils/miniutils.log`
+- Windows: `%LOCALAPPDATA%\miniutils\logs\miniutils.log`
+
+O botão **Abrir registros** em Configurações › Sistema abre a pasta. Ao relatar um
+problema, mande esse arquivo e a versão. Passando de 1 MiB, o arquivo vira
+`miniutils.1.log` e um novo começa. `MINIUTILS_DEBUG=1` registra também os detalhes.
 
 Clique na mascote da bandeja: o hub abre como popup junto do ícone e some quando você
 clica fora ou aperta Esc.
@@ -109,7 +125,7 @@ Variáveis de ambiente:
 
 ```text
 MINIUTILS_NATIVE_WAYLAND=1   usa Wayland nativo em vez de XWayland (o popup perde a posição)
-MINIUTILS_DEBUG=1            mostra eventos de foco e de janela no terminal
+MINIUTILS_DEBUG=1            registra também os detalhes (foco, janela, debug() dos plugins)
 ```
 
 ## Requisitos em tempo de execução

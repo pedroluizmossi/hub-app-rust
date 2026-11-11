@@ -4,6 +4,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod apps;
+mod autostart;
 mod core;
 mod hub;
 mod instance;
@@ -34,9 +35,13 @@ fn main() -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    if args.iter().any(|a| a == "-V" || a == "--version") {
+        println!("miniutils {}", core::about::version_line());
+        return Ok(());
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!(
-            "Uso: miniutils [--hidden] [--tab <id>] [--plugin-dev <pasta>]\n       miniutils --previa <mascote> [animação] [--saida arquivo.gif]\n\n  --hidden              inicia só na bandeja (para o autostart)\n  --tab <id>            abre numa aba (ex.: cyber.vitals, apps)\n  --plugin-dev <pasta>  carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao\n                        salvar; erros da tela e do script saem no terminal\n  --previa              GIF de uma animação de mascote em todos os temas\n\n{}",
+            "Uso: miniutils [--hidden] [--tab <id>] [--plugin-dev <pasta>]\n       miniutils --previa <mascote> [animação] [--saida arquivo.gif]\n       miniutils --version\n\n  --hidden              inicia só na bandeja (para o autostart)\n  --tab <id>            abre numa aba (ex.: cyber.vitals, apps)\n  --plugin-dev <pasta>  carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao\n                        salvar; erros da tela e do script saem no terminal\n  --previa              GIF de uma animação de mascote em todos os temas\n\n{}",
             store::USAGE
         );
         return Ok(());
@@ -64,6 +69,7 @@ fn main() -> anyhow::Result<()> {
 
     // já há uma instância? ela recebe o pedido e esta sai, sem abrir janela nem bandeja
     let socket = instance::socket_path();
+    let mut claim_error = None;
     let server = match instance::claim(&socket, &instance::show_message(tab.as_deref())) {
         Ok(instance::Role::Second) if dev => {
             eprintln!("--plugin-dev: feche o MiniUtils que já está aberto (o plugin em desenvolvimento roda numa instância só dele)");
@@ -72,20 +78,38 @@ fn main() -> anyhow::Result<()> {
         Ok(instance::Role::Second) => return Ok(()),
         Ok(instance::Role::First(server)) => Some(server),
         Err(e) => {
-            eprintln!("miniutils: sem instância única ({e})");
+            claim_error = Some(e);
             None
         }
     };
-
-    let positionable = popup::select_backend()?;
-    let hub = hub::Hub::new(args.iter().any(|a| a == "--hidden"), tab, positionable)?;
-    if let Some(server) = &server {
-        hub.serve_commands(server);
+    // só a instância que fica aberta registra (a segunda sai logo acima)
+    let log_file = core::logging::init(dev);
+    log::info!(
+        "MiniUtils {} iniciando; registro em {}",
+        core::about::version_line(),
+        log_file.as_deref().map_or("(sem arquivo)".into(), |p| p.display().to_string())
+    );
+    if let Some(e) = claim_error {
+        log::warn!("sem instância única ({e})");
     }
-    slint::run_event_loop_until_quit()?;
+    autostart::refresh();
+
+    let result = (|| -> anyhow::Result<()> {
+        let positionable = popup::select_backend()?;
+        let hub = hub::Hub::new(args.iter().any(|a| a == "--hidden"), tab, positionable)?;
+        if let Some(server) = &server {
+            hub.serve_commands(server);
+        }
+        slint::run_event_loop_until_quit()?;
+        Ok(())
+    })();
     // a configuração é gravada numa thread: termina o que estiver pendente antes de sair
     core::config::flush_saves();
-    Ok(())
+    match &result {
+        Ok(()) => log::info!("encerrado"),
+        Err(e) => log::error!("encerrado por erro: {e:#}"),
+    }
+    result
 }
 
 /// Saída de texto no Windows para um app sem console.

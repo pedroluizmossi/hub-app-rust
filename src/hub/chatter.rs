@@ -456,11 +456,11 @@ impl Hub {
             match Lines::parse(src) {
                 Ok(lines) => {
                     for p in lines.problems() {
-                        eprintln!("miniutils: falas de {app}: {p}");
+                        log::warn!("falas de {app}: {p}");
                     }
                     d.add_lines(&app, lines);
                 }
-                Err(e) => eprintln!("miniutils: falas de {app} inválidas: {e}"),
+                Err(e) => log::warn!("falas de {app} inválidas: {e}"),
             }
         }
     }

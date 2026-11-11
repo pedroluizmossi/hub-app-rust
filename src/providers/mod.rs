@@ -5,6 +5,7 @@ pub mod docker;
 pub mod gpu;
 pub mod media;
 pub mod ports;
+pub mod procs;
 pub mod sys;
 
 use std::time::Duration;
@@ -52,4 +53,7 @@ pub fn spawn_all(bus: &mut Bus) {
         last_agents = Some(std::time::Instant::now());
         Some(Event::Agents(agents.collect()))
     });
+    // ler todos os processos custa mais que o resto: a cada 3 s, e só com plugin que assina
+    let mut procs = procs::ProcsProvider::default();
+    bus.spawn(Topic::Procs, Duration::from_secs(3), move || Event::Procs(procs.collect()));
 }

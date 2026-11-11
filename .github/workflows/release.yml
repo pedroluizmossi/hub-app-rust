@@ -76,7 +76,7 @@ jobs:
         run: |
           dir="miniutils-$VERSION-$NAME"
           mkdir -p "dist/$dir"
-          cp "target/release/$BINARY" README.md THIRD_PARTY_NOTICES.md "dist/$dir/"
+          cp "target/release/$BINARY" README.md LICENSE THIRD_PARTY_NOTICES.md "dist/$dir/"
           cd dist
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             archive="$dir.zip"

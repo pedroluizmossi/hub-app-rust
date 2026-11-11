@@ -207,6 +207,12 @@ component AppsView inherits ScrollView {
     // quanto as mascotes conversam (0 nunca, 1 às vezes, 2 bastante)
     in property <int> chatter-index;
     callback chatter-chosen(int);
+    // sistema: iniciar junto, versão e pasta dos registros
+    in property <bool> autostart;
+    callback autostart-toggled();
+    in property <string> version;
+    in property <string> log-dir;
+    callback open-logs();
     // páginas: lista, nomes (para o seletor de cada app) e mascotes disponíveis
     in property <[PageInfo]> pages;
     in property <[string]> page-names;
@@ -342,6 +348,66 @@ component AppsView inherits ScrollView {
                     options: tray-themes;
                     index: tray-theme-index;
                     chosen(i) => { root.tray-theme-chosen(i); }
+                }
+            }
+        }
+
+        // sistema
+        Rectangle {
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.surface-edge;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Text { text: "Sistema"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                HorizontalLayout {
+                    spacing: 16px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Iniciar com o sistema"; color: Skin.ink; font-size: 14px; }
+                        Text {
+                            text: "Abre só na bandeja ao entrar na sessão.";
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SqSwitch {
+                            checked: autostart;
+                            label: "Iniciar com o sistema";
+                            toggled => { root.autostart-toggled(); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Versão " + version; color: Skin.ink; font-size: 14px; }
+                        Text {
+                            text: log-dir == "" ? "Sem pasta para os registros." : "Registros (avisos e erros): " + log-dir;
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        if log-dir != "": TextButton {
+                            text: "Abrir registros";
+                            font-size: 13px;
+                            clicked => { root.open-logs(); }
+                        }
+                    }
                 }
             }
         }
@@ -1228,6 +1294,9 @@ export component HubWindow inherits Window {
     in property <bool> nav-top: false;
     in property <bool> reduce-motion: false;
     in property <int> chatter-index: 1;
+    in property <bool> autostart: false;
+    in property <string> version;
+    in property <string> log-dir;
     // fundo desenhado pelo Rust para o tamanho da área do painel
     in property <image> backdrop;
     // relógio e saudação ("boa noite · 21:57"), para os visuais que mostram
@@ -1262,6 +1331,8 @@ export component HubWindow inherits Window {
     callback nav-chosen(int);
     callback reduce-motion-toggled();
     callback chatter-chosen(int);
+    callback autostart-toggled();
+    callback open-logs();
     callback page-selected(int);
     callback page-added();
     callback page-removed(int);
@@ -1596,6 +1667,11 @@ export component HubWindow inherits Window {
                 reduce-motion-toggled => { root.reduce-motion-toggled(); }
                 chatter-index: chatter-index;
                 chatter-chosen(i) => { root.chatter-chosen(i); }
+                autostart: autostart;
+                autostart-toggled => { root.autostart-toggled(); }
+                version: version;
+                log-dir: log-dir;
+                open-logs => { root.open-logs(); }
                 page-added => { root.page-added(); }
                 page-removed(i) => { root.page-removed(i); }
                 page-renamed(i, n) => { root.page-renamed(i, n); }

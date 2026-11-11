@@ -229,8 +229,8 @@ impl Config {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 match std::fs::copy(&old, &path) {
-                    Ok(_) => eprintln!("miniutils: config copiada de {}", old.display()),
-                    Err(e) => eprintln!("miniutils: não consegui copiar {}: {e}", old.display()),
+                    Ok(_) => log::info!("config copiada de {}", old.display()),
+                    Err(e) => log::warn!("não consegui copiar {}: {e}", old.display()),
                 }
             }
         }
@@ -277,12 +277,12 @@ impl Config {
 
         // Arquivo de um MiniUtils mais novo: lê o que der, mas não mexe nele.
         if versao > VERSAO_ATUAL {
-            eprintln!(
-                "miniutils: {} é da versão {versao}, mais nova que a {VERSAO_ATUAL} daqui; alterações não serão salvas",
+            log::warn!(
+                "{} é da versão {versao}, mais nova que a {VERSAO_ATUAL} daqui; alterações não serão salvas",
                 path.display()
             );
             let cfg = desserializa(tabela).unwrap_or_else(|e| {
-                eprintln!("miniutils: config inválida ({e}); usando o padrão");
+                log::warn!("config inválida ({e}); usando o padrão");
                 Config::default()
             });
             return Config { estado: Estado::SomenteLeitura, ..cfg };
@@ -306,7 +306,7 @@ impl Config {
 
     /// Configuração padrão para um arquivo que não pôde ser lido; o original é preservado.
     fn quebrada(motivo: &str) -> Self {
-        eprintln!("miniutils: config inválida ({motivo}); usando o padrão");
+        log::warn!("config inválida ({motivo}); usando o padrão");
         Config { estado: Estado::Quebrado, ..Config::default() }
     }
 
@@ -335,7 +335,7 @@ impl Config {
                 if path.exists() {
                     let destino = nome_livre(&com_sufixo(path, ".quebrado"));
                     if let Err(e) = std::fs::rename(path, &destino) {
-                        eprintln!("miniutils: não consegui mover {} para {}: {e}", path.display(), destino.display());
+                        log::warn!("não consegui mover {} para {}: {e}", path.display(), destino.display());
                         return None;
                     }
                 }
@@ -346,7 +346,7 @@ impl Config {
         match toml::to_string_pretty(self) {
             Ok(text) => Some(text),
             Err(e) => {
-                eprintln!("miniutils: erro ao serializar config: {e}");
+                log::error!("erro ao serializar config: {e}");
                 None
             }
         }
@@ -393,7 +393,7 @@ fn write_logged(path: &Path, text: &str) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Err(e) = write_atomic(path, text.as_bytes()) {
-        eprintln!("miniutils: não consegui salvar {}: {e}", path.display());
+        log::error!("não consegui salvar {}: {e}", path.display());
     }
 }
 
@@ -578,7 +578,7 @@ fn backup(path: &Path) -> bool {
     match std::fs::copy(path, &bak) {
         Ok(_) => true,
         Err(e) => {
-            eprintln!("miniutils: não consegui criar {}: {e}", bak.display());
+            log::warn!("não consegui criar {}: {e}", bak.display());
             false
         }
     }
