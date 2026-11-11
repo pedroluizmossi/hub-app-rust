@@ -42,3 +42,5 @@ binário e o SHA-256 dele, e anuncia `"full_access": true`:
 
 A instalação baixa o binário deste sistema, confere o hash e mostra o aviso de acesso total
 antes de instalar.
+
+Os tipos de app e quando usar cada um: [APPS.md](../../APPS.md).

@@ -383,8 +383,8 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 
-**Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin.rs`
-e `src/store.rs`):
+**Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin.rs`,
+`src/apps/external.rs` e `src/store.rs`; guia para quem cria apps em [APPS.md](APPS.md)):
 - Três tipos de plugin; os dois primeiros sem código nativo:
   - **simples** (`[run]`): o host roda um comando da allowlist a cada N segundos e mostra a
     saída numa tela genérica (`ui/plugin.slint`);

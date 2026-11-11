@@ -5,3 +5,4 @@ Mostra há quanto tempo o computador está ligado, lendo `uptime -p` a cada 30 s
 - Permissões: executa só o programa `uptime`.
 - Instalar: `miniutils --instalar io.github.exemplo.uptime <índice>`
 - Remover: `miniutils --remover io.github.exemplo.uptime`
+- Os tipos de app e o que cada um pode: [APPS.md](../../APPS.md).
