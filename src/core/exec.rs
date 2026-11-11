@@ -512,12 +512,11 @@ fn terminal_prefix(term: &str) -> &'static [&'static str] {
 /// Terminal disponível e o argumento que separa o comando a executar.
 #[cfg(not(windows))]
 fn terminal() -> Option<(String, &'static [&'static str])> {
-    if let Ok(t) = std::env::var("TERMINAL") {
-        if which(&t) || Path::new(&t).is_file() {
+    if let Ok(t) = std::env::var("TERMINAL")
+        && (which(&t) || Path::new(&t).is_file()) {
             let prefix = terminal_prefix(&t);
             return Some((t, prefix));
         }
-    }
     KNOWN_TERMINALS.iter().find(|(t, _)| which(t)).map(|(t, p)| (t.to_string(), *p))
 }
 

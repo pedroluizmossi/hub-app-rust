@@ -66,11 +66,10 @@ fn handle<F: Fn(Command)>(stream: UnixStream, on_command: &F) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let mut line = String::new();
     // limite de 256 bytes: uma linha de comando nunca passa disso
-    if BufReader::new((&stream).take(256)).read_line(&mut line).is_ok() {
-        if let Some(cmd) = parse(&line) {
+    if BufReader::new((&stream).take(256)).read_line(&mut line).is_ok()
+        && let Some(cmd) = parse(&line) {
             on_command(cmd);
         }
-    }
 }
 
 /// Tenta ser a instância principal em `path`. Se já houver uma, entrega `message` a ela.

@@ -130,7 +130,7 @@ O script responde a eventos e usa a API do hub:
 O estado entre chamadas fica em `this` (`this.settings` traz as opções). Limites: 5 milhões
 de operações por chamada, `run` com prazo de 30 s, respostas HTTP de até 1 MiB, até 4
 tarefas assíncronas e 1 MiB de dados guardados. A referência completa está no topo de
-[`src/apps/plugin.rs`](src/apps/plugin.rs).
+[`src/apps/plugin/mod.rs`](src/apps/plugin/mod.rs).
 
 Exemplos: [`examples/plugin-top`](examples/plugin-top) (processos pelo provedor `procs`,
 sem executar nada) e os plugins da loja,

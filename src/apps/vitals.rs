@@ -442,13 +442,12 @@ impl MiniApp for VitalsMini {
         // só redesenha as mascotes que mudaram; o resto muda com as leituras.
         // O ritmo vem do relógio de cada `Animator`, não do quadro do hub.
         for i in 0..N {
-            if self.refresh_mascot(i) {
-                if let Some(mut c) = self.cards.row_data(i) {
+            if self.refresh_mascot(i)
+                && let Some(mut c) = self.cards.row_data(i) {
                     c.mascot = self.mascots[i].image();
                     c.reaction = self.reactions[i].map_or("", Reaction::as_str).into();
                     self.cards.set_row_data(i, c);
                 }
-            }
         }
     }
 

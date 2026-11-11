@@ -77,15 +77,14 @@ pub fn collect() -> PortsSnapshot {
         Ok(out) => {
             let mut listeners = parse(&out);
             for l in &mut listeners {
-                if l.pid > 0 {
-                    if let Some((name, cmd)) = read_cmdline(l.pid) {
+                if l.pid > 0
+                    && let Some((name, cmd)) = read_cmdline(l.pid) {
                         // o `ss` corta o nome em 15 letras; a linha de comando tem o inteiro
                         if !name.is_empty() {
                             l.process = name;
                         }
                         l.cmd = cmd;
                     }
-                }
             }
             PortsSnapshot { ok: true, listeners, ..Default::default() }
         }

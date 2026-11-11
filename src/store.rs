@@ -7,7 +7,7 @@
 //! - o índice é **assinado** (ed25519, `registry.json.sig` ao lado): com a chave pública
 //!   configurada, índice adulterado é recusado. Sem chave, só um índice local é aceito;
 //! - o plugin não roda código nativo: o host executa o manifesto e, nos plugins com tela,
-//!   interpreta o `.slint` e o script Rhai isolados (ver `apps/plugin.rs`); só os arquivos
+//!   interpreta o `.slint` e o script Rhai isolados (ver `apps/plugin/`); só os arquivos
 //!   que `plugins::files` aceita são copiados;
 //! - a exceção é o **app externo** (`[app]`, acesso total): o índice tem de anunciá-lo
 //!   (`full_access`) e fixar, por sistema, de onde vem o executável e o SHA-256 dele
@@ -395,7 +395,7 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn from_hex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()

@@ -1,0 +1,63 @@
+// Dados que o Rust preenche para a janela do hub (ver hub.slint).
+import { Colors } from "theme.slint";
+
+// Posição de um app na grade do painel (em células).
+export struct GridCell {
+    id: string,
+    name: string,
+    col: int,
+    row: int,
+    w: int,
+    h: int,
+    theme: Colors,   // tema do app (preenchido pelo Rust)
+}
+
+// Prévia de onde o app vai parar durante um arrasto no modo de edição.
+export struct Ghost {
+    visible: bool,
+    id: string,
+    col: int,
+    row: int,
+    w: int,
+    h: int,
+    ok: bool,        // cabe (os outros acham lugar)
+}
+
+// Uma configuração declarada no manifesto de um app.
+export struct SettingRow {
+    app: string,
+    key: string,
+    label: string,
+    unit: string,        // "%", "°C" ou vazio (tirado do fim do rótulo)
+    kind: string,        // "bool" | "int" | "choice"
+    bool-value: bool,
+    int-value: int,
+    minimum: int,
+    maximum: int,
+    step: int,
+    options: [string],   // rótulos de um choice
+    index: int,          // opção escolhida
+    images: [image],     // desenho de cada opção, se for uma escolha de mascote (senão vazio)
+}
+
+export struct AppInfo {
+    id: string,
+    name: string,
+    description: string,
+    icon: image,
+    enabled: bool,
+    mood: string,
+    theme: Colors,
+    settings: [SettingRow],
+    page: int,           // página onde o app está
+}
+
+// Uma página do painel (item da barra lateral).
+export struct PageInfo {
+    name: string,
+    icon: image,         // mascote da página, no humor do pior app dela
+    icon-index: int,     // mascote escolhida (índice na lista de mascotes)
+    mood: string,        // pior humor dos apps ligados da página
+    theme: Colors,       // tema usado no ícone (o do visual)
+    apps: int,           // apps ligados na página
+}

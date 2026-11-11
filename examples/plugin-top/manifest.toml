@@ -1,5 +1,5 @@
 # Plugin de exemplo com tela e script próprios: os processos mais pesados do momento.
-# Formato: topo de src/core/plugins.rs e src/apps/plugin.rs no repositório do MiniUtils.
+# Formato: topo de src/core/plugins.rs e src/apps/plugin/mod.rs no repositório do MiniUtils.
 id = "io.github.pedroluizmossi.top-processes"
 name = "Top processos"
 description = "Os processos que mais usam CPU ou memória, com tela e script próprios. Funciona no Linux e no Windows. Plugin de exemplo da loja do MiniUtils."

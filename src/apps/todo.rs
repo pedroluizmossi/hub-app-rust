@@ -300,7 +300,7 @@ impl MiniApp for TodoMini {
 
     fn tick(&mut self, frame: u32, ui: &HubWindow) {
         // a idade das tarefas ("há 5 min") anda sozinha; ~1 vez por minuto basta
-        if frame % 400 == 0 {
+        if frame.is_multiple_of(400) {
             self.refresh(ui);
         }
         if self.refresh_mascot() {

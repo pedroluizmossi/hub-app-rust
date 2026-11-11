@@ -109,11 +109,10 @@ impl Codex {
     fn tail(&mut self, path: &Path) -> (i64, Tail) {
         let Ok(meta) = std::fs::metadata(path) else { return (0, Tail::default()) };
         let key = (meta.len(), mtime_ms(&meta));
-        if let Some((k, tail)) = self.tails.get(path) {
-            if *k == key {
+        if let Some((k, tail)) = self.tails.get(path)
+            && *k == key {
                 return (key.1, tail.clone());
             }
-        }
         let tail = read_tail(path, meta.len()).map(|text| parse_tail(&text)).unwrap_or_default();
         self.tails.insert(path.to_path_buf(), (key, tail.clone()));
         (key.1, tail)

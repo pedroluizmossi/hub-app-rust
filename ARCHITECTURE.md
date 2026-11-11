@@ -67,7 +67,12 @@ hub-app-rust/
   ui/                         crate `miniutils-ui`: só a interface, compilada à parte
     Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
                               dos mini-apps); src/lib.rs reexporta os tipos gerados
-    hub.slint                 janela: moldura, cabeçalhos, painel (grade + edição), configurações
+    hub.slint                 janela (HubWindow): junta as partes abaixo e exporta o que o Rust usa
+    models.slint              structs que o Rust preenche (GridCell, AppInfo, PageInfo…)
+    dashboard.slint           painel: grade dos mini-apps e modo de edição
+    settings.slint            configurações (painel, aparência, sistema, páginas, apps)
+    nav.slint                 navegação entre páginas: barra lateral ou abas no cabeçalho
+    frame.slint               moldura da janela sem borda: alças, fundo, barras, título
     theme.slint               tokens: Skin (visual da janela), Colors (tema de app), Icons, Anim
     widgets.slint             componentes: Mascot, Icon, IconButton, TextButton, HeaderButton,
                               SqSwitch, Stepper, Select, SegBar, Sparkline, Counter, SearchBox
@@ -155,8 +160,11 @@ hub-app-rust/
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
       todo.rs                 To-do rápido: lista salva em ~/.config/miniutils/todo.json
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou
-      plugin.rs               plugins da comunidade: tela genérica, tela interpretada + Rhai,
+      plugin/                 plugins da comunidade: tela genérica, tela interpretada + Rhai,
                               ou tela interpretada + processo do app externo
+        mod.rs                conjunto de plugins carregados e o mini-app; API do script no topo
+        view.rs               tela interpretada (slint-interpreter): imports e imagens permitidos
+        script.rs             o main.rhai numa thread própria: API, allowlist, HTTP, dados
       external.rs             app externo: protocolo JSON por linha e o processo (iniciar,
                               ler, escrever, encerrar o grupo)
 ```
@@ -383,7 +391,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 
-**Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin.rs`,
+**Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin/mod.rs`,
 `src/apps/external.rs` e `src/store.rs`; guia para quem cria apps em [APPS.md](APPS.md)):
 - Três tipos de plugin; os dois primeiros sem código nativo:
   - **simples** (`[run]`): o host roda um comando da allowlist a cada N segundos e mostra a

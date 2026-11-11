@@ -129,6 +129,19 @@ impl Config {
         self.pages.iter().position(|p| p.apps.iter().any(|a| a == id))
     }
 
+    /// Página pedida por `--tab`: pelo nome da página ou por um app que está nela, com o id
+    /// inteiro (`cyber.docker`) ou só a última parte (`docker`). Sem diferença de
+    /// maiúsculas; o nome da página ganha de um app com o mesmo nome.
+    pub fn find_page(&self, tab: &str) -> Option<usize> {
+        let tab = tab.trim();
+        let same = |s: &str| s.trim().eq_ignore_ascii_case(tab);
+        self.pages.iter().position(|p| same(&p.name)).or_else(|| {
+            self.pages.iter().position(|p| {
+                p.apps.iter().any(|id| same(id) || id.rsplit_once('.').is_some_and(|(_, short)| same(short)))
+            })
+        })
+    }
+
     /// Apps ligados da página, na ordem da página.
     pub fn page_apps(&self, page: usize) -> Vec<String> {
         self.pages.get(page).map_or_else(Vec::new, |p| p.apps.iter().filter(|a| self.is_enabled(a)).cloned().collect())
@@ -223,8 +236,8 @@ impl Config {
     /// vez, copia a config da época em que o app se chamava CyberHub.
     pub fn load() -> Self {
         let path = Self::path();
-        if !path.exists() {
-            if let Some(old) = dirs::config_dir().map(|d| d.join("cyberhub/config.toml")).filter(|p| p.exists()) {
+        if !path.exists()
+            && let Some(old) = dirs::config_dir().map(|d| d.join("cyberhub/config.toml")).filter(|p| p.exists()) {
                 if let Some(dir) = path.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
@@ -233,7 +246,6 @@ impl Config {
                     Err(e) => log::warn!("não consegui copiar {}: {e}", old.display()),
                 }
             }
-        }
         let mut cfg = Self::load_from(&path);
         // deixa a linha `name` no arquivo, para o usuário achar onde trocar o nome
         let sem_nome = std::fs::read_to_string(&path)
@@ -501,11 +513,10 @@ fn migra_0_para_1(t: &mut toml::Table) {
     let Some(apps) = apps.as_table_mut() else { return };
     for id in ["cyber.docker", "cyber.vitals"] {
         let app = apps.entry(id).or_insert_with(|| toml::Value::Table(toml::Table::new()));
-        if let Some(app) = app.as_table_mut() {
-            if !app.contains_key("theme") {
+        if let Some(app) = app.as_table_mut()
+            && !app.contains_key("theme") {
                 app.insert("theme".to_string(), tema.clone());
             }
-        }
     }
 }
 
@@ -774,6 +785,28 @@ warn = 70
         cfg.arrange();
         assert_eq!(cfg.page_of("a"), Some(0));
         assert_eq!(cfg.page_apps(0), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn find_page_pelo_nome_ou_pelo_app() {
+        let page = |name: &str, apps: &[&str]| Page {
+            name: name.into(),
+            apps: apps.iter().map(|a| a.to_string()).collect(),
+            ..Page::default()
+        };
+        let cfg = Config {
+            pages: vec![page("Geral", &["cyber.vitals"]), page("IA", &["cyber.docker", "io.github.x.uptime"]), page("Docker", &[])],
+            ..Config::default()
+        };
+        assert_eq!(cfg.find_page("geral"), Some(0));
+        assert_eq!(cfg.find_page(" IA "), Some(1));
+        assert_eq!(cfg.find_page("cyber.vitals"), Some(0));
+        assert_eq!(cfg.find_page("Vitals"), Some(0));
+        assert_eq!(cfg.find_page("uptime"), Some(1));
+        // a página chamada "Docker" ganha do app cyber.docker
+        assert_eq!(cfg.find_page("docker"), Some(2));
+        assert_eq!(cfg.find_page("cyber"), None);
+        assert_eq!(cfg.find_page("nada"), None);
     }
 
     #[test]

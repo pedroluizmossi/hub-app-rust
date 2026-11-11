@@ -36,7 +36,7 @@ pub struct Permissions {
     /// Programas que o app pode executar (allowlist do executor).
     #[serde(default)]
     pub exec: Vec<String>,
-    /// Domínios que o app pode consultar por HTTPS (só plugins com tela; ver `apps/plugin.rs`).
+    /// Domínios que o app pode consultar por HTTPS (só plugins com tela; ver `apps/plugin/script.rs`).
     #[serde(default)]
     pub net: Vec<String>,
 }

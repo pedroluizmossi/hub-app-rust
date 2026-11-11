@@ -1,0 +1,132 @@
+// Moldura da janela sem borda: alças de redimensionar, fundo do visual, barras e título.
+import { Anim, Skin } from "theme.slint";
+
+// Áreas invisíveis nas bordas e cantos para redimensionar a janela sem moldura.
+export component ResizeHandles inherits Rectangle {
+    callback start(string);
+    property <length> e: 6px;   // espessura da borda
+    property <length> k: 14px;  // tamanho do canto
+
+    // bordas
+    TouchArea { y: 0; height: e; x: k; width: parent.width - 2 * k; mouse-cursor: ns-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("n"); } } }
+    TouchArea { y: parent.height - e; height: e; x: k; width: parent.width - 2 * k; mouse-cursor: ns-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("s"); } } }
+    TouchArea { x: 0; width: e; y: k; height: parent.height - 2 * k; mouse-cursor: ew-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("w"); } } }
+    TouchArea { x: parent.width - e; width: e; y: k; height: parent.height - 2 * k; mouse-cursor: ew-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("e"); } } }
+    // cantos
+    TouchArea { x: 0; y: 0; width: k; height: k; mouse-cursor: nwse-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("nw"); } } }
+    TouchArea { x: parent.width - k; y: parent.height - k; width: k; height: k; mouse-cursor: nwse-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("se"); } } }
+    TouchArea { x: parent.width - k; y: 0; width: k; height: k; mouse-cursor: nesw-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("ne"); } } }
+    TouchArea { x: 0; y: parent.height - k; width: k; height: k; mouse-cursor: nesw-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("sw"); } } }
+}
+
+// Fundo da janela: polígono com os cantos superior direito e inferior esquerdo cortados
+// (ou retângulo, com chanfro 0). A borda tem a espessura do visual.
+//
+// Retângulo de verdade quando o chanfro é 0 (a maioria dos visuais): um `Path` do tamanho
+// da janela é rasterizado inteiro, preenchimento e traço, em todo quadro, por menor que
+// seja a área que mudou.
+export component Frame inherits Rectangle {
+    if Skin.chamfer == 0: Rectangle {
+        background: Skin.bg;
+        border-width: Skin.border;
+        border-color: Skin.edge;
+    }
+    if Skin.chamfer > 0: Path {
+        property <float> w: self.width / 1px;
+        property <float> h: self.height / 1px;
+        property <float> c: Skin.chamfer / 1px;
+        property <float> b: Skin.border / 2px;   // traço centrado: recua meia borda
+        width: 100%;
+        height: 100%;
+        viewbox-width: w;
+        viewbox-height: h;
+        commands: "M " + b + " " + b + " L " + (w - c) + " " + b + " L " + (w - b) + " " + c
+            + " L " + (w - b) + " " + (h - b) + " L " + c + " " + (h - b)
+            + " L " + b + " " + (h - c) + " Z";
+        fill: Skin.bg;
+        stroke: Skin.edge;
+        stroke-width: Skin.border;
+    }
+    // filete por dentro da borda (madeira do Aconchego)
+    if Skin.edge-inner != transparent: Rectangle {
+        x: Skin.border;
+        y: Skin.border;
+        width: parent.width - 2 * Skin.border;
+        height: parent.height - 2 * Skin.border;
+        border-width: 2px;
+        border-color: Skin.edge-inner;
+    }
+}
+
+// Barra de título de uma tela, com linha embaixo (e brilho em cima, se o visual tiver).
+export component Bar inherits Rectangle {
+    in property <color> line: Skin.line;
+    in property <length> line-width: Skin.header-line;
+    height: Skin.header-h + Skin.panel-top-h + line-width;
+    background: Skin.panel;
+    Rectangle { y: 0; height: Skin.panel-top-h; background: Skin.panel-top; }
+    Rectangle {
+        y: Skin.panel-top-h;
+        height: Skin.header-h;
+        @children
+    }
+    Rectangle { y: parent.height - line-width; height: line-width; background: line; }
+}
+
+// Título da janela no estilo do visual: ícone em pixel, nome e cursor piscando.
+export component Title inherits HorizontalLayout {
+    spacing: Skin.title-cursor ? 4px : 10px;
+    horizontal-stretch: 0;
+    if Skin.title-icon != "": VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 24px;
+            height: 24px;
+            Path {
+                width: 100%;
+                height: 100%;
+                commands: Skin.title-icon;
+                viewbox-width: 8;
+                viewbox-height: 8;
+                fill: Skin.panel-ink;
+                anti-alias: false;
+            }
+            if Skin.title-icon-cut != "": Path {
+                width: 100%;
+                height: 100%;
+                commands: Skin.title-icon-cut;
+                viewbox-width: 8;
+                viewbox-height: 8;
+                fill: Skin.panel;
+                anti-alias: false;
+            }
+        }
+    }
+    Text {
+        text: Skin.title;
+        color: Skin.title-cursor ? Skin.accent : Skin.panel-ink;
+        font-family: Skin.font-title;
+        font-size: Skin.title-size;
+        font-weight: Skin.title-weight;
+        letter-spacing: Skin.title-spacing;
+        vertical-alignment: center;
+        horizontal-stretch: 0;
+    }
+    if Skin.title-cursor: VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 9px;
+            height: 15px;
+            background: Skin.accent;
+            opacity: mod(Anim.frame, 8) < 4 ? 1 : 0;
+        }
+    }
+}

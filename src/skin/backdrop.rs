@@ -50,6 +50,7 @@ impl Canvas {
     }
 
     /// Brilho elíptico: cor `c` com alfa `a` no centro (cx, cy), sumindo até `fade` do raio.
+    #[allow(clippy::too_many_arguments)] // centro, raios, fade e cor: agrupar não ajuda a ler
     fn glow(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, fade: f32, c: u32, a: f32) {
         let c = rgb(c);
         let (cx, cy, rx, ry) = (cx * self.s, cy * self.s, rx * self.s * fade, ry * self.s * fade);

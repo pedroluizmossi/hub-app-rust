@@ -63,7 +63,7 @@ impl Source for Claude {
                 agents.push(agent);
             }
         }
-        agents.sort_by(|a, b| b.since_ms.cmp(&a.since_ms));
+        agents.sort_by_key(|a| std::cmp::Reverse(a.since_ms));
         agents.truncate(LIMIT);
         self.transcripts.retain(|id, _| agents.iter().any(|a| a.id == *id));
 
@@ -351,7 +351,7 @@ fn subagents(dir: &Path, parent: &Agent, now: i64) -> Vec<Agent> {
             details: Details { kind: sub.kind, model: sub.model, depth: sub.depth, ..Details::default() },
         });
     }
-    subs.sort_by(|a, b| b.since_ms.cmp(&a.since_ms));
+    subs.sort_by_key(|a| std::cmp::Reverse(a.since_ms));
     subs.truncate(SUBS);
     subs
 }

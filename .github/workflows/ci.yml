@@ -29,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       # winit (X11/Wayland) e fontes: só o Linux precisa de pacotes do sistema
       - name: Dependências do sistema (Linux)
@@ -39,5 +41,8 @@ jobs:
       # `--locked`: falha se o Cargo.lock estiver desatualizado, em vez de resolver de novo
       - name: cargo check
         run: cargo check --workspace --all-targets --locked
+      # aviso do clippy reprova: o código entra limpo nos dois sistemas
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
         run: cargo test --workspace --locked

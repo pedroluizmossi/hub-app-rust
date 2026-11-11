@@ -168,15 +168,14 @@ fn data_dir() -> Result<PathBuf, String> { crate::core::os::xdg_data_dir().ok_or
 struct OpenCodeAuth { token: String, org: Option<String> }
 
 fn opencode_token() -> Result<OpenCodeAuth, String> {
-    if let Ok(key) = std::env::var("OPENCODE_GO_API_KEY") {
-        if !key.trim().is_empty() && !key.contains(['\r','\n']) { return Ok(OpenCodeAuth { token: key, org: None }); }
-    }
+    if let Ok(key) = std::env::var("OPENCODE_GO_API_KEY")
+        && !key.trim().is_empty() && !key.contains(['\r','\n']) { return Ok(OpenCodeAuth { token: key, org: None }); }
     let dir = data_dir()?.join("opencode");
     // Na versão 2, o banco guarda a sessão ativa; um auth.json antigo pode
     // conter uma chave revogada de outra conta e não deve prevalecer.
-    if let Ok(conn) = database(&dir.join("opencode.db")) {
-        if let Ok(mut stmt) = conn.prepare("SELECT value FROM credential WHERE integration_id IN ('opencode-go','opencode') AND active = 1 ORDER BY CASE integration_id WHEN 'opencode-go' THEN 0 ELSE 1 END, time_updated DESC") {
-            if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+    if let Ok(conn) = database(&dir.join("opencode.db"))
+        && let Ok(mut stmt) = conn.prepare("SELECT value FROM credential WHERE integration_id IN ('opencode-go','opencode') AND active = 1 ORDER BY CASE integration_id WHEN 'opencode-go' THEN 0 ELSE 1 END, time_updated DESC")
+            && let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
                 for row in rows.flatten() {
                     let Ok(v) = serde_json::from_str::<Value>(&row) else { continue };
                     let token = match v["type"].as_str() {
@@ -190,13 +189,10 @@ fn opencode_token() -> Result<OpenCodeAuth, String> {
                     }
                 }
             }
-        }
-    }
     if let Ok(v) = object(&dir.join("auth.json")) {
         for id in ["opencode-go", "opencode"] {
-            if matches!(v[id]["type"].as_str(), Some("api" | "zen")) {
-                if let Some(key) = nonempty(&v[id]["key"]) { return Ok(OpenCodeAuth { token: key.into(), org: None }); }
-            }
+            if matches!(v[id]["type"].as_str(), Some("api" | "zen"))
+                && let Some(key) = nonempty(&v[id]["key"]) { return Ok(OpenCodeAuth { token: key.into(), org: None }); }
         }
     }
     Err("Entre no OpenCode Go para renovar o login".into())

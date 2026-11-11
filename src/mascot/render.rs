@@ -151,7 +151,7 @@ impl Painter<'_> {
     fn led(&self) -> u32 {
         let on = self.frame % 4 < 2;
         match self.reaction {
-            Some(Reaction::Celebrate) => return if self.frame % 2 == 0 { self.t.ok } else { lighter(self.t.visor, 1.5) },
+            Some(Reaction::Celebrate) => return if self.frame.is_multiple_of(2) { self.t.ok } else { lighter(self.t.visor, 1.5) },
             Some(Reaction::Surprised) => return lighter(self.t.visor, 1.6),
             None => {}
         }
@@ -344,7 +344,7 @@ pub fn rgba_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale
 #[cfg_attr(windows, allow(dead_code))]
 pub fn argb_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
     let (side, mut data) = rgba_square(sprite, theme, mood, frame, scale);
-    for px in data.chunks_exact_mut(4) {
+    for px in data.as_chunks_mut::<4>().0 {
         px.rotate_right(1); // [r, g, b, a] -> [a, r, g, b]
     }
     (side, data)

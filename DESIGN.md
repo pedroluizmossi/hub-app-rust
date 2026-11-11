@@ -155,9 +155,10 @@ Um app novo, do zero:
    `MiniApp`. Preencha a tela em `enable`, `on_event` e `settings_changed` (que também é
    chamado quando o visual muda e o tema "auto" troca). Registre o módulo em
    `src/apps/mod.rs`.
-4. **Registro** — em `src/hub.rs`, `registry.add(crate::apps::<app>::<App>Mini::create(…))`.
-5. **No painel** — em `ui/hub.slint`, importe a view e o global, exporte o global no
-   `export { … }` e acrescente no `Dashboard` um `if c.id == "cyber.<nome>": <App>View { … }`.
+4. **Registro** — em `src/hub/mod.rs`, `registry.add(crate::apps::<app>::<App>Mini::create(…))`.
+5. **No painel** — em `ui/dashboard.slint`, importe a view e acrescente no `Dashboard` um
+   `if c.id == "cyber.<nome>": <App>View { … }`; em `ui/hub.slint`, importe o global (e as
+   structs da tela) e exporte-os no `export { … }`, para o Rust enxergar.
 6. **Provedor** (se precisar de dado novo) — `src/providers/<nome>.rs` com um `collect()`
    que devolve um snapshot; um caso novo em `bus::Event`; `bus.spawn("<nome>", intervalo, …)`
    no `Hub::new`. O provedor só roda enquanto algum app ativo o tiver em `uses`.
@@ -324,6 +325,15 @@ XDG_CONFIG_HOME=/tmp/mu-teste MINIUTILS_INSTANCE=teste cargo run
 
 `--tab apps` abre direto nas configurações. Confira cada visual em painel, modo de edição
 e configurações, e cada tema em calma e alarme.
+
+Para ajustar a tela sem recompilar a cada mudança, rode com o live-preview do Slint: os
+`.slint` recarregam ao salvar (num editor que grava no mesmo arquivo, como o VS Code).
+
+```sh
+cargo run --features live-preview
+```
+
+Um agente faz o mesmo, e ainda vê e clica, com `tools/dev-ui.sh` (ver AGENTS.md).
 
 ## 8. Limites do renderizador
 

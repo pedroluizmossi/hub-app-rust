@@ -82,11 +82,10 @@ struct Stream {
 
 impl Stream {
     fn kill(&self) {
-        if let Ok(mut slot) = self.child.lock() {
-            if let Some(child) = slot.as_mut() {
+        if let Ok(mut slot) = self.child.lock()
+            && let Some(child) = slot.as_mut() {
                 let _ = child.kill();
             }
-        }
     }
 
     fn idle(&self) -> bool {
@@ -210,11 +209,10 @@ fn watch(tx: Sender<GpuSnapshot>, stream: Arc<Stream>) {
             if stream.idle() {
                 break;
             }
-            if let Some(snap) = parse_nvidia(&line) {
-                if tx.send(snap).is_err() {
+            if let Some(snap) = parse_nvidia(&line)
+                && tx.send(snap).is_err() {
                     break;
                 }
-            }
         }
     }
     let child = stream.child.lock().ok().and_then(|mut slot| slot.take());

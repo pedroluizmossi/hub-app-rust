@@ -1,0 +1,6 @@
+[env]
+# sccache (se estiver em uso, como `rustc-wrapper`): tira a raiz desta árvore dos caminhos
+# da chave do cache, para a pasta principal e cada worktree (.claude/worktrees/<nome>)
+# reaproveitarem as dependências compiladas umas das outras. Sem sccache, não faz nada.
+# `relative`: o valor vira a pasta que contém este .cargo/, ou seja, a raiz de cada árvore.
+SCCACHE_BASEDIRS = { value = "", relative = true }

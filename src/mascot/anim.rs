@@ -113,7 +113,7 @@ pub struct Look {
 impl Look {
     /// Sem `Animator`: piscada e quadro vêm do contador global (bandeja, ícones das listas).
     pub fn from_frame(mood: Mood, frame: u32) -> Self {
-        Look { mood, reaction: None, blink: frame % 25 == 0, frame, pose: None }
+        Look { mood, reaction: None, blink: frame.is_multiple_of(25), frame, pose: None }
     }
 }
 
@@ -151,11 +151,10 @@ impl Animator {
         if self.last[r.index()].is_some_and(|t| now.duration_since(t) < r.cooldown()) {
             return false;
         }
-        if let Some(cur) = self.current(now) {
-            if cur.priority() > r.priority() {
+        if let Some(cur) = self.current(now)
+            && cur.priority() > r.priority() {
                 return false;
             }
-        }
         self.active = Some((r, now));
         self.last[r.index()] = Some(now);
         true

@@ -182,19 +182,17 @@ impl Director {
             }
         }
         // fim da fala atual: pausa e depois a próxima
-        if let Some((line, started)) = &self.current {
-            if now >= *started + line_time(&line.text) {
+        if let Some((line, started)) = &self.current
+            && now >= *started + line_time(&line.text) {
                 self.current = None;
                 self.gap_until = Some(now + GAP);
             }
-        }
-        if self.current.is_none() && self.gap_until.is_none_or(|t| now >= t) {
-            if let Some(line) = self.queue.pop_front() {
+        if self.current.is_none() && self.gap_until.is_none_or(|t| now >= t)
+            && let Some(line) = self.queue.pop_front() {
                 self.seq += 1;
                 self.current = Some((line, now));
                 self.gap_until = None;
             }
-        }
         // conversa no ar conta como "não calmo"
         if self.current.is_some() || !self.queue.is_empty() {
             self.quiet_since = Some(now);
@@ -320,11 +318,10 @@ impl Director {
         if let Some(t) = self.pick_text(&a_say, lang, ctx) {
             out.push(Line { voice: a.clone(), text: fill(&t), listener: b.clone(), show_in: show_a });
         }
-        if let (Some(b), Some(say)) = (&b, &b_say) {
-            if let Some(t) = self.pick_text(say, lang, ctx) {
+        if let (Some(b), Some(say)) = (&b, &b_say)
+            && let Some(t) = self.pick_text(say, lang, ctx) {
                 out.push(Line { voice: b.clone(), text: fill(&t), listener: Some(a.clone()), show_in: b.app.clone() });
             }
-        }
         out
     }
 
@@ -565,11 +562,10 @@ mod tests {
         for _ in 0..secs * 10 {
             *t += Duration::from_millis(100);
             d.step(*t, Vec::new(), voices, true, Pace::Some);
-            if let Some(v) = d.view(*t) {
-                if names.last() != Some(&v.line.voice.name) {
+            if let Some(v) = d.view(*t)
+                && names.last() != Some(&v.line.voice.name) {
                     names.push(v.line.voice.name.clone());
                 }
-            }
         }
         names
     }
@@ -657,7 +653,7 @@ mod tests {
         for seed in 1..30 {
             let mut d = director(seed);
             // sozinho na página: só a primeira fala, sem número e sem `{b}`
-            let lines = d.compose(FactKind::Trouble, &claude, "Claude", None, &[claude.clone()]);
+            let lines = d.compose(FactKind::Trouble, &claude, "Claude", None, std::slice::from_ref(&claude));
             assert_eq!(lines.len(), 1);
             assert!(!lines[0].text.contains('%') && !lines[0].text.contains('{'), "{}", lines[0].text);
             // a resposta ao alarme da IA é a que o app de IA sugere (`trouble.answer`)

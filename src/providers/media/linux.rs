@@ -25,6 +25,7 @@ fn connect() -> zbus::Result<Connection> {
     zbus::blocking::connection::Builder::session()?.method_timeout(CALL_TIMEOUT).build()
 }
 
+#[derive(Default)]
 pub struct MediaProvider {
     conn: Option<Connection>,
     /// Player em uso (mantém a escolha entre leituras).
@@ -33,11 +34,6 @@ pub struct MediaProvider {
     retry_at: Option<Instant>,
 }
 
-impl Default for MediaProvider {
-    fn default() -> Self {
-        MediaProvider { conn: None, player: String::new(), last: None, retry_at: None }
-    }
-}
 
 impl MediaProvider {
     /// Chamado a cada segundo enquanto o mini-app está ligado. `Some` quando algo mudou.
@@ -176,13 +172,10 @@ pub fn send(service: &str, verb: &str, seek_us: i64) -> anyhow::Result<()> {
         anyhow::bail!("player inválido");
     }
     let conn = connect()?;
-    match verb {
-        "raise" => {
-            let root = Proxy::new(&conn, service, PATH, ROOT)?;
-            root.call_method("Raise", &())?;
-            return Ok(());
-        }
-        _ => {}
+    if verb == "raise" {
+        let root = Proxy::new(&conn, service, PATH, ROOT)?;
+        root.call_method("Raise", &())?;
+        return Ok(());
     }
     let player = Proxy::new(&conn, service, PATH, PLAYER)?;
     match verb {

@@ -149,11 +149,10 @@ impl Hub {
 
         let w = Rc::downgrade(hub);
         ui.on_backdrop_resized(move |bw, bh| {
-            if let Some(h) = w.upgrade() {
-                if bw > 0.0 && bh > 0.0 && h.backdrop_size.replace((bw, bh)) != (bw, bh) {
+            if let Some(h) = w.upgrade()
+                && bw > 0.0 && bh > 0.0 && h.backdrop_size.replace((bw, bh)) != (bw, bh) {
                     h.schedule_backdrop();
                 }
-            }
         });
 
         let w = Rc::downgrade(hub);
@@ -295,12 +294,11 @@ impl Hub {
                         h.resize_until.set(Some(Instant::now() + RESIZE_QUIET));
                     }
                     // fixado ou no meio de um redimensionamento: não some sozinho
-                    WindowEvent::Focused(false) => {
-                        if h.shown.get() && h.has_tray() && h.had_focus.get() && !h.pinned.get() && !h.resizing() {
+                    WindowEvent::Focused(false)
+                        if h.shown.get() && h.has_tray() && h.had_focus.get() && !h.pinned.get() && !h.resizing() => {
                             h.hide();
                             h.focus_hidden_at.set(Some(Instant::now()));
                         }
-                    }
                     _ => {}
                 }
                 EventResult::Propagate

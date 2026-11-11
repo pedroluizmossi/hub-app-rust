@@ -17,7 +17,8 @@ impl Hub {
         p
     }
 
-    /// Abre uma aba pelo nome: "apps" (configurações), "panel" ou o nome de uma página.
+    /// Abre uma aba pelo nome: "apps" (configurações), "store" (loja), "panel" ou uma página
+    /// (pelo nome ou por um app que está nela, ver `Config::find_page`).
     pub(super) fn open_tab(&self, tab: &str) {
         if tab == "apps" || tab == "store" {
             self.ui.set_current(tab.into());
@@ -26,10 +27,7 @@ impl Hub {
             }
             return;
         }
-        let found = {
-            let cfg = self.host.config.borrow();
-            cfg.pages.iter().position(|p| p.name.trim().eq_ignore_ascii_case(tab.trim()))
-        };
+        let found = self.host.config.borrow().find_page(tab);
         if let Some(i) = found {
             self.page.set(i);
         }
