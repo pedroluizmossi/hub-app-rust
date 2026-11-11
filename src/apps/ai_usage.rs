@@ -319,7 +319,7 @@ impl AiUsageMini {
                 None => card.status.clone(),
             };
             let tint = ai_mascots::get(&card.name).and_then(ai_mascots::button_colors).unwrap_or((0x9399a4, 0x26282e));
-            UsageCard { name: card.name.clone().into(), status: status.into(), plan: card.plan.clone().into(),
+            UsageCard { name: card.name.clone().into(), voice: Voice::id_of(&self.manifest.id, &card.name).into(), status: status.into(), plan: card.plan.clone().into(),
                 stale: card.stale, lines: ModelRc::new(VecModel::from(lines)),
                 mascot: self.mascots[i].image(), mood: self.card_mood(i).as_str().into(),
                 button: render::color(tint.0), button_edge: render::color(tint.1),

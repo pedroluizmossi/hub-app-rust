@@ -1,6 +1,9 @@
 //! O hub: liga registro, provedores, janela e bandeja.
 //!
-//! Este arquivo guarda o estado (`Hub`), a montagem e os dois laços (dados e animação).
+//! Este arquivo guarda o estado (`Hub`), a montagem e o que move a tela:
+//! - `update`: roda quando o barramento ou uma ação em segundo plano tocam o despertador
+//!   (`core::wake`). Sem nada chegando, nada roda.
+//! - `anim_tick`: o quadro de animação, só com a janela aberta.
 //! O resto do `impl Hub` está dividido por assunto nos módulos abaixo.
 
 mod appearance;
@@ -12,7 +15,7 @@ mod settings;
 mod window;
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -21,10 +24,10 @@ use self::grid::Drag;
 use crate::core::bus::Bus;
 use crate::core::config::Config;
 use crate::core::layout;
-use crate::core::miniapp::{AppRef, Host};
+use crate::core::miniapp::{AppRef, Host, TrayMedia};
 use crate::core::registry::Registry;
 use crate::mascot::{Mood, sprites, themes};
-use crate::tray::{Tray, TrayMedia};
+use crate::tray::Tray;
 use crate::ui::{Anim, HubWindow};
 
 /// Depois do último tamanho novo durante um arrasto de borda, o foco ainda é ignorado este tempo.
@@ -34,6 +37,25 @@ const RESIZE_QUIET: Duration = Duration::from_millis(800);
 /// janela, 8 quadros/s; fora dela, 4/s: cada quadro é desenhado na CPU.
 const FRAME_HOT: Duration = Duration::from_millis(125);
 const FRAME_COLD: Duration = Duration::from_millis(250);
+
+thread_local! {
+    /// O hub da thread da UI, para quem chega de outra thread pelo event loop
+    /// (despertador, menu da bandeja). Closures `Send` não podem levar um `Rc`.
+    static CURRENT: RefCell<Weak<Hub>> = const { RefCell::new(Weak::new()) };
+}
+
+/// Roda `f` com o hub, se ele ainda existe (só na thread da UI).
+fn with_hub(f: impl FnOnce(&Hub)) {
+    if let Some(hub) = CURRENT.with(|c| c.borrow().upgrade()) {
+        f(&hub);
+    }
+}
+
+/// Comando de mídia escolhido no menu da bandeja (chamado na thread do ksni): vai para o
+/// app que deu as informações de mídia, na thread da UI.
+pub fn tray_media_command(verb: &'static str) {
+    let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.tray_command(verb)));
+}
 
 pub struct Hub {
     host: Rc<Host>,
@@ -67,7 +89,7 @@ pub struct Hub {
     /// Tamanho (lógico) da área do painel, para desenhar o fundo; e a geração do pedido
     /// de desenho (vários pedidos seguidos num redimensionamento viram um só).
     backdrop_size: Cell<(f32, f32)>,
-    backdrop_gen: Rc<Cell<u32>>,
+    backdrop: std::sync::Arc<appearance::BackdropState>,
     /// Minuto mostrado no relógio ("21:57").
     clock: RefCell<String>,
     /// O que a lista das Configurações mostra agora (ver `rebuild_settings`).
@@ -79,6 +101,10 @@ pub struct Hub {
     /// Conversa entre mascotes (ver `chatter.rs`) e o que a caixa de diálogo mostra agora.
     chatter: RefCell<chatter::Director>,
     chat_shown: Cell<Option<(u64, usize, bool)>>,
+    /// Quadros da fala sendo "digitada": só corre enquanto há conversa no ar.
+    chat_timer: Timer,
+    /// Tooltip adiado (ver `TOOLTIP_EVERY`): manda o texto quando o prazo vence.
+    tray_later: Timer,
 }
 
 /// De quanto em quanto tempo o tooltip da bandeja acompanha números que só mudam de valor
@@ -137,13 +163,15 @@ impl Hub {
             anim: Timer::default(),
             drag: RefCell::new(None),
             backdrop_size: Cell::new((0.0, 0.0)),
-            backdrop_gen: Rc::new(Cell::new(0)),
+            backdrop: Default::default(),
             clock: RefCell::new(String::new()),
             settings_fingerprint: RefCell::new(String::new()),
             page: Cell::new(0),
             pages_fingerprint: RefCell::new(String::new()),
             chatter: RefCell::new(chatter::Director::default()),
             chat_shown: Cell::new(None),
+            chat_timer: Timer::default(),
+            tray_later: Timer::default(),
         });
         hub.ui.set_max_columns(layout::MAX_COLS as i32);
         hub.ui.set_max_rows(layout::MAX_ROWS as i32);
@@ -154,7 +182,8 @@ impl Hub {
         Self::bind(&hub);
         hub.load_lines();
 
-        // bandeja: se não houver (GNOME sem AppIndicator), a janela fica sempre aberta
+        // bandeja: enquanto não houver painel (subindo, ou GNOME sem AppIndicator), a
+        // janela fica aberta; o ícone aparece sozinho quando o painel surgir
         match Tray::spawn(hub.ui.as_weak(), sprites::get("neko"), themes::get("neon"), Mood::Sleep) {
             Ok(t) => *hub.tray.borrow_mut() = Some(t),
             Err(e) => eprintln!("miniutils: sem bandeja do sistema ({e}); a janela fica aberta"),
@@ -165,37 +194,39 @@ impl Hub {
             hub.ui.window().set_size(slint::LogicalSize::new(w.max(360) as f32, h.max(280) as f32));
         }
 
+        Self::start_loops(&hub);
         if !(start_hidden && hub.has_tray()) {
             hub.show(None);
         }
-        Self::start_timers(&hub);
         Ok(hub)
     }
 
-    fn start_timers(hub: &Rc<Self>) {
-        // dados: esvazia o barramento e atualiza humor/bandeja
-        let data = Timer::default();
-        let w = Rc::downgrade(hub);
-        data.start(TimerMode::Repeated, Duration::from_millis(100), move || {
-            if let Some(h) = w.upgrade() {
-                h.data_tick();
-            }
+    fn start_loops(hub: &Rc<Self>) {
+        CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(hub));
+        // dados: cada leitura ou recado toca o despertador, que agenda `update` na thread
+        // da UI (vários toques seguidos viram uma atualização)
+        hub.host.bus.waker().install(|| {
+            let _ = slint::invoke_from_event_loop(|| with_hub(Hub::update));
         });
-        // animação: só com a janela visível; o relógio fica no hub (`set_hovered` muda o ritmo)
+        // o que chegou antes de instalar (a montagem leva um tempo)
+        hub.update();
+        // animação: só com a janela visível (`set_shown` liga e desliga; `set_hovered` muda o ritmo)
         let w = Rc::downgrade(hub);
         hub.anim.start(TimerMode::Repeated, FRAME_COLD, move || {
             if let Some(h) = w.upgrade() {
-                if h.shown.get() {
-                    h.anim_tick();
-                }
+                h.anim_tick();
             }
         });
-        // os timers vivem enquanto o event loop roda
-        std::mem::forget(data);
+        if !hub.shown.get() {
+            hub.anim.stop();
+        }
     }
 
-    fn data_tick(&self) {
-        self.update_clock();
+    /// Chegaram leituras dos provedores ou recados das ações: entrega aos apps e atualiza
+    /// o que depende deles.
+    fn update(&self) {
+        // antes de esvaziar: o que chegar daqui em diante toca de novo
+        self.host.bus.waker().take();
         let events = self.host.bus.drain();
         if !events.is_empty() {
             self.registry.dispatch(&events, &self.ui);
@@ -205,15 +236,29 @@ impl Hub {
         if !reports.is_empty() {
             self.registry.deliver(&reports, &self.ui);
         }
+        self.refresh_derived();
+    }
+
+    /// Atualiza o que depende do estado dos apps: formulário das Configurações, humor das
+    /// páginas, bandeja e conversa. Barato quando nada mudou (cada parte compara antes).
+    fn refresh_derived(&self) {
         if self.host.settings_dirty.replace(false) {
             self.rebuild_settings();
         }
         // a barra lateral mostra o humor de cada página
         self.rebuild_pages(false);
-
         self.sync_tray();
         // conversa entre mascotes: fatos novos e a fala que está sendo "digitada"
         self.chat_tick();
+    }
+
+    /// Comando de mídia do menu da bandeja: vai ao app que deu as informações de mídia.
+    fn tray_command(&self, verb: &str) {
+        let owner = self.registry.enabled().into_iter().find(|a| a.borrow().tray_media().is_some());
+        if let Some(app) = owner {
+            app.borrow_mut().tray_command(verb, &self.ui);
+        }
+        self.refresh_derived();
     }
 
     /// A bandeja mostra a mascote (e o tema) do app em pior estado, ou a escolhida na config.
@@ -263,8 +308,14 @@ impl Hub {
             }
         };
         if !urgent {
+            // só o texto mudou: manda quando o prazo vencer, mesmo que nada mais chegue
+            if !self.tray_later.running() {
+                let left = last.as_ref().map_or(Duration::ZERO, |(_, sent)| TOOLTIP_EVERY.saturating_sub(sent.elapsed()));
+                self.tray_later.start(TimerMode::SingleShot, left, || with_hub(Hub::sync_tray));
+            }
             return;
         }
+        self.tray_later.stop();
         if let Some(tray) = self.tray.borrow().as_ref() {
             // o ícone só é redesenhado quando a mascote, o tema ou o humor mudam
             let icon = (!same_icon).then(|| (sprites::get(&now.sprite), themes::get(now.theme), now.mood));
@@ -273,7 +324,13 @@ impl Hub {
         *last = Some((now, Instant::now()));
     }
 
+    /// Um quadro: mascotes, relógio e o que um clique numa tela pode ter mudado (os
+    /// apps tratam os próprios cliques; o hub confere humor, bandeja e conversa aqui).
     fn anim_tick(&self) {
+        if !self.shown.get() {
+            return;
+        }
+        self.update_clock();
         let f = self.frame.get().wrapping_add(1) % 600;
         self.frame.set(f);
         self.ui.global::<Anim>().set_frame(f as i32);
@@ -284,5 +341,6 @@ impl Hub {
                 app.borrow_mut().tick(f, &self.ui);
             }
         }
+        self.refresh_derived();
     }
 }

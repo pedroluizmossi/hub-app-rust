@@ -370,6 +370,7 @@ impl VitalsMini {
         let show_temps = self.host.config.borrow().bool(&self.manifest, "show_temps");
         VitalCard {
             title: TITLES[i].into(),
+            voice: Voice::id_of(&self.manifest.id, TITLES[i]).into(),
             mascot: self.mascots[i].image(),
             mood: v.mood.as_str().into(),
             reaction: self.reactions[i].map_or("", Reaction::as_str).into(),

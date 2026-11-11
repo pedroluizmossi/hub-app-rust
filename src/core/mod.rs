@@ -8,3 +8,4 @@ pub mod manifest;
 pub mod miniapp;
 pub mod notify;
 pub mod registry;
+pub mod wake;

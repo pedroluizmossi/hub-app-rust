@@ -21,6 +21,8 @@ export struct AgentSub {
 }
 
 export struct AgentRow {
+    // identifica a sessão nos cliques (a posição muda quando a lista se reordena)
+    key: string,
     title: string,
     // "Claude · 2 subagentes ativos · Edit: bus.rs" (parada, a pasta no lugar da ação)
     info: string,
@@ -77,10 +79,11 @@ export global AgentsApp {
 
     callback mascot-poked();
     // todos recebem o índice da linha
-    callback toggle(int);          // abre ou fecha as opções
-    callback open-dir(int);        // pasta no gerenciador de arquivos
-    callback open-terminal(int);   // terminal na pasta
-    callback resume(int);          // retoma a sessão num terminal
+    // recebem a `key` da sessão
+    callback toggle(string);          // abre ou fecha as opções
+    callback open-dir(string);        // pasta no gerenciador de arquivos
+    callback open-terminal(string);   // terminal na pasta
+    callback resume(string);          // retoma a sessão num terminal
 }
 
 // Etiqueta pequena: modelo, esforço, branch.
@@ -178,7 +181,7 @@ component Row inherits Rectangle {
     // clique no cartão: abre ou fecha as opções
     hover := TouchArea {
         mouse-cursor: pointer;
-        clicked => { AgentsApp.toggle(root.index); }
+        clicked => { AgentsApp.toggle(root.a.key); }
     }
 
     Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
@@ -389,21 +392,21 @@ component Row inherits Rectangle {
             icon: Icons.grid;
             ink: t.visor;
             font-size: 13px;
-            clicked => { AgentsApp.open-dir(root.index); }
+            clicked => { AgentsApp.open-dir(root.a.key); }
         }
         TextButton {
             text: narrow ? "Terminal" : "Terminal na pasta";
             icon: Icons.terminal;
             ink: t.visor;
             font-size: 13px;
-            clicked => { AgentsApp.open-terminal(root.index); }
+            clicked => { AgentsApp.open-terminal(root.a.key); }
         }
         if a.can-resume: TextButton {
             text: narrow ? "Retomar" : "Retomar sessão";
             icon: Icons.play;
             ink: t.ok;
             font-size: 13px;
-            clicked => { AgentsApp.resume(root.index); }
+            clicked => { AgentsApp.resume(root.a.key); }
         }
     }
 }

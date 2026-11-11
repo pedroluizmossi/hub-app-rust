@@ -162,7 +162,8 @@ Um app novo, do zero:
    `take_facts` (o que aconteceu: use `chatter::mood_fact` quando o humor muda e registre
    `Poked` ao cutucar) e `lines` (`include_str!` do `miniapps/<app>/lines.toml`, só com o
    que o app tem de próprio; o resto vem das genéricas). Na view, dê ao `Mascot` o
-   `voice: "cyber.<nome>:<nome da mascote>"`, o mesmo `app:nome` da `Voice` no Rust.
+   `voice` que o Rust preenche com `Voice::id_of(&manifest.id, nome)` (uma propriedade do
+   global ou um campo da linha), nunca um texto escrito à mão.
    Formato das falas: topo de `src/core/chatter.rs`.
 
 ### Tamanhos

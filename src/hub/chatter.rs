@@ -18,7 +18,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, TimerMode};
 
 use super::Hub;
 use crate::core::chatter::{Fact, FactKind, Lang, Lines, Say, Voice};
@@ -28,6 +28,8 @@ use crate::ui::Chatter;
 /// Falas genéricas: o que um app não declarou no próprio `lines.toml`.
 const GENERIC: &str = include_str!("lines.toml");
 
+/// Intervalo dos quadros enquanto uma fala está no ar.
+const CHAT_FRAME: Duration = Duration::from_millis(100);
 /// Letras por segundo ao "digitar" a fala.
 const TYPE_RATE: f32 = 28.0;
 /// Quanto a fala fica na tela depois de digitada: base + um tanto por letra (até o teto).
@@ -197,6 +199,11 @@ impl Director {
         if self.current.is_some() || !self.queue.is_empty() {
             self.quiet_since = Some(now);
         }
+    }
+
+    /// Há conversa no ar (uma fala ou outras na fila): a tela precisa de quadros.
+    pub fn busy(&self) -> bool {
+        self.current.is_some() || !self.queue.is_empty()
     }
 
     /// O que mostrar agora (nada entre falas).
@@ -437,9 +444,8 @@ fn line_time(text: &str) -> Duration {
     typing + (HOLD_BASE + HOLD_PER_CHAR * n as u32).min(HOLD_MAX)
 }
 
-/// Id de uma mascote na tela ("cyber.vitals:CPU"): é como a view diz qual mascote é qual.
 fn voice_id(v: &Voice) -> String {
-    format!("{}:{}", v.app, v.name)
+    v.id()
 }
 
 impl Hub {
@@ -471,11 +477,18 @@ impl Hub {
             Vec::new()
         };
         let now = Instant::now();
-        let view = {
+        let (view, busy) = {
             let mut d = self.chatter.borrow_mut();
             d.step(now, facts, &voices, visible, pace);
-            d.view(now)
+            (d.view(now), d.busy())
         };
+        // a fala é "digitada" a 28 letras/s: com conversa no ar, quadros a cada 100 ms; sem
+        // ela, o quadro de animação basta para puxar o próximo papo
+        if !busy {
+            self.chat_timer.stop();
+        } else if !self.chat_timer.running() {
+            self.chat_timer.start(TimerMode::Repeated, CHAT_FRAME, || super::with_hub(Hub::chat_tick));
+        }
         let key = view.as_ref().map(|v| (v.seq, v.typed.len(), v.done));
         if self.chat_shown.replace(key) == key {
             return;

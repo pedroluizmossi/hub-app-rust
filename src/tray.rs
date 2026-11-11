@@ -1,19 +1,14 @@
 //! Ícone na bandeja (StatusNotifierItem via D-Bus): a mascote no humor do hub.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use ksni::blocking::TrayMethods;
-use slint::ComponentHandle;
 
 use crate::mascot::{Mood, render, sprites::Sprite, themes::Theme};
 use crate::ui::HubWindow;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrayMedia {
-    pub summary: String,
-    pub playing: bool,
-    pub can_play_pause: bool,
-    pub can_previous: bool,
-    pub can_next: bool,
-}
+use crate::core::miniapp::TrayMedia;
 
 pub struct AppTray {
     icons: Vec<ksni::Icon>,
@@ -22,9 +17,22 @@ pub struct AppTray {
     /// Marca o item "Fixar janela" do menu.
     pinned: bool,
     media: Option<TrayMedia>,
+    /// Há um painel (`StatusNotifierWatcher`) mostrando o ícone agora.
+    online: Arc<AtomicBool>,
 }
 
 impl ksni::Tray for AppTray {
+    // o painel pode subir depois do app (autostart) ou reiniciar: o ksni registra o ícone
+    // de novo quando ele volta, e o hub só esconde a janela de vez com o painel no ar
+    fn watcher_online(&self) {
+        self.online.store(true, Ordering::Relaxed);
+    }
+
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        self.online.store(false, Ordering::Relaxed);
+        true
+    }
+
     fn id(&self) -> String {
         "miniutils".into()
     }
@@ -87,11 +95,8 @@ impl ksni::Tray for AppTray {
                 items.push(StandardItem {
                     label: label.into(),
                     enabled,
-                    activate: Box::new(move |t: &mut Self| {
-                        let _ = t.ui.upgrade_in_event_loop(move |ui| {
-                            ui.global::<crate::ui::CdPlayerApp>().invoke_command(verb.into());
-                        });
-                    }),
+                    // o hub leva o comando ao app dono da mídia
+                    activate: Box::new(move |_: &mut Self| crate::hub::tray_media_command(verb)),
                     ..Default::default()
                 }.into());
             }
@@ -125,14 +130,31 @@ fn icons(sprite: &Sprite, theme: &Theme, mood: Mood) -> Vec<ksni::Icon> {
 
 pub struct Tray {
     handle: ksni::blocking::Handle<AppTray>,
+    online: Arc<AtomicBool>,
 }
 
 impl Tray {
-    /// Cria o ícone. Falha se não houver bandeja (ex.: GNOME sem a extensão AppIndicator).
+    /// Cria o ícone. Sem painel no ar (ainda subindo, ou GNOME sem a extensão
+    /// AppIndicator), o serviço fica esperando e o ícone aparece quando o painel surgir;
+    /// `online` diz se ele está visível agora. Só falha sem D-Bus.
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
-        let tray = AppTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui, pinned: false, media: None };
-        let handle = tray.spawn()?;
-        Ok(Tray { handle })
+        let online = Arc::new(AtomicBool::new(true));
+        let tray = AppTray {
+            icons: icons(sprite, theme, mood),
+            tooltip: String::new(),
+            ui,
+            pinned: false,
+            media: None,
+            online: online.clone(),
+        };
+        // sem painel, o ksni chama `watcher_offline` antes de voltar daqui
+        let handle = tray.assume_sni_available(true).spawn()?;
+        Ok(Tray { handle, online })
+    }
+
+    /// O ícone está num painel agora (dá para esconder a janela e voltar por ele).
+    pub fn online(&self) -> bool {
+        self.online.load(Ordering::Relaxed)
     }
 
     /// Atualiza tooltip e menu; o ícone só é redesenhado quando `icon` vem (a mascote, o

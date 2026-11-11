@@ -8,7 +8,7 @@ use slint::ComponentHandle;
 
 use crate::core::bus::{Event, Topic};
 use crate::core::manifest::Manifest;
-use crate::core::miniapp::{Host, MiniApp, Report};
+use crate::core::miniapp::{Host, MiniApp, Report, TrayMedia};
 use crate::mascot::{Mood, disc, render};
 use crate::providers::media::{self, MediaSnapshot};
 use crate::ui::{CdPlayerApp, HubWindow};
@@ -63,31 +63,30 @@ impl CdPlayerMini {
         let a = Rc::downgrade(app);
         g.on_command(move |verb| {
             if let Some(a) = a.upgrade() {
-                Self::command(&a, &verb);
+                a.borrow().command(&verb);
             }
         });
     }
 
     /// Comando do player numa thread: o D-Bus pode demorar e a UI não espera.
-    fn command(app: &Rc<RefCell<Self>>, verb: &str) {
-        let (player, step, poker, reporter) = {
-            let a = app.borrow();
-            if !media::valid_service(&a.snap.player) {
-                return;
-            }
-            let step = a.host.config.borrow().int(&a.manifest, "seek").clamp(1, 300) as i64 * 1_000_000;
-            (a.snap.player.clone(), step, a.host.bus.poker(Topic::Media), a.host.reporter(&a.manifest))
-        };
+    fn command(&self, verb: &str) {
+        if !media::valid_service(&self.snap.player) {
+            return;
+        }
+        let step = self.host.config.borrow().int(&self.manifest, "seek").clamp(1, 300) as i64 * 1_000_000;
+        let (player, poker, reporter) =
+            (self.snap.player.clone(), self.host.bus.poker(Topic::Media), self.host.reporter(&self.manifest));
         let verb = verb.to_string();
-        std::thread::Builder::new()
-            .name("mpris-comando".into())
-            .spawn(move || {
-                let result = media::send(&player, &verb, step);
-                poker.poke();
-                // a falha chega ao app por `on_report`
-                reporter.result(&verb, &result);
-            })
-            .expect("não consegui criar a thread do comando MPRIS");
+        let failed = reporter.clone();
+        let spawned = std::thread::Builder::new().name("mpris-comando".into()).spawn(move || {
+            let result = media::send(&player, &verb, step);
+            poker.poke();
+            // a falha chega ao app por `on_report`
+            reporter.result(&verb, &result);
+        });
+        if let Err(e) = spawned {
+            failed.error(format!("sem thread para o comando: {e}"));
+        }
     }
 
     fn ingest(&mut self, snap: MediaSnapshot) {
@@ -263,11 +262,15 @@ impl MiniApp for CdPlayerMini {
         self.snap.summary()
     }
 
-    fn tray_media(&self) -> Option<crate::tray::TrayMedia> {
+    fn tray_command(&mut self, verb: &str, _ui: &HubWindow) {
+        self.command(verb);
+    }
+
+    fn tray_media(&self) -> Option<TrayMedia> {
         if !self.host.config.borrow().bool(&self.manifest, "tray_controls") {
             return None;
         }
-        Some(crate::tray::TrayMedia {
+        Some(TrayMedia {
             summary: self.snap.summary(),
             playing: self.snap.playing(),
             can_play_pause: self.snap.has_player()

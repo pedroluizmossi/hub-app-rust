@@ -38,5 +38,7 @@ fn main() -> anyhow::Result<()> {
         hub.serve_commands(server);
     }
     slint::run_event_loop_until_quit()?;
+    // a configuração é gravada numa thread: termina o que estiver pendente antes de sair
+    core::config::flush_saves();
     Ok(())
 }
