@@ -10,10 +10,20 @@ use crate::core::config::Config;
 use crate::core::manifest::SettingKind;
 use crate::core::miniapp::{AppRef, Host};
 use crate::core::registry::Registry;
+use crate::instance;
 use crate::mascot::{Mood, render, sprites, themes};
 use crate::popup;
 use crate::tray::Tray;
-use crate::ui::{AppInfo, HubWindow, SettingRow, Theme as UiTheme, Anim};
+use crate::core::layout::{self, Rect};
+use crate::ui::{AppInfo, Ghost, GridCell, HubWindow, SettingRow, Anim};
+
+/// Depois do último tamanho novo durante um arrasto de borda, o foco ainda é ignorado este tempo.
+const RESIZE_QUIET: Duration = Duration::from_millis(800);
+
+/// Intervalo do quadro de animação (mascotes, costura e luz da borda). Com o mouse sobre a
+/// janela, 8 quadros/s; fora dela, 4/s, porque o renderizador por software redesenha tudo.
+const FRAME_HOT: Duration = Duration::from_millis(125);
+const FRAME_COLD: Duration = Duration::from_millis(250);
 
 pub struct Hub {
     host: Rc<Host>,
@@ -27,8 +37,34 @@ pub struct Hub {
     focus_hidden_at: Cell<Option<Instant>>,
     /// O popup chegou a ganhar foco desde que abriu (o winit avisa "sem foco" ao mapear).
     had_focus: Cell<bool>,
+    /// Modo fixar: perder o foco não esconde o popup.
+    pinned: Cell<bool>,
+    /// Último ponto da bandeja onde o popup abriu (para reabrir no mesmo lugar).
+    last_anchor: Cell<Option<(i32, i32)>>,
+    /// Até quando ignorar a perda de foco por causa de um redimensionamento pela borda.
+    resize_until: Cell<Option<Instant>>,
     frame: Cell<u32>,
+    /// Geração do fade em curso: um fade novo cancela o anterior.
+    fade_gen: Rc<Cell<u32>>,
     last_tray: RefCell<(Mood, String, String)>,
+    /// O mouse está sobre a janela (`CursorEntered`/`CursorLeft` do winit).
+    hovered: Cell<bool>,
+    /// Relógio do quadro de animação; o intervalo segue `hovered` (ver `FRAME_HOT`).
+    anim: Timer,
+    /// Arrasto em curso no modo de edição.
+    drag: RefCell<Option<Drag>>,
+}
+
+/// Um app sendo movido ou redimensionado no modo de edição.
+struct Drag {
+    id: String,
+    /// "move", "r" (largura), "b" (altura) ou "rb" (as duas).
+    mode: String,
+    /// Célula agarrada dentro do app (ao mover).
+    off: (i32, i32),
+    /// Onde ele iria parar e se os outros acham lugar.
+    target: Rect,
+    ok: bool,
 }
 
 impl Hub {
@@ -38,8 +74,10 @@ impl Hub {
         bus.spawn("sys", Duration::from_secs(2), move || crate::core::bus::Event::Sys(sys.collect()));
         let mut gpu = crate::providers::gpu::GpuProvider::detect();
         bus.spawn("gpu", Duration::from_secs(2), move || crate::core::bus::Event::Gpu(gpu.collect()));
-        bus.spawn("docker", Duration::from_secs(3), || {
-            crate::core::bus::Event::Docker(crate::providers::docker::collect())
+        // `docker events` traz as mudanças; ps é rede de segurança e stats roda à parte
+        let mut docker = crate::providers::docker::DockerProvider::default();
+        bus.spawn_polled("docker", Duration::from_secs(1), move |poker, poked| {
+            docker.collect(poker, poked).map(crate::core::bus::Event::Docker)
         });
 
         let host = Rc::new(Host {
@@ -63,17 +101,18 @@ impl Hub {
             positionable,
             focus_hidden_at: Cell::new(None),
             had_focus: Cell::new(false),
+            pinned: Cell::new(false),
+            last_anchor: Cell::new(None),
+            resize_until: Cell::new(None),
             frame: Cell::new(1),
+            fade_gen: Rc::new(Cell::new(0)),
             last_tray: RefCell::new((Mood::Sleep, String::new(), String::new())),
+            hovered: Cell::new(false),
+            anim: Timer::default(),
+            drag: RefCell::new(None),
         });
         hub.registry.start(&hub.ui);
-        if let Some(first) = hub.host.config.borrow().enabled.first() {
-            hub.ui.set_current(first.into());
-        }
-        if let Some(tab) = tab {
-            hub.ui.set_current(tab.into());
-        }
-        hub.apply_app_theme();
+        hub.ui.set_current(tab_name(tab.as_deref()));
         hub.rebuild_lists();
         Self::bind(&hub);
 
@@ -81,6 +120,11 @@ impl Hub {
         match Tray::spawn(hub.ui.as_weak(), sprites::get("neko"), themes::get("neon"), Mood::Sleep) {
             Ok(t) => *hub.tray.borrow_mut() = Some(t),
             Err(e) => eprintln!("cyberhub: sem bandeja do sistema ({e}); a janela fica aberta"),
+        }
+
+        // tamanho lembrado da última vez (lógico: o Slint converte pela escala da tela)
+        if let Some((w, h)) = hub.host.config.borrow().window {
+            hub.ui.window().set_size(slint::LogicalSize::new(w.max(360) as f32, h.max(280) as f32));
         }
 
         if !(start_hidden && hub.has_tray()) {
@@ -94,9 +138,20 @@ impl Hub {
 
     /// Mostra o popup junto de `anchor` (ponto clicado na bandeja).
     fn show(&self, anchor: Option<(i32, i32)>) {
+        let anchor = anchor.or(self.last_anchor.get());
+        self.last_anchor.set(anchor);
         self.had_focus.set(false);
+        // reabrindo: começa transparente e aparece com fade (a 1ª vez a janela ainda não existe)
+        let fade_in = self.positionable && popup::has_window(self.ui.window());
+        if fade_in {
+            self.fade_gen.set(self.fade_gen.get() + 1); // cancela um fade de saída pendente
+            popup::set_opacity(self.ui.window(), 0.0);
+        }
         if self.ui.show().is_err() {
             return;
+        }
+        if fade_in {
+            self.fade(0.0, 1.0, false);
         }
         self.shown.set(true);
         let window = self.ui.window();
@@ -116,18 +171,110 @@ impl Hub {
         }
     }
 
+    /// Pedido de outra instância: abre o popup (na aba, se houver). Já aberto, só traz para frente.
+    fn show_from_command(&self, tab: &str) {
+        if !tab.is_empty() {
+            self.ui.set_current(tab_name(Some(tab)));
+        }
+        if self.shown.get() {
+            popup::focus(self.ui.window());
+        } else {
+            self.show(None);
+        }
+    }
+
+    /// Atende as outras instâncias (ver `instance.rs`) pela thread da UI.
+    pub fn serve_commands(&self, server: &instance::Server) {
+        let weak = self.ui.as_weak();
+        let served = server.serve(move |cmd| {
+            let instance::Command::Show(tab) = cmd;
+            let tab = tab.unwrap_or_default();
+            let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
+        });
+        if let Err(e) = served {
+            eprintln!("cyberhub: não consegui atender outras instâncias ({e})");
+        }
+    }
+
     fn has_tray(&self) -> bool {
         self.tray.borrow().is_some()
     }
 
+    /// Guarda o tamanho atual da janela, se mudou. Em pixels lógicos, para não mudar de
+    /// tamanho quando a escala da tela muda.
+    fn remember_size(&self) {
+        let window = self.ui.window();
+        let size = window.size();
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        let scale = window.scale_factor();
+        let logical = ((size.width as f32 / scale).round() as u32, (size.height as f32 / scale).round() as u32);
+        let mut cfg = self.host.config.borrow_mut();
+        if cfg.window != Some(logical) {
+            cfg.window = Some(logical);
+            cfg.save();
+        }
+    }
+
+    /// Muda o intervalo do quadro conforme o mouse está (ou não) sobre a janela.
+    fn set_hovered(&self, on: bool) {
+        if self.hovered.replace(on) != on {
+            self.anim.set_interval(if on { FRAME_HOT } else { FRAME_COLD });
+        }
+    }
+
     fn hide(&self) {
+        self.remember_size();
+        // ao esconder não chega `CursorLeft`: a próxima vez que aparecer, o `CursorEntered` decide
+        self.set_hovered(false);
         if !self.has_tray() {
             // sem bandeja não teria como voltar: só minimiza
             self.ui.window().set_minimized(true);
             return;
         }
-        let _ = self.ui.hide();
         self.shown.set(false);
+        if self.positionable {
+            self.fade(1.0, 0.0, true); // some com fade em vez de piscar
+        } else {
+            let _ = self.ui.hide();
+        }
+    }
+
+    /// Anima a opacidade da janela de `from` a `to` em ~110 ms; `then_hide` esconde no fim.
+    fn fade(&self, from: f32, to: f32, then_hide: bool) {
+        const STEPS: u32 = 6;
+        let id = self.fade_gen.get() + 1;
+        self.fade_gen.set(id);
+        for i in 1..=STEPS {
+            let weak = self.ui.as_weak();
+            let current = self.fade_gen.clone();
+            Timer::single_shot(Duration::from_millis(18 * i as u64), move || {
+                if current.get() != id {
+                    return; // outro fade começou
+                }
+                let Some(ui) = weak.upgrade() else { return };
+                let t = i as f32 / STEPS as f32;
+                popup::set_opacity(ui.window(), from + (to - from) * t);
+                if i == STEPS && then_hide {
+                    let _ = ui.hide();
+                }
+            });
+        }
+    }
+
+    /// Liga/desliga o modo fixar (alfinete, clique do meio ou menu da bandeja).
+    fn set_pinned(&self, on: bool) {
+        self.pinned.set(on);
+        self.ui.set_pinned(on);
+        if let Some(tray) = self.tray.borrow().as_ref() {
+            tray.set_pinned(on);
+        }
+    }
+
+    /// Um arrasto de borda está em curso (ou acabou há pouco).
+    fn resizing(&self) -> bool {
+        self.resize_until.get().is_some_and(|t| Instant::now() < t)
     }
 
     fn toggle(&self, anchor: Option<(i32, i32)>) {
@@ -143,56 +290,189 @@ impl Hub {
 
     // ---- tema e listas --------------------------------------------------------
 
-    /// O painel do app visível usa o tema dele; a moldura do hub é neutra.
-    fn apply_app_theme(&self) {
-        let current = self.ui.get_current();
-        let Some(app) = self.registry.find(&current) else { return };
-        let t = self.host.theme_for(app.borrow().manifest());
-        let g = self.ui.global::<UiTheme>();
-        let c = render::color;
-        g.set_fur(c(t.fur));
-        g.set_visor(c(t.visor));
-        g.set_outline(c(t.outline));
-        g.set_ok(c(t.ok));
-        g.set_warn(c(t.warn));
-        g.set_alarm(c(t.alarm));
-        g.set_sleep(c(t.sleep));
-        g.set_bg0(c(t.bg0));
-        g.set_bg1(c(t.bg1));
-        g.set_text(c(t.text));
-        g.set_sub(c(t.sub));
-        g.set_muted(c(t.muted));
-    }
-
-    fn app_info(&self, app: &AppRef, with_settings: bool) -> AppInfo {
+    fn app_info(&self, app: &AppRef) -> AppInfo {
         let a = app.borrow();
         let m = a.manifest();
-        let settings = if with_settings { self.settings_of(m) } else { Vec::new() };
+        let settings = self.settings_of(m);
+        let theme = self.host.theme_for(m);
         AppInfo {
             id: m.id.clone().into(),
             name: m.name.clone().into(),
             description: m.description.clone().into(),
-            icon: render::image(sprites::get(&m.icon), self.host.theme_for(m), Mood::Idle, 1),
+            icon: render::image(sprites::get(&m.icon), theme, Mood::Idle, 1),
             enabled: self.host.config.borrow().is_enabled(&m.id),
             mood: a.mood().as_str().into(),
+            theme: render::colors(theme),
             settings: ModelRc::new(VecModel::from(settings)),
         }
     }
 
-    /// Abas, lista de apps e formulário de configurações.
+    /// Grade do painel e lista da aba Apps.
     fn rebuild_lists(&self) {
-        self.rebuild_tabs();
+        self.rebuild_grid();
         self.rebuild_settings();
     }
 
-    fn rebuild_tabs(&self) {
-        let tabs: Vec<AppInfo> = self.registry.enabled().iter().map(|a| self.app_info(a, false)).collect();
-        self.ui.set_tabs(ModelRc::new(VecModel::from(tabs)));
+    /// Posiciona os apps ligados na grade (cada um onde a config diz).
+    fn rebuild_grid(&self) {
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.arrange() {
+                cfg.save();
+            }
+        }
+        let cfg = self.host.config.borrow();
+        let (cols, rows) = (cfg.columns, cfg.rows);
+        let rects = cfg.rects();
+        let cells: Vec<GridCell> = self
+            .registry
+            .enabled()
+            .iter()
+            .zip(&rects)
+            .map(|(a, r)| {
+                let a = a.borrow();
+                let m = a.manifest();
+                GridCell {
+                    id: m.id.clone().into(),
+                    name: m.name.clone().into(),
+                    col: r.x as i32,
+                    row: r.y as i32,
+                    w: r.w as i32,
+                    h: r.h as i32,
+                    theme: render::colors(self.host.theme_for(m)),
+                }
+            })
+            .collect();
+        let n = cells.len();
+        let fits = |c: u32, r: u32| {
+            (1..=layout::MAX_COLS).contains(&c) && (1..=layout::MAX_ROWS).contains(&r) && layout::settle(&rects, None, c, r).is_some()
+        };
+        self.ui.set_cols_down_ok(fits(cols.wrapping_sub(1), rows));
+        self.ui.set_cols_up_ok(fits(cols + 1, rows));
+        self.ui.set_rows_down_ok(fits(cols, rows.wrapping_sub(1)));
+        self.ui.set_rows_up_ok(fits(cols, rows + 1));
+        self.ui.set_grid_tag(format!("// {n} {} · {cols} × {rows}", if n == 1 { "APP" } else { "APPS" }).into());
+        self.ui.set_columns(cols as i32);
+        self.ui.set_rows(rows as i32);
+        self.ui.set_cells(ModelRc::new(VecModel::from(cells)));
     }
 
-    /// Lista da aba Apps, cada app com o formulário gerado do manifesto.
+    /// Grava um novo arranjo da grade (já validado por `layout::settle`).
+    fn apply_layout(&self, cols: u32, rows: u32, rects: Vec<Rect>) {
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            cfg.columns = cols;
+            cfg.rows = rows;
+            let ids = cfg.enabled.clone();
+            for (id, r) in ids.into_iter().zip(rects) {
+                cfg.layout.insert(id, r);
+            }
+            cfg.save();
+        }
+        self.rebuild_grid();
+    }
+
+    /// Mostra (ou esconde) a prévia do arrasto.
+    fn set_ghost(&self, drag: Option<&Drag>) {
+        self.ui.set_ghost(match drag {
+            Some(d) => Ghost {
+                visible: true,
+                id: d.id.clone().into(),
+                col: d.target.x as i32,
+                row: d.target.y as i32,
+                w: d.target.w as i32,
+                h: d.target.h as i32,
+                ok: d.ok,
+            },
+            None => Ghost::default(),
+        });
+    }
+
+    /// Grade e app (índice e retângulo) para os cálculos do modo de edição.
+    fn grid_of(&self, id: &str) -> Option<(u32, u32, Vec<Rect>, usize)> {
+        let cfg = self.host.config.borrow();
+        let i = cfg.enabled.iter().position(|e| e == id)?;
+        Some((cfg.columns, cfg.rows, cfg.rects(), i))
+    }
+
+    fn edit_begin(&self, id: &str, mode: &str, col: i32, row: i32) {
+        let Some((_, _, rects, i)) = self.grid_of(id) else { return };
+        let r = rects[i];
+        let drag = Drag { id: id.into(), mode: mode.into(), off: (col - r.x as i32, row - r.y as i32), target: r, ok: true };
+        self.set_ghost(Some(&drag));
+        *self.drag.borrow_mut() = Some(drag);
+    }
+
+    fn edit_drag(&self, col: i32, row: i32) {
+        let mut slot = self.drag.borrow_mut();
+        let Some(d) = slot.as_mut() else { return };
+        let Some((cols, rows, rects, i)) = self.grid_of(&d.id) else { return };
+        let r = rects[i];
+        let t = if d.mode == "move" {
+            let x = (col - d.off.0).clamp(0, (cols - r.w) as i32) as u32;
+            let y = (row - d.off.1).clamp(0, (rows - r.h) as i32) as u32;
+            Rect::new(x, y, r.w, r.h)
+        } else {
+            let w = if d.mode.contains('r') { (col - r.x as i32 + 1).max(1) as u32 } else { r.w };
+            let h = if d.mode.contains('b') { (row - r.y as i32 + 1).max(1) as u32 } else { r.h };
+            Rect::new(r.x, r.y, w, h)
+        };
+        if t == d.target {
+            return;
+        }
+        d.target = t;
+        d.ok = layout::settle(&rects, Some((i, t)), cols, rows).is_some();
+        self.set_ghost(Some(d));
+    }
+
+    fn edit_end(&self) {
+        let Some(d) = self.drag.borrow_mut().take() else { return };
+        self.set_ghost(None);
+        if !d.ok {
+            return;
+        }
+        let Some((cols, rows, rects, i)) = self.grid_of(&d.id) else { return };
+        if rects[i] == d.target {
+            return;
+        }
+        if let Some(out) = layout::settle(&rects, Some((i, d.target)), cols, rows) {
+            self.apply_layout(cols, rows, out);
+        }
+    }
+
+    /// Setas: move uma célula; com Shift, muda o tamanho.
+    fn edit_key(&self, id: &str, dx: i32, dy: i32, resize: bool) {
+        let Some((cols, rows, rects, i)) = self.grid_of(id) else { return };
+        let r = rects[i];
+        let (x, y, w, h) = if resize {
+            (r.x as i32, r.y as i32, (r.w as i32 + dx).max(1), (r.h as i32 + dy).max(1))
+        } else {
+            (r.x as i32 + dx, r.y as i32 + dy, r.w as i32, r.h as i32)
+        };
+        if x < 0 || y < 0 {
+            return;
+        }
+        let t = Rect::new(x as u32, y as u32, w as u32, h as u32);
+        if let Some(out) = layout::settle(&rects, Some((i, t)), cols, rows) {
+            self.apply_layout(cols, rows, out);
+        }
+    }
+
+    /// Colunas e linhas da grade; recusa se algum app ficaria sem lugar.
+    fn grid_size(&self, cols: i32, rows: i32) {
+        if !(1..=layout::MAX_COLS as i32).contains(&cols) || !(1..=layout::MAX_ROWS as i32).contains(&rows) {
+            return;
+        }
+        let (cols, rows) = (cols as u32, rows as u32);
+        let rects = self.host.config.borrow().rects();
+        if let Some(out) = layout::settle(&rects, None, cols, rows) {
+            self.apply_layout(cols, rows, out);
+        }
+    }
+
+    /// Lista da aba Apps, cada app com o arranjo e o formulário gerado do manifesto.
     fn rebuild_settings(&self) {
-        let apps: Vec<AppInfo> = self.registry.all().iter().map(|a| self.app_info(a, true)).collect();
+        let apps: Vec<AppInfo> = self.registry.all().iter().map(|a| self.app_info(a)).collect();
         self.ui.set_apps(ModelRc::new(VecModel::from(apps)));
     }
 
@@ -202,10 +482,12 @@ impl Hub {
             .iter()
             .map(|s| {
                 let v = cfg.value(m, &s.key);
+                let (label, unit) = split_unit(&s.label);
                 SettingRow {
                     app: m.id.clone().into(),
                     key: s.key.clone().into(),
-                    label: s.label.clone().into(),
+                    label: label.into(),
+                    unit: unit.into(),
                     kind: match s.kind {
                         SettingKind::Bool => "bool",
                         SettingKind::Int => "int",
@@ -252,10 +534,7 @@ impl Hub {
             cfg.save();
         }
         app.borrow_mut().settings_changed(&self.ui);
-        // tema ou mascote podem ter mudado: ícones, painel e bandeja
-        if self.ui.get_current() == app_id {
-            self.apply_app_theme();
-        }
+        // tema ou mascote podem ter mudado: ícones e bandeja
         self.rebuild_lists();
         self.last_tray.borrow_mut().2.clear();
     }
@@ -268,8 +547,7 @@ impl Hub {
         ui.on_select_tab(move |id| {
             if let Some(h) = w.upgrade() {
                 h.ui.set_current(id);
-                h.apply_app_theme();
-                h.anim_tick(); // desenha a mascote da aba já no primeiro quadro
+                h.anim_tick(); // desenha as mascotes já no primeiro quadro
             }
         });
 
@@ -279,6 +557,41 @@ impl Hub {
             let on = !h.host.config.borrow().is_enabled(&id);
             h.registry.set_enabled(&id, on, &h.ui);
             h.rebuild_lists();
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_grid_size(move |c, r| {
+            if let Some(h) = w.upgrade() {
+                h.grid_size(c, r);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_edit_begin(move |id, mode, c, r| {
+            if let Some(h) = w.upgrade() {
+                h.edit_begin(&id, &mode, c, r);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_edit_drag(move |c, r| {
+            if let Some(h) = w.upgrade() {
+                h.edit_drag(c, r);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_edit_end(move || {
+            if let Some(h) = w.upgrade() {
+                h.edit_end();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_edit_key(move |id, dx, dy, resize| {
+            if let Some(h) = w.upgrade() {
+                h.edit_key(&id, dx, dy, resize);
+            }
         });
 
         let w = Rc::downgrade(hub);
@@ -310,10 +623,47 @@ impl Hub {
         });
 
         let w = Rc::downgrade(hub);
+        ui.on_start_resize(move |dir| {
+            if let Some(h) = w.upgrade() {
+                h.resize_until.set(Some(Instant::now() + RESIZE_QUIET));
+                popup::drag_resize(h.ui.window(), &dir);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_toggle_pin(move || {
+            if let Some(h) = w.upgrade() {
+                let on = !h.pinned.get();
+                h.set_pinned(on);
+                // fixar pela bandeja: o menu rouba o foco e esconde o popup antes; reabre
+                if on && !h.shown.get() {
+                    h.show(None);
+                }
+            }
+        });
+
+        ui.on_quit({
+            let w = Rc::downgrade(hub);
+            move || {
+                if let Some(h) = w.upgrade() {
+                    h.remember_size();
+                }
+                let _ = slint::quit_event_loop();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
         ui.on_toggle_requested(move |x, y| {
             if let Some(h) = w.upgrade() {
                 let anchor = (x != 0 || y != 0).then_some((x, y));
                 h.toggle(anchor);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_show_requested(move |tab| {
+            if let Some(h) = w.upgrade() {
+                h.show_from_command(&tab);
             }
         });
 
@@ -328,22 +678,33 @@ impl Hub {
                     }
                 }
                 let Some(h) = w.upgrade() else { return EventResult::Propagate };
-                if let WindowEvent::Focused(true) = ev {
-                    h.had_focus.set(true);
+                match ev {
+                    WindowEvent::CursorEntered { .. } => h.set_hovered(true),
+                    WindowEvent::CursorLeft { .. } => h.set_hovered(false),
+                    _ => {}
                 }
-                if let WindowEvent::Focused(false) = ev {
-                    if h.shown.get() && h.has_tray() && h.had_focus.get() {
-                        h.hide();
-                        h.focus_hidden_at.set(Some(Instant::now()));
+                match ev {
+                    WindowEvent::Focused(true) => {
+                        h.had_focus.set(true);
+                        h.resize_until.set(None);
                     }
+                    // redimensionando pela borda: cada tamanho novo adia o fim do arrasto
+                    WindowEvent::Resized(_) if h.resize_until.get().is_some() => {
+                        h.resize_until.set(Some(Instant::now() + RESIZE_QUIET));
+                    }
+                    // fixado ou no meio de um redimensionamento: não some sozinho
+                    WindowEvent::Focused(false) => {
+                        if h.shown.get() && h.has_tray() && h.had_focus.get() && !h.pinned.get() && !h.resizing() {
+                            h.hide();
+                            h.focus_hidden_at.set(Some(Instant::now()));
+                        }
+                    }
+                    _ => {}
                 }
                 EventResult::Propagate
             });
         }
 
-        ui.on_quit(|| {
-            let _ = slint::quit_event_loop();
-        });
 
         // fechar a janela só esconde quando há bandeja
         let w = Rc::downgrade(hub);
@@ -372,10 +733,9 @@ impl Hub {
                 h.data_tick();
             }
         });
-        // animação: só com a janela visível
-        let anim = Timer::default();
+        // animação: só com a janela visível; o relógio fica no hub (`set_hovered` muda o ritmo)
         let w = Rc::downgrade(hub);
-        anim.start(TimerMode::Repeated, Duration::from_millis(125), move || {
+        hub.anim.start(TimerMode::Repeated, FRAME_COLD, move || {
             if let Some(h) = w.upgrade() {
                 if h.shown.get() {
                     h.anim_tick();
@@ -384,7 +744,6 @@ impl Hub {
         });
         // os timers vivem enquanto o event loop roda
         std::mem::forget(data);
-        std::mem::forget(anim);
     }
 
     fn data_tick(&self) {
@@ -415,7 +774,7 @@ impl Hub {
             return;
         }
         self.ui.set_summary(SharedString::from(summary.replace('\n', "   ·   ")));
-        self.rebuild_tabs(); // humor das abas
+        self.rebuild_settings(); // humor dos apps na aba Apps
         if let Some(tray) = self.tray.borrow().as_ref() {
             tray.update(sprites::get(&sprite), theme, mood, summary.clone());
         }
@@ -426,14 +785,18 @@ impl Hub {
         let f = self.frame.get().wrapping_add(1) % 600;
         self.frame.set(f);
         self.ui.global::<Anim>().set_frame(f as i32);
-        // só o app da aba visível anima
-        let current = self.ui.get_current();
-        if let Some(app) = self.registry.find(&current) {
-            if self.host.config.borrow().is_enabled(&current) {
+        // no painel, todos os apps ligados estão visíveis e animam
+        if self.ui.get_current() == "panel" {
+            for app in self.registry.enabled() {
                 app.borrow_mut().tick(f, &self.ui);
             }
         }
     }
+}
+
+/// Aba pelo nome: "apps" são as configurações; o resto, o painel.
+fn tab_name(tab: Option<&str>) -> SharedString {
+    if tab == Some("apps") { "apps".into() } else { "panel".into() }
 }
 
 /// Rótulo de uma opção de `choice`: nome do tema ou da mascote, se for um.
@@ -447,6 +810,16 @@ fn option_label(key: &str) -> String {
     } else {
         key.into()
     }
+}
+
+/// Separa a unidade do fim do rótulo: "Temperatura quente (°C)" -> ("Temperatura quente", "°C").
+fn split_unit(label: &str) -> (String, String) {
+    for unit in ["%", "°C"] {
+        if let Some(base) = label.strip_suffix(&format!(" ({unit})")) {
+            return (base.to_string(), unit.to_string());
+        }
+    }
+    (label.to_string(), String::new())
 }
 
 /// O que o usuário fez num campo da aba Apps.

@@ -1,31 +1,78 @@
-// Cores do tema ativo (preenchidas pelo Rust a partir de src/mascot/themes.rs)
-// e o relógio de animação compartilhado pelas mascotes.
+// Cores de um tema. Cada mini-app tem o seu (vários aparecem juntos no painel),
+// então o tema é um valor passado aos componentes, não um global.
 
-export global Theme {
-    in property <color> fur: #ff2bd6;
-    in property <color> visor: #00f0ff;
-    in property <color> outline: #12061f;
-    in property <color> ok: #39ff14;
-    in property <color> warn: #fff200;
-    in property <color> alarm: #ff1744;
-    in property <color> sleep: #7a5cff;
-    in property <color> bg0: #14062a;
-    in property <color> bg1: #05020c;
-    in property <color> text: #f2e9ff;
-    in property <color> sub: #8f7bb3;
-    in property <color> muted: #5a4a78;
+export struct Colors {
+    fur: color,
+    visor: color,
+    outline: color,
+    ok: color,
+    warn: color,
+    alarm: color,
+    sleep: color,
+    bg0: color,
+    bg1: color,
+    text: color,
+    sub: color,
+    muted: color,
+}
 
+export global Moods {
     // cor de cada humor
-    public pure function mood-color(mood: string) -> color {
-        if mood == "alarm" { return alarm; }
-        if mood == "busy" { return warn; }
-        if mood == "happy" { return ok; }
-        if mood == "sleep" { return sleep; }
-        return visor;
+    public pure function color(t: Colors, mood: string) -> color {
+        if mood == "alarm" { return t.alarm; }
+        if mood == "busy" { return t.warn; }
+        if mood == "happy" { return t.ok; }
+        if mood == "sleep" { return t.sleep; }
+        return t.visor;
     }
 }
 
 // Quadro de animação (~8/s), avançado pelo Rust só com a janela visível.
 export global Anim {
     in property <int> frame;
+}
+
+// Moldura da Toca (fixa, igual em todos os temas): fundo, linhas e acentos do design.
+export global Chrome {
+    out property <color> bg: #0B0912;
+    out property <color> edge: #2E2546;
+    out property <color> line: #1E1830;
+    out property <color> ink: #EDE6FF;
+    out property <color> sub: #C9BEE6;
+    out property <color> dim: #8E80AA;
+    out property <color> hover: #24123A;
+    out property <color> cyan: #3DF2FF;
+    out property <color> magenta: #FF3DB8;
+    out property <color> danger: #FF8095;
+    out property <color> danger-edge: #5A1F3A;
+    // modo de edição
+    out property <color> edit-bg: #071A1E;
+    out property <color> edit-line: #1F5A62;
+    out property <color> edit-ink: #C9E9EC;
+    out property <color> edit-sub: #9FD8DE;
+    out property <color> bad: #FF4D6A;
+    // corte dos cantos (superior direito e inferior esquerdo)
+    out property <length> chamfer: 18px;
+}
+
+export global Fonts {
+    out property <string> ui: "Chakra Petch";
+    out property <string> mono: "JetBrains Mono";
+}
+
+// Ícones de traço (caminhos SVG num quadro 24×24, como no design).
+export global Icons {
+    out property <string> pin: "M9 3h6l-1 6l3 3H7l3-3zM12 12v9";
+    out property <string> gear: "M12 9a3 3 0 1 0 0 6a3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1";
+    out property <string> search: "M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13zM15.5 15.5L20 20";
+    out property <string> refresh: "M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5";
+    out property <string> stop: "M7 7h10v10H7z";
+    out property <string> play: "M8 5v14l11-7z";
+    out property <string> logs: "M5 7h14M5 12h14M5 17h10";
+    out property <string> terminal: "M4 7l5 5l-5 5M12 17h8";
+    out property <string> close: "M6 6l12 12M18 6L6 18";
+    out property <string> grid: "M3 3h8v8H3zM13 3h8v4h-8zM13 9h8v12h-8zM3 13h8v8H3z";
+    out property <string> chevron: "M6 9l6 6l6-6";
+    // preenchido
+    out property <string> grip: "M8 5h3v3H8zM13 5h3v3h-3zM8 10.5h3v3H8zM13 10.5h3v3h-3zM8 16h3v3H8zM13 16h3v3h-3z";
 }

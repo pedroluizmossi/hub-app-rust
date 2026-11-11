@@ -33,7 +33,13 @@ Opções:
 Clique na mascote da bandeja: o hub abre como popup junto do ícone e some quando você
 clica fora ou aperta Esc.
 
-A configuração fica em `~/.config/cyberhub/config.toml` e é editada pela aba **Apps**.
+A configuração fica em `~/.config/cyberhub/config.toml`. A grade do painel se arruma direto
+na janela: na engrenagem, arraste cada app pelo topo e puxe as bordas para mudar o tamanho
+(as setas também movem; Shift + setas redimensiona). As opções de cada app ficam em
+**Configurações**, a partir do modo de edição.
+
+As fontes embutidas (Chakra Petch e JetBrains Mono, em `ui/fonts/`) são distribuídas sob a
+SIL Open Font License; as licenças estão na mesma pasta.
 
 Variáveis de ambiente:
 

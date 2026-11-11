@@ -2,6 +2,7 @@
 pub mod bus;
 pub mod config;
 pub mod exec;
+pub mod layout;
 pub mod manifest;
 pub mod miniapp;
 pub mod notify;

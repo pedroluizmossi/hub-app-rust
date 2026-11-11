@@ -40,6 +40,8 @@ pub struct VitalsMini {
     net: (f64, f64),
     frame: u32,
     cards: Rc<VecModel<VitalCard>>,
+    /// Último quadro de cada mascote: só troca a imagem quando os pixels mudam.
+    mascots: [render::Cache; 4],
 }
 
 impl VitalsMini {
@@ -56,7 +58,15 @@ impl VitalsMini {
             net: (0.0, 0.0),
             frame: 1,
             cards,
+            mascots: Default::default(),
         }))
+    }
+
+    /// Redesenha a mascote `i` no quadro atual; `true` se a imagem mudou.
+    fn refresh_mascot(&mut self, i: usize) -> bool {
+        let key = self.mascot_of(i);
+        let theme = self.host.theme_for(&self.manifest);
+        self.mascots[i].update(sprites::get(&key), theme, self.vitals[i].mood, self.frame)
     }
 
     fn mascot_of(&self, i: usize) -> String {
@@ -157,7 +167,7 @@ impl VitalsMini {
         let title = ["CPU", "RAM", "GPU", "DISCO"][i];
         VitalCard {
             title: title.into(),
-            mascot: render::image(sprites::get(&self.mascot_of(i)), self.host.theme_for(&self.manifest), v.mood, self.frame),
+            mascot: self.mascots[i].image(),
             mood: v.mood.as_str().into(),
             available: v.available,
             value: v.value,
@@ -169,8 +179,9 @@ impl VitalsMini {
         }
     }
 
-    fn push_cards(&self, ui: &HubWindow) {
+    fn push_cards(&mut self, ui: &HubWindow) {
         for i in 0..4 {
+            self.refresh_mascot(i);
             self.cards.set_row_data(i, self.card(i));
         }
         let (rx, tx) = self.net;
@@ -203,6 +214,7 @@ impl MiniApp for VitalsMini {
     }
 
     fn enable(&mut self, ui: &HubWindow) {
+        ui.global::<VitalsApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.push_cards(ui);
     }
 
@@ -223,18 +235,20 @@ impl MiniApp for VitalsMini {
     }
 
     fn tick(&mut self, frame: u32, _ui: &HubWindow) {
-        // só redesenha as mascotes; o resto muda com as leituras
+        // só redesenha as mascotes que mudaram; o resto muda com as leituras
         self.frame = frame;
         for i in 0..4 {
-            if let Some(mut c) = self.cards.row_data(i) {
-                let v = &self.vitals[i];
-                c.mascot = render::image(sprites::get(&self.mascot_of(i)), self.host.theme_for(&self.manifest), v.mood, frame);
-                self.cards.set_row_data(i, c);
+            if self.refresh_mascot(i) {
+                if let Some(mut c) = self.cards.row_data(i) {
+                    c.mascot = self.mascots[i].image();
+                    self.cards.set_row_data(i, c);
+                }
             }
         }
     }
 
     fn settings_changed(&mut self, ui: &HubWindow) {
+        ui.global::<VitalsApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.update_moods();
         self.push_cards(ui);
     }

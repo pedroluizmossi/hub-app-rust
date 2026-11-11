@@ -1,5 +1,7 @@
 // Tela do mini-app Sinais vitais: um cartão por recurso, cada um com sua mascote.
-import { Theme } from "../../ui/theme.slint";
+// Responsiva: os 4 cartões ficam em 4×1, 2×2 ou 1×4 conforme o formato da célula,
+// e ficam compactos (sem histórico e detalhe) quando baixos.
+import { Colors, Moods, Chrome, Fonts } from "../../ui/theme.slint";
 import { Mascot, SegBar, Sparkline } from "../../ui/widgets.slint";
 
 export struct VitalCard {
@@ -17,63 +19,76 @@ export struct VitalCard {
 
 // Estado do mini-app, preenchido pelo Rust (src/apps/vitals.rs).
 export global VitalsApp {
+    in property <Colors> theme;
     in property <[VitalCard]> cards;
     in property <string> net-text;
 }
 
 component Card inherits Rectangle {
     in property <VitalCard> v;
-    property <color> tint: !v.available ? Theme.muted : Theme.mood-color(v.mood == "sleep" ? "idle" : v.mood);
-    border-radius: 10px;
+    property <Colors> t: VitalsApp.theme;
+    property <bool> compact: self.height < 150px;
+    property <bool> slim: self.width < 220px;
+    property <color> tint: !v.available ? t.muted : Moods.color(t, v.mood == "sleep" ? "idle" : v.mood);
     border-width: 1px;
-    border-color: v.mood == "alarm" ? Theme.alarm : tint.with-alpha(0.45);
-    background: Theme.bg0.with-alpha(0.55);
+    border-color: v.mood == "alarm" ? t.alarm : v.mood == "busy" ? t.warn.with-alpha(0.5) : tint.with-alpha(0.3);
+    background: t.bg0.mix(t.bg1, 0.6);
     animate border-color { duration: 300ms; }
 
     HorizontalLayout {
-        padding: 12px;
-        spacing: 12px;
+        padding-left: compact ? 10px : 14px;
+        padding-right: compact ? 10px : 14px;
+        padding-top: compact ? 6px : 10px;
+        padding-bottom: compact ? 6px : 10px;
+        spacing: compact ? 10px : 14px;
 
         VerticalLayout {
             alignment: center;
             Mascot {
+                theme: t;
                 frame: v.mascot;
                 mood: v.mood;
-                width: 80px;
-                height: 70px;
+                width: compact || slim ? 48px : 72px;
+                height: compact || slim ? 42px : 63px;
             }
         }
 
         VerticalLayout {
-            spacing: 5px;
+            alignment: center;
+            spacing: compact ? 4px : 6px;
             horizontal-stretch: 1;
             HorizontalLayout {
                 Text {
                     text: v.title;
-                    color: Theme.sub;
+                    color: t.sub;
+                    font-family: Fonts.mono;
                     font-size: 11px;
-                    letter-spacing: 2px;
+                    letter-spacing: 1.5px;
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; }
                 if v.temp-text != "": Text {
                     text: (v.hot ? "♨ " : "") + v.temp-text;
-                    color: v.hot ? Theme.alarm : Theme.sub;
+                    color: v.hot ? t.alarm : t.sub;
+                    font-family: Fonts.mono;
                     font-size: 11px;
+                    letter-spacing: 1.5px;
                     vertical-alignment: center;
                 }
             }
             Text {
                 text: v.available ? v.value-text : "—";
                 color: tint;
-                font-size: 26px;
-                font-weight: 800;
+                font-family: Fonts.mono;
+                font-size: compact ? 18px : 22px;
+                font-weight: 700;
             }
-            SegBar { value: v.value; tint: tint; }
-            Sparkline { commands: v.spark; tint: tint.with-alpha(0.8); }
-            Text {
+            SegBar { theme: t; value: v.value; tint: tint; off: t.muted.with-alpha(0.35); segments: slim ? 10 : 20; }
+            if !compact: Sparkline { commands: v.spark; tint: tint.with-alpha(0.7); height: 22px; }
+            if !compact: Text {
                 text: v.available ? v.detail : "não encontrado";
-                color: Theme.sub;
+                color: t.sub;
+                font-family: Fonts.mono;
                 font-size: 11px;
                 overflow: elide;
             }
@@ -81,26 +96,35 @@ component Card inherits Rectangle {
     }
 }
 
-export component VitalsView inherits VerticalLayout {
-    spacing: 10px;
+export component VitalsView inherits Rectangle {
+    property <Colors> t: VitalsApp.theme;
+    property <length> gap: 10px;
+    property <length> footer: 18px;
+    property <length> area-h: self.height - footer - gap;
+    // 4 colunas se for bem largo, 2 se couber, senão 1
+    property <int> cols: self.width >= 4 * 200px + 3 * gap && self.width / area-h > 2.4 ? 4
+        : self.width >= 2 * 190px + gap ? 2 : 1;
+    property <int> rows: 4 / cols;
+    property <length> cw: (self.width - (cols - 1) * gap) / cols;
+    property <length> ch: max(64px, (area-h - (rows - 1) * gap) / rows);
 
-    // quatro cartões fixos (CPU, RAM, GPU, disco) em 2×2
-    HorizontalLayout {
-        spacing: 10px;
-        vertical-stretch: 1;
-        Card { v: VitalsApp.cards[0]; }
-        Card { v: VitalsApp.cards[1]; }
+    for v[i] in VitalsApp.cards: Card {
+        v: v;
+        x: mod(i, cols) * (cw + gap);
+        y: floor(i / cols) * (ch + gap);
+        width: cw;
+        height: ch;
     }
-    HorizontalLayout {
-        spacing: 10px;
-        vertical-stretch: 1;
-        Card { v: VitalsApp.cards[2]; }
-        Card { v: VitalsApp.cards[3]; }
-    }
+
     Text {
+        y: parent.height - footer;
+        height: footer;
+        width: parent.width;
         text: VitalsApp.net-text;
-        color: Theme.sub;
-        font-size: 11px;
+        color: t.sub;
+        font-family: Fonts.mono;
+        font-size: 12px;
         horizontal-alignment: center;
+        vertical-alignment: center;
     }
 }

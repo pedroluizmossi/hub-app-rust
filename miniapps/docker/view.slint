@@ -1,7 +1,10 @@
-// Tela do mini-app Docker.
+// Tela do mini-app Docker. Responsiva: se adapta à célula do painel em que está.
+//   estreita (< 560 px): sem contadores grandes e sem coluna de uso; botões menores
+//   muito estreita (< 420 px): só as ações iniciar/parar e logs
+//   baixa (< 260 px): mascote menor
 import { ListView } from "std-widgets.slint";
-import { Theme } from "../../ui/theme.slint";
-import { Mascot, NeonButton, Counter, SearchBox, Toggle } from "../../ui/widgets.slint";
+import { Colors, Moods, Chrome, Fonts, Icons } from "../../ui/theme.slint";
+import { Mascot, IconButton, TextButton, Counter, SearchBox, SqSwitch } from "../../ui/widgets.slint";
 
 export struct ContainerRow {
     name: string,
@@ -20,6 +23,7 @@ export struct ContainerRow {
 
 // Estado do mini-app, preenchido pelo Rust (src/apps/docker.rs).
 export global DockerApp {
+    in property <Colors> theme;
     in property <[ContainerRow]> rows;
     in property <int> running;
     in property <int> stopped;
@@ -43,34 +47,36 @@ export global DockerApp {
 
 component Row inherits Rectangle {
     in property <ContainerRow> c;
-    property <color> state-color: c.problem ? Theme.alarm : c.running ? Theme.ok : Theme.muted;
-    height: 50px;
-    border-radius: 6px;
-    background: hover.has-hover ? Theme.visor.with-alpha(0.06) : transparent;
-    border-width: c.problem ? 1px : 0;
-    border-color: Theme.alarm.with-alpha(0.5);
+    in property <bool> narrow;
+    in property <bool> tiny;
+    property <Colors> t: DockerApp.theme;
+    property <color> state-color: c.problem ? t.alarm : c.running ? t.ok : t.muted;
+    property <length> btn: narrow ? 34px : 40px;
+    property <color> act-edge: t.visor.with-alpha(0.4);
+    height: narrow ? 56px : 62px;
+    background: c.problem ? t.alarm.with-alpha(0.08) : hover.has-hover ? t.visor.with-alpha(0.05) : transparent;
 
     hover := TouchArea { }
 
-    HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        spacing: 10px;
+    // divisória
+    Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
 
-        // estado
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        // estado: quadrado com brilho
         Rectangle {
-            width: 14px;
-            // halo (sem blur, para o renderizador por software)
+            width: 18px;
             if c.running || c.problem: Rectangle {
-                width: 14px;
-                height: 14px;
-                border-radius: 7px;
-                background: state-color.with-alpha(0.22);
+                width: 18px;
+                height: 18px;
+                background: state-color.with-alpha(0.18);
             }
             Rectangle {
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
+                width: 10px;
+                height: 10px;
                 background: state-color;
             }
         }
@@ -78,51 +84,56 @@ component Row inherits Rectangle {
         VerticalLayout {
             alignment: center;
             horizontal-stretch: 1;
-            spacing: 2px;
+            spacing: 4px;
             HorizontalLayout {
-                spacing: 6px;
+                spacing: 8px;
                 Text {
                     text: c.name;
-                    color: Theme.text;
-                    font-size: 13px;
+                    color: Chrome.ink;
+                    font-size: 15px;
                     font-weight: 700;
                     overflow: elide;
                 }
-                if c.project != "": Rectangle {
-                    border-radius: 3px;
-                    background: Theme.fur.with-alpha(0.2);
-                    width: proj.preferred-width + 8px;
+                if c.project != "" && !narrow: Rectangle {
+                    border-width: 1px;
+                    border-color: t.fur.with-alpha(0.5);
+                    background: t.fur.with-alpha(0.14);
+                    width: proj.preferred-width + 12px;
                     proj := Text {
                         text: c.project;
-                        color: Theme.fur.brighter(0.3);
-                        font-size: 10px;
+                        color: t.fur.mix(#ffffff, 0.55);
+                        font-family: Fonts.mono;
+                        font-size: 11px;
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
             }
             Text {
-                text: c.state-text + " · " + c.image;
-                color: c.problem ? Theme.alarm : Theme.sub;
-                font-size: 11px;
+                text: narrow ? c.state-text : c.state-text + " · " + c.image;
+                color: c.problem ? t.alarm.mix(#ffffff, 0.6) : #A99BC4;
+                font-family: Fonts.mono;
+                font-size: 12px;
                 overflow: elide;
             }
         }
 
-        // uso
-        VerticalLayout {
+        // uso e porta
+        if !narrow: VerticalLayout {
             alignment: center;
-            width: 96px;
+            spacing: 4px;
+            width: 104px;
             Text {
                 text: c.usage-text;
-                color: c.cpu >= 60 ? Theme.warn : Theme.sub;
-                font-size: 11px;
-                font-family: "monospace";
+                color: c.cpu >= 60 ? t.warn : #A99BC4;
+                font-family: Fonts.mono;
+                font-size: 12px;
                 horizontal-alignment: right;
             }
             if c.url != "": Text {
                 text: c.port-text;
-                color: link.has-hover ? Theme.visor.brighter(0.3) : Theme.visor;
-                font-size: 11px;
+                color: link.has-hover ? #ffffff : t.visor;
+                font-family: Fonts.mono;
+                font-size: 12px;
                 horizontal-alignment: right;
                 link := TouchArea {
                     mouse-cursor: pointer;
@@ -134,46 +145,74 @@ component Row inherits Rectangle {
         // ações
         HorizontalLayout {
             alignment: center;
-            spacing: 4px;
-            padding-top: 12px;
-            padding-bottom: 12px;
-            NeonButton {
-                text: c.running ? "■" : "▶";
-                tint: c.running ? Theme.alarm : Theme.ok;
-                width: 26px;
+            spacing: 6px;
+            padding-top: (root.height - btn) / 2;
+            padding-bottom: (root.height - btn) / 2;
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: c.running ? Icons.stop : Icons.play;
+                ink: c.running ? t.fur : t.ok;
+                edge: c.running ? t.fur : t.ok;
+                label: c.running ? "Parar" : "Iniciar";
                 clicked => { DockerApp.action(c.running ? "stop" : "start", c.name); }
             }
-            NeonButton {
-                text: "⟳";
-                width: 26px;
+            if !tiny: IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.refresh;
+                ink: t.visor;
+                edge: act-edge;
+                label: "Reiniciar";
                 clicked => { DockerApp.action("restart", c.name); }
             }
-            NeonButton {
-                text: "≡";
-                width: 26px;
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.logs;
+                ink: t.visor;
+                edge: act-edge;
+                label: "Logs";
                 clicked => { DockerApp.action("logs", c.name); }
             }
-            NeonButton {
-                text: ">_";
-                width: 30px;
+            if !tiny: IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.terminal;
+                ink: t.visor;
+                edge: act-edge;
                 enabled: c.running;
+                label: "Terminal";
                 clicked => { DockerApp.action("shell", c.name); }
             }
         }
     }
 }
 
-export component DockerView inherits VerticalLayout {
-    spacing: 10px;
+export component DockerView inherits Rectangle {
+    property <Colors> t: DockerApp.theme;
+    property <bool> narrow: self.width < 560px;
+    property <bool> tiny: self.width < 420px;
+    property <bool> short: self.height < 260px;
+    property <bool> bad: !DockerApp.ok || DockerApp.errors > 0;
+
+  VerticalLayout {
+    spacing: 12px;
 
     // mascote + fala + contadores
     HorizontalLayout {
-        spacing: 12px;
-        Mascot {
-            frame: DockerApp.mascot;
-            mood: DockerApp.mood;
-            width: 72px;
-            height: 63px;
+        spacing: 16px;
+        Rectangle {
+            width: short ? 56px : 72px;
+            height: short ? 50px : 64px;
+            background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
+            Mascot {
+                theme: t;
+                frame: DockerApp.mascot;
+                mood: DockerApp.mood;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+            }
         }
         VerticalLayout {
             alignment: center;
@@ -181,43 +220,62 @@ export component DockerView inherits VerticalLayout {
             spacing: 4px;
             Text {
                 text: !DockerApp.ok ? "Docker fora do ar" : DockerApp.speech;
-                color: !DockerApp.ok || DockerApp.mood == "alarm" ? Theme.alarm : Theme.text;
-                font-size: 14px;
-                font-weight: 600;
+                color: bad ? t.alarm.mix(#ffffff, 0.75) : Chrome.ink;
+                font-size: short ? 15px : 19px;
+                font-weight: 700;
                 wrap: word-wrap;
             }
             Text {
-                text: !DockerApp.ok ? DockerApp.error-text : DockerApp.usage-text;
-                color: Theme.sub;
-                font-size: 11px;
+                text: !DockerApp.ok ? DockerApp.error-text
+                    : narrow ? DockerApp.running + " rodando · " + DockerApp.stopped + " parados · " + DockerApp.errors + " com erro"
+                    : DockerApp.usage-text;
+                color: DockerApp.errors > 0 && narrow ? t.alarm : #A99BC4;
+                font-family: Fonts.mono;
+                font-size: 12px;
                 wrap: word-wrap;
             }
         }
-        Counter { label: "RUN"; value: DockerApp.running; tint: Theme.ok; width: 64px; }
-        Counter { label: "STOP"; value: DockerApp.stopped; tint: Theme.sub; width: 64px; }
-        Counter { label: "ERR"; value: DockerApp.errors; tint: Theme.alarm; width: 64px; }
+        if !narrow: HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+            Counter { theme: t; label: "RUN"; value: DockerApp.running; tint: t.ok; }
+            Counter { theme: t; label: "STOP"; value: DockerApp.stopped; tint: Chrome.sub; }
+            Counter { theme: t; label: "ERR"; value: DockerApp.errors; tint: t.alarm; }
+        }
     }
 
     // busca e filtros
     HorizontalLayout {
-        spacing: 10px;
+        spacing: 12px;
         SearchBox {
+            theme: t;
             text <=> DockerApp.search;
-            placeholder: "buscar por nome, imagem ou stack…";
+            placeholder: narrow ? "buscar…" : "buscar por nome, imagem ou stack";
             horizontal-stretch: 1;
-            edited(t) => { DockerApp.search-edited(t); }
+            edited(text) => { DockerApp.search-edited(text); }
         }
         HorizontalLayout {
-            spacing: 6px;
+            horizontal-stretch: 0;
+            spacing: 8px;
             alignment: center;
-            Toggle {
+            SqSwitch {
+                width: 34px;
+                height: 18px;
+                knob: 12px;
+                accent: t.fur;
+                label: "Só ativos";
                 checked: DockerApp.hide-stopped;
                 toggled => { DockerApp.toggle-hide-stopped(); }
             }
-            Text { text: "só ativos"; color: Theme.sub; font-size: 11px; vertical-alignment: center; }
+            if !tiny: Text { text: "só ativos"; color: Chrome.sub; font-size: 14px; vertical-alignment: center; }
         }
-        NeonButton {
-            text: "⟳ atualizar";
+        TextButton {
+            text: "atualizar";
+            icon: Icons.refresh;
+            ink: t.visor;
+            compact: narrow;
+            horizontal-stretch: 0;
+            width: narrow ? 40px : self.min-width;
             clicked => { DockerApp.refresh(); }
         }
     }
@@ -225,21 +283,23 @@ export component DockerView inherits VerticalLayout {
     // lista
     Rectangle {
         vertical-stretch: 1;
-        border-radius: 8px;
+        min-height: 56px;
         border-width: 1px;
-        border-color: Theme.muted.with-alpha(0.5);
-        background: Theme.bg0.with-alpha(0.4);
+        border-color: t.muted.with-alpha(0.45);
+        background: t.bg1.mix(#0D0717, 0.4);
 
         if DockerApp.rows.length == 0: Text {
-            text: !DockerApp.ok ? "Sem conexão com o Docker." : DockerApp.search != "" ? "Nada encontrado." : "Nenhum container.";
-            color: Theme.muted;
+            text: !DockerApp.ok ? "Sem conexão com o Docker." : DockerApp.search != "" ? "Nenhum container bate com esse filtro." : "Nenhum container.";
+            color: #A99BC4;
+            font-family: Fonts.mono;
             font-size: 13px;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
 
         ListView {
-            for c in DockerApp.rows: Row { c: c; }
+            for c in DockerApp.rows: Row { c: c; narrow: narrow; tiny: tiny; }
         }
     }
+  }
 }

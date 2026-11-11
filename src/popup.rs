@@ -29,39 +29,132 @@ pub fn select_backend() -> anyhow::Result<bool> {
     Ok(x11)
 }
 
-/// Põe a janela junto de `anchor` (ponto clicado na bandeja, em pixels da tela).
+/// Monitor em pixels físicos (como o winit informa) e o fator de escala dele.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Monitor {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub scale: f64,
+}
+
+/// Posição física (canto superior esquerdo) do popup. Função pura, para testar.
+/// - `anchor`: ponto clicado na bandeja, em pixels **lógicos** (é assim que o SNI entrega).
+/// - `win`: tamanho físico da janela.
+/// - `fallback`: índice do monitor usado sem âncora ou quando ela não cai em nenhum monitor.
+pub fn popup_position(
+    anchor: Option<(i32, i32)>,
+    win: (i32, i32),
+    monitors: &[Monitor],
+    fallback: usize,
+) -> Option<(i32, i32)> {
+    let (pw, ph) = win;
+    // o monitor que contém a âncora (cada um converte o ponto pela própria escala)
+    let found = anchor.and_then(|a| {
+        monitors.iter().find_map(|m| {
+            let p = to_physical(a, m.scale);
+            contains(m, p).then_some((m, p))
+        })
+    });
+    let m = match found {
+        Some((m, _)) => m,
+        None => monitors.get(fallback)?,
+    };
+    // margens e metade do painel são em pixels lógicos: aqui viram físicos
+    let gap = (GAP as f64 * m.scale).round() as i32;
+    let half = (PANEL_HALF as f64 * m.scale).round() as i32;
+    let (ax, ay) = match (anchor, found) {
+        (_, Some((_, p))) => p,
+        (Some(a), None) => to_physical(a, m.scale),
+        // sem âncora: canto inferior direito do monitor, onde costuma ficar a bandeja
+        (None, None) => (m.x + m.w - gap, m.y + m.h - gap),
+    };
+
+    let x = (ax - pw / 2).clamp(m.x + gap, (m.x + m.w - pw - gap).max(m.x + gap));
+    // painel embaixo (clique na metade de baixo): abre para cima; senão para baixo
+    let y = if ay > m.y + m.h / 2 { ay - half - gap - ph } else { ay + half + gap };
+    let y = y.clamp(m.y, (m.y + m.h - ph).max(m.y));
+    Some((x, y))
+}
+
+fn to_physical((x, y): (i32, i32), scale: f64) -> (i32, i32) {
+    ((x as f64 * scale).round() as i32, (y as f64 * scale).round() as i32)
+}
+
+fn contains(m: &Monitor, (x, y): (i32, i32)) -> bool {
+    x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h
+}
+
+/// Põe a janela junto de `anchor` (ponto clicado na bandeja, em pixels lógicos).
 /// Sem âncora, vai para o canto inferior direito, onde costuma ficar a bandeja.
 pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
     window.with_winit_window(|w| {
         let size = w.outer_size();
-        let (pw, ph) = (size.width as i32, size.height as i32);
-
-        // monitor que contém o ponto (ou o atual)
-        let monitor = anchor
-            .and_then(|(ax, ay)| {
-                w.available_monitors().find(|m| {
-                    let (p, s) = (m.position(), m.size());
-                    ax >= p.x && ax < p.x + s.width as i32 && ay >= p.y && ay < p.y + s.height as i32
-                })
+        let handles: Vec<_> = w.available_monitors().collect();
+        let monitors: Vec<Monitor> = handles
+            .iter()
+            .map(|m| {
+                let (p, s) = (m.position(), m.size());
+                Monitor { x: p.x, y: p.y, w: s.width as i32, h: s.height as i32, scale: m.scale_factor() }
             })
-            .or_else(|| w.current_monitor())
-            .or_else(|| w.primary_monitor());
-        let Some(m) = monitor else { return };
-        let (mx, my) = (m.position().x, m.position().y);
-        let (mw, mh) = (m.size().width as i32, m.size().height as i32);
+            .collect();
+        // o monitor atual (ou o primário) é o reserva quando a âncora não cai em nenhum
+        let current = w.current_monitor().or_else(|| w.primary_monitor());
+        let fallback = current.and_then(|c| handles.iter().position(|m| m.position() == c.position())).unwrap_or(0);
+        if let Some((x, y)) = popup_position(anchor, (size.width as i32, size.height as i32), &monitors, fallback) {
+            w.set_outer_position(PhysicalPosition::new(x, y));
+        }
+    });
+}
 
-        let (ax, ay) = anchor.unwrap_or((mx + mw - GAP, my + mh - GAP));
-        let x = (ax - pw / 2).clamp(mx + GAP, (mx + mw - pw - GAP).max(mx));
-        // painel embaixo (clique na metade de baixo): abre para cima; senão para baixo
-        let y = if ay > my + mh / 2 { ay - PANEL_HALF - GAP - ph } else { ay + PANEL_HALF + GAP };
-        let y = y.clamp(my, (my + mh - ph).max(my));
-        w.set_outer_position(PhysicalPosition::new(x, y));
+/// Começa a redimensionar pela borda/canto `dir` ("n", "se", …), com o mouse pressionado.
+pub fn drag_resize(window: &slint::Window, dir: &str) {
+    use winit::window::ResizeDirection as D;
+    let d = match dir {
+        "n" => D::North,
+        "s" => D::South,
+        "e" => D::East,
+        "w" => D::West,
+        "ne" => D::NorthEast,
+        "nw" => D::NorthWest,
+        "se" => D::SouthEast,
+        "sw" => D::SouthWest,
+        _ => return,
+    };
+    window.with_winit_window(|w| {
+        if let Err(e) = w.drag_resize_window(d) {
+            eprintln!("cyberhub: não deu para redimensionar: {e}");
+        }
     });
 }
 
 /// Pede o foco (o popup precisa dele para fechar quando o usuário clica fora).
 pub fn focus(window: &slint::Window) {
     window.with_winit_window(|w| w.focus_window());
+}
+
+/// A janela nativa já existe (depois do primeiro `show`).
+pub fn has_window(window: &slint::Window) -> bool {
+    window.has_winit_window()
+}
+
+/// Opacidade da janela inteira (0..1), via `_NET_WM_WINDOW_OPACITY` do compositor.
+pub fn set_opacity(window: &slint::Window, alpha: f32) {
+    window.with_winit_window(|w| {
+        if let Some(id) = x11_id(w) {
+            let _ = x11::set_opacity(id, alpha);
+        }
+    });
+}
+
+fn x11_id(w: &winit::window::Window) -> Option<u32> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match w.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Xlib(h) => Some(h.window as u32),
+        RawWindowHandle::Xcb(h) => Some(h.window.get()),
+        _ => None,
+    }
 }
 
 /// Tira a janela da barra de tarefas e do alternador e a mantém por cima (EWMH, X11).
@@ -92,6 +185,25 @@ mod x11 {
         AtomEnum, ClientMessageEvent, ConnectionExt, EventMask, PropMode,
     };
     use x11rb::wrapper::ConnectionExt as _;
+    use x11rb::rust_connection::RustConnection;
+
+    thread_local! {
+        /// Conexão reaproveitada pelo fade (várias mudanças de opacidade seguidas).
+        static CONN: Option<(RustConnection, u32)> = x11rb::connect(None).ok().and_then(|(c, _)| {
+            let atom = c.intern_atom(false, b"_NET_WM_WINDOW_OPACITY").ok()?.reply().ok()?.atom;
+            Some((c, atom))
+        });
+    }
+
+    pub fn set_opacity(window: u32, alpha: f32) -> anyhow::Result<()> {
+        CONN.with(|c| {
+            let Some((conn, atom)) = c else { return Ok(()) };
+            let value = (alpha.clamp(0.0, 1.0) as f64 * u32::MAX as f64) as u32;
+            conn.change_property32(PropMode::REPLACE, window, *atom, AtomEnum::CARDINAL, &[value])?;
+            conn.flush()?;
+            Ok(())
+        })
+    }
 
     pub fn set_states(window: u32) -> anyhow::Result<()> {
         let (conn, screen) = x11rb::connect(None)?;
@@ -122,5 +234,84 @@ mod x11 {
         // ida e volta: garante que o servidor processou tudo antes de a conexão fechar
         conn.get_input_focus()?.reply()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mon(x: i32, y: i32, w: i32, h: i32, scale: f64) -> Monitor {
+        Monitor { x, y, w, h, scale }
+    }
+
+    #[test]
+    fn escala_1_painel_embaixo_abre_para_cima() {
+        let m = [mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(popup_position(Some((1800, 1070)), (400, 500), &m, 0), Some((1510, 536)));
+    }
+
+    #[test]
+    fn escala_1_5_usa_margens_e_ancora_em_logico() {
+        // 1920x1080 lógicos = 2880x1620 físicos; a janela 400x500 lógicos = 600x750
+        let m = [mon(0, 0, 2880, 1620, 1.5)];
+        let (x, y) = popup_position(Some((1200, 1070)), (600, 750), &m, 0).unwrap();
+        assert_eq!((x, y), (1500, 804));
+        // o mesmo ponto em escala 1 dá (1000, 536) lógicos: a 1,5 tem que dar exatamente 1,5×
+        let m1 = [mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(popup_position(Some((1200, 1070)), (400, 500), &m1, 0), Some((1000, 536)));
+        assert_eq!((x, y), (1000 * 3 / 2, 536 * 3 / 2));
+    }
+
+    #[test]
+    fn escala_2() {
+        let m = [mon(0, 0, 3840, 2160, 2.0)];
+        assert_eq!(popup_position(Some((1800, 1070)), (800, 1000), &m, 0), Some((3020, 1072)));
+    }
+
+    #[test]
+    fn monitor_a_direita_e_acima() {
+        let m = [mon(0, 0, 1920, 1080, 1.0), mon(1920, -1080, 1920, 1080, 1.0)];
+        // clique na bandeja do monitor de cima (y negativo), no canto direito
+        assert_eq!(popup_position(Some((3800, -10)), (400, 500), &m, 0), Some((3430, -544)));
+        // sem âncora, usa o monitor do reserva (o de cima)
+        assert_eq!(popup_position(None, (400, 500), &m, 1), Some((3430, -544)));
+    }
+
+    #[test]
+    fn painel_em_cima_abre_para_baixo() {
+        let m = [mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(popup_position(Some((100, 10)), (400, 500), &m, 0), Some((10, 44)));
+        // a 1,5: âncora (100, 10) lógica = (150, 15) física; margens de 15 e 36
+        let m15 = [mon(0, 0, 2880, 1620, 1.5)];
+        assert_eq!(popup_position(Some((100, 10)), (600, 750), &m15, 0), Some((15, 66)));
+    }
+
+    #[test]
+    fn sem_ancora_vai_para_o_canto_do_monitor_de_reserva() {
+        let m = [mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(popup_position(None, (400, 500), &m, 0), Some((1510, 536)));
+        let m15 = [mon(0, 0, 2880, 1620, 1.5)];
+        assert_eq!(popup_position(None, (600, 750), &m15, 0), Some((2265, 804)));
+    }
+
+    #[test]
+    fn ancora_fora_de_todos_os_monitores_usa_o_reserva_e_fica_dentro() {
+        let m = [mon(0, 0, 1920, 1080, 1.0), mon(1920, 0, 1920, 1080, 1.0)];
+        let (x, y) = popup_position(Some((5000, 5000)), (400, 500), &m, 1).unwrap();
+        assert!((1920..=3840 - 400).contains(&x) && (0..=1080 - 500).contains(&y));
+    }
+
+    #[test]
+    fn sem_monitores_nao_posiciona() {
+        assert_eq!(popup_position(Some((1, 1)), (400, 500), &[], 0), None);
+        assert_eq!(popup_position(None, (400, 500), &[], 0), None);
+    }
+
+    #[test]
+    fn janela_maior_que_o_monitor_nao_quebra() {
+        let m = [mon(0, 0, 300, 200, 1.0)];
+        let (x, y) = popup_position(Some((100, 100)), (400, 500), &m, 0).unwrap();
+        assert_eq!((x, y), (10, 0));
     }
 }

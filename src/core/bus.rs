@@ -46,23 +46,35 @@ impl Bus {
     where
         F: FnMut() -> Event + Send + 'static,
     {
+        self.spawn_polled(name, interval, move |_, _| Some(collect()));
+    }
+
+    /// Como `spawn`, mas `collect` recebe o `Poker` do próprio provedor e se a leitura foi
+    /// pedida agora (`poked`). Pode devolver `None` para não publicar nada nesta rodada.
+    pub fn spawn_polled<F>(&mut self, name: &'static str, tick: Duration, mut collect: F)
+    where
+        F: FnMut(&Poker, bool) -> Option<Event> + Send + 'static,
+    {
         let topic = Arc::new(Topic::default());
         self.topics.insert(name, topic.clone());
         let tx = self.tx.clone();
         std::thread::Builder::new()
             .name(format!("provider-{name}"))
             .spawn(move || {
+                let me = Poker(Some(topic.clone()));
                 loop {
                     if topic.subscribers.load(Ordering::Relaxed) == 0 {
                         std::thread::sleep(Duration::from_millis(250));
                         continue;
                     }
-                    topic.poke.store(false, Ordering::Relaxed);
-                    if tx.send(collect()).is_err() {
-                        return; // o hub fechou
+                    let poked = topic.poke.swap(false, Ordering::Relaxed);
+                    if let Some(ev) = collect(&me, poked) {
+                        if tx.send(ev).is_err() {
+                            return; // o hub fechou
+                        }
                     }
                     let start = Instant::now();
-                    while start.elapsed() < interval
+                    while start.elapsed() < tick
                         && !topic.poke.load(Ordering::Relaxed)
                         && topic.subscribers.load(Ordering::Relaxed) > 0
                     {
@@ -113,5 +125,10 @@ impl Poker {
         if let Some(t) = &self.0 {
             t.poke.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// O provedor tem algum assinante agora (quem o assina pode parar de trabalhar).
+    pub fn subscribed(&self) -> bool {
+        self.0.as_ref().is_some_and(|t| t.subscribers.load(Ordering::Relaxed) > 0)
     }
 }

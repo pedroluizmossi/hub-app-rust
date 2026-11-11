@@ -9,6 +9,8 @@ pub struct CyberTray {
     icons: Vec<ksni::Icon>,
     tooltip: String,
     ui: slint::Weak<HubWindow>,
+    /// Marca o item "Fixar janela" do menu.
+    pinned: bool,
 }
 
 impl ksni::Tray for CyberTray {
@@ -32,6 +34,11 @@ impl ksni::Tray for CyberTray {
         let _ = self.ui.upgrade_in_event_loop(move |ui| ui.invoke_toggle_requested(x, y));
     }
 
+    // clique do meio: liga/desliga o modo fixar
+    fn secondary_activate(&mut self, _x: i32, _y: i32) {
+        let _ = self.ui.upgrade_in_event_loop(|ui| ui.invoke_toggle_pin());
+    }
+
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::*;
         vec![
@@ -39,6 +46,15 @@ impl ksni::Tray for CyberTray {
                 label: "Mostrar / esconder".into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.ui.upgrade_in_event_loop(|ui| ui.invoke_toggle_requested(0, 0));
+                }),
+                ..Default::default()
+            }
+            .into(),
+            CheckmarkItem {
+                label: "Fixar janela".into(),
+                checked: self.pinned,
+                activate: Box::new(|t: &mut Self| {
+                    let _ = t.ui.upgrade_in_event_loop(|ui| ui.invoke_toggle_pin());
                 }),
                 ..Default::default()
             }
@@ -75,7 +91,7 @@ pub struct Tray {
 impl Tray {
     /// Cria o ícone. Falha se não houver bandeja (ex.: GNOME sem a extensão AppIndicator).
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
-        let tray = CyberTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui };
+        let tray = CyberTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui, pinned: false };
         let handle = tray.spawn()?;
         Ok(Tray { handle })
     }
@@ -86,5 +102,10 @@ impl Tray {
             t.icons = icons;
             t.tooltip = tooltip;
         });
+    }
+
+    /// Atualiza a marca de "Fixar janela" no menu.
+    pub fn set_pinned(&self, pinned: bool) {
+        self.handle.update(move |t| t.pinned = pinned);
     }
 }

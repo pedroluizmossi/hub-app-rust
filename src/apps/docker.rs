@@ -49,6 +49,8 @@ pub struct DockerMini {
     search: String,
     mood: Mood,
     rows: Rc<VecModel<ContainerRow>>,
+    /// Último quadro da mascote: só troca a imagem quando os pixels mudam.
+    mascot: render::Cache,
 }
 
 impl DockerMini {
@@ -70,6 +72,7 @@ impl DockerMini {
             search: String::new(),
             mood: Mood::Sleep,
             rows,
+            mascot: Default::default(),
         }));
         Self::bind(&app, ui);
         app
@@ -267,8 +270,11 @@ impl DockerMini {
 
     // ---- tela ---------------------------------------------------------------
 
-    fn mascot_image(&self, frame: u32) -> slint::Image {
-        render::image(sprites::get(&self.mascot_key()), self.host.theme_for(&self.manifest), self.mood, frame)
+    /// Redesenha a mascote no quadro dado; `true` se a imagem mudou.
+    fn refresh_mascot(&mut self, frame: u32) -> bool {
+        let key = self.mascot_key();
+        let theme = self.host.theme_for(&self.manifest);
+        self.mascot.update(sprites::get(&key), theme, self.mood, frame)
     }
 
     fn counts(&self) -> (i32, i32, i32) {
@@ -404,7 +410,9 @@ impl MiniApp for DockerMini {
 
     fn enable(&mut self, ui: &HubWindow) {
         self.baseline = false; // sem histórico: não acusa eventos antigos
-        ui.global::<DockerApp>().set_mascot(self.mascot_image(1));
+        ui.global::<DockerApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
+        self.refresh_mascot(1);
+        ui.global::<DockerApp>().set_mascot(self.mascot.image());
         self.push_header(ui);
     }
 
@@ -429,12 +437,16 @@ impl MiniApp for DockerMini {
             self.mood = mood;
             self.push_header(ui);
         }
-        ui.global::<DockerApp>().set_mascot(self.mascot_image(frame));
+        if self.refresh_mascot(frame) {
+            ui.global::<DockerApp>().set_mascot(self.mascot.image());
+        }
     }
 
     fn settings_changed(&mut self, ui: &HubWindow) {
+        ui.global::<DockerApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.mood = self.compute_mood();
-        ui.global::<DockerApp>().set_mascot(self.mascot_image(1));
+        self.refresh_mascot(1);
+        ui.global::<DockerApp>().set_mascot(self.mascot.image());
         self.refresh_rows(ui);
     }
 

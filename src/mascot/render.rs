@@ -222,12 +222,41 @@ pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4
 
 /// Quadro como imagem do Slint (o Slint amplia com `image-rendering: pixelated`).
 pub fn image(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> slint::Image {
-    let px = render(sprite, theme, mood, frame);
+    to_image(&render(sprite, theme, mood, frame))
+}
+
+fn to_image(px: &[[u8; 4]; W * H]) -> slint::Image {
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(W as u32, H as u32);
     for (dst, src) in buf.make_mut_slice().iter_mut().zip(px.iter()) {
         *dst = slint::Rgba8Pixel { r: src[0], g: src[1], b: src[2], a: src[3] };
     }
     slint::Image::from_rgba8(buf)
+}
+
+/// Último quadro entregue à UI. O Slint redesenha a janela quando uma imagem muda, então
+/// só se refaz a imagem quando os pixels mudam (mascote dormindo ou parada não redesenha).
+#[derive(Default)]
+pub struct Cache {
+    px: Option<Box<[[u8; 4]; W * H]>>,
+    img: slint::Image,
+}
+
+impl Cache {
+    /// Atualiza para o quadro dado. Devolve `true` se mudou; aí `image()` tem a imagem nova.
+    pub fn update(&mut self, sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> bool {
+        let px = render(sprite, theme, mood, frame);
+        if self.px.as_deref() == Some(&px) {
+            return false;
+        }
+        self.img = to_image(&px);
+        self.px = Some(Box::new(px));
+        true
+    }
+
+    /// Imagem do último quadro atualizado (barata: a imagem é compartilhada).
+    pub fn image(&self) -> slint::Image {
+        self.img.clone()
+    }
 }
 
 /// Quadro quadrado ampliado `scale`× em ARGB32 big-endian (formato do ícone de bandeja SNI).
@@ -244,6 +273,24 @@ pub fn argb_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale
         }
     }
     (side as i32, data)
+}
+
+/// Cores do tema para a UI (cada app manda as suas).
+pub fn colors(t: &Theme) -> crate::ui::Colors {
+    crate::ui::Colors {
+        fur: color(t.fur),
+        visor: color(t.visor),
+        outline: color(t.outline),
+        ok: color(t.ok),
+        warn: color(t.warn),
+        alarm: color(t.alarm),
+        sleep: color(t.sleep),
+        bg0: color(t.bg0),
+        bg1: color(t.bg1),
+        text: color(t.text),
+        sub: color(t.sub),
+        muted: color(t.muted),
+    }
 }
 
 /// Cor do tema como `slint::Color`.

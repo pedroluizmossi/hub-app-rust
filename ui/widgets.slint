@@ -1,19 +1,21 @@
-// Componentes reutilizáveis pelo hub e pelos mini-apps.
-import { Theme, Anim } from "theme.slint";
+// Componentes reutilizáveis pelos mini-apps e pela moldura. Cantos retos, linhas finas
+// e ícones de traço, como no design da Toca.
+import { Colors, Moods, Anim, Chrome, Fonts, Icons } from "theme.slint";
 
 // Mascote em pixel art. O quadro (piscar, LED, glitch) vem desenhado do Rust;
 // flutuar e pular são deslocamentos aqui, sem redesenhar a imagem.
 export component Mascot inherits Rectangle {
+    in property <Colors> theme;
     in property <image> frame;
     in property <string> mood: "idle";
     in property <bool> moving: true;
     in property <bool> aura: true;
     property <int> f: Anim.frame;
-    property <color> accent: Theme.mood-color(mood);
+    property <color> accent: Moods.color(theme, mood);
     preferred-width: 64px;
     preferred-height: 56px;
 
-    // aura neon: anéis concêntricos (funciona no renderizador por software, sem blur)
+    // aura neon: anéis concêntricos (o renderizador por software não tem blur)
     property <float> glow: mood == "alarm" && mod(f, 4) < 2 ? 1.6 : 1;
     if aura && mood != "sleep": Rectangle {
         for k in 3: Rectangle {
@@ -46,7 +48,7 @@ export component Mascot inherits Rectangle {
         x: parent.width * 0.8;
         y: parent.height * 0.05 - mod(f, 16) * 1px;
         opacity: 1 - mod(f, 16) / 16;
-        color: Theme.sleep;
+        color: theme.sleep;
         font-size: parent.height * 0.22;
         font-weight: 700;
     }
@@ -54,33 +56,158 @@ export component Mascot inherits Rectangle {
         text: "!";
         x: parent.width * 0.86;
         y: 0;
-        color: Theme.alarm;
+        color: theme.alarm;
         font-size: parent.height * 0.3;
         font-weight: 900;
         opacity: mod(f, 4) < 2 ? 1 : 0.3;
     }
 }
 
-// Botão neon pequeno.
-export component NeonButton inherits Rectangle {
-    in property <string> text;
-    in property <color> tint: Theme.visor;
-    in property <bool> active: false;
-    in property <bool> enabled: true;
-    in property <length> font-size: 12px;
-    callback clicked;
-    min-height: 24px;
-    min-width: label.preferred-width + 16px;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: !enabled ? Theme.muted : touch.has-hover || active ? tint : tint.with-alpha(0.45);
-    background: active ? tint.with-alpha(0.22) : touch.pressed ? tint.with-alpha(0.3) : touch.has-hover ? tint.with-alpha(0.12) : transparent;
-    animate background, border-color { duration: 120ms; }
+// Ícone de traço num quadro 24×24.
+export component Icon inherits Path {
+    in property <string> icon;
+    in property <color> ink: Chrome.sub;
+    in property <bool> filled: false;
+    in property <length> size: 16px;
+    in property <float> weight: 2.2;
+    width: size;
+    height: size;
+    commands: icon;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: filled ? transparent : ink;
+    stroke-width: size * weight / 24;
+    stroke-line-cap: square;
+    fill: filled ? ink : transparent;
+}
 
-    label := Text {
+// Botão quadrado só com ícone (ações dos containers, alfinete, engrenagem).
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <color> ink: Chrome.cyan;
+    in property <color> edge: Chrome.edge;
+    in property <bool> enabled: true;
+    in property <length> icon-size: 16px;
+    in property <string> label;   // nome para leitores de tela
+    callback clicked;
+    width: 44px;
+    height: 44px;
+    border-width: 1px;
+    border-color: edge;
+    background: !enabled ? transparent : touch.pressed ? ink.with-alpha(0.22) : touch.has-hover ? ink.with-alpha(0.12) : transparent;
+    opacity: enabled ? 1 : 0.35;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { if enabled { root.clicked(); } }
+
+    Icon {
+        icon: root.icon;
+        ink: root.ink;
+        size: root.icon-size;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Botão com texto (e ícone opcional) e borda fina.
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <color> ink: Chrome.cyan;
+    in property <color> edge: ink;
+    in property <color> fill: transparent;   // fundo cheio (botão principal)
+    in property <length> font-size: 14px;
+    in property <int> font-weight: 600;
+    in property <length> letter-spacing: 0;
+    in property <bool> compact: false;        // só o ícone
+    callback clicked;
+    height: 36px;
+    min-width: row.preferred-width + 24px;
+    horizontal-stretch: 0;
+    border-width: fill == transparent ? 1px : 0;
+    border-color: edge;
+    background: fill != transparent ? (touch.pressed ? fill.darker(0.2) : touch.has-hover ? fill.brighter(0.15) : fill)
+        : touch.pressed ? ink.with-alpha(0.22) : touch.has-hover ? ink.with-alpha(0.12) : transparent;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { root.clicked(); }
+
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        if icon != "": VerticalLayout {
+            alignment: center;
+            Icon { icon: root.icon; ink: root.ink; size: 14px; weight: 2.4; }
+        }
+        if !compact: Text {
+            text: root.text;
+            color: root.ink;
+            font-size: root.font-size;
+            font-weight: root.font-weight;
+            letter-spacing: root.letter-spacing;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Interruptor quadrado: trilho na cor do acento quando ligado.
+export component SqSwitch inherits Rectangle {
+    in property <bool> checked;
+    in property <color> accent: Chrome.cyan;
+    in property <length> knob: 14px;
+    in property <string> label;
+    callback toggled;
+    width: 40px;
+    height: 22px;
+    border-width: 1px;
+    border-color: checked ? accent : #4A3A66;
+    background: checked ? accent : #1A1228;
+    animate background, border-color { duration: 150ms; }
+    accessible-role: switch;
+    accessible-checked: checked;
+    accessible-label: label;
+    accessible-action-default => { root.toggled(); }
+
+    Rectangle {
+        width: knob;
+        height: knob;
+        y: (parent.height - self.height) / 2;
+        x: checked ? parent.width - self.width - (parent.height - self.height) / 2 : (parent.height - self.height) / 2;
+        background: checked ? Chrome.bg : #8E80AA;
+        animate x { duration: 150ms; easing: ease-in-out; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+}
+
+// Botão − / + de um stepper.
+component StepKey inherits Rectangle {
+    in property <string> text;
+    in property <color> ink;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 34px;
+    background: enabled && touch.has-hover ? Chrome.hover : transparent;
+    opacity: enabled ? 1 : 0.35;
+    accessible-role: button;
+    accessible-label: text == "+" ? "Aumentar" : "Diminuir";
+    accessible-action-default => { if enabled { root.clicked(); } }
+    Text {
         text: root.text;
-        color: !enabled ? Theme.muted : active || touch.has-hover ? tint : Theme.text;
-        font-size: root.font-size;
+        color: root.ink;
+        font-family: Fonts.mono;
+        font-size: 16px;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -91,38 +218,130 @@ export component NeonButton inherits Rectangle {
     }
 }
 
-// Interruptor liga/desliga.
-export component Toggle inherits Rectangle {
-    in property <bool> checked;
-    callback toggled;
-    width: 34px;
-    height: 18px;
-    border-radius: 9px;
-    background: checked ? Theme.visor.with-alpha(0.35) : Theme.muted.with-alpha(0.4);
+// Número com − e + dos lados.
+export component Stepper inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <string> unit;
+    in property <color> accent: Chrome.cyan;
+    in property <color> edge: #3A2A55;
+    in property <length> value-width: 52px;
+    in property <length> font-size: 15px;
+    // − e + desligados por fora (ex.: a grade não comporta)
+    in property <bool> down-enabled: value > minimum;
+    in property <bool> up-enabled: value < maximum;
+    callback edited(int);
+    height: 34px;
     border-width: 1px;
-    border-color: checked ? Theme.visor : Theme.muted;
-    animate background { duration: 150ms; }
-
-    Rectangle {
-        width: 12px;
-        height: 12px;
-        y: 3px;
-        x: checked ? parent.width - 15px : 3px;
-        border-radius: 6px;
-        background: checked ? Theme.visor : Theme.sub;
-        animate x { duration: 150ms; easing: ease-in-out; }
-    }
-    TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.toggled(); }
+    border-color: edge;
+    HorizontalLayout {
+        padding: 1px;
+        StepKey {
+            text: "−";
+            ink: accent;
+            enabled: down-enabled;
+            clicked => { root.edited(max(minimum, value - step)); }
+        }
+        Text {
+            width: value-width;
+            text: value + unit;
+            color: Chrome.ink;
+            font-family: Fonts.mono;
+            font-size: root.font-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        StepKey {
+            text: "+";
+            ink: accent;
+            enabled: up-enabled;
+            clicked => { root.edited(min(maximum, value + step)); }
+        }
     }
 }
 
-// Barra segmentada com a parte "destaque" (ex.: o que é do Docker) por cima.
+// Lista de escolha: botão com a opção atual e uma lista que abre por baixo.
+export component Select inherits Rectangle {
+    in property <[string]> options;
+    in property <int> index;
+    in property <color> accent: Chrome.cyan;
+    in property <string> label;
+    callback chosen(int);
+    width: 240px;
+    height: 36px;
+    border-width: 1px;
+    border-color: touch.has-hover ? accent : #3A2A55;
+    background: #0D0717;
+    accessible-role: combobox;
+    accessible-label: label;
+    accessible-value: options[index];
+    accessible-action-default => { popup.show(); }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text {
+            text: options[index];
+            color: Chrome.ink;
+            font-size: 14px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { icon: Icons.chevron; ink: accent; size: 14px; }
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 2px;
+        width: root.width;
+        Rectangle {
+            background: #0D0717;
+            border-width: 1px;
+            border-color: accent;
+            VerticalLayout {
+                padding: 1px;
+                for o[i] in options: Rectangle {
+                    height: 32px;
+                    background: i == index ? accent.with-alpha(0.18) : item.has-hover ? Chrome.hover : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        Text {
+                            text: o;
+                            color: i == index ? accent : Chrome.ink;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                    item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.chosen(i); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Barra segmentada; `part` (ex.: o que é do Docker) aparece por cima.
 export component SegBar inherits Rectangle {
+    in property <Colors> theme;
     in property <float> value;     // 0..100
-    in property <float> part: 0;   // 0..100, desenhado por cima
-    in property <color> tint: Theme.visor;
+    in property <float> part: 0;   // 0..100
+    in property <color> tint: theme.visor;
+    in property <color> off: theme.muted.with-alpha(0.3);
     in property <int> segments: 20;
     height: 8px;
 
@@ -130,10 +349,9 @@ export component SegBar inherits Rectangle {
         spacing: 2px;
         for i in segments: Rectangle {
             property <float> lit: (i + 0.5) * 100 / segments;
-            border-radius: 1px;
             background: lit <= part ? tint
-                : lit <= value ? tint.with-alpha(0.55)
-                : Theme.muted.with-alpha(0.25);
+                : lit <= value ? tint.with-alpha(0.85)
+                : off;
             animate background { duration: 300ms; }
         }
     }
@@ -143,7 +361,7 @@ export component SegBar inherits Rectangle {
 // a proporção, então o quadro já é largo como o espaço onde ele aparece).
 export component Sparkline inherits Rectangle {
     in property <string> commands;
-    in property <color> tint: Theme.visor;
+    in property <color> tint;
     height: 28px;
 
     Path {
@@ -160,66 +378,77 @@ export component Sparkline inherits Rectangle {
 
 // Quadro de contador (RUN / STOP / ERR).
 export component Counter inherits Rectangle {
+    in property <Colors> theme;
     in property <string> label;
     in property <int> value;
     in property <color> tint;
-    border-radius: 6px;
+    in property <color> idle-ink: Chrome.sub;
+    width: 64px;
+    height: 60px;
     border-width: 1px;
-    border-color: value > 0 ? tint.with-alpha(0.6) : Theme.muted.with-alpha(0.5);
-    background: value > 0 ? tint.with-alpha(0.08) : transparent;
-    min-height: 46px;
+    border-color: value > 0 ? tint : #3A2A55;
+    background: value > 0 ? tint.with-alpha(0.1) : transparent;
 
     VerticalLayout {
-        padding: 6px;
         alignment: center;
+        spacing: 2px;
         Text {
             text: value;
-            color: value > 0 ? tint : Theme.muted;
-            font-size: 20px;
-            font-weight: 800;
+            color: value > 0 ? tint : idle-ink;
+            font-family: Fonts.mono;
+            font-size: 22px;
+            font-weight: 700;
             horizontal-alignment: center;
         }
         Text {
             text: label;
-            color: Theme.sub;
+            color: #A99BC4;
+            font-family: Fonts.mono;
             font-size: 10px;
-            letter-spacing: 2px;
+            letter-spacing: 1.4px;
             horizontal-alignment: center;
         }
     }
 }
 
-// Campo de busca simples no estilo do tema.
+// Campo de busca com lupa.
 export component SearchBox inherits Rectangle {
+    in property <Colors> theme;
     in-out property <string> text;
     in property <string> placeholder: "buscar…";
     callback edited(string);
-    min-height: 26px;
-    border-radius: 4px;
+    height: 36px;
     border-width: 1px;
-    border-color: input.has-focus ? Theme.visor : Theme.muted;
-    background: Theme.bg0.with-alpha(0.6);
+    border-color: input.has-focus ? theme.visor : #3A2A55;
+    background: #0D0717;
 
     HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        spacing: 6px;
-        Text { text: "⌕"; color: Theme.sub; vertical-alignment: center; }
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Icon { icon: Icons.search; ink: Chrome.dim; size: 14px; weight: 2.4; }
+        }
         Rectangle {
             if text == "": Text {
                 text: placeholder;
-                color: Theme.muted;
-                font-size: 12px;
+                color: Chrome.dim;
+                font-family: Fonts.mono;
+                font-size: 13px;
                 vertical-alignment: center;
+                overflow: elide;
                 width: 100%;
                 height: 100%;
             }
             input := TextInput {
                 text <=> root.text;
-                color: Theme.text;
-                font-size: 12px;
+                color: Chrome.ink;
+                font-family: Fonts.mono;
+                font-size: 13px;
                 vertical-alignment: center;
                 single-line: true;
+                accessible-label: placeholder;
                 edited => { root.edited(self.text); }
             }
         }

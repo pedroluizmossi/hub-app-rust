@@ -1,17 +1,49 @@
-// Janela do hub. A moldura é neutra (cores e controles do sistema, claro ou escuro);
-// cada mini-app aparece num painel com o próprio tema.
-import { ScrollView, Switch, SpinBox, ComboBox, Palette } from "std-widgets.slint";
-import { Theme, Anim } from "theme.slint";
+// Janela do hub (a "Toca"): moldura escura com dois cantos cortados, cabeçalho e o
+// painel com os mini-apps numa grade, cada um com o próprio tema. Na engrenagem, o modo
+// de edição deixa arrastar os apps pelo topo e puxar as bordas para mudar o tamanho.
+import { ScrollView } from "std-widgets.slint";
+import { Colors, Anim, Chrome, Fonts, Icons } from "theme.slint";
+import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select } from "widgets.slint";
 import { DockerView, DockerApp, ContainerRow } from "../miniapps/docker/view.slint";
 import { VitalsView, VitalsApp, VitalCard } from "../miniapps/vitals/view.slint";
 
-export { Theme, Anim, DockerApp, ContainerRow, VitalsApp, VitalCard }
+import "fonts/ChakraPetch-Regular.ttf";
+import "fonts/ChakraPetch-Medium.ttf";
+import "fonts/ChakraPetch-SemiBold.ttf";
+import "fonts/ChakraPetch-Bold.ttf";
+import "fonts/JetBrainsMono-Regular.ttf";
+import "fonts/JetBrainsMono-Bold.ttf";
+
+export { Colors, Anim, DockerApp, ContainerRow, VitalsApp, VitalCard }
+
+// Posição de um app na grade do painel (em células).
+export struct GridCell {
+    id: string,
+    name: string,
+    col: int,
+    row: int,
+    w: int,
+    h: int,
+    theme: Colors,   // tema do app (preenchido pelo Rust)
+}
+
+// Prévia de onde o app vai parar durante um arrasto no modo de edição.
+export struct Ghost {
+    visible: bool,
+    id: string,
+    col: int,
+    row: int,
+    w: int,
+    h: int,
+    ok: bool,        // cabe (os outros acham lugar)
+}
 
 // Uma configuração declarada no manifesto de um app.
 export struct SettingRow {
     app: string,
     key: string,
     label: string,
+    unit: string,        // "%", "°C" ou vazio (tirado do fim do rótulo)
     kind: string,        // "bool" | "int" | "choice"
     bool-value: bool,
     int-value: int,
@@ -29,120 +61,56 @@ export struct AppInfo {
     icon: image,
     enabled: bool,
     mood: string,
+    theme: Colors,
     settings: [SettingRow],
 }
 
-// Cores fixas de estado na moldura (o tema de cada app só vale dentro do painel dele).
-global Status {
-    out property <color> alarm: #e5484d;
-    out property <color> busy: #f5a524;
-}
+// ---- configurações ------------------------------------------------------------
 
-component ShellButton inherits Rectangle {
-    in property <string> text;
-    callback clicked;
-    width: label.preferred-width + 18px;
-    height: 26px;
-    border-radius: 5px;
-    background: touch.pressed ? Palette.selection-background : touch.has-hover ? Palette.alternate-background : transparent;
-    label := Text {
-        text: root.text;
-        color: Palette.foreground;
-        font-size: 12px;
-    }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-component Tab inherits Rectangle {
-    in property <string> label;
-    in property <image> icon;
-    in property <string> mood;
-    in property <bool> selected;
-    callback clicked;
-    height: 34px;
-    min-width: row.preferred-width + 16px;
-    border-radius: 6px;
-    background: selected ? Palette.alternate-background : touch.has-hover ? Palette.alternate-background.with-alpha(0.5) : transparent;
-
-    row := HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        spacing: 8px;
-        alignment: center;
-        if icon.width > 0: Image {
-            source: icon;
-            image-rendering: pixelated;
-            width: 22px;
-            height: 19px;
-            y: (parent.height - self.height) / 2;
-        }
-        Text {
-            text: label;
-            color: Palette.foreground;
-            opacity: selected ? 1 : 0.7;
-            font-size: 13px;
-            font-weight: selected ? 600 : 400;
-            vertical-alignment: center;
-        }
-        if mood == "alarm" || mood == "busy": Rectangle {
-            width: 7px;
-            height: 7px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 4px;
-            background: mood == "alarm" ? Status.alarm : Status.busy;
-        }
-    }
-    // marca da aba ativa
-    if selected: Rectangle {
-        y: parent.height - 2px;
-        height: 2px;
-        width: parent.width - 16px;
-        x: 8px;
-        border-radius: 1px;
-        background: Palette.accent-background;
-    }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-component SettingLine inherits HorizontalLayout {
+component SettingLine inherits Rectangle {
     in property <SettingRow> s;
+    in property <color> accent;
     callback toggled;
     callback int-edited(int);
     callback chosen(int);
-    spacing: 10px;
-    min-height: 32px;
+    min-height: 44px;
 
-    Text {
-        text: s.label;
-        color: Palette.foreground;
-        font-size: 12px;
-        horizontal-stretch: 1;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-    if s.kind == "bool": Switch {
-        checked: s.bool-value;
-        toggled => { root.toggled(); }
-    }
-    if s.kind == "int": SpinBox {
-        width: 120px;
-        minimum: s.minimum;
-        maximum: s.maximum;
-        step-size: s.step;
-        value: s.int-value;
-        edited(v) => { root.int-edited(v); }
-    }
-    if s.kind == "choice": ComboBox {
-        width: 220px;
-        model: s.options;
-        current-index: s.index;
-        selected => { root.chosen(self.current-index); }
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            text: s.label;
+            color: #DCD3F2;
+            font-size: 14px;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        VerticalLayout {
+            alignment: center;
+            if s.kind == "bool": SqSwitch {
+                checked: s.bool-value;
+                accent: accent;
+                label: s.label;
+                toggled => { root.toggled(); }
+            }
+            if s.kind == "int": Stepper {
+                value: s.int-value;
+                minimum: s.minimum;
+                maximum: s.maximum;
+                step: s.step;
+                unit: s.unit;
+                accent: accent;
+                edited(v) => { root.int-edited(v); }
+            }
+            if s.kind == "choice": Select {
+                width: 220px;
+                options: s.options;
+                index: s.index;
+                accent: accent;
+                label: s.label;
+                chosen(i) => { root.chosen(i); }
+            }
+        }
     }
 }
 
@@ -154,45 +122,92 @@ component AppsView inherits ScrollView {
     callback setting-chosen(string, string, int);
 
     VerticalLayout {
-        spacing: 10px;
-        padding-right: 12px;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 16px;
+        spacing: 12px;
+
+        // como arrumar o painel
+        Rectangle {
+            background: Chrome.edit-bg;
+            border-width: 1px;
+            border-color: Chrome.edit-line;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 14px;
+                padding-bottom: 14px;
+                spacing: 14px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon { icon: Icons.grid; ink: Chrome.cyan; size: 28px; weight: 1.8; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text { text: "Painel"; color: Chrome.ink; font-size: 17px; font-weight: 700; }
+                    Text {
+                        text: "A grade se arruma direto no hub: na engrenagem, arraste os apps pelo topo e puxe as bordas para mudar o tamanho.";
+                        color: Chrome.edit-sub;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
 
         for app in apps: Rectangle {
-            border-radius: 8px;
-            background: Palette.alternate-background;
+            property <color> accent: app.theme.fur;
+            background: app.theme.bg0.mix(Chrome.bg, 0.7);
+            border-width: 1px;
+            border-color: app.theme.muted.mix(Chrome.bg, 0.6);
+            opacity: app.enabled ? 1 : 0.55;
 
             VerticalLayout {
-                padding: 12px;
-                spacing: 6px;
+                padding: 16px;
+                spacing: 14px;
                 HorizontalLayout {
-                    spacing: 12px;
-                    Image {
-                        source: app.icon;
-                        image-rendering: pixelated;
-                        width: 40px;
-                        height: 35px;
-                        opacity: app.enabled ? 1 : 0.45;
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 48px;
+                            height: 43px;
+                            background: #07060C;
+                            Image {
+                                source: app.icon;
+                                image-rendering: pixelated;
+                                width: 40px;
+                                height: 35px;
+                            }
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: app.name; color: Palette.foreground; font-size: 14px; font-weight: 600; }
-                        Text { text: app.description; color: Palette.foreground; opacity: 0.7; font-size: 11px; wrap: word-wrap; }
+                        spacing: 4px;
+                        Text { text: app.name; color: Chrome.ink; font-size: 17px; font-weight: 700; }
+                        Text { text: app.description; color: #A99BC4; font-size: 13px; wrap: word-wrap; }
                     }
                     VerticalLayout {
                         alignment: center;
-                        Switch {
+                        SqSwitch {
+                            width: 48px;
+                            height: 26px;
+                            knob: 18px;
+                            accent: accent;
                             checked: app.enabled;
+                            label: "Ativar " + app.name;
                             toggled => { root.toggle-app(app.id); }
                         }
                     }
                 }
-                if app.enabled: VerticalLayout {
-                    padding-left: 52px;
-                    spacing: 2px;
+                Rectangle { height: 1px; background: app.theme.muted.mix(Chrome.bg, 0.4); }
+                VerticalLayout {
                     for s in app.settings: SettingLine {
                         s: s;
+                        accent: accent;
                         toggled => { root.setting-toggled(s.app, s.key); }
                         int-edited(v) => { root.setting-int(s.app, s.key, v); }
                         chosen(i) => { root.setting-chosen(s.app, s.key, i); }
@@ -203,133 +218,597 @@ component AppsView inherits ScrollView {
 
         Text {
             text: "Mascotes e temas do CyberDock · Interface feita com Slint (slint.dev)";
-            color: Palette.foreground;
-            opacity: 0.5;
-            font-size: 10px;
+            color: Chrome.dim;
+            font-size: 11px;
             horizontal-alignment: center;
         }
     }
 }
 
-// Painel com o tema do mini-app.
-component ThemedPanel inherits Rectangle {
-    border-radius: 10px;
-    clip: true;
-    background: @linear-gradient(180deg, Theme.bg0 0%, Theme.bg1 100%);
-    VerticalLayout {
-        padding: 12px;
-        @children
+// ---- painel ---------------------------------------------------------------------
+
+// Alça de redimensionar (barra ou canto) no modo de edição.
+component Handle inherits TouchArea {
+    in property <string> mode;      // "r" | "b" | "rb"
+    callback begin(length, length);
+    callback drag(length, length);
+    callback end();
+    mouse-cursor: mode == "r" ? ew-resize : mode == "b" ? ns-resize : nwse-resize;
+    pointer-event(ev) => {
+        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+            root.begin(self.mouse-x, self.mouse-y);
+        } else if ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel {
+            root.end();
+        }
+    }
+    moved => { if self.pressed { root.drag(self.mouse-x, self.mouse-y); } }
+
+    property <color> ink: self.has-hover || self.pressed ? #ffffff : Chrome.cyan;
+    if mode == "r": Rectangle { width: 4px; height: min(48px, parent.height); background: ink; }
+    if mode == "b": Rectangle { width: min(48px, parent.width); height: 4px; background: ink; }
+    if mode == "rb": Rectangle {
+        x: parent.width - 18px;
+        y: parent.height - 18px;
+        width: 14px;
+        height: 14px;
+        Rectangle { x: parent.width - 4px; width: 4px; background: ink; }
+        Rectangle { y: parent.height - 4px; height: 4px; background: ink; }
     }
 }
 
+// Grade com os apps ligados. A altura de uma linha é a altura visível dividida pelas
+// linhas, com um mínimo; passando disso, o painel rola.
+component Dashboard inherits ScrollView {
+    in property <[GridCell]> cells;
+    in property <int> columns;
+    in property <int> rows;
+    in property <bool> editing;
+    in property <Ghost> ghost;
+    // começo, meio e fim de um arrasto (célula sob o ponteiro)
+    callback edit-begin(string /* id */, string /* "move" | "r" | "b" | "rb" */, int, int);
+    callback edit-drag(int, int);
+    callback edit-end();
+    // setas no modo de edição: mover (ou redimensionar com Shift)
+    callback edit-key(string, int, int, bool);
+
+    property <length> pad: 12px;
+    property <length> gap: 12px;
+    property <length> cw: (self.visible-width - 2 * pad - (columns - 1) * gap) / max(columns, 1);
+    property <length> rh: max(160px, (self.visible-height - 2 * pad - (rows - 1) * gap) / max(rows, 1));
+    content-width: self.visible-width;
+    content-height: 2 * pad + rows * rh + max(rows - 1, 0) * gap;
+
+    // célula da grade sob um ponto do conteúdo
+    pure function col-at(px: length) -> int {
+        return clamp(floor((px - pad + gap / 2) / (cw + gap)), 0, columns - 1);
+    }
+    pure function row-at(py: length) -> int {
+        return clamp(floor((py - pad + gap / 2) / (rh + gap)), 0, rows - 1);
+    }
+
+    if cells.length == 0 && !editing: Text {
+        width: root.visible-width;
+        height: root.visible-height;
+        text: "Nenhum app ligado. Na engrenagem, abra as Configurações.";
+        color: Chrome.dim;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    // células vazias da grade, para mirar
+    if editing: Rectangle {
+        for i in columns * rows: Rectangle {
+            x: pad + mod(i, columns) * (cw + gap);
+            y: pad + floor(i / columns) * (rh + gap);
+            width: cw;
+            height: rh;
+            border-width: 1px;
+            border-color: #2A4A55;
+            background: Chrome.cyan.with-alpha(0.03);
+        }
+    }
+
+    // o app recebe o tamanho exato da célula e se adapta a ele
+    for c in cells: cell := Rectangle {
+        property <bool> active: ghost.visible && ghost.id == c.id;
+        property <color> accent: active ? Chrome.cyan : c.theme.fur;
+        x: pad + c.col * (cw + gap);
+        y: pad + c.row * (rh + gap);
+        width: c.w * cw + (c.w - 1) * gap;
+        height: c.h * rh + (c.h - 1) * gap;
+        clip: true;
+        background: c.theme.bg0.mix(c.theme.bg1, 0.75);
+        border-width: 1px;
+        border-color: c.theme.muted.mix(c.theme.bg0, 0.55);
+
+        if c.id == "cyber.docker": DockerView {
+            x: 14px;
+            y: 14px;
+            width: parent.width - 28px;
+            height: parent.height - 28px;
+        }
+        if c.id == "cyber.vitals": VitalsView {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+        }
+
+        // modo de edição: véu, contorno, barra de arrasto e alças
+        if editing: Rectangle {
+            background: c.theme.bg1.with-alpha(0.64);
+            border-width: 2px;
+            border-color: accent;
+
+            // bloqueia cliques no app por baixo
+            TouchArea { }
+
+            fs := FocusScope {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: 44px;
+                key-pressed(e) => {
+                    if e.text == Key.LeftArrow { root.edit-key(c.id, -1, 0, e.modifiers.shift); return accept; }
+                    if e.text == Key.RightArrow { root.edit-key(c.id, 1, 0, e.modifiers.shift); return accept; }
+                    if e.text == Key.UpArrow { root.edit-key(c.id, 0, -1, e.modifiers.shift); return accept; }
+                    if e.text == Key.DownArrow { root.edit-key(c.id, 0, 1, e.modifiers.shift); return accept; }
+                    reject
+                }
+
+                Rectangle {
+                    background: accent;
+                    border-width: fs.has-focus ? 2px : 0;
+                    border-color: #ffffff;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Icon { icon: Icons.grip; ink: Chrome.bg; filled: true; size: 16px; }
+                        }
+                        Text {
+                            text: c.name.to-uppercase();
+                            color: Chrome.bg;
+                            font-size: 14px;
+                            font-weight: 700;
+                            letter-spacing: 1.7px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: c.w + "×" + c.h;
+                            color: Chrome.bg;
+                            font-family: Fonts.mono;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                grip := TouchArea {
+                    mouse-cursor: self.pressed ? grabbing : grab;
+                    accessible-role: button;
+                    accessible-label: "Mover " + c.name + ". Setas movem, Shift mais setas redimensiona";
+                    pointer-event(ev) => {
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                            fs.focus();
+                            root.edit-begin(c.id, "move",
+                                root.col-at(cell.x + self.mouse-x),
+                                root.row-at(cell.y + self.mouse-y));
+                        } else if ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel {
+                            root.edit-end();
+                        }
+                    }
+                    moved => {
+                        if self.pressed {
+                            root.edit-drag(
+                                root.col-at(cell.x + self.mouse-x),
+                                root.row-at(cell.y + self.mouse-y));
+                        }
+                    }
+                }
+            }
+
+            Handle {
+                mode: "r";
+                x: parent.width - 16px;
+                y: 52px;
+                width: 16px;
+                height: max(0px, parent.height - 80px);
+                begin(mx, my) => { root.edit-begin(c.id, "r", root.col-at(cell.x + self.x + mx), root.row-at(cell.y + self.y + my)); }
+                drag(mx, my) => { root.edit-drag(root.col-at(cell.x + self.x + mx), root.row-at(cell.y + self.y + my)); }
+                end => { root.edit-end(); }
+            }
+            Handle {
+                mode: "b";
+                x: 0;
+                y: parent.height - 16px;
+                width: max(0px, parent.width - 28px);
+                height: 16px;
+                begin(mx, my) => { root.edit-begin(c.id, "b", root.col-at(cell.x + self.x + mx), root.row-at(cell.y + self.y + my)); }
+                drag(mx, my) => { root.edit-drag(root.col-at(cell.x + self.x + mx), root.row-at(cell.y + self.y + my)); }
+                end => { root.edit-end(); }
+            }
+            Handle {
+                mode: "rb";
+                x: parent.width - 28px;
+                y: parent.height - 28px;
+                width: 28px;
+                height: 28px;
+                begin(mx, my) => { root.edit-begin(c.id, "rb", root.col-at(cell.x + self.x + mx), root.row-at(cell.y + self.y + my)); }
+                drag(mx, my) => { root.edit-drag(root.col-at(cell.x + self.x + mx), root.row-at(cell.y + self.y + my)); }
+                end => { root.edit-end(); }
+            }
+        }
+    }
+
+    // prévia do arrasto: ciano se cabe, vermelho se não
+    if editing && ghost.visible: Rectangle {
+        x: pad + ghost.col * (cw + gap);
+        y: pad + ghost.row * (rh + gap);
+        width: ghost.w * cw + (ghost.w - 1) * gap;
+        height: ghost.h * rh + (ghost.h - 1) * gap;
+        border-width: 2px;
+        border-color: ghost.ok ? Chrome.cyan : Chrome.bad;
+        background: ghost.ok ? Chrome.cyan.with-alpha(0.1) : Chrome.bad.with-alpha(0.12);
+        Text {
+            text: ghost.ok ? ghost.w + "×" + ghost.h : "sem espaço";
+            color: ghost.ok ? Chrome.cyan : Chrome.bad;
+            font-family: Fonts.mono;
+            font-size: 16px;
+            font-weight: 700;
+        }
+    }
+}
+
+// ---- moldura ----------------------------------------------------------------------
+
+// Áreas invisíveis nas bordas e cantos para redimensionar a janela sem moldura.
+component ResizeHandles inherits Rectangle {
+    callback start(string);
+    property <length> e: 6px;   // espessura da borda
+    property <length> k: 14px;  // tamanho do canto
+
+    // bordas
+    TouchArea { y: 0; height: e; x: k; width: parent.width - 2 * k; mouse-cursor: ns-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("n"); } } }
+    TouchArea { y: parent.height - e; height: e; x: k; width: parent.width - 2 * k; mouse-cursor: ns-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("s"); } } }
+    TouchArea { x: 0; width: e; y: k; height: parent.height - 2 * k; mouse-cursor: ew-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("w"); } } }
+    TouchArea { x: parent.width - e; width: e; y: k; height: parent.height - 2 * k; mouse-cursor: ew-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("e"); } } }
+    // cantos
+    TouchArea { x: 0; y: 0; width: k; height: k; mouse-cursor: nwse-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("nw"); } } }
+    TouchArea { x: parent.width - k; y: parent.height - k; width: k; height: k; mouse-cursor: nwse-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("se"); } } }
+    TouchArea { x: parent.width - k; y: 0; width: k; height: k; mouse-cursor: nesw-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("ne"); } } }
+    TouchArea { x: 0; y: parent.height - k; width: k; height: k; mouse-cursor: nesw-resize;
+        pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("sw"); } } }
+}
+
+// Fundo da janela: polígono com os cantos superior direito e inferior esquerdo cortados.
+component Frame inherits Path {
+    property <float> w: self.width / 1px;
+    property <float> h: self.height / 1px;
+    property <float> c: Chrome.chamfer / 1px;
+    viewbox-width: w;
+    viewbox-height: h;
+    commands: "M 0.5 0.5 L " + (w - c) + " 0.5 L " + (w - 0.5) + " " + c
+        + " L " + (w - 0.5) + " " + (h - 0.5) + " L " + c + " " + (h - 0.5)
+        + " L 0.5 " + (h - c) + " Z";
+    fill: Chrome.bg;
+    stroke: Chrome.edge;
+    stroke-width: 1px;
+}
+
+// Título e ações de uma tela: barra de 48 px com linha embaixo.
+component Bar inherits Rectangle {
+    in property <color> line: Chrome.line;
+    height: 48px;
+    @children
+    Rectangle { y: parent.height - 1px; height: 1px; background: line; }
+}
+
 export component HubWindow inherits Window {
-    title: "CyberHub";
-    preferred-width: 820px;
-    preferred-height: 600px;
-    min-width: 640px;
-    min-height: 460px;
+    title: "Toca";
+    preferred-width: 980px;
+    preferred-height: 640px;
+    min-width: 400px;
+    min-height: 300px;
     // popup de bandeja: sem moldura e por cima das outras janelas
     no-frame: true;
     always-on-top: true;
-    background: Palette.background;
+    // transparente: os cantos cortados mostram o que há atrás
+    background: transparent;
+    default-font-family: Fonts.ui;
     default-font-size: 13px;
 
-    in property <[AppInfo]> tabs;          // apps ligados, na ordem das abas
-    in property <[AppInfo]> apps;          // todos os apps (aba Apps)
-    in-out property <string> current: "apps";
+    in property <[AppInfo]> apps;          // todos os apps (configurações)
+    in property <[GridCell]> cells;        // apps ligados, posicionados na grade
+    in property <int> columns: 2;
+    in property <int> rows: 1;
+    in property <string> grid-tag;         // "// 2 APPS · 3 × 2"
+    in-out property <string> current: "panel";   // "panel" | "apps" (configurações)
+    in-out property <bool> editing: false;
+    in property <Ghost> ghost;
+    // a grade comporta mais ou menos colunas/linhas sem tirar ninguém
+    in property <bool> cols-down-ok;
+    in property <bool> cols-up-ok;
+    in property <bool> rows-down-ok;
+    in property <bool> rows-up-ok;
     in property <string> summary;
 
+    // modo fixar (ligado pelo alfinete ou pela bandeja)
+    in-out property <bool> pinned: false;
+
     callback select-tab(string);
+    callback toggle-pin();
+    callback grid-size(int /* colunas */, int /* linhas */);
+    callback edit-begin(string, string, int, int);
+    callback edit-drag(int, int);
+    callback edit-end();
+    callback edit-key(string, int, int, bool);
     callback toggle-app(string);
     callback setting-toggled(string, string);
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
     callback hide-window();
+    // começou a arrastar uma borda/canto ("n", "se", …)
+    callback start-resize(string);
     // vindo do ícone da bandeja: mostra/esconde a janela junto do ponto clicado (x, y)
     callback toggle-requested(int, int);
+    // outra instância pediu para abrir: aba ("apps", "panel" ou vazio = manter a atual)
+    callback show-requested(string);
     callback quit();
 
-    // borda (a janela não tem moldura)
-    Rectangle {
-        border-width: 1px;
-        border-color: Palette.border;
-    }
-
-    // Esc fecha o popup
+    // Esc: nas configurações volta ao painel; na edição, conclui; no painel fecha o popup
     FocusScope {
         key-pressed(e) => {
             if e.text == Key.Escape {
-                root.hide-window();
+                if current == "apps" {
+                    root.select-tab("panel");
+                } else if editing {
+                    root.edit-end();
+                    root.editing = false;
+                } else {
+                    root.hide-window();
+                }
                 return accept;
             }
             reject
         }
 
-        VerticalLayout {
-            padding: 12px;
-            spacing: 10px;
+        Frame { }
 
-            // cabeçalho
-            HorizontalLayout {
-                spacing: 10px;
-                VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 1;
+        VerticalLayout {
+            padding-top: 1px;
+            padding-left: 1px;
+            padding-right: 1px;
+            padding-bottom: 1px;
+
+            // cabeçalho do painel
+            if current == "panel" && !editing: Bar {
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 12px;
                     Text {
-                        text: "CyberHub";
-                        color: Palette.foreground;
-                        font-size: 15px;
+                        text: "TOCA";
+                        color: Chrome.ink;
+                        font-size: 18px;
                         font-weight: 700;
+                        letter-spacing: 3.2px;
+                        vertical-alignment: center;
                     }
                     Text {
-                        text: summary;
-                        color: Palette.foreground;
-                        opacity: 0.65;
+                        text: grid-tag;
+                        color: Chrome.dim;
+                        font-family: Fonts.mono;
                         font-size: 11px;
+                        letter-spacing: 1.5px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
                         overflow: elide;
                     }
-                }
-                VerticalLayout {
-                    alignment: center;
                     HorizontalLayout {
-                        spacing: 4px;
-                        ShellButton { text: "Esconder"; clicked => { root.hide-window(); } }
-                        ShellButton { text: "Sair"; clicked => { root.quit(); } }
+                        alignment: end;
+                        spacing: 6px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        padding-right: 4px;
+                        IconButton {
+                            width: 44px;
+                            height: 36px;
+                            icon: Icons.pin;
+                            icon-size: 18px;
+                            ink: pinned ? Chrome.magenta : Chrome.sub;
+                            edge: pinned ? Chrome.magenta : Chrome.edge;
+                            label: "Manter aberto";
+                            clicked => { root.toggle-pin(); }
+                        }
+                        IconButton {
+                            width: 44px;
+                            height: 36px;
+                            icon: Icons.gear;
+                            icon-size: 18px;
+                            ink: Chrome.sub;
+                            edge: Chrome.edge;
+                            label: "Editar painel";
+                            clicked => { root.editing = true; }
+                        }
                     }
                 }
             }
 
-            // abas
-            HorizontalLayout {
-                spacing: 4px;
-                alignment: start;
-                for t in tabs: Tab {
-                    label: t.name;
-                    icon: t.icon;
-                    mood: t.mood;
-                    selected: current == t.id;
-                    clicked => { root.select-tab(t.id); }
-                }
-                Tab {
-                    label: "⚙ Apps";
-                    selected: current == "apps";
-                    clicked => { root.select-tab("apps"); }
+            // cabeçalho do modo de edição
+            if current == "panel" && editing: Bar {
+                background: Chrome.edit-bg;
+                line: Chrome.cyan;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 14px;
+                    Text {
+                        text: "MODO DE EDIÇÃO";
+                        color: Chrome.cyan;
+                        font-size: 16px;
+                        font-weight: 700;
+                        letter-spacing: 2.5px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "arraste pelo topo · puxe as bordas";
+                        color: Chrome.edit-sub;
+                        font-family: Fonts.mono;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        Text { text: "Colunas"; color: Chrome.edit-ink; font-size: 13px; vertical-alignment: center; }
+                        VerticalLayout {
+                            alignment: center;
+                            Stepper {
+                                height: 32px;
+                                value: columns;
+                                minimum: 1;
+                                maximum: 6;
+                                value-width: 24px;
+                                font-size: 14px;
+                                accent: Chrome.cyan;
+                                edge: Chrome.edit-line;
+                                down-enabled: cols-down-ok;
+                                up-enabled: cols-up-ok;
+                                edited(v) => { root.grid-size(v, rows); }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        Text { text: "Linhas"; color: Chrome.edit-ink; font-size: 13px; vertical-alignment: center; }
+                        VerticalLayout {
+                            alignment: center;
+                            Stepper {
+                                height: 32px;
+                                value: rows;
+                                minimum: 1;
+                                maximum: 6;
+                                value-width: 24px;
+                                font-size: 14px;
+                                accent: Chrome.cyan;
+                                edge: Chrome.edit-line;
+                                down-enabled: rows-down-ok;
+                                up-enabled: rows-up-ok;
+                                edited(v) => { root.grid-size(columns, v); }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            height: 34px;
+                            text: "Configurações";
+                            icon: Icons.gear;
+                            ink: Chrome.edit-ink;
+                            edge: Chrome.edit-line;
+                            font-size: 13px;
+                            font-weight: 400;
+                            clicked => { root.select-tab("apps"); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            height: 34px;
+                            text: "Concluir";
+                            ink: #04161A;
+                            fill: Chrome.cyan;
+                            font-weight: 700;
+                            letter-spacing: 1.1px;
+                            clicked => {
+                                root.edit-end();
+                                root.editing = false;
+                            }
+                        }
+                    }
                 }
             }
 
-            // conteúdo: só o app da aba atual existe na árvore
-            Rectangle {
-                vertical-stretch: 1;
-                if current == "cyber.docker": ThemedPanel { DockerView { } }
-                if current == "cyber.vitals": ThemedPanel { VitalsView { } }
-                if current == "apps": AppsView {
-                    apps: apps;
-                    toggle-app(id) => { root.toggle-app(id); }
-                    setting-toggled(a, k) => { root.setting-toggled(a, k); }
-                    setting-int(a, k, v) => { root.setting-int(a, k, v); }
-                    setting-chosen(a, k, i) => { root.setting-chosen(a, k, i); }
+            // cabeçalho das configurações
+            if current == "apps": Bar {
+                height: 52px;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 8px;
+                    Text {
+                        text: "CONFIGURAÇÕES";
+                        color: Chrome.ink;
+                        font-size: 20px;
+                        font-weight: 700;
+                        letter-spacing: 1.6px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Sair da Toca";
+                            ink: Chrome.danger;
+                            edge: Chrome.danger-edge;
+                            font-weight: 400;
+                            clicked => { root.quit(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Fechar";
+                            icon: Icons.close;
+                            ink: Chrome.sub;
+                            edge: Chrome.edge;
+                            font-weight: 400;
+                            clicked => { root.select-tab("panel"); }
+                        }
+                    }
                 }
             }
+
+            if current == "panel": Dashboard {
+                vertical-stretch: 1;
+                cells: cells;
+                columns: columns;
+                rows: rows;
+                editing: editing;
+                ghost: ghost;
+                edit-begin(id, mode, col, row) => { root.edit-begin(id, mode, col, row); }
+                edit-drag(col, row) => { root.edit-drag(col, row); }
+                edit-end => { root.edit-end(); }
+                edit-key(id, dx, dy, resize) => { root.edit-key(id, dx, dy, resize); }
+            }
+
+            if current == "apps": AppsView {
+                vertical-stretch: 1;
+                apps: apps;
+                toggle-app(id) => { root.toggle-app(id); }
+                setting-toggled(a, k) => { root.setting-toggled(a, k); }
+                setting-int(a, k, v) => { root.setting-int(a, k, v); }
+                setting-chosen(a, k, i) => { root.setting-chosen(a, k, i); }
+            }
+        }
+
+        ResizeHandles {
+            start(dir) => { root.start-resize(dir); }
         }
     }
 }
