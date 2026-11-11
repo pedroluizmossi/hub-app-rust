@@ -1,6 +1,6 @@
-# CyberHub — arquitetura
+# MiniUtils — arquitetura
 
-CyberHub é um **hub de mini-apps** para o desktop Linux: um único binário Rust que fica na
+MiniUtils é um **hub de mini-apps** para o desktop Linux: um único binário Rust que fica na
 bandeja do sistema e hospeda pequenos apps (Docker, sinais vitais, …) que você liga e desliga
 à vontade. É a evolução do plasmoid CyberDock, mas sem depender do KDE: roda em KDE, XFCE,
 Cinnamon, MATE e GNOME (este com a extensão AppIndicator para a bandeja).
@@ -25,7 +25,7 @@ Cinnamon, MATE e GNOME (este com a extensão AppIndicator para a bandeja).
  Superfícies     [ícone na bandeja (ksni/SNI)]  [popup do hub]  [widget flutuante*]
                               │                       │
  ┌────────────────────────────┴───────────────────────┴──────────────────────────┐
- │ cyberhub (binário Rust único)                                                 │
+ │ miniutils (binário Rust único)                                                 │
  │                                                                               │
  │  UI (Slint)          Shell do hub (abas + gerenciador de apps)                │
  │                      Views dos mini-apps (.slint compilado; interpretado*)    │
@@ -64,7 +64,7 @@ hub-app-rust/
       miniapp.rs              o trait MiniApp e o Host (serviços)
       manifest.rs             formato do manifest.toml
       registry.rs             descobre e liga/desliga mini-apps
-      config.rs               ~/.config/cyberhub/config.toml
+      config.rs               ~/.config/miniutils/config.toml
       exec.rs                 executor com allowlist
       notify.rs               notificações (com limite de 1/min por evento)
       bus.rs                  assinaturas dos provedores (contagem de referências)
@@ -149,7 +149,7 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (invoke_f
 - [x] Bandeja com a mascote no humor do hub, notificações
 
 **Fase 2** — plugins externos sem recompilar:
-- Views em `.slint` carregadas pelo `slint-interpreter` a partir de `~/.local/share/cyberhub/miniapps/`
+- Views em `.slint` carregadas pelo `slint-interpreter` a partir de `~/.local/share/miniutils/miniapps/`
 - Lógica em Rhai, com acesso só aos serviços do host (executor com allowlist, config, notify)
 - Widget flutuante na área de trabalho (layer-shell no KDE/wlroots; janela comum no GNOME)
 
@@ -165,6 +165,6 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (invoke_f
 | Mascote desenhada em Rust | Mesma pixel art e regras de cor do CyberDock, nítida em qualquer escala (`image-rendering: pixelated`) |
 | Mini-apps compilados na fase 1 | Contrato de plugin nasce de apps reais (princípio 6) |
 | Renderizador por software do Slint | Com o femtovg (OpenGL) o processo carregava o driver da GPU: ~270 MB de RSS. Por software: ~30 MB, e a UI em pixel art não precisa de GPU. Sem `drop-shadow` (não existe nesse renderizador): auras são anéis concêntricos |
-| Popup de bandeja via X11/XWayland | O Wayland não deixa o app escolher onde a janela abre. Com `$DISPLAY` o hub roda como cliente X11 (XWayland no KDE/GNOME, nativo no XFCE): abre junto do ícone clicado, sem moldura, fora da barra de tarefas (`_NET_WM_STATE_SKIP_TASKBAR`) e some ao perder o foco ou com Esc. `CYBERHUB_NATIVE_WAYLAND=1` força Wayland nativo (sem posição) |
+| Popup de bandeja via X11/XWayland | O Wayland não deixa o app escolher onde a janela abre. Com `$DISPLAY` o hub roda como cliente X11 (XWayland no KDE/GNOME, nativo no XFCE): abre junto do ícone clicado, sem moldura, fora da barra de tarefas (`_NET_WM_STATE_SKIP_TASKBAR`) e some ao perder o foco ou com Esc. `MINIUTILS_NATIVE_WAYLAND=1` força Wayland nativo (sem posição) |
 | `ksni` para a bandeja | StatusNotifierItem puro em Rust (D-Bus); funciona em KDE, XFCE, Cinnamon, MATE e GNOME com AppIndicator |
 | Licença do Slint | Usado sob a *Royalty-free Desktop License* (exige crédito ao Slint no "Sobre"); alternativa: GPLv3 |

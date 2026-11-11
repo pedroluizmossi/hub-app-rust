@@ -1,4 +1,4 @@
-//! Configuração do usuário em `~/.config/cyberhub/config.toml`.
+//! Configuração do usuário em `~/.config/miniutils/config.toml`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,6 +7,18 @@ use serde::{Deserialize, Serialize};
 
 use super::layout::{self, Rect};
 use super::manifest::Manifest;
+
+/// Nome do app (padrão do nome exibido, pasta da config, socket e binário em minúsculas).
+pub const APP_NAME: &str = "MiniUtils";
+
+/// Nome exibido atual, lido de outras threads (bandeja e notificações).
+static DISPLAY_NAME: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+/// Nome que o usuário escolheu (`name` na config), ou `MiniUtils`.
+pub fn display_name() -> String {
+    let n = DISPLAY_NAME.read().map(|n| n.clone()).unwrap_or_default();
+    if n.trim().is_empty() { APP_NAME.into() } else { n }
+}
 
 /// Versão atual do formato do arquivo. Ao mudar a estrutura, suba o número e
 /// acrescente a migração correspondente em `migra`.
@@ -17,10 +29,14 @@ pub const VERSAO_ATUAL: u32 = 2;
 pub struct Config {
     /// Versão do formato do arquivo (ausente = 0, o formato antigo).
     pub version: u32,
+    /// Nome exibido na janela, na bandeja e nas notificações (o usuário pode trocar).
+    pub name: String,
     /// Colunas da grade do painel.
     pub columns: u32,
     /// Linhas da grade do painel.
     pub rows: u32,
+    /// Visual da janela (ver `src/skin`).
+    pub skin: String,
     /// Posição e tamanho de cada app na grade, em células: `[layout."cyber.docker"]`.
     pub layout: BTreeMap<String, Rect>,
     /// Tamanho da janela em pixels lógicos (lembrado entre aberturas).
@@ -39,7 +55,7 @@ pub struct Config {
 enum Estado {
     #[default]
     Normal,
-    /// Arquivo de um CyberHub mais novo: nunca é sobrescrito.
+    /// Arquivo de um MiniUtils mais novo: nunca é sobrescrito.
     SomenteLeitura,
     /// TOML quebrado: o original vai para `.quebrado` antes de salvar algo novo.
     Quebrado,
@@ -49,8 +65,10 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             version: VERSAO_ATUAL,
+            name: APP_NAME.into(),
             columns: 2,
             rows: 1,
+            skin: "neon".into(),
             window: None,
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into()],
@@ -91,12 +109,42 @@ impl Config {
     }
 
     pub fn path() -> PathBuf {
-        dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("cyberhub/config.toml")
+        dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("miniutils/config.toml")
     }
 
-    /// Lê a configuração; se não existir ou estiver quebrada, usa o padrão.
+    /// Lê a configuração; se não existir ou estiver quebrada, usa o padrão. Na primeira
+    /// vez, copia a config da época em que o app se chamava CyberHub.
     pub fn load() -> Self {
-        Self::load_from(&Self::path())
+        let path = Self::path();
+        if !path.exists() {
+            if let Some(old) = dirs::config_dir().map(|d| d.join("cyberhub/config.toml")).filter(|p| p.exists()) {
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                match std::fs::copy(&old, &path) {
+                    Ok(_) => eprintln!("miniutils: config copiada de {}", old.display()),
+                    Err(e) => eprintln!("miniutils: não consegui copiar {}: {e}", old.display()),
+                }
+            }
+        }
+        let mut cfg = Self::load_from(&path);
+        // deixa a linha `name` no arquivo, para o usuário achar onde trocar o nome
+        let sem_nome = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| t.parse::<toml::Table>().ok())
+            .is_some_and(|t| !t.contains_key("name"));
+        if sem_nome && cfg.estado == Estado::Normal {
+            cfg.save_to(&path);
+        }
+        cfg.publish_name();
+        cfg
+    }
+
+    /// Torna o nome exibido visível para a bandeja e as notificações.
+    pub fn publish_name(&self) {
+        if let Ok(mut n) = DISPLAY_NAME.write() {
+            *n = self.name.trim().to_string();
+        }
     }
 
     fn load_from(path: &Path) -> Self {
@@ -115,14 +163,14 @@ impl Config {
             },
         };
 
-        // Arquivo de um CyberHub mais novo: lê o que der, mas não mexe nele.
+        // Arquivo de um MiniUtils mais novo: lê o que der, mas não mexe nele.
         if versao > VERSAO_ATUAL {
             eprintln!(
-                "cyberhub: {} é da versão {versao}, mais nova que a {VERSAO_ATUAL} daqui; alterações não serão salvas",
+                "miniutils: {} é da versão {versao}, mais nova que a {VERSAO_ATUAL} daqui; alterações não serão salvas",
                 path.display()
             );
             let cfg = desserializa(tabela).unwrap_or_else(|e| {
-                eprintln!("cyberhub: config inválida ({e}); usando o padrão");
+                eprintln!("miniutils: config inválida ({e}); usando o padrão");
                 Config::default()
             });
             return Config { estado: Estado::SomenteLeitura, ..cfg };
@@ -146,7 +194,7 @@ impl Config {
 
     /// Configuração padrão para um arquivo que não pôde ser lido; o original é preservado.
     fn quebrada(motivo: &str) -> Self {
-        eprintln!("cyberhub: config inválida ({motivo}); usando o padrão");
+        eprintln!("miniutils: config inválida ({motivo}); usando o padrão");
         Config { estado: Estado::Quebrado, ..Config::default() }
     }
 
@@ -162,7 +210,7 @@ impl Config {
                 if path.exists() {
                     let destino = nome_livre(&com_sufixo(path, ".quebrado"));
                     if let Err(e) = std::fs::rename(path, &destino) {
-                        eprintln!("cyberhub: não consegui mover {} para {}: {e}", path.display(), destino.display());
+                        eprintln!("miniutils: não consegui mover {} para {}: {e}", path.display(), destino.display());
                         return;
                     }
                 }
@@ -176,10 +224,10 @@ impl Config {
         match toml::to_string_pretty(self) {
             Ok(text) => {
                 if let Err(e) = std::fs::write(path, text) {
-                    eprintln!("cyberhub: não consegui salvar {}: {e}", path.display());
+                    eprintln!("miniutils: não consegui salvar {}: {e}", path.display());
                 }
             }
-            Err(e) => eprintln!("cyberhub: erro ao serializar config: {e}"),
+            Err(e) => eprintln!("miniutils: erro ao serializar config: {e}"),
         }
     }
 
@@ -296,7 +344,7 @@ fn backup(path: &Path) -> bool {
     match std::fs::copy(path, &bak) {
         Ok(_) => true,
         Err(e) => {
-            eprintln!("cyberhub: não consegui criar {}: {e}", bak.display());
+            eprintln!("miniutils: não consegui criar {}: {e}", bak.display());
             false
         }
     }
@@ -329,7 +377,7 @@ mod tests {
 
     impl Tmp {
         fn new(nome: &str) -> Self {
-            let d = std::env::temp_dir().join(format!("cyberhub-teste-{}-{nome}", std::process::id()));
+            let d = std::env::temp_dir().join(format!("miniutils-teste-{}-{nome}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d);
             std::fs::create_dir_all(&d).unwrap();
             Tmp(d)

@@ -1,4 +1,4 @@
-//! Instância única: a primeira `cyberhub` escuta num socket Unix; as seguintes só mandam
+//! Instância única: a primeira `miniutils` escuta num socket Unix; as seguintes só mandam
 //! um comando (`show`, `show apps`) para ela e saem.
 
 use std::fs;
@@ -31,10 +31,10 @@ pub fn show_message(tab: Option<&str>) -> String {
     }
 }
 
-/// `$XDG_RUNTIME_DIR/cyberhub.sock` (ou `cyberhub-<nome>.sock` com `CYBERHUB_INSTANCE`).
+/// `$XDG_RUNTIME_DIR/miniutils.sock` (ou `miniutils-<nome>.sock` com `MINIUTILS_INSTANCE`).
 pub fn socket_path() -> PathBuf {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR");
-    let instance = std::env::var("CYBERHUB_INSTANCE").ok();
+    let instance = std::env::var("MINIUTILS_INSTANCE").ok();
     // SAFETY: getuid não tem efeitos colaterais nem falha
     let uid = unsafe { libc::getuid() };
     socket_path_for(runtime.as_deref().map(Path::new), uid, instance.as_deref())
@@ -46,9 +46,9 @@ fn socket_path_for(runtime_dir: Option<&Path>, uid: u32, instance: Option<&str>)
             // o nome vai para o caminho: só letras, números, '-' (sem '/')
             let clean: String =
                 name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-            format!("cyberhub-{clean}")
+            format!("miniutils-{clean}")
         }
-        None => "cyberhub".to_string(),
+        None => "miniutils".to_string(),
     };
     match runtime_dir.filter(|d| !d.as_os_str().is_empty()) {
         Some(dir) => dir.join(format!("{stem}.sock")),
@@ -130,7 +130,7 @@ mod tests {
     use std::sync::mpsc;
 
     fn test_path(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("cyberhub-test-{}-{name}.sock", std::process::id()));
+        let p = std::env::temp_dir().join(format!("miniutils-test-{}-{name}.sock", std::process::id()));
         let _ = fs::remove_file(&p);
         p
     }
@@ -155,10 +155,10 @@ mod tests {
         assert_eq!(show_message(None), "show");
         assert_eq!(show_message(Some("apps")), "show apps");
         let run = Path::new("/run/user/1000");
-        assert_eq!(socket_path_for(Some(run), 1000, None), run.join("cyberhub.sock"));
-        assert_eq!(socket_path_for(Some(run), 1000, Some("teste1")), run.join("cyberhub-teste1.sock"));
-        assert_eq!(socket_path_for(Some(Path::new("")), 1000, None), PathBuf::from("/tmp/cyberhub-1000.sock"));
-        assert_eq!(socket_path_for(None, 7, Some("a/b")), PathBuf::from("/tmp/cyberhub-a_b-7.sock"));
+        assert_eq!(socket_path_for(Some(run), 1000, None), run.join("miniutils.sock"));
+        assert_eq!(socket_path_for(Some(run), 1000, Some("teste1")), run.join("miniutils-teste1.sock"));
+        assert_eq!(socket_path_for(Some(Path::new("")), 1000, None), PathBuf::from("/tmp/miniutils-1000.sock"));
+        assert_eq!(socket_path_for(None, 7, Some("a/b")), PathBuf::from("/tmp/miniutils-a_b-7.sock"));
     }
 
     #[test]

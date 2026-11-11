@@ -9,8 +9,8 @@ uses = ["sys", "gpu"]
 key = "theme"
 label = "Tema"
 type = "choice"
-default = "ghost"
-options = ["neon", "matrix", "synthwave", "vaporwave", "akira", "ghost"]
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
 
 [[settings]]
 key = "warn"

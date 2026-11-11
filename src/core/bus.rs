@@ -89,7 +89,7 @@ impl Bus {
         if let Some(t) = self.topics.get(name) {
             t.subscribers.fetch_add(1, Ordering::Relaxed);
         } else {
-            eprintln!("cyberhub: provedor desconhecido \"{name}\"");
+            eprintln!("miniutils: provedor desconhecido \"{name}\"");
         }
     }
 

@@ -1,4 +1,4 @@
-# CyberHub
+# MiniUtils
 
 Hub de mini-apps para o desktop Linux, com mascotes em pixel art que reagem ao que está
 acontecendo. Fica na bandeja do sistema e hospeda apps que você liga e desliga à vontade.
@@ -20,7 +20,7 @@ Precisa de Rust (via [rustup](https://rustup.rs)).
 
 ```bash
 cargo build --release
-./target/release/cyberhub
+./target/release/miniutils
 ```
 
 Opções:
@@ -33,19 +33,27 @@ Opções:
 Clique na mascote da bandeja: o hub abre como popup junto do ícone e some quando você
 clica fora ou aperta Esc.
 
-A configuração fica em `~/.config/cyberhub/config.toml`. A grade do painel se arruma direto
-na janela: na engrenagem, arraste cada app pelo topo e puxe as bordas para mudar o tamanho
-(as setas também movem; Shift + setas redimensiona). As opções de cada app ficam em
-**Configurações**, a partir do modo de edição.
+A configuração fica em `~/.config/miniutils/config.toml` (na primeira execução, a de
+`~/.config/cyberhub/` é copiada para lá). A linha `name = "MiniUtils"` muda o nome exibido
+na janela, na bandeja e nas notificações.
 
-As fontes embutidas (Chakra Petch e JetBrains Mono, em `ui/fonts/`) são distribuídas sob a
+A engrenagem abre as **Configurações**. O botão de layout (ícone de grade) liga o modo de
+edição: arraste cada app pelo topo e puxe as bordas para mudar o tamanho (as setas também
+movem; Shift + setas redimensiona).
+
+O visual da janela (Neon, Terminal, Aconchego, Noite chuvosa) é escolhido em
+**Configurações › Aparência**. Cada visual é uma tabela de valores em `src/skin/mod.rs`
+(cores, fontes, moldura, cabeçalho, botões) com um fundo desenhado em `src/skin/backdrop.rs`;
+apps com o tema "Acompanha a janela" mudam junto.
+
+As fontes embutidas (Chakra Petch, JetBrains Mono e Pixelify Sans, em `ui/fonts/`) são distribuídas sob a
 SIL Open Font License; as licenças estão na mesma pasta.
 
 Variáveis de ambiente:
 
 ```text
-CYBERHUB_NATIVE_WAYLAND=1   usa Wayland nativo em vez de XWayland (o popup perde a posição)
-CYBERHUB_DEBUG=1            mostra eventos de foco e de janela no terminal
+MINIUTILS_NATIVE_WAYLAND=1   usa Wayland nativo em vez de XWayland (o popup perde a posição)
+MINIUTILS_DEBUG=1            mostra eventos de foco e de janela no terminal
 ```
 
 ## Requisitos em tempo de execução

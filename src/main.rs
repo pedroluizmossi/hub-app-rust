@@ -1,4 +1,4 @@
-//! CyberHub — hub de mini-apps para o desktop Linux. Ver ARCHITECTURE.md.
+//! MiniUtils — hub de mini-apps para o desktop Linux. Ver ARCHITECTURE.md.
 
 mod apps;
 mod core;
@@ -7,6 +7,7 @@ mod instance;
 mod mascot;
 mod popup;
 mod providers;
+mod skin;
 mod tray;
 mod ui;
 
@@ -14,7 +15,7 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!(
-            "Uso: cyberhub [--hidden] [--tab <id>]\n\n  --hidden     inicia só na bandeja (para o autostart)\n  --tab <id>   abre numa aba (ex.: cyber.vitals, apps)"
+            "Uso: miniutils [--hidden] [--tab <id>]\n\n  --hidden     inicia só na bandeja (para o autostart)\n  --tab <id>   abre numa aba (ex.: cyber.vitals, apps)"
         );
         return Ok(());
     }
@@ -26,7 +27,7 @@ fn main() -> anyhow::Result<()> {
         Ok(instance::Role::Second) => return Ok(()),
         Ok(instance::Role::First(server)) => Some(server),
         Err(e) => {
-            eprintln!("cyberhub: sem instância única ({e})");
+            eprintln!("miniutils: sem instância única ({e})");
             None
         }
     };

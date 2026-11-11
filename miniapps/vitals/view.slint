@@ -1,7 +1,7 @@
 // Tela do mini-app Sinais vitais: um cartão por recurso, cada um com sua mascote.
 // Responsiva: os 4 cartões ficam em 4×1, 2×2 ou 1×4 conforme o formato da célula,
 // e ficam compactos (sem histórico e detalhe) quando baixos.
-import { Colors, Moods, Chrome, Fonts } from "../../ui/theme.slint";
+import { Colors, Moods, Skin } from "../../ui/theme.slint";
 import { Mascot, SegBar, Sparkline } from "../../ui/widgets.slint";
 
 export struct VitalCard {
@@ -61,7 +61,7 @@ component Card inherits Rectangle {
                 Text {
                     text: v.title;
                     color: t.sub;
-                    font-family: Fonts.mono;
+                    font-family: Skin.font-mono;
                     font-size: 11px;
                     letter-spacing: 1.5px;
                     vertical-alignment: center;
@@ -70,7 +70,7 @@ component Card inherits Rectangle {
                 if v.temp-text != "": Text {
                     text: (v.hot ? "♨ " : "") + v.temp-text;
                     color: v.hot ? t.alarm : t.sub;
-                    font-family: Fonts.mono;
+                    font-family: Skin.font-mono;
                     font-size: 11px;
                     letter-spacing: 1.5px;
                     vertical-alignment: center;
@@ -79,7 +79,7 @@ component Card inherits Rectangle {
             Text {
                 text: v.available ? v.value-text : "—";
                 color: tint;
-                font-family: Fonts.mono;
+                font-family: Skin.font-mono;
                 font-size: compact ? 18px : 22px;
                 font-weight: 700;
             }
@@ -88,7 +88,7 @@ component Card inherits Rectangle {
             if !compact: Text {
                 text: v.available ? v.detail : "não encontrado";
                 color: t.sub;
-                font-family: Fonts.mono;
+                font-family: Skin.font-mono;
                 font-size: 11px;
                 overflow: elide;
             }
@@ -122,7 +122,7 @@ export component VitalsView inherits Rectangle {
         width: parent.width;
         text: VitalsApp.net-text;
         color: t.sub;
-        font-family: Fonts.mono;
+        font-family: Skin.font-mono;
         font-size: 12px;
         horizontal-alignment: center;
         vertical-alignment: center;

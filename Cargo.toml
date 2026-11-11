@@ -1,8 +1,8 @@
 [package]
-name = "cyberhub"
+name = "miniutils"
 version = "0.1.0"
 edition = "2024"
-description = "Hub de mini-apps para o desktop Linux, com mascotes em pixel art"
+description = "Hub de mini-apps para o desktop Linux, com mascotes em pixel art e visuais trocáveis"
 license = "MIT"
 
 [dependencies]

@@ -66,6 +66,21 @@ pub static THEMES: &[Theme] = &[
         ok: 0x64ffda, warn: 0xffe57f, alarm: 0xff5252, sleep: 0x5c7c99,
         bg0: 0x061a2b, bg1: 0x01070d, text: 0xe8f6ff, sub: 0x7fa7c4, muted: 0x3b5a73,
     },
+    // claro: papel e terracota
+    Theme {
+        key: "aconchego",
+        label: "Aconchego (papel / terracota)",
+        fur: 0xc0602f, visor: 0x3f6b3a, outline: 0x3e2a1e, ear: 0xf4e6cc, blush: 0xf28ca0,
+        ok: 0x3f8a3a, warn: 0xb87514, alarm: 0xb4322a, sleep: 0x8a6e58,
+        bg0: 0xfbf1de, bg1: 0xf1dfc0, text: 0x3e2a1e, sub: 0x6f5a4a, muted: 0xb8936a,
+    },
+    Theme {
+        key: "noite",
+        label: "Noite (azul / âmbar)",
+        fur: 0xff6fb5, visor: 0xffc46b, outline: 0x0c1024, ear: 0xf3ebd0, blush: 0xff9ec8,
+        ok: 0x6be3a4, warn: 0xffc46b, alarm: 0xff5c6c, sleep: 0x6b78c4,
+        bg0: 0x151b3d, bg1: 0x0c1024, text: 0xe4e8ff, sub: 0xb9c2f0, muted: 0x3b4578,
+    },
 ];
 
 pub fn get(key: &str) -> &'static Theme {

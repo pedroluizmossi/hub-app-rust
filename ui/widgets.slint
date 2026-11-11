@@ -1,6 +1,6 @@
 // Componentes reutilizáveis pelos mini-apps e pela moldura. Cantos retos, linhas finas
 // e ícones de traço, como no design da Toca.
-import { Colors, Moods, Anim, Chrome, Fonts, Icons } from "theme.slint";
+import { Colors, Moods, Anim, Skin, Icons } from "theme.slint";
 
 // Mascote em pixel art. O quadro (piscar, LED, glitch) vem desenhado do Rust;
 // flutuar e pular são deslocamentos aqui, sem redesenhar a imagem.
@@ -66,7 +66,7 @@ export component Mascot inherits Rectangle {
 // Ícone de traço num quadro 24×24.
 export component Icon inherits Path {
     in property <string> icon;
-    in property <color> ink: Chrome.sub;
+    in property <color> ink: Skin.sub;
     in property <bool> filled: false;
     in property <length> size: 16px;
     in property <float> weight: 2.2;
@@ -84,8 +84,8 @@ export component Icon inherits Path {
 // Botão quadrado só com ícone (ações dos containers, alfinete, engrenagem).
 export component IconButton inherits Rectangle {
     in property <string> icon;
-    in property <color> ink: Chrome.cyan;
-    in property <color> edge: Chrome.edge;
+    in property <color> ink: Skin.accent;
+    in property <color> edge: Skin.edge;
     in property <bool> enabled: true;
     in property <length> icon-size: 16px;
     in property <string> label;   // nome para leitores de tela
@@ -117,7 +117,7 @@ export component IconButton inherits Rectangle {
 export component TextButton inherits Rectangle {
     in property <string> text;
     in property <string> icon;
-    in property <color> ink: Chrome.cyan;
+    in property <color> ink: Skin.accent;
     in property <color> edge: ink;
     in property <color> fill: transparent;   // fundo cheio (botão principal)
     in property <length> font-size: 14px;
@@ -162,15 +162,20 @@ export component TextButton inherits Rectangle {
 // Interruptor quadrado: trilho na cor do acento quando ligado.
 export component SqSwitch inherits Rectangle {
     in property <bool> checked;
-    in property <color> accent: Chrome.cyan;
+    in property <color> accent: Skin.accent;
     in property <length> knob: 14px;
     in property <string> label;
+    // cores desligado e do pino (dentro de um app, vêm do tema do app)
+    in property <color> off-track: Skin.field;
+    in property <color> off-edge: Skin.field-edge;
+    in property <color> off-knob: Skin.dim;
+    in property <color> on-knob: Skin.bg;
     callback toggled;
     width: 40px;
     height: 22px;
     border-width: 1px;
-    border-color: checked ? accent : #4A3A66;
-    background: checked ? accent : #1A1228;
+    border-color: checked ? accent : off-edge;
+    background: checked ? accent : off-track;
     animate background, border-color { duration: 150ms; }
     accessible-role: switch;
     accessible-checked: checked;
@@ -182,7 +187,7 @@ export component SqSwitch inherits Rectangle {
         height: knob;
         y: (parent.height - self.height) / 2;
         x: checked ? parent.width - self.width - (parent.height - self.height) / 2 : (parent.height - self.height) / 2;
-        background: checked ? Chrome.bg : #8E80AA;
+        background: checked ? on-knob : off-knob;
         animate x { duration: 150ms; easing: ease-in-out; }
     }
     TouchArea {
@@ -198,7 +203,7 @@ component StepKey inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked;
     width: 34px;
-    background: enabled && touch.has-hover ? Chrome.hover : transparent;
+    background: enabled && touch.has-hover ? Skin.hover : transparent;
     opacity: enabled ? 1 : 0.35;
     accessible-role: button;
     accessible-label: text == "+" ? "Aumentar" : "Diminuir";
@@ -206,7 +211,7 @@ component StepKey inherits Rectangle {
     Text {
         text: root.text;
         color: root.ink;
-        font-family: Fonts.mono;
+        font-family: Skin.font-mono;
         font-size: 16px;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -225,8 +230,8 @@ export component Stepper inherits Rectangle {
     in property <int> maximum: 100;
     in property <int> step: 1;
     in property <string> unit;
-    in property <color> accent: Chrome.cyan;
-    in property <color> edge: #3A2A55;
+    in property <color> accent: Skin.accent;
+    in property <color> edge: Skin.field-edge;
     in property <length> value-width: 52px;
     in property <length> font-size: 15px;
     // − e + desligados por fora (ex.: a grade não comporta)
@@ -236,6 +241,7 @@ export component Stepper inherits Rectangle {
     height: 34px;
     border-width: 1px;
     border-color: edge;
+    background: Skin.field;
     HorizontalLayout {
         padding: 1px;
         StepKey {
@@ -247,8 +253,8 @@ export component Stepper inherits Rectangle {
         Text {
             width: value-width;
             text: value + unit;
-            color: Chrome.ink;
-            font-family: Fonts.mono;
+            color: Skin.ink;
+            font-family: Skin.font-mono;
             font-size: root.font-size;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -266,14 +272,14 @@ export component Stepper inherits Rectangle {
 export component Select inherits Rectangle {
     in property <[string]> options;
     in property <int> index;
-    in property <color> accent: Chrome.cyan;
+    in property <color> accent: Skin.accent;
     in property <string> label;
     callback chosen(int);
     width: 240px;
     height: 36px;
     border-width: 1px;
-    border-color: touch.has-hover ? accent : #3A2A55;
-    background: #0D0717;
+    border-color: touch.has-hover ? accent : Skin.field-edge;
+    background: Skin.field;
     accessible-role: combobox;
     accessible-label: label;
     accessible-value: options[index];
@@ -285,7 +291,7 @@ export component Select inherits Rectangle {
         spacing: 8px;
         Text {
             text: options[index];
-            color: Chrome.ink;
+            color: Skin.ink;
             font-size: 14px;
             vertical-alignment: center;
             overflow: elide;
@@ -306,20 +312,20 @@ export component Select inherits Rectangle {
         y: root.height + 2px;
         width: root.width;
         Rectangle {
-            background: #0D0717;
+            background: Skin.field;
             border-width: 1px;
             border-color: accent;
             VerticalLayout {
                 padding: 1px;
                 for o[i] in options: Rectangle {
                     height: 32px;
-                    background: i == index ? accent.with-alpha(0.18) : item.has-hover ? Chrome.hover : transparent;
+                    background: i == index ? accent.with-alpha(0.18) : item.has-hover ? Skin.hover : transparent;
                     HorizontalLayout {
                         padding-left: 10px;
                         padding-right: 10px;
                         Text {
                             text: o;
-                            color: i == index ? accent : Chrome.ink;
+                            color: i == index ? accent : Skin.ink;
                             font-size: 14px;
                             vertical-alignment: center;
                             overflow: elide;
@@ -382,11 +388,11 @@ export component Counter inherits Rectangle {
     in property <string> label;
     in property <int> value;
     in property <color> tint;
-    in property <color> idle-ink: Chrome.sub;
+    in property <color> idle-ink: theme.sub;
     width: 64px;
     height: 60px;
     border-width: 1px;
-    border-color: value > 0 ? tint : #3A2A55;
+    border-color: value > 0 ? tint : theme.muted.with-alpha(0.7);
     background: value > 0 ? tint.with-alpha(0.1) : transparent;
 
     VerticalLayout {
@@ -395,15 +401,15 @@ export component Counter inherits Rectangle {
         Text {
             text: value;
             color: value > 0 ? tint : idle-ink;
-            font-family: Fonts.mono;
+            font-family: Skin.font-mono;
             font-size: 22px;
             font-weight: 700;
             horizontal-alignment: center;
         }
         Text {
             text: label;
-            color: #A99BC4;
-            font-family: Fonts.mono;
+            color: theme.sub;
+            font-family: Skin.font-mono;
             font-size: 10px;
             letter-spacing: 1.4px;
             horizontal-alignment: center;
@@ -419,8 +425,8 @@ export component SearchBox inherits Rectangle {
     callback edited(string);
     height: 36px;
     border-width: 1px;
-    border-color: input.has-focus ? theme.visor : #3A2A55;
-    background: #0D0717;
+    border-color: input.has-focus ? theme.visor : theme.muted.with-alpha(0.7);
+    background: theme.bg1.mix(theme.bg0, 0.6);
 
     HorizontalLayout {
         padding-left: 10px;
@@ -428,13 +434,13 @@ export component SearchBox inherits Rectangle {
         spacing: 8px;
         VerticalLayout {
             alignment: center;
-            Icon { icon: Icons.search; ink: Chrome.dim; size: 14px; weight: 2.4; }
+            Icon { icon: Icons.search; ink: theme.sub; size: 14px; weight: 2.4; }
         }
         Rectangle {
             if text == "": Text {
                 text: placeholder;
-                color: Chrome.dim;
-                font-family: Fonts.mono;
+                color: theme.sub.with-alpha(0.8);
+                font-family: Skin.font-mono;
                 font-size: 13px;
                 vertical-alignment: center;
                 overflow: elide;
@@ -443,8 +449,8 @@ export component SearchBox inherits Rectangle {
             }
             input := TextInput {
                 text <=> root.text;
-                color: Chrome.ink;
-                font-family: Fonts.mono;
+                color: theme.text;
+                font-family: Skin.font-mono;
                 font-size: 13px;
                 vertical-alignment: center;
                 single-line: true;
@@ -452,5 +458,92 @@ export component SearchBox inherits Rectangle {
                 edited => { root.edited(self.text); }
             }
         }
+    }
+}
+
+// Botão do cabeçalho da janela, no estilo do visual: "icon" (ícone com borda fina),
+// "bracket" (texto "[ fixar ]", de terminal) ou "chunky" (bloco claro com sombra dura e
+// ícone em pixel).
+export component HeaderButton inherits Rectangle {
+    in property <string> text;            // nome (leitores de tela e botões com texto)
+    in property <string> short: text;     // rótulo curto do estilo "bracket"
+    in property <string> icon;            // traço 24×24
+    in property <string> px-icon;         // pixel 7×7 (estilo "chunky")
+    in property <bool> show-text: false;  // mostra o texto além do ícone
+    in property <bool> active: false;     // ligado (alfinete)
+    in property <bool> danger: false;     // ação destrutiva (sair)
+    callback clicked;
+    property <string> style: Skin.buttons;
+    property <color> tone: danger ? Skin.danger : active ? Skin.accent2 : Skin.panel-sub;
+    property <length> shadow: style == "chunky" ? 2px : 0;
+    horizontal-stretch: 0;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { root.clicked(); }
+
+    property <length> dx: style == "chunky" && touch.pressed ? shadow : 0;
+    property <length> pad: style == "bracket" ? 6px : show-text ? 12px : 13px;
+    height: (style == "bracket" ? 32px : 36px) + shadow;
+
+    // sombra dura (chunky)
+    if style == "chunky": Rectangle {
+        x: shadow;
+        y: shadow;
+        width: parent.width - shadow;
+        height: parent.height - shadow;
+        background: Skin.edge;
+    }
+    Rectangle {
+        x: dx;
+        y: dx;
+        width: parent.width - shadow;
+        height: parent.height - shadow;
+        border-width: style == "bracket" ? 0 : style == "chunky" ? 2px : 1px;
+        border-color: style == "chunky" ? Skin.edge : danger ? Skin.danger-edge : active ? Skin.accent2 : Skin.edge;
+        background: style == "chunky" ? (touch.has-hover ? Skin.hover : Skin.bg)
+            : touch.pressed ? tone.with-alpha(0.22) : touch.has-hover ? tone.with-alpha(0.12) : transparent;
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        padding-left: pad + dx;
+        padding-right: pad + shadow - dx;
+        padding-top: dx;
+        padding-bottom: shadow - dx;
+        if style == "bracket": Text {
+            text: "[ " + short + " ]";
+            color: touch.has-hover ? Skin.panel-ink : active ? Skin.accent : tone;
+            font-family: Skin.font-mono;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+        if style == "icon" && icon != "": VerticalLayout {
+            alignment: center;
+            Icon { icon: root.icon; ink: tone; size: show-text ? 14px : 18px; weight: 2; }
+        }
+        if style == "chunky" && px-icon != "": VerticalLayout {
+            alignment: center;
+            Path {
+                width: 14px;
+                height: 14px;
+                commands: px-icon;
+                viewbox-width: 7;
+                viewbox-height: 7;
+                fill: danger ? Skin.danger : active ? Skin.accent2 : Skin.ink;
+                anti-alias: false;
+            }
+        }
+        if style != "bracket" && show-text: Text {
+            text: root.text;
+            color: style == "chunky" ? (danger ? Skin.danger : Skin.ink) : tone;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 }

@@ -20,13 +20,13 @@ impl Notifier {
         // o envio fala com o D-Bus e pode demorar: fora da thread da UI
         std::thread::spawn(move || {
             let mut n = notify_rust::Notification::new();
-            n.appname("CyberHub").summary(&title).body(&body).icon("utilities-system-monitor");
+            n.appname(&crate::core::config::display_name()).summary(&title).body(&body).icon("utilities-system-monitor");
             n.urgency(if urgent { notify_rust::Urgency::Normal } else { notify_rust::Urgency::Low });
             if !urgent {
                 n.timeout(8000);
             }
             if let Err(e) = n.show() {
-                eprintln!("cyberhub: notificação falhou: {e}");
+                eprintln!("miniutils: notificação falhou: {e}");
             }
         });
     }

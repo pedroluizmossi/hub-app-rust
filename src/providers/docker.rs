@@ -39,6 +39,19 @@ pub struct Container {
     pub ports: Vec<Port>,
     /// Projeto do Docker Compose (stack), se houver.
     pub project: String,
+    /// Quando subiu / parou pela última vez (segundos Unix; 0 = não sei). Vem do `docker inspect`.
+    pub started_at: i64,
+    pub finished_at: i64,
+    /// Quantas vezes o Docker reiniciou o container (política de restart).
+    pub restarts: u32,
+}
+
+/// O que o `docker inspect` acrescenta ao `docker ps`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Inspect {
+    pub started_at: i64,
+    pub finished_at: i64,
+    pub restarts: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -80,6 +93,8 @@ pub struct DockerProvider {
     error: String,
     last_ps: Option<Instant>,
     last_stats: Option<Instant>,
+    /// Cache do `docker inspect` por id, junto com o estado em que foi lido.
+    inspected: HashMap<String, (String, Inspect)>,
     /// A thread do `docker events` está viva (ela se encerra sozinha sem assinantes).
     watching: Arc<AtomicBool>,
 }
@@ -107,6 +122,7 @@ impl DockerProvider {
                     self.containers = parse_ps(&out);
                     self.ok = true;
                     self.error.clear();
+                    self.inspect(poked);
                 }
                 Err(e) => {
                     self.containers.clear();
@@ -138,6 +154,109 @@ impl DockerProvider {
             containers: self.containers.clone(),
             stats: self.stats.clone(),
         })
+    }
+
+    /// Completa os containers com início/fim e reinícios. Só reinspeciona (num único
+    /// `docker inspect`) os novos, os que mudaram de estado, ou todos quando chegou evento.
+    fn inspect(&mut self, all: bool) {
+        let stale: Vec<String> = self
+            .containers
+            .iter()
+            .filter(|c| valid_id(&c.id))
+            .filter(|c| all || self.inspected.get(&c.id).is_none_or(|(st, _)| *st != c.state))
+            .map(|c| c.id.clone())
+            .collect();
+        if !stale.is_empty() {
+            let mut cmd = Command::new("docker");
+            cmd.args(["inspect", "--format", INSPECT_FORMAT]).arg("--").args(&stale);
+            // um id que sumiu faz o inspect sair com erro, mas os outros vêm no stdout
+            if let Ok(out) = cmd.stdin(Stdio::null()).stderr(Stdio::null()).output() {
+                let got = parse_inspect(&String::from_utf8_lossy(&out.stdout));
+                for c in &self.containers {
+                    if let Some(i) = got.get(&c.id) {
+                        self.inspected.insert(c.id.clone(), (c.state.clone(), *i));
+                    }
+                }
+            }
+        }
+        // esquece os que não existem mais
+        let ids: std::collections::HashSet<&str> = self.containers.iter().map(|c| c.id.as_str()).collect();
+        self.inspected.retain(|id, _| ids.contains(id.as_str()));
+        for c in &mut self.containers {
+            if let Some((_, i)) = self.inspected.get(&c.id) {
+                c.started_at = i.started_at;
+                c.finished_at = i.finished_at;
+                c.restarts = i.restarts;
+            }
+        }
+    }
+}
+
+/// Uma linha por container: "<id> <reinícios> <início> <fim>".
+const INSPECT_FORMAT: &str = "{{.Id}} {{.RestartCount}} {{.State.StartedAt}} {{.State.FinishedAt}}";
+
+/// Ids do Docker são hexadecimais (com --no-trunc, 64 dígitos).
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Saída do `docker inspect --format INSPECT_FORMAT` -> por id.
+pub fn parse_inspect(out: &str) -> HashMap<String, Inspect> {
+    out.lines()
+        .filter_map(|line| {
+            let mut f = line.split_whitespace();
+            let id = f.next()?;
+            let restarts = f.next()?.parse().ok()?;
+            let started_at = f.next().and_then(parse_time).unwrap_or(0);
+            let finished_at = f.next().and_then(parse_time).unwrap_or(0);
+            Some((id.to_string(), Inspect { started_at, finished_at, restarts }))
+        })
+        .collect()
+}
+
+/// RFC 3339 do Docker -> segundos Unix. "0001-01-01T00:00:00Z" (nunca) vira `None`.
+/// Ex.: "2026-11-09T15:02:34.006791228Z", "2026-11-09T12:02:34-03:00".
+pub fn parse_time(s: &str) -> Option<i64> {
+    let (date, time) = s.trim().split_once('T')?;
+    let mut d = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (y, mo, day) = (d.next()??, d.next()??, d.next()??);
+    if y < 1970 || !(1..=12).contains(&mo) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // separa o fuso: "Z", "+hh:mm" ou "-hh:mm"
+    let (clock, offset) = if let Some(c) = time.strip_suffix('Z') {
+        (c, 0)
+    } else {
+        let at = time.rfind(['+', '-'])?;
+        let (c, z) = time.split_at(at);
+        let (h, m) = z[1..].split_once(':')?;
+        let secs = h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60;
+        (c, if z.starts_with('-') { -secs } else { secs })
+    };
+    let clock = clock.split('.').next()?;
+    let mut t = clock.splitn(3, ':').map(|p| p.parse::<i64>().ok());
+    let (h, mi, se) = (t.next()??, t.next()??, t.next()??);
+    Some(days_from_civil(y, mo, day) * 86400 + h * 3600 + mi * 60 + se - offset)
+}
+
+/// Dias desde 1970-01-01 (algoritmo de Howard Hinnant).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// Segundos -> "40 s", "5 min", "3 h", "2 d" (curto, arredondado para baixo).
+pub fn format_age(secs: i64) -> String {
+    let s = secs.max(0);
+    match s {
+        0..60 => format!("{s} s"),
+        60..3600 => format!("{} min", s / 60),
+        3600..86400 => format!("{} h", s / 3600),
+        _ => format!("{} d", s / 86400),
     }
 }
 
@@ -273,6 +392,7 @@ pub fn parse_ps(out: &str) -> Vec<Container> {
                     .find_map(|l| l.strip_prefix("com.docker.compose.project="))
                     .unwrap_or_default()
                     .to_string(),
+                ..Default::default()
             }
         })
         .collect()
@@ -368,9 +488,28 @@ pub fn valid_container_name(n: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
 }
 
+/// Nome de projeto do Compose: minúsculas, dígitos, `-` e `_`, começando por letra ou dígito.
+pub fn valid_project_name(n: &str) -> bool {
+    let mut chars = n.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_-".contains(c))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nome_de_projeto() {
+        assert!(valid_project_name("loja"));
+        assert!(valid_project_name("1app_dev-2"));
+        assert!(!valid_project_name(""));
+        assert!(!valid_project_name("-p"));
+        assert!(!valid_project_name("Loja"));
+        assert!(!valid_project_name("a b"));
+        assert!(!valid_project_name("a;rm"));
+        assert!(!valid_project_name("a.b"));
+    }
 
     #[test]
     fn portas() {
@@ -421,6 +560,41 @@ mod tests {
         assert!(!relevant(r#"{"Type":"container"}"#));
         assert!(!relevant("lixo"));
         assert!(!relevant(""));
+    }
+
+    #[test]
+    fn horarios() {
+        assert_eq!(parse_time("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_time("2026-11-09T15:02:34.006791228Z"), Some(1794236554));
+        // mesmo instante com fuso de -03:00
+        assert_eq!(parse_time("2026-11-09T12:02:34.5-03:00"), Some(1794236554));
+        assert_eq!(parse_time("2024-02-29T00:00:00+01:00"), Some(1709161200));
+        assert_eq!(parse_time("0001-01-01T00:00:00Z"), None);
+        assert_eq!(parse_time("lixo"), None);
+        assert_eq!(parse_time(""), None);
+    }
+
+    #[test]
+    fn inspect() {
+        let out = "abc123 2 2026-11-09T15:02:34.006791228Z 0001-01-01T00:00:00Z\n\
+                   def 0 2026-11-09T15:00:00Z 2026-11-09T16:00:00Z\nlixo\n";
+        let i = parse_inspect(out);
+        assert_eq!(i.len(), 2);
+        assert_eq!(i["abc123"], Inspect { started_at: 1794236554, finished_at: 0, restarts: 2 });
+        assert_eq!(i["def"].finished_at - i["def"].started_at, 3600);
+        assert!(valid_id("abc123"));
+        assert!(!valid_id("-f"));
+        assert!(!valid_id(""));
+    }
+
+    #[test]
+    fn idade() {
+        assert_eq!(format_age(-5), "0 s");
+        assert_eq!(format_age(42), "42 s");
+        assert_eq!(format_age(60), "1 min");
+        assert_eq!(format_age(3599), "59 min");
+        assert_eq!(format_age(2 * 3600 + 59), "2 h");
+        assert_eq!(format_age(3 * 86400 + 7200), "3 d");
     }
 
     #[test]

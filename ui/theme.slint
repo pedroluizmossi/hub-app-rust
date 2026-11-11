@@ -32,32 +32,64 @@ export global Anim {
     in property <int> frame;
 }
 
-// Moldura da Toca (fixa, igual em todos os temas): fundo, linhas e acentos do design.
-export global Chrome {
-    out property <color> bg: #0B0912;
-    out property <color> edge: #2E2546;
-    out property <color> line: #1E1830;
-    out property <color> ink: #EDE6FF;
-    out property <color> sub: #C9BEE6;
-    out property <color> dim: #8E80AA;
-    out property <color> hover: #24123A;
-    out property <color> cyan: #3DF2FF;
-    out property <color> magenta: #FF3DB8;
-    out property <color> danger: #FF8095;
-    out property <color> danger-edge: #5A1F3A;
-    // modo de edição
-    out property <color> edit-bg: #071A1E;
-    out property <color> edit-line: #1F5A62;
-    out property <color> edit-ink: #C9E9EC;
-    out property <color> edit-sub: #9FD8DE;
-    out property <color> bad: #FF4D6A;
-    // corte dos cantos (superior direito e inferior esquerdo)
-    out property <length> chamfer: 18px;
-}
-
-export global Fonts {
-    out property <string> ui: "Chakra Petch";
-    out property <string> mono: "JetBrains Mono";
+// Visual da janela (a "skin"): fundo, moldura, cabeçalho, fontes e cores da interface.
+// Os valores vêm do Rust (src/skin/mod.rs); os daqui são os do visual Neon, usados só
+// até o Rust preencher. O conteúdo de cada app segue o tema do app (`Colors`).
+export global Skin {
+    // superfícies
+    in property <color> bg: #0B0912;          // fundo do conteúdo
+    in property <color> panel: #0B0912;       // cabeçalho e rodapé
+    in property <color> panel-top: transparent; // brilho no alto do cabeçalho
+    in property <color> edge: #2E2546;        // borda da janela
+    in property <color> edge-inner: transparent;
+    in property <color> line: #1E1830;        // linha sob o cabeçalho
+    in property <color> surface: #120A1F;     // blocos das configurações
+    in property <color> surface-edge: #3A1F55;
+    in property <color> field: #0D0717;       // campos, selects, steppers
+    in property <color> field-edge: #3A2A55;
+    in property <color> slot: #2A4A55;        // células vazias no modo de edição
+    // texto
+    in property <color> ink: #EDE6FF;
+    in property <color> sub: #C9BEE6;
+    in property <color> dim: #8E80AA;
+    in property <color> panel-ink: #EDE6FF;   // título no cabeçalho
+    in property <color> panel-sub: #C9BEE6;   // botões do cabeçalho
+    in property <color> tag-ink: #8E80AA;     // texto ao lado do título
+    // acentos
+    in property <color> accent: #3DF2FF;
+    in property <color> accent-ink: #04161A;  // texto sobre o acento
+    in property <color> accent2: #FF3DB8;     // alfinete ligado
+    in property <color> hover: #24123A;
+    in property <color> danger: #FF8095;
+    in property <color> danger-edge: #5A1F3A;
+    in property <color> bad: #FF4D6A;
+    // modo de edição (derivadas do acento)
+    in property <color> edit-bg: #071A1E;
+    in property <color> edit-line: #1F5A62;
+    in property <color> edit-ink: #C9E9EC;
+    in property <color> edit-sub: #9FD8DE;
+    // forma
+    in property <length> chamfer: 18px;       // corte dos cantos (0 = retos)
+    in property <length> border: 1px;         // espessura da borda da janela
+    in property <length> header-h: 48px;
+    in property <length> header-line: 1px;
+    in property <length> panel-top-h: 0px;
+    in property <length> footer-h: 0px;       // rodapé (0 = sem; < 20 px = só a faixa)
+    in property <float> card-alpha: 1;        // opacidade do fundo dos apps sobre o fundo da janela
+    // letras
+    in property <string> font-ui: "Chakra Petch";
+    in property <string> font-mono: "JetBrains Mono";
+    in property <string> font-title: "Chakra Petch";
+    // cabeçalho
+    in property <string> title: "TOCA";
+    in property <length> title-size: 18px;
+    in property <int> title-weight: 700;
+    in property <length> title-spacing: 3.2px;
+    in property <bool> title-cursor: false;   // cursor piscando depois do título
+    in property <string> title-icon;          // ícone em pixel (quadro 8×8, preenchido)
+    in property <string> title-icon-cut;      // furo no ícone (porta da casinha)
+    in property <string> tag: "grid";         // "grid" | "greeting" | "none"
+    in property <string> buttons: "icon";     // "icon" | "bracket" | "chunky"
 }
 
 // Ícones de traço (caminhos SVG num quadro 24×24, como no design).
@@ -68,11 +100,17 @@ export global Icons {
     out property <string> refresh: "M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5";
     out property <string> stop: "M7 7h10v10H7z";
     out property <string> play: "M8 5v14l11-7z";
+    out property <string> pause: "M9 6v12M15 6v12";
     out property <string> logs: "M5 7h14M5 12h14M5 17h10";
     out property <string> terminal: "M4 7l5 5l-5 5M12 17h8";
     out property <string> close: "M6 6l12 12M18 6L6 18";
     out property <string> grid: "M3 3h8v8H3zM13 3h8v4h-8zM13 9h8v12h-8zM3 13h8v8H3z";
     out property <string> chevron: "M6 9l6 6l6-6";
+    // em pixel (quadro 7×7, preenchidos), para os botões "chunky"
+    out property <string> px-pin: "M2 0h3v1H2zM2 1h1v2H2zM4 1h1v2H4zM1 3h5v1H1zM3 4h1v3H3z";
+    out property <string> px-gear: "M3 0h1v1H3zM0 3h1v1H0zM6 3h1v1H6zM3 6h1v1H3zM1 1h1v1H1zM5 1h1v1H5zM1 5h1v1H1zM5 5h1v1H5zM2 2h3v1H2zM2 3h1v1H2zM4 3h1v1H4zM2 4h3v1H2z";
+    out property <string> px-grid: "M0 0h3v3H0zM4 0h3v3H4zM0 4h3v3H0zM4 4h3v3H4z";
+    out property <string> px-close: "M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM6 0h1v1H6zM5 1h1v1H5zM4 2h1v1H4zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z";
     // preenchido
     out property <string> grip: "M8 5h3v3H8zM13 5h3v3h-3zM8 10.5h3v3H8zM13 10.5h3v3h-3zM8 16h3v3H8zM13 16h3v3h-3z";
 }

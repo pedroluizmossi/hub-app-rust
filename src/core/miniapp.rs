@@ -21,9 +21,12 @@ pub struct Host {
 }
 
 impl Host {
-    /// Tema escolhido pelo mini-app (cada app tem o seu; o hub é neutro).
+    /// Tema escolhido pelo mini-app (cada app tem o seu). "auto" acompanha o visual da janela.
     pub fn theme_for(&self, m: &Manifest) -> &'static Theme {
-        crate::mascot::themes::get(&self.config.borrow().string(m, "theme"))
+        let cfg = self.config.borrow();
+        let key = cfg.string(m, "theme");
+        let key = if key == "auto" { crate::skin::get(&cfg.skin).app_theme.to_string() } else { key };
+        crate::mascot::themes::get(&key)
     }
 
     /// Executor restrito à allowlist do manifesto.

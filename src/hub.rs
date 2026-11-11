@@ -13,6 +13,7 @@ use crate::core::registry::Registry;
 use crate::instance;
 use crate::mascot::{Mood, render, sprites, themes};
 use crate::popup;
+use crate::skin;
 use crate::tray::Tray;
 use crate::core::layout::{self, Rect};
 use crate::ui::{AppInfo, Ghost, GridCell, HubWindow, SettingRow, Anim};
@@ -53,6 +54,12 @@ pub struct Hub {
     anim: Timer,
     /// Arrasto em curso no modo de edição.
     drag: RefCell<Option<Drag>>,
+    /// Tamanho (lógico) da área do painel, para desenhar o fundo; e a geração do pedido
+    /// de desenho (vários pedidos seguidos num redimensionamento viram um só).
+    backdrop_size: Cell<(f32, f32)>,
+    backdrop_gen: Rc<Cell<u32>>,
+    /// Minuto mostrado no relógio ("21:57").
+    clock: RefCell<String>,
 }
 
 /// Um app sendo movido ou redimensionado no modo de edição.
@@ -110,7 +117,11 @@ impl Hub {
             hovered: Cell::new(false),
             anim: Timer::default(),
             drag: RefCell::new(None),
+            backdrop_size: Cell::new((0.0, 0.0)),
+            backdrop_gen: Rc::new(Cell::new(0)),
+            clock: RefCell::new(String::new()),
         });
+        hub.apply_skin();
         hub.registry.start(&hub.ui);
         hub.ui.set_current(tab_name(tab.as_deref()));
         hub.rebuild_lists();
@@ -119,7 +130,7 @@ impl Hub {
         // bandeja: se não houver (GNOME sem AppIndicator), a janela fica sempre aberta
         match Tray::spawn(hub.ui.as_weak(), sprites::get("neko"), themes::get("neon"), Mood::Sleep) {
             Ok(t) => *hub.tray.borrow_mut() = Some(t),
-            Err(e) => eprintln!("cyberhub: sem bandeja do sistema ({e}); a janela fica aberta"),
+            Err(e) => eprintln!("miniutils: sem bandeja do sistema ({e}); a janela fica aberta"),
         }
 
         // tamanho lembrado da última vez (lógico: o Slint converte pela escala da tela)
@@ -150,6 +161,7 @@ impl Hub {
         if self.ui.show().is_err() {
             return;
         }
+        self.schedule_backdrop();
         if fade_in {
             self.fade(0.0, 1.0, false);
         }
@@ -192,7 +204,7 @@ impl Hub {
             let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
         });
         if let Err(e) = served {
-            eprintln!("cyberhub: não consegui atender outras instâncias ({e})");
+            eprintln!("miniutils: não consegui atender outras instâncias ({e})");
         }
     }
 
@@ -286,6 +298,88 @@ impl Hub {
         } else if !just_hidden {
             self.show(anchor);
         }
+    }
+
+    // ---- visual da janela ---------------------------------------------------------
+
+    /// Aplica o visual da config: tokens da tela, lista do seletor e fundo.
+    fn apply_skin(&self) {
+        let (key, name) = {
+            let cfg = self.host.config.borrow();
+            (cfg.skin.clone(), crate::core::config::display_name())
+        };
+        skin::apply(&self.ui, skin::get(&key), &name);
+        self.ui.set_app_name(name.into());
+        let labels: Vec<SharedString> = skin::SKINS.iter().map(|s| s.label.into()).collect();
+        self.ui.set_skins(ModelRc::new(VecModel::from(labels)));
+        self.ui.set_skin_index(skin::index_of(&key) as i32);
+        self.schedule_backdrop();
+    }
+
+    /// Troca o visual. Os apps com tema "auto" mudam junto.
+    fn choose_skin(&self, i: usize) {
+        let Some(s) = skin::SKINS.get(i) else { return };
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.skin == s.key {
+                return;
+            }
+            cfg.skin = s.key.into();
+            cfg.save();
+        }
+        self.apply_skin();
+        for app in self.registry.enabled() {
+            app.borrow_mut().settings_changed(&self.ui);
+        }
+        self.rebuild_lists();
+        self.last_tray.borrow_mut().2.clear(); // a bandeja pode ter mudado de tema
+    }
+
+    /// Pede um fundo novo daqui a pouco (um só, mesmo com vários pedidos seguidos).
+    fn schedule_backdrop(&self) {
+        let id = self.backdrop_gen.get().wrapping_add(1);
+        self.backdrop_gen.set(id);
+        let current = self.backdrop_gen.clone();
+        let weak = self.ui.as_weak();
+        let size = self.backdrop_size.get();
+        let key = self.host.config.borrow().skin.clone();
+        Timer::single_shot(Duration::from_millis(60), move || {
+            if current.get() != id {
+                return;
+            }
+            let Some(ui) = weak.upgrade() else { return };
+            let s = skin::get(&key);
+            let window = ui.window();
+            let scale = window.scale_factor();
+            // sem o tamanho exato da área ainda: estima pela janela
+            let (w, h) = if size.0 > 0.0 && size.1 > 0.0 {
+                size
+            } else {
+                let px = window.size();
+                let (ww, wh) = (px.width as f32 / scale, px.height as f32 / scale);
+                let chrome = 2.0 * s.border + s.header_h + s.header_line + s.panel_top_h + s.footer_h;
+                ((ww - 2.0 * s.border).max(1.0), (wh - chrome).max(1.0))
+            };
+            let buf = skin::backdrop::render(s.backdrop, s.bg, w, h, scale);
+            ui.set_backdrop(slint::Image::from_rgb8(buf));
+        });
+    }
+
+    /// Relógio e saudação, atualizados quando muda o minuto.
+    fn update_clock(&self) {
+        let (hour, min) = local_time();
+        let text = format!("{hour:02}:{min:02}");
+        if *self.clock.borrow() == text {
+            return;
+        }
+        let part = match hour {
+            5..=11 => "bom dia",
+            12..=17 => "boa tarde",
+            _ => "boa noite",
+        };
+        self.ui.set_greeting(format!("{part} · {text}").into());
+        self.ui.set_clock(text.clone().into());
+        *self.clock.borrow_mut() = text;
     }
 
     // ---- tema e listas --------------------------------------------------------
@@ -548,6 +642,7 @@ impl Hub {
             if let Some(h) = w.upgrade() {
                 h.ui.set_current(id);
                 h.anim_tick(); // desenha as mascotes já no primeiro quadro
+                h.schedule_backdrop();
             }
         });
 
@@ -557,6 +652,22 @@ impl Hub {
             let on = !h.host.config.borrow().is_enabled(&id);
             h.registry.set_enabled(&id, on, &h.ui);
             h.rebuild_lists();
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_skin_chosen(move |i| {
+            if let Some(h) = w.upgrade() {
+                h.choose_skin(i.max(0) as usize);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_backdrop_resized(move |bw, bh| {
+            if let Some(h) = w.upgrade() {
+                if bw > 0.0 && bh > 0.0 && h.backdrop_size.replace((bw, bh)) != (bw, bh) {
+                    h.schedule_backdrop();
+                }
+            }
         });
 
         let w = Rc::downgrade(hub);
@@ -672,9 +783,9 @@ impl Hub {
         {
             use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
             ui.window().on_winit_window_event(move |_, ev| {
-                if std::env::var_os("CYBERHUB_DEBUG").is_some() {
+                if std::env::var_os("MINIUTILS_DEBUG").is_some() {
                     if let WindowEvent::Focused(f) = ev {
-                        eprintln!("cyberhub: foco {f}");
+                        eprintln!("miniutils: foco {f}");
                     }
                 }
                 let Some(h) = w.upgrade() else { return EventResult::Propagate };
@@ -747,6 +858,7 @@ impl Hub {
     }
 
     fn data_tick(&self) {
+        self.update_clock();
         let events = self.host.bus.drain();
         if !events.is_empty() {
             self.registry.dispatch(&events, &self.ui);
@@ -802,13 +914,26 @@ fn tab_name(tab: Option<&str>) -> SharedString {
 /// Rótulo de uma opção de `choice`: nome do tema ou da mascote, se for um.
 fn option_label(key: &str) -> String {
     if key == "auto" {
-        "Automática".into()
+        "Acompanha a janela".into()
     } else if let Some(t) = themes::THEMES.iter().find(|t| t.key == key) {
         t.label.into()
     } else if let Some(s) = sprites::SPRITES.iter().find(|s| s.key == key) {
         s.label.into()
     } else {
         key.into()
+    }
+}
+
+/// Hora e minuto locais.
+fn local_time() -> (i32, i32) {
+    // SAFETY: time e localtime_r só escrevem no `tm` que passamos
+    unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&now, &mut tm).is_null() {
+            return (0, 0);
+        }
+        (tm.tm_hour, tm.tm_min)
     }
 }
 

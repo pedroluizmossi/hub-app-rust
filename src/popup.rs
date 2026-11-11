@@ -2,7 +2,7 @@
 //!
 //! O Wayland não deixa um app posicionar a própria janela. Por isso, quando há XWayland
 //! (`$DISPLAY`), o hub roda como cliente X11 — o mesmo vale direto em sessões X11 (XFCE,
-//! Cinnamon, MATE). Com `CYBERHUB_NATIVE_WAYLAND=1` ele fica no Wayland nativo: sem
+//! Cinnamon, MATE). Com `MINIUTILS_NATIVE_WAYLAND=1` ele fica no Wayland nativo: sem
 //! moldura e fechando ao perder o foco, mas onde o compositor quiser.
 
 use slint::winit_030::{SlintEvent, WinitWindowAccessor, winit};
@@ -16,7 +16,7 @@ const PANEL_HALF: i32 = 24;
 /// Escolhe o backend (winit + renderizador por software) e, se possível, o X11.
 /// Devolve `true` quando o popup pode ser posicionado.
 pub fn select_backend() -> anyhow::Result<bool> {
-    let native_wayland = std::env::var_os("CYBERHUB_NATIVE_WAYLAND").is_some();
+    let native_wayland = std::env::var_os("MINIUTILS_NATIVE_WAYLAND").is_some();
     let x11 = std::env::var_os("DISPLAY").is_some() && !native_wayland;
     let mut selector = slint::BackendSelector::new().backend_name("winit-software".into());
     if x11 {
@@ -124,7 +124,7 @@ pub fn drag_resize(window: &slint::Window, dir: &str) {
     };
     window.with_winit_window(|w| {
         if let Err(e) = w.drag_resize_window(d) {
-            eprintln!("cyberhub: não deu para redimensionar: {e}");
+            eprintln!("miniutils: não deu para redimensionar: {e}");
         }
     });
 }
@@ -167,15 +167,15 @@ pub fn skip_taskbar(window: &slint::Window) {
             RawWindowHandle::Xcb(h) => h.window.get(),
             _ => return, // Wayland nativo: não há como pedir isso
         };
-        if std::env::var_os("CYBERHUB_DEBUG").is_some() {
-            eprintln!("cyberhub: estados EWMH na janela 0x{id:x}");
+        if std::env::var_os("MINIUTILS_DEBUG").is_some() {
+            eprintln!("miniutils: estados EWMH na janela 0x{id:x}");
         }
         if let Err(e) = x11::set_states(id) {
-            eprintln!("cyberhub: não consegui tirar da barra de tarefas: {e}");
+            eprintln!("miniutils: não consegui tirar da barra de tarefas: {e}");
         }
     });
-    if done.is_none() && std::env::var_os("CYBERHUB_DEBUG").is_some() {
-        eprintln!("cyberhub: janela winit ainda não existe");
+    if done.is_none() && std::env::var_os("MINIUTILS_DEBUG").is_some() {
+        eprintln!("miniutils: janela winit ainda não existe");
     }
 }
 

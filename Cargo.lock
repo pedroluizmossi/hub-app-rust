@@ -914,24 +914,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "cyberhub"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "ksni",
- "libc",
- "notify-rust",
- "raw-window-handle",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "toml",
- "x11rb",
-]
-
-[[package]]
 name = "data-url"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2604,6 +2586,24 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "miniutils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "ksni",
+ "libc",
+ "notify-rust",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "toml",
+ "x11rb",
+]
 
 [[package]]
 name = "miniz_oxide"

@@ -12,14 +12,21 @@ exec = ["docker"]
 key = "theme"
 label = "Tema"
 type = "choice"
-default = "neon"
-options = ["neon", "matrix", "synthwave", "vaporwave", "akira", "ghost"]
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
 
 [[settings]]
 key = "hide_stopped"
 label = "Esconder containers parados"
 type = "bool"
 default = false
+
+[[settings]]
+key = "sort"
+label = "Ordenar lista por"
+type = "choice"
+default = "estado"
+options = ["estado", "nome", "cpu", "ram"]
 
 [[settings]]
 key = "notify"

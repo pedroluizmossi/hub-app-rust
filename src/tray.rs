@@ -5,7 +5,7 @@ use ksni::blocking::TrayMethods;
 use crate::mascot::{Mood, render, sprites::Sprite, themes::Theme};
 use crate::ui::HubWindow;
 
-pub struct CyberTray {
+pub struct AppTray {
     icons: Vec<ksni::Icon>,
     tooltip: String,
     ui: slint::Weak<HubWindow>,
@@ -13,13 +13,13 @@ pub struct CyberTray {
     pinned: bool,
 }
 
-impl ksni::Tray for CyberTray {
+impl ksni::Tray for AppTray {
     fn id(&self) -> String {
-        "cyberhub".into()
+        "miniutils".into()
     }
 
     fn title(&self) -> String {
-        "CyberHub".into()
+        crate::core::config::display_name()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -27,7 +27,7 @@ impl ksni::Tray for CyberTray {
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
-        ksni::ToolTip { title: "CyberHub".into(), description: self.tooltip.clone(), ..Default::default() }
+        ksni::ToolTip { title: crate::core::config::display_name(), description: self.tooltip.clone(), ..Default::default() }
     }
 
     fn activate(&mut self, x: i32, y: i32) {
@@ -85,13 +85,13 @@ fn icons(sprite: &Sprite, theme: &Theme, mood: Mood) -> Vec<ksni::Icon> {
 }
 
 pub struct Tray {
-    handle: ksni::blocking::Handle<CyberTray>,
+    handle: ksni::blocking::Handle<AppTray>,
 }
 
 impl Tray {
     /// Cria o ícone. Falha se não houver bandeja (ex.: GNOME sem a extensão AppIndicator).
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
-        let tray = CyberTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui, pinned: false };
+        let tray = AppTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui, pinned: false };
         let handle = tray.spawn()?;
         Ok(Tray { handle })
     }
