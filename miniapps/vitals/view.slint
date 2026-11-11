@@ -54,8 +54,9 @@ component Card inherits Rectangle {
                 mood: v.mood;
                 reaction: v.reaction;
                 poked => { VitalsApp.mascot-poked(index); }
-                width: compact || slim ? 48px : 72px;
-                height: compact || slim ? 42px : 63px;
+                // compacto (cartão baixo ou estreito): 2/3 da referência
+                width: compact || slim ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+                height: compact || slim ? Skin.mascot-size * 2 / 3 * 14 / 16 : Skin.mascot-size * 14 / 16;
             }
         }
 

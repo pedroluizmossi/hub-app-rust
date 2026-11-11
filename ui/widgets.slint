@@ -18,81 +18,90 @@ export component Mascot inherits Rectangle {
     property <bool> party: reaction == "celebrate";
     property <bool> startled: reaction == "surprised";
     property <color> accent: Moods.color(theme, mood);
-    preferred-width: 64px;
-    preferred-height: 56px;
-
-    // aura neon: anéis concêntricos (o renderizador por software não tem blur)
+    // tamanho de referência (Skin.mascot-size); quem usa a mascote pode dar outra caixa
+    preferred-width: Skin.mascot-size;
+    preferred-height: Skin.mascot-size * 14 / 16;
     property <float> glow: mood == "alarm" && mod(f, 4) < 2 ? 1.6 : 1;
-    if aura && mood != "sleep": Rectangle {
-        for k in 3: Rectangle {
-            property <float> s: 1.1 - k * 0.2;
-            width: root.width * s;
-            height: root.height * s;
-            x: (root.width - self.width) / 2;
-            y: (root.height - self.height) / 2 + root.height * 0.05;
-            border-radius: min(self.width, self.height) / 2;
-            background: accent.with-alpha(0.07 * glow);
+
+    // o quadro 16×14 ocupa o maior tamanho que cabe na caixa, sem deformar (escala automática)
+    stage := Rectangle {
+        width: min(root.width, root.height * 16 / 14);
+        height: self.width * 14 / 16;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+
+        // aura neon: anéis concêntricos (o renderizador por software não tem blur)
+        if aura && mood != "sleep": Rectangle {
+            for k in 3: Rectangle {
+                property <float> s: 1.1 - k * 0.2;
+                width: stage.width * s;
+                height: stage.height * s;
+                x: (stage.width - self.width) / 2;
+                y: (stage.height - self.height) / 2 + stage.height * 0.05;
+                border-radius: min(self.width, self.height) / 2;
+                background: accent.with-alpha(0.07 * glow);
+            }
         }
-    }
 
-    Image {
-        source: frame;
-        image-rendering: pixelated;
-        width: parent.width;
-        height: parent.height;
-        x: !moving ? 0
-            : startled ? (mod(f, 2) == 0 ? -2px : 2px)
-            : mood == "alarm" ? (mod(f, 2) == 0 ? -1px : 1px) : 0;
-        y: !moving ? 0
-            : party ? (mod(f, 4) < 2 ? -parent.height * 0.24 : 0)
-            : startled ? -parent.height * 0.12
-            : mood == "busy" || mood == "happy" ? (mod(f, 4) < 2 ? -parent.height * 0.1 : 0)
-            : mood == "idle" ? (mod(f, 16) < 8 ? -parent.height * 0.04 : 0)
-            : 0;
-        animate y { duration: 110ms; easing: ease-out; }
-    }
-
-    // "z" do sono / "!" do alarme
-    if moving && mood == "sleep": Text {
-        text: "z";
-        x: parent.width * 0.8;
-        y: parent.height * 0.05 - mod(f, 16) * 1px;
-        opacity: 1 - mod(f, 16) / 16;
-        color: theme.sleep;
-        font-size: parent.height * 0.22;
-        font-weight: 700;
-    }
-    if moving && mood == "alarm": Text {
-        text: "!";
-        x: parent.width * 0.86;
-        y: 0;
-        color: theme.alarm;
-        font-size: parent.height * 0.3;
-        font-weight: 900;
-        opacity: mod(f, 4) < 2 ? 1 : 0.3;
-    }
-
-    // comemoração: faíscas quadradas que sobem e somem, em volta da cabeça
-    if party: Rectangle {
-        for k in 4: Rectangle {
-            property <int> step: mod(f + k * 3, 8);
-            property <length> s: max(2px, root.height * 0.07);
-            width: s;
-            height: s;
-            x: root.width * (k == 0 ? 0.04 : k == 1 ? 0.84 : k == 2 ? 0.18 : 0.7);
-            y: root.height * (k < 2 ? 0.3 : 0.05) - step * root.height * 0.035;
-            background: mod(k, 2) == 0 ? theme.ok : theme.visor;
-            opacity: 1 - step / 8;
+        Image {
+            source: frame;
+            image-rendering: pixelated;
+            width: parent.width;
+            height: parent.height;
+            x: !moving ? 0
+                : startled ? (mod(f, 2) == 0 ? -2px : 2px)
+                : mood == "alarm" ? (mod(f, 2) == 0 ? -1px : 1px) : 0;
+            y: !moving ? 0
+                : party ? (mod(f, 4) < 2 ? -parent.height * 0.24 : 0)
+                : startled ? -parent.height * 0.12
+                : mood == "busy" || mood == "happy" ? (mod(f, 4) < 2 ? -parent.height * 0.1 : 0)
+                : mood == "idle" ? (mod(f, 16) < 8 ? -parent.height * 0.04 : 0)
+                : 0;
+            animate y { duration: 110ms; easing: ease-out; }
         }
-    }
-    // susto (easter egg): "?" em cima da cabeça
-    if startled: Text {
-        text: "?";
-        x: parent.width * 0.8;
-        y: -parent.height * 0.08;
-        color: theme.visor;
-        font-size: parent.height * 0.32;
-        font-weight: 900;
+
+        // "z" do sono / "!" do alarme
+        if moving && mood == "sleep": Text {
+            text: "z";
+            x: parent.width * 0.8;
+            y: parent.height * 0.05 - mod(f, 16) * 1px;
+            opacity: 1 - mod(f, 16) / 16;
+            color: theme.sleep;
+            font-size: parent.height * 0.22;
+            font-weight: 700;
+        }
+        if moving && mood == "alarm": Text {
+            text: "!";
+            x: parent.width * 0.86;
+            y: 0;
+            color: theme.alarm;
+            font-size: parent.height * 0.3;
+            font-weight: 900;
+            opacity: mod(f, 4) < 2 ? 1 : 0.3;
+        }
+
+        // comemoração: faíscas quadradas que sobem e somem, em volta da cabeça
+        if party: Rectangle {
+            for k in 4: Rectangle {
+                property <int> step: mod(f + k * 3, 8);
+                property <length> s: max(2px, stage.height * 0.07);
+                width: s;
+                height: s;
+                x: stage.width * (k == 0 ? 0.04 : k == 1 ? 0.84 : k == 2 ? 0.18 : 0.7);
+                y: stage.height * (k < 2 ? 0.3 : 0.05) - step * stage.height * 0.035;
+                background: mod(k, 2) == 0 ? theme.ok : theme.visor;
+                opacity: 1 - step / 8;
+            }
+        }
+        // susto (easter egg): "?" em cima da cabeça
+        if startled: Text {
+            text: "?";
+            x: parent.width * 0.8;
+            y: -parent.height * 0.08;
+            color: theme.visor;
+            font-size: parent.height * 0.32;
+            font-weight: 900;
+        }
     }
 
     TouchArea {

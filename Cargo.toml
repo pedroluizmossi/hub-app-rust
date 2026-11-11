@@ -13,8 +13,9 @@ libc = "0.2.191"
 notify-rust = "4.19.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-# Só o renderizador por software: ~30 MB em uso, contra ~270 MB carregando o driver OpenGL
-slint = { version = "1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "unstable-winit-030"] }
+slint = { workspace = true }
+# a interface (código gerado pelo Slint), num crate à parte: ver ui/Cargo.toml
+miniutils-ui = { path = "ui" }
 # janela popup: tirar da barra de tarefas (X11 / XWayland)
 x11rb = "0.13"
 raw-window-handle = "0.6"
@@ -25,7 +26,12 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 rusqlite = { version = "0.37", features = ["bundled"] }
 chrono = "0.4"
 
-[build-dependencies]
+[workspace]
+members = ["ui"]
+
+[workspace.dependencies]
+# Só o renderizador por software: ~30 MB em uso, contra ~270 MB carregando o driver OpenGL
+slint = { version = "1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "unstable-winit-030"] }
 slint-build = "1.18.1"
 
 # `cargo run` sem --release: o Slint (renderizador por software) e o desenho dos fundos e das
@@ -34,6 +40,10 @@ slint-build = "1.18.1"
 # recompila rápido e mantém os símbolos de depuração.
 [profile.dev]
 opt-level = 1
+# Só arquivo e linha (backtraces e panics continuam apontando o lugar): bem menos para
+# gerar e linkar que o debuginfo completo. Para depurar com variáveis no gdb/lldb, troque
+# por `debug = true` localmente.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3

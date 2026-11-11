@@ -2790,6 +2790,7 @@ dependencies = [
  "dirs",
  "ksni",
  "libc",
+ "miniutils-ui",
  "notify-rust",
  "raw-window-handle",
  "reqwest",
@@ -2797,10 +2798,17 @@ dependencies = [
  "serde",
  "serde_json",
  "slint",
- "slint-build",
  "toml",
  "x11rb",
  "zbus 5.19.0",
+]
+
+[[package]]
+name = "miniutils-ui"
+version = "0.1.0"
+dependencies = [
+ "slint",
+ "slint-build",
 ]
 
 [[package]]

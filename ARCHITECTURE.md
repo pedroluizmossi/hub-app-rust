@@ -52,11 +52,13 @@ está em [DESIGN.md](DESIGN.md).
 
 ```
 hub-app-rust/
-  Cargo.toml                  pacote `miniutils`
-  build.rs                    compila ui/hub.slint (e tudo que ele importa)
+  Cargo.toml                  pacote `miniutils` e o workspace (com ui/)
+  AGENTS.md                   regras para agentes de código (compilar, validar, UI)
   ARCHITECTURE.md             este documento
   DESIGN.md                   visuais, temas, telas, apps e mascotes: como criar
-  ui/
+  ui/                         crate `miniutils-ui`: só a interface, compilada à parte
+    Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
+                              dos mini-apps); src/lib.rs reexporta os tipos gerados
     hub.slint                 janela: moldura, cabeçalhos, painel (grade + edição), configurações
     theme.slint               tokens: Skin (visual da janela), Colors (tema de app), Icons, Anim
     widgets.slint             componentes: Mascot, Icon, IconButton, TextButton, HeaderButton,

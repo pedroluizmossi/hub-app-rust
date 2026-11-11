@@ -2,13 +2,20 @@
 //!
 //! As consultas não imprimem credenciais nem o conteúdo das respostas. Cada fonte falha
 //! independentemente; a última leitura válida é mantida e marcada como desatualizada.
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[path = "ai_usage_direct.rs"]
 mod direct;
 
-const POLL: Duration = Duration::from_secs(180);
-const KIRO_POLL: Duration = Duration::from_secs(900);
+/// Intervalo entre leituras (s), vindo da config do app ("Atualizar a cada").
+pub static POLL_SECS: AtomicU64 = AtomicU64::new(180);
+/// Fontes ligadas na config (bit `i` = fonte `i`, na ordem de `SOURCES`). Desligada não é consultada.
+pub static ENABLED: AtomicU8 = AtomicU8::new(0b1111);
+/// Nomes das fontes, na ordem dos cartões.
+pub const SOURCES: [&str; 4] = ["Codex", "Claude", "Kiro", "OpenCode Go"];
+/// O Kiro é consultado com menos frequência (nunca menos que isto).
+const KIRO_MIN_POLL: Duration = Duration::from_secs(900);
 const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -37,7 +44,7 @@ pub struct UsageSnapshot {
 
 impl Default for UsageSnapshot {
     fn default() -> Self {
-        Self { cards: ["Codex", "Claude", "Kiro", "OpenCode Go"].into_iter()
+        Self { cards: SOURCES.into_iter()
             .map(|name| UsageCard { name: name.into(), status: "Aguardando leitura".into(), ..Default::default() }).collect() }
     }
 }
@@ -56,9 +63,12 @@ fn now() -> i64 {
 impl UsageProvider {
     pub fn collect(&mut self, force: bool) -> UsageSnapshot {
         if self.cards.is_empty() { self.cards = UsageSnapshot::default().cards; }
-        let elapsed = |i: usize, interval: Duration| self.retry_at[i].is_none_or(|t| Instant::now() >= t)
+        let poll = Duration::from_secs(POLL_SECS.load(Ordering::Relaxed).max(60));
+        let enabled = ENABLED.load(Ordering::Relaxed);
+        let elapsed = |i: usize, interval: Duration| enabled & (1 << i) != 0
+            && self.retry_at[i].is_none_or(|t| Instant::now() >= t)
             && (force || self.last[i].is_none_or(|t| t.elapsed() >= interval));
-        let should_read = [elapsed(0, POLL), elapsed(1, POLL), elapsed(2, KIRO_POLL), elapsed(3, POLL)];
+        let should_read = [elapsed(0, poll), elapsed(1, poll), elapsed(2, poll.max(KIRO_MIN_POLL)), elapsed(3, poll)];
         let (codex, claude, kiro, opencode) = std::thread::scope(|scope| {
             let c = should_read[0].then(|| scope.spawn(direct::codex));
             let a = should_read[1].then(|| scope.spawn(direct::claude));

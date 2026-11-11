@@ -351,6 +351,9 @@ export component DockerView inherits Rectangle {
     property <bool> tiny: self.width < 420px;
     property <bool> short: self.height < 260px;
     property <bool> bad: (!DockerApp.ok && !DockerApp.missing) || DockerApp.errors > 0;
+    // mascote: tamanho de referência (Skin.mascot-size); na versão baixa, 2/3 dele
+    property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+    property <length> mascot-h: mascot-w * 14 / 16;
 
   VerticalLayout {
     spacing: 12px;
@@ -359,8 +362,9 @@ export component DockerView inherits Rectangle {
     HorizontalLayout {
         spacing: 16px;
         Rectangle {
-            width: short ? 56px : 72px;
-            height: short ? 50px : 64px;
+            // moldura: a mascote com 4px de respiro em cada lado
+            width: mascot-w + 8px;
+            height: mascot-h + 8px;
             background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
             Mascot {
                 theme: t;

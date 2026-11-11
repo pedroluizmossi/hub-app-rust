@@ -1,0 +1,18 @@
+[package]
+name = "miniutils-ui"
+version = "0.1.0"
+edition = "2024"
+description = "Interface Slint do MiniUtils (ui/hub.slint e as telas dos mini-apps), compilada à parte"
+license = "MIT"
+publish = false
+
+# Crate só da interface: o código gerado pelo Slint (dezenas de milhares de linhas) fica
+# em cache aqui, e mudar só o Rust do app não o recompila.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+slint = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }

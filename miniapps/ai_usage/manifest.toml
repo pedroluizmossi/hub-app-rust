@@ -11,3 +11,84 @@ label = "Tema"
 type = "choice"
 default = "auto"
 options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
+
+[[settings]]
+key = "warn"
+label = "Barra e mascote agitadas a partir de (%)"
+type = "int"
+default = 75
+min = 10
+max = 95
+step = 5
+
+[[settings]]
+key = "alarm"
+label = "Barra e mascote em alarme a partir de (%)"
+type = "int"
+default = 90
+min = 20
+max = 100
+step = 5
+
+[[settings]]
+key = "alerts"
+label = "Avisar quando um limite passar do alarme"
+type = "bool"
+default = true
+
+[[settings]]
+key = "show_codex"
+label = "Mostrar Codex"
+type = "bool"
+default = true
+
+[[settings]]
+key = "show_claude"
+label = "Mostrar Claude"
+type = "bool"
+default = true
+
+[[settings]]
+key = "show_kiro"
+label = "Mostrar Kiro"
+type = "bool"
+default = true
+
+[[settings]]
+key = "show_opencode"
+label = "Mostrar OpenCode Go"
+type = "bool"
+default = true
+
+[[settings]]
+key = "hide_empty"
+label = "Esconder fontes sem leitura"
+type = "bool"
+default = false
+
+[[settings]]
+key = "reset_relative"
+label = "Renovação em tempo restante (em vez de data)"
+type = "bool"
+default = false
+
+[[settings]]
+key = "compact"
+label = "Modo compacto (sem status nem renovação)"
+type = "bool"
+default = false
+
+[[settings]]
+key = "poll"
+label = "Atualizar a cada (min)"
+type = "int"
+default = 3
+min = 1
+max = 30
+step = 1
+
+[[settings]]
+key = "grid"
+label = "Cartões lado a lado quando couber (em vez de lista)"
+type = "bool"
+default = false

@@ -1,6 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin } from "../../ui/theme.slint";
-import { TextButton } from "../../ui/widgets.slint";
+import { Mascot, TextButton } from "../../ui/widgets.slint";
 
 export struct UsageLine {
     label: string,
@@ -17,12 +17,20 @@ export struct UsageCard {
     plan: string,
     stale: bool,
     lines: [UsageLine],
+    mascot: image,
+    mood: string,
+    reaction: string,
 }
 
 export global AiUsageApp {
     in property <Colors> theme;
     in property <[UsageCard]> cards;
+    // modo compacto (config): sem status nem renovação
+    in property <bool> compact;
+    // cartões lado a lado, em quantas colunas couberem (config); senão, um embaixo do outro
+    in property <bool> grid;
     callback refresh();
+    callback mascot-poked(int);
 }
 
 component Meter inherits Rectangle {
@@ -30,52 +38,57 @@ component Meter inherits Rectangle {
     in property <Colors> t;
     property <bool> hot: entry.level == "alarm" || entry.level == "busy";
     property <color> tint: entry.level == "alarm" ? t.alarm : t.warn;
-    height: 43px;
     background: transparent;
     VerticalLayout {
-        spacing: 3px;
+        spacing: 4px;
         HorizontalLayout {
-            Text { text: entry.label; color: t.sub; font-family: Skin.font-mono; font-size: 11px; }
+            Text { text: entry.label; color: t.sub; font-family: Skin.font-mono; font-size: 13px; overflow: elide; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 11px; }
+            Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 13px; }
         }
         Rectangle {
-            height: 4px;
+            height: 6px;
             background: t.muted.with-alpha(0.25);
             Rectangle { height: parent.height; width: parent.width * min(max(entry.value, 0), 100) / 100; background: hot ? tint : t.visor; }
         }
-        Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 10px; overflow: elide; }
+        if !AiUsageApp.compact: Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 12px; overflow: elide; }
     }
 }
 
 component AccountCard inherits Rectangle {
     in property <UsageCard> account;
     in property <Colors> t;
+    in property <int> index;
     border-width: 1px;
     border-color: t.muted.with-alpha(0.35);
     background: t.bg0.mix(t.bg1, 0.6);
-    VerticalLayout {
+    HorizontalLayout {
         padding: 10px;
-        spacing: 5px;
-        HorizontalLayout {
-            spacing: 9px;
-            Image {
-                width: 32px;
-                height: 28px;
-                source: account.name == "Claude" ? @image-url("icons/claude.svg")
-                    : account.name == "Codex" ? @image-url("icons/codex.svg")
-                    : account.name == "Kiro" ? @image-url("icons/kiro.svg")
-                    : account.name == "OpenCode Go" ? @image-url("icons/opencode.svg")
-                    : @image-url("");
-                image-fit: contain;
-                image-rendering: pixelated;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Mascot {
+                theme: root.t;
+                frame: account.mascot;
+                mood: account.mood;
+                reaction: account.reaction;
+                width: Skin.mascot-size;
+                height: Skin.mascot-size * 14 / 16;
+                poked => { AiUsageApp.mascot-poked(root.index); }
             }
-            Text { text: account.name; color: t.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
-            Rectangle { horizontal-stretch: 1; }
-            Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 10px; overflow: elide; vertical-alignment: center; }
         }
-        Text { text: account.status; color: account.stale ? t.warn : t.muted; font-size: 11px; wrap: word-wrap; }
-        for entry in account.lines: Meter { entry: entry; t: root.t; }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 7px;
+            HorizontalLayout {
+                spacing: 9px;
+                Text { text: account.name; color: t.text; font-size: 17px; font-weight: 700; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 12px; overflow: elide; vertical-alignment: center; }
+            }
+            if !AiUsageApp.compact || account.lines.length == 0: Text { text: account.status; color: account.stale ? t.warn : t.muted; font-size: 13px; wrap: word-wrap; }
+            for entry in account.lines: Meter { entry: entry; t: root.t; }
+        }
     }
 }
 
@@ -84,16 +97,41 @@ export component AiUsageView inherits Rectangle {
     VerticalLayout {
         spacing: 8px;
         HorizontalLayout {
-            Text { text: "ASSINATURAS DE IA"; color: t.text; font-family: Skin.font-mono; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+            Text { text: "ASSINATURAS DE IA"; color: t.text; font-family: Skin.font-mono; font-size: 14px; font-weight: 700; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
-            TextButton { text: "Atualizar"; ink: t.visor; height: 28px; font-size: 11px; clicked => { AiUsageApp.refresh(); } }
+            TextButton { text: "Atualizar"; ink: t.visor; height: 30px; font-size: 13px; clicked => { AiUsageApp.refresh(); } }
         }
-        ScrollView {
+        scroll := ScrollView {
             vertical-stretch: 1;
+            // grade: quantas colunas de pelo menos `min-card` couberem; lista: uma só
+            property <length> gap: 8px;
+            property <length> min-card: 340px;
+            property <length> area: self.visible-width;
+            property <int> n: AiUsageApp.cards.length;
+            property <int> cols: !AiUsageApp.grid || n == 0 ? 1
+                : min(n, max(1, floor((area + gap) / (min-card + gap))));
+            property <length> cw: (area - (cols - 1) * gap) / cols;
             VerticalLayout {
                 alignment: start;
-                spacing: 8px;
-                for account in AiUsageApp.cards: AccountCard { account: account; t: root.t; }
+                spacing: scroll.gap;
+                for r in ceil(scroll.n / scroll.cols): HorizontalLayout {
+                    spacing: scroll.gap;
+                    alignment: start;
+                    for c in scroll.cols: Rectangle {
+                        property <int> i: r * scroll.cols + c;
+                        width: scroll.cw;
+                        // o layout passa a altura do cartão para a linha; cartões da linha ficam iguais
+                        VerticalLayout {
+                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; }
+                        }
+                    }
+                }
+                if scroll.n == 0: Text {
+                    text: "Nenhuma fonte para mostrar. Ligue alguma nas configurações do app.";
+                    color: t.muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
             }
         }
     }
