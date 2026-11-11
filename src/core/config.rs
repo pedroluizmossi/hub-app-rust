@@ -37,6 +37,8 @@ pub struct Config {
     pub skin: String,
     /// Reduzir movimento: mascotes sem pulos nem tremores, e sem reações nem easter eggs.
     pub reduce_motion: bool,
+    /// Quanto as mascotes conversam entre si: `"off"`, `"some"` ou `"lots"`.
+    pub chatter: String,
     /// Onde ficam as páginas: `"side"` (barra lateral) ou `"top"` (abas no cabeçalho).
     pub nav: String,
     /// Mascote do ícone da bandeja: `"auto"` (a do app em pior estado) ou uma mascote.
@@ -100,6 +102,7 @@ impl Default for Config {
             }],
             skin: "neon".into(),
             reduce_motion: false,
+            chatter: "some".into(),
             nav: "side".into(),
             tray_icon: "auto".into(),
             tray_theme: "auto".into(),

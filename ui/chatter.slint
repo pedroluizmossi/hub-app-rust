@@ -1,0 +1,137 @@
+// Conversa entre mascotes: a fala atual (preenchida pelo Rust, src/hub/chatter.rs) e a
+// caixa de diálogo que aparece no app de quem fala.
+import { Colors, Anim, Skin } from "theme.slint";
+
+export global Chatter {
+    in property <string> app;        // id do app de quem fala ("" = ninguém falando)
+    in property <int> seq;           // muda a cada fala nova
+    in property <string> name;       // "CPU", "Docker", "Claude"
+    in property <string> text;       // parte já "digitada"
+    in property <bool> done;         // terminou de digitar
+    in property <image> portrait;    // retrato da mascote
+    in property <Colors> theme;      // tema do app de quem fala
+    // quem fala e quem ouve, como "app:nome" (ex.: "cyber.vitals:CPU"): a mascote com esse
+    // id na tela pula enquanto fala, ou mostra que está ouvindo
+    in property <string> speaker;
+    in property <string> listener;
+    callback skip();                 // clique na caixa: pula a fala
+}
+
+// Caixa de diálogo em pixel, estilo RPG: borda dupla, retrato da mascote numa moldura,
+// nome e a fala sendo digitada. Quando termina, um triângulo pisca no canto. Entra
+// subindo; clique pula a fala.
+export component SpeechBox inherits Rectangle {
+    property <Colors> t: Chatter.theme;
+    property <length> line: 2px;
+    property <length> face: 44px;
+    height: 66px;
+
+    // entrada: sobe alguns pixels e aparece
+    in-out property <length> rise: 10px;
+    init => { rise = 0; }
+    animate rise { duration: 160ms; easing: ease-out; }
+    opacity: 1 - rise / 10px;
+
+    accessible-role: text;
+    accessible-label: Chatter.name + ": " + Chatter.text;
+
+    // sombra dura
+    Rectangle {
+        x: 3px;
+        y: 3px + rise;
+        width: parent.width - 3px;
+        height: parent.height - 3px;
+        background: black.with-alpha(0.45);
+    }
+
+    box := Rectangle {
+        y: rise;
+        width: parent.width - 3px;
+        height: parent.height - 3px;
+        background: t.text;           // borda de fora (clara)
+        Rectangle {
+            x: line;
+            y: line;
+            width: parent.width - 2 * line;
+            height: parent.height - 2 * line;
+            background: t.bg0;
+            // borda de dentro (fina), a segunda linha da borda dupla
+            Rectangle {
+                x: 2px;
+                y: 2px;
+                width: parent.width - 4px;
+                height: parent.height - 4px;
+                border-width: 1px;
+                border-color: t.muted.with-alpha(0.7);
+            }
+
+            // retrato: moldura quadrada; a mascote balança enquanto "fala"
+            Rectangle {
+                x: 8px;
+                y: (parent.height - face) / 2;
+                width: face;
+                height: face;
+                background: t.text;
+                Rectangle {
+                    x: line;
+                    y: line;
+                    width: parent.width - 2 * line;
+                    height: parent.height - 2 * line;
+                    background: t.bg1;
+                    Image {
+                        source: Chatter.portrait;
+                        image-rendering: pixelated;
+                        width: parent.width - 4px;
+                        height: self.width * 14 / 16;
+                        x: 2px;
+                        y: (parent.height - self.height) / 2
+                            + (!Chatter.done && !Anim.calm && mod(Anim.frame, 2) == 0 ? -1px : 0);
+                    }
+                }
+            }
+
+            VerticalLayout {
+                x: 8px + face + 10px;
+                width: parent.width - self.x - 18px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 2px;
+                Text {
+                    text: Chatter.name;
+                    color: t.visor;
+                    font-family: Skin.font-mono;
+                    font-size: 12px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                Text {
+                    vertical-stretch: 1;
+                    text: Chatter.text;
+                    color: t.text;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+            }
+
+            // terminou: triângulo em pixel piscando no canto
+            if Chatter.done: Path {
+                x: parent.width - 16px;
+                y: parent.height - 11px;
+                width: 10px;
+                height: 6px;
+                commands: "M0 0h5v1H0zM1 1h3v1H1zM2 2h1v1H2z";
+                viewbox-width: 5;
+                viewbox-height: 3;
+                fill: t.visor;
+                anti-alias: false;
+                opacity: Anim.calm || mod(Anim.frame, 4) < 2 ? 1 : 0;
+            }
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Chatter.skip(); }
+    }
+}

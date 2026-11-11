@@ -8,6 +8,9 @@ import { DockerView, DockerApp, ContainerRow } from "../miniapps/docker/view.sli
 import { VitalsView, VitalsApp, VitalCard } from "../miniapps/vitals/view.slint";
 import { CdPlayerView, CdPlayerApp } from "../miniapps/cdplayer/view.slint";
 import { AiUsageView, AiUsageApp, UsageCard, UsageLine } from "../miniapps/ai_usage/view.slint";
+import { PortsView, PortsApp, PortRow } from "../miniapps/ports/view.slint";
+import { TodoView, TodoApp, TodoRow } from "../miniapps/todo/view.slint";
+import { Chatter, SpeechBox } from "chatter.slint";
 
 import "fonts/ChakraPetch-Regular.ttf";
 import "fonts/ChakraPetch-Medium.ttf";
@@ -18,7 +21,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, Chatter }
 
 // Posição de um app na grade do painel (em células).
 export struct GridCell {
@@ -176,6 +179,9 @@ component AppsView inherits ScrollView {
     // reduzir movimento (mascotes paradas, sem reações)
     in property <bool> reduce-motion;
     callback reduce-motion-toggled();
+    // quanto as mascotes conversam (0 nunca, 1 às vezes, 2 bastante)
+    in property <int> chatter-index;
+    callback chatter-chosen(int);
     // páginas: lista, nomes (para o seletor de cada app) e mascotes disponíveis
     in property <[PageInfo]> pages;
     in property <[string]> page-names;
@@ -288,6 +294,13 @@ component AppsView inherits ScrollView {
                             toggled => { root.reduce-motion-toggled(); }
                         }
                     }
+                }
+                ChoiceRow {
+                    title: "Mascotes conversam";
+                    hint: "As mascotes comentam o que acontece nos apps e, com tudo calmo, puxam papo. Clique numa mascote para ela falar.";
+                    options: ["Nunca", "Às vezes", "Bastante"];
+                    index: chatter-index;
+                    chosen(i) => { root.chatter-chosen(i); }
                 }
                 ChoiceRow {
                     title: "Ícone da bandeja";
@@ -827,11 +840,31 @@ component Dashboard inherits ScrollView {
             width: parent.width - 24px;
             height: parent.height - 24px;
         }
+        if c.id == "cyber.ports": PortsView {
+            x: 14px;
+            y: 14px;
+            width: parent.width - 28px;
+            height: parent.height - 28px;
+        }
+        if c.id == "cyber.todo": TodoView {
+            x: 14px;
+            y: 14px;
+            width: parent.width - 28px;
+            height: parent.height - 28px;
+        }
         if c.id == "cyber.ai_usage": AiUsageView {
+            span: c.w;
             x: 12px;
             y: 12px;
             width: parent.width - 24px;
             height: parent.height - 24px;
+        }
+
+        // conversa entre mascotes: a fala sai na caixa do app de quem fala
+        if Chatter.app == c.id && !editing: SpeechBox {
+            x: 10px;
+            y: parent.height - self.height - 10px;
+            width: parent.width - 20px;
         }
 
         // modo de edição: véu, contorno, barra de arrasto e alças
@@ -1143,6 +1176,7 @@ export component HubWindow inherits Window {
     // páginas como abas no cabeçalho em vez da barra lateral (`nav = "top"`)
     in property <bool> nav-top: false;
     in property <bool> reduce-motion: false;
+    in property <int> chatter-index: 1;
     // fundo desenhado pelo Rust para o tamanho da área do painel
     in property <image> backdrop;
     // relógio e saudação ("boa noite · 21:57"), para os visuais que mostram
@@ -1176,6 +1210,7 @@ export component HubWindow inherits Window {
     callback tray-theme-chosen(int);
     callback nav-chosen(int);
     callback reduce-motion-toggled();
+    callback chatter-chosen(int);
     callback page-selected(int);
     callback page-added();
     callback page-removed(int);
@@ -1461,6 +1496,8 @@ export component HubWindow inherits Window {
                 nav-chosen(i) => { root.nav-chosen(i); }
                 reduce-motion: reduce-motion;
                 reduce-motion-toggled => { root.reduce-motion-toggled(); }
+                chatter-index: chatter-index;
+                chatter-chosen(i) => { root.chatter-chosen(i); }
                 page-added => { root.page-added(); }
                 page-removed(i) => { root.page-removed(i); }
                 page-renamed(i, n) => { root.page-renamed(i, n); }

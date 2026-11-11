@@ -64,6 +64,13 @@ impl Hub {
         });
 
         let w = Rc::downgrade(hub);
+        ui.on_chatter_chosen(move |i| {
+            if let Some(h) = w.upgrade() {
+                h.choose_chatter(i.max(0) as usize);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
         ui.on_reduce_motion_toggled(move || {
             if let Some(h) = w.upgrade() {
                 h.toggle_motion();
@@ -181,6 +188,13 @@ impl Hub {
         ui.on_setting_chosen(move |app, key, i| {
             if let Some(h) = w.upgrade() {
                 h.change_setting(&app, &key, Input::Choice(i.max(0) as usize));
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.global::<crate::ui::Chatter>().on_skip(move || {
+            if let Some(h) = w.upgrade() {
+                h.chat_skip();
             }
         });
 

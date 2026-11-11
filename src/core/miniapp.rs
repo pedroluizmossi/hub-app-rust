@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use super::bus::{Bus, Event};
+use super::chatter::{Fact, Voice};
 use super::config::Config;
 use super::exec::Exec;
 use super::manifest::Manifest;
@@ -135,6 +136,22 @@ pub trait MiniApp {
     /// Informações e controles opcionais para o menu da bandeja.
     fn tray_media(&self) -> Option<crate::tray::TrayMedia> {
         None
+    }
+
+    /// Fatos novos para a conversa entre mascotes (o hub recolhe depois de cada leitura).
+    fn take_facts(&mut self) -> Vec<Fact> {
+        Vec::new()
+    }
+
+    /// Mascotes deste app que podem responder numa conversa.
+    fn voices(&self) -> Vec<Voice> {
+        Vec::new()
+    }
+
+    /// Falas próprias das mascotes deste app: o conteúdo de `miniapps/<app>/lines.toml`
+    /// (formato em `core/chatter.rs`). Vazio = só as falas genéricas do hub.
+    fn lines(&self) -> &'static str {
+        ""
     }
 }
 

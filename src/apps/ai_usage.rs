@@ -1,12 +1,13 @@
 //! Cartões das assinaturas de IA; dados vêm dos provedores na thread de coleta.
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::core::bus::{Event, Topic};
+use crate::core::chatter::{self, Fact, FactKind, Voice};
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
 use crate::mascot::anim::{Animator, Reaction};
@@ -16,12 +17,19 @@ use crate::ui::{AiUsageApp, HubWindow, UsageCard, UsageLine};
 
 #[path = "ai_mascots.rs"]
 mod ai_mascots;
+#[path = "ai_pace.rs"]
+mod ai_pace;
+use ai_pace::Forecast;
 
 const N: usize = provider::SOURCES.len();
 /// Chave de config que liga cada fonte, na ordem de `provider::SOURCES`.
 const SHOW_KEYS: [&str; N] = ["show_codex", "show_claude", "show_kiro", "show_opencode"];
+/// Programa de linha de comando de cada fonte, na ordem de `provider::SOURCES`.
+const COMMANDS: [&str; N] = ["codex", "claude", "kiro-cli", "opencode"];
 /// Abaixo do alarme menos isto, o aviso daquela janela "rearma".
 const SLACK: f64 = 10.0;
+/// A fala da previsão só diz quantos minutos faltam até este tanto ("em 900 min" não ajuda).
+const FORECAST_MINUTES: i64 = 120;
 
 /// Limites (em %) lidos da config: agitado e alarme.
 #[derive(Clone, Copy)]
@@ -57,6 +65,17 @@ pub struct AiUsageMini {
     alerted: HashSet<String>,
     /// Fontes ligadas na última leitura da config (para pedir leitura das recém-ligadas).
     enabled: u8,
+    /// Humor de cada fonte pelo % usado (sem a previsão) na última leitura com dados,
+    /// para contar quando muda.
+    moods: [Mood; N],
+    /// Fontes que a previsão já apontava na última leitura com dados.
+    strained_before: [bool; N],
+    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    facts: Vec<Fact>,
+    /// Leituras recentes de cada janela de uso (fonte + rótulo), para medir o ritmo.
+    pace: HashMap<String, ai_pace::History>,
+    /// Previsão de cada janela de cada fonte, na ordem de `windows`.
+    forecasts: [Vec<Option<Forecast>>; N],
 }
 
 impl AiUsageMini {
@@ -74,6 +93,11 @@ impl AiUsageMini {
             reactions: [None; N],
             alerted: HashSet::new(),
             enabled: 0b1111,
+            moods: [Mood::Sleep; N],
+            strained_before: [false; N],
+            facts: Vec::new(),
+            pace: HashMap::new(),
+            forecasts: Default::default(),
         }));
         let weak = Rc::downgrade(&app);
         ui.global::<AiUsageApp>().on_refresh(move || {
@@ -86,11 +110,28 @@ impl AiUsageMini {
             let Some(&i) = app.rows.get(row as usize) else { return };
             if app.host.config.borrow().reduce_motion { return; }
             let mood = app.card_mood(i);
+            if let Some(voice) = app.voice(i) {
+                app.facts.push(Fact { kind: FactKind::Poked, voice, subject: String::new(), value: None });
+            }
             if app.anims[i].poke(mood, Instant::now()) && app.refresh_mascot(i) {
                 app.update_mascot_row(row as usize);
             }
         });
+        let weak = Rc::downgrade(&app);
+        ui.global::<AiUsageApp>().on_launch(move |row| {
+            let Some(app) = weak.upgrade() else { return };
+            app.borrow().launch(row as usize);
+        });
         app
+    }
+
+    /// Abre num terminal o programa da fonte mostrada na linha `row`.
+    fn launch(&self, row: usize) {
+        let Some(&i) = self.rows.get(row) else { return };
+        let (name, cmd) = (provider::SOURCES[i], COMMANDS[i]);
+        if let Err(e) = self.host.exec_for(&self.manifest).open_terminal(name, &[cmd]) {
+            self.host.notifier.borrow_mut().send(&format!("ai_usage:launch:{cmd}"), &format!("Não deu para abrir o {name}"), &e.to_string(), false);
+        }
     }
 
     fn levels(&self) -> Levels {
@@ -115,10 +156,79 @@ impl AiUsageMini {
         self.enabled = enabled;
     }
 
+    /// A mascote da fonte `i`, para a conversa entre mascotes.
+    fn voice(&self, i: usize) -> Option<Voice> {
+        let card = self.snap.cards.get(i)?;
+        Some(Voice {
+            app: self.manifest.id.clone(),
+            name: card.name.clone(),
+            sprite: ai_mascots::get(&card.name)?,
+            theme: self.host.theme_for(&self.manifest),
+            mood: self.card_mood(i),
+        })
+    }
+
+    /// Conta as fontes que pioraram ou melhoraram desde a última leitura. Fonte sem dados
+    /// (desatualizada, sem login) não conta: o humor dela é "dormindo" por falta de leitura.
+    fn collect_facts(&mut self) {
+        for i in 0..self.snap.cards.len().min(N) {
+            let card = &self.snap.cards[i];
+            if self.enabled & (1 << i) == 0 || card.stale || card.windows.is_empty() {
+                continue;
+            }
+            let used = card.windows.iter().map(|w| w.used).fold(0.0, f64::max);
+            // O humor pelo % usado e a previsão são contados à parte: a previsão tem fala
+            // própria, e o fim dela (o ritmo caiu) não é "limite renovou".
+            let now = self.levels().of(used);
+            let before = std::mem::replace(&mut self.moods[i], now);
+            let strained = self.strained(i);
+            let newly_strained = strained && !std::mem::replace(&mut self.strained_before[i], strained);
+            let Some(voice) = self.voice(i) else { continue };
+            let name = voice.name.clone();
+            if newly_strained && now != Mood::Alarm {
+                let minutes = self.forecasts[i].iter().flatten().filter(|f| f.strained)
+                    .map(|f| (f.ends_at - self::now() + 59) / 60).min()
+                    .filter(|m| (1..=FORECAST_MINUTES).contains(m)).map(|m| m as f32);
+                self.facts.push(Fact { kind: FactKind::Forecast, voice, subject: name, value: minutes });
+            } else {
+                self.facts.extend(chatter::mood_fact(before, now, voice, &name, Some(used as f32)));
+            }
+        }
+    }
+
     fn card_mood(&self, i: usize) -> Mood {
         let card = &self.snap.cards[i];
         if card.stale || card.windows.is_empty() { return Mood::Sleep; }
-        self.levels().of(card.windows.iter().map(|w| w.used).fold(0.0, f64::max))
+        let mood = self.levels().of(card.windows.iter().map(|w| w.used).fold(0.0, f64::max));
+        if self.strained(i) { mood.max(Mood::Busy) } else { mood }
+    }
+
+    /// Alguma janela da fonte `i` acaba antes de renovar, no ritmo de agora.
+    fn strained(&self, i: usize) -> bool {
+        self.forecasts[i].iter().flatten().any(|f| f.strained)
+    }
+
+    /// Guarda a leitura nova de cada janela (sem horário de renovação, só para o gráfico).
+    fn record_pace(&mut self) {
+        for card in self.snap.cards.iter().take(N) {
+            let Some(at) = card.updated_at.filter(|_| !card.stale) else { continue };
+            for w in &card.windows {
+                let resets_at = w.resets_at.unwrap_or(0).max(0);
+                self.pace.entry(pace_key(&card.name, w)).or_default().record(at, w.used, resets_at);
+            }
+        }
+    }
+
+    /// Refaz as previsões (config "forecast"). Fonte desatualizada não tem previsão.
+    fn refresh_forecasts(&mut self) {
+        let on = self.host.config.borrow().bool(&self.manifest, "forecast");
+        let now = now();
+        for (i, card) in self.snap.cards.iter().enumerate().take(N) {
+            self.forecasts[i] = card.windows.iter().map(|w| {
+                if !on || card.stale || w.resets_at.is_none_or(|t| t <= 0) { return None; }
+                self.pace.get(&pace_key(&card.name, w))?.forecast(now)
+            }).collect();
+        }
     }
 
     fn refresh_mascot(&mut self, i: usize) -> bool {
@@ -187,25 +297,32 @@ impl AiUsageMini {
             (cfg.bool(&self.manifest, "reset_relative"), cfg.bool(&self.manifest, "compact"))
         };
         g.set_compact(compact);
-        g.set_grid(self.host.config.borrow().bool(&self.manifest, "grid"));
         let levels = self.levels();
         self.rows = self.visible_rows();
         for i in self.rows.clone() { self.refresh_mascot(i); }
         let cards = self.rows.iter().map(|&i| {
             let card = &self.snap.cards[i];
-            let lines: Vec<UsageLine> = card.windows.iter().map(|w| UsageLine {
+            let lines: Vec<UsageLine> = card.windows.iter().enumerate().map(|(k, w)| UsageLine {
                 label: w.label.clone().into(), value: w.used as f32,
                 detail: if w.detail.is_empty() { format!("{:.1}% usado", w.used) } else { w.detail.clone() }.into(),
-                reset: reset_text(w, relative).into(),
+                reset: match self.forecasts[i].get(k).copied().flatten() {
+                    Some(f) => forecast_text(w, f, relative),
+                    None => reset_text(w, relative),
+                }.into(),
                 level: levels.of(w.used).as_str().into(),
+                spark: if card.stale { String::new() } else {
+                    self.pace.get(&pace_key(&card.name, w)).map(ai_pace::History::spark).unwrap_or_default()
+                }.into(),
             }).collect();
             let status = match card.updated_at {
                 Some(at) => format!("{} · {}", card.status, age(at)),
                 None => card.status.clone(),
             };
+            let tint = ai_mascots::get(&card.name).and_then(ai_mascots::button_colors).unwrap_or((0x9399a4, 0x26282e));
             UsageCard { name: card.name.clone().into(), status: status.into(), plan: card.plan.clone().into(),
                 stale: card.stale, lines: ModelRc::new(VecModel::from(lines)),
                 mascot: self.mascots[i].image(), mood: self.card_mood(i).as_str().into(),
+                button: render::color(tint.0), button_edge: render::color(tint.1),
                 reaction: self.reactions[i].map_or("", Reaction::as_str).into() }
         }).collect::<Vec<_>>();
         self.cards.set_vec(cards);
@@ -235,15 +352,46 @@ fn remaining(secs: i64) -> String {
     }
 }
 
+fn pace_key(source: &str, w: &UsageWindow) -> String {
+    format!("{source}:{}", w.label)
+}
+
+/// Data e hora locais de um instante.
+fn local(at: i64) -> Option<libc::tm> {
+    let time = at as libc::time_t;
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: ponteiros válidos para dados locais; a saída pertence à chamada.
+    (!unsafe { libc::localtime_r(&time, &mut local) }.is_null()).then_some(local)
+}
+
 fn reset_text(w: &UsageWindow, relative: bool) -> String {
     if !w.reset_date.is_empty() { return format!("Renova em {}", w.reset_date); }
     let Some(at) = w.resets_at.filter(|t| *t > 0) else { return String::new() };
     if relative { return format!("Renova em {}", remaining(at - now())); }
-    let time = at as libc::time_t;
-    let mut local: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: ponteiros válidos para dados locais; a saída pertence à chamada.
-    if unsafe { libc::localtime_r(&time, &mut local) }.is_null() { return String::new() }
+    let Some(local) = local(at) else { return String::new() };
     format!("Renova {:02}/{:02} às {:02}:{:02}", local.tm_mday, local.tm_mon + 1, local.tm_hour, local.tm_min)
+}
+
+/// Hora curta: "16:10" se for hoje, "12/11 16:10" se for outro dia.
+fn clock(at: i64) -> String {
+    let (Some(t), Some(today)) = (local(at), local(now())) else { return String::new() };
+    if (t.tm_year, t.tm_yday) == (today.tm_year, today.tm_yday) {
+        format!("{:02}:{:02}", t.tm_hour, t.tm_min)
+    } else {
+        format!("{:02}/{:02} {:02}:{:02}", t.tm_mday, t.tm_mon + 1, t.tm_hour, t.tm_min)
+    }
+}
+
+/// Texto da janela que, nesse ritmo, acaba antes de renovar. O fim vem primeiro: se a
+/// linha não couber, o que se perde é a renovação.
+fn forecast_text(w: &UsageWindow, f: Forecast, relative: bool) -> String {
+    let resets_at = w.resets_at.unwrap_or(0);
+    if relative {
+        let now = now();
+        format!("Acaba em ~{} · renova em {}", remaining(f.ends_at - now), remaining(resets_at - now))
+    } else {
+        format!("Acaba ~{} · renova {}", clock(f.ends_at), clock(resets_at))
+    }
 }
 
 impl MiniApp for AiUsageMini {
@@ -256,7 +404,10 @@ impl MiniApp for AiUsageMini {
     fn on_event(&mut self, event: &Event, ui: &HubWindow) {
         if let Event::AiUsage(snap) = event {
             self.snap = snap.clone();
+            self.record_pace();
+            self.refresh_forecasts();
             self.check_alerts();
+            self.collect_facts();
             self.push(ui);
         }
     }
@@ -265,13 +416,20 @@ impl MiniApp for AiUsageMini {
             if self.refresh_mascot(self.rows[row]) { self.update_mascot_row(row); }
         }
     }
-    fn settings_changed(&mut self, ui: &HubWindow) { self.push(ui); }
+    fn settings_changed(&mut self, ui: &HubWindow) {
+        self.refresh_forecasts();
+        self.push(ui);
+    }
+    fn take_facts(&mut self) -> Vec<Fact> { std::mem::take(&mut self.facts) }
+    fn voices(&self) -> Vec<Voice> { self.rows.iter().filter_map(|&i| self.voice(i)).collect() }
+    fn lines(&self) -> &'static str { include_str!("../../miniapps/ai_usage/lines.toml") }
     fn mood(&self) -> Mood {
         let levels = self.levels();
         let highest = self.snap.cards.iter().enumerate()
             .filter(|(i, c)| self.enabled & (1 << i) != 0 && !c.stale).flat_map(|(_, c)| &c.windows)
             .map(|w| w.used).fold(0.0, f64::max);
-        levels.of(highest)
+        let strained = (0..N).any(|i| self.enabled & (1 << i) != 0 && self.strained(i));
+        if strained { levels.of(highest).max(Mood::Busy) } else { levels.of(highest) }
     }
     fn summary(&self) -> String {
         let shown = self.rows.len();
@@ -283,6 +441,14 @@ impl MiniApp for AiUsageMini {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn botoes_do_terminal_tem_permissao() {
+        let m = Manifest::parse(include_str!("../../miniapps/ai_usage/manifest.toml")).unwrap();
+        for cmd in COMMANDS {
+            assert!(m.permissions.exec.iter().any(|p| p == cmd), "{cmd} fora de permissions.exec");
+        }
+    }
 
     #[test]
     fn tempo_restante_curto() {

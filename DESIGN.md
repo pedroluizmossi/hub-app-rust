@@ -158,6 +158,12 @@ Um app novo, do zero:
 6. **Provedor** (se precisar de dado novo) — `src/providers/<nome>.rs` com um `collect()`
    que devolve um snapshot; um caso novo em `bus::Event`; `bus.spawn("<nome>", intervalo, …)`
    no `Hub::new`. O provedor só roda enquanto algum app ativo o tiver em `uses`.
+7. **Conversa entre mascotes** (opcional) — implemente `voices` (as mascotes na tela),
+   `take_facts` (o que aconteceu: use `chatter::mood_fact` quando o humor muda e registre
+   `Poked` ao cutucar) e `lines` (`include_str!` do `miniapps/<app>/lines.toml`, só com o
+   que o app tem de próprio; o resto vem das genéricas). Na view, dê ao `Mascot` o
+   `voice: "cyber.<nome>:<nome da mascote>"`, o mesmo `app:nome` da `Voice` no Rust.
+   Formato das falas: topo de `src/core/chatter.rs`.
 
 ### Tamanhos
 

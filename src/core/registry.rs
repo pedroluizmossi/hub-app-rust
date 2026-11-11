@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use super::bus::Event;
+use super::chatter::{Fact, Voice};
 use super::miniapp::{AppRef, Host, Report};
 use crate::mascot::Mood;
 use crate::ui::HubWindow;
@@ -94,6 +95,24 @@ impl Registry {
                 }
             }
         }
+    }
+
+    /// Fatos novos de todos os apps ligados, para a conversa entre mascotes.
+    pub fn take_facts(&self) -> Vec<Fact> {
+        self.enabled().iter().flat_map(|app| app.borrow_mut().take_facts()).collect()
+    }
+
+    /// Falas próprias de cada app (id, conteúdo do `lines.toml`), ligado ou não.
+    pub fn lines(&self) -> Vec<(String, &'static str)> {
+        self.apps.iter().map(|a| {
+            let a = a.borrow();
+            (a.manifest().id.clone(), a.lines())
+        }).collect()
+    }
+
+    /// Mascotes que podem falar, dos apps `ids` (os da página aberta).
+    pub fn voices(&self, ids: &[String]) -> Vec<Voice> {
+        ids.iter().filter_map(|id| self.find(id)).flat_map(|app| app.borrow().voices()).collect()
     }
 
     /// Entrega o resultado das ações em segundo plano ao app que as pediu (se ainda ligado).

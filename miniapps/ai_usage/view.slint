@@ -1,6 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin } from "../../ui/theme.slint";
-import { Mascot, TextButton } from "../../ui/widgets.slint";
+import { LaunchButton, Mascot, Sparkline, TextButton } from "../../ui/widgets.slint";
 
 export struct UsageLine {
     label: string,
@@ -9,6 +9,8 @@ export struct UsageLine {
     reset: string,
     // "alarm" | "busy" | "idle": quem decide os limites é o Rust (um lugar só)
     level: string,
+    // uso da última hora (caminho SVG 1000×100); vazio = sem leituras para desenhar
+    spark: string,
 }
 
 export struct UsageCard {
@@ -20,6 +22,9 @@ export struct UsageCard {
     mascot: image,
     mood: string,
     reaction: string,
+    // botão de terminal na cor da mascote: corpo e contorno
+    button: color,
+    button-edge: color,
 }
 
 export global AiUsageApp {
@@ -27,31 +32,61 @@ export global AiUsageApp {
     in property <[UsageCard]> cards;
     // modo compacto (config): sem status nem renovação
     in property <bool> compact;
-    // cartões lado a lado, em quantas colunas couberem (config); senão, um embaixo do outro
-    in property <bool> grid;
     callback refresh();
     callback mascot-poked(int);
+    // abre o programa do cartão (linha) num terminal
+    callback launch(int);
 }
 
-component Meter inherits Rectangle {
+// É um layout (e não um Rectangle) porque as duas formas são `if`: num Rectangle a
+// altura dos filhos condicionais não conta, e as barras se sobrepunham.
+component Meter inherits VerticalLayout {
     in property <UsageLine> entry;
     in property <Colors> t;
+    in property <bool> dense;   // uma linha só: rótulo · barra · valor, sem renovação
     property <bool> hot: entry.level == "alarm" || entry.level == "busy";
     property <color> tint: entry.level == "alarm" ? t.alarm : t.warn;
-    background: transparent;
-    VerticalLayout {
+    property <float> fill: min(max(entry.value, 0), 100) / 100;
+    if !dense: VerticalLayout {
         spacing: 4px;
         HorizontalLayout {
             Text { text: entry.label; color: t.sub; font-family: Skin.font-mono; font-size: 13px; overflow: elide; }
             Rectangle { horizontal-stretch: 1; }
+            if entry.spark != "" && !AiUsageApp.compact: VerticalLayout {
+                alignment: center;
+                Sparkline { commands: entry.spark; tint: (hot ? tint : t.visor).with-alpha(0.7); width: 48px; height: 12px; }
+            }
+            Rectangle { width: 6px; }
             Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 13px; }
         }
         Rectangle {
             height: 6px;
             background: t.muted.with-alpha(0.25);
-            Rectangle { height: parent.height; width: parent.width * min(max(entry.value, 0), 100) / 100; background: hot ? tint : t.visor; }
+            Rectangle { x: 0; height: parent.height; width: parent.width * fill; background: hot ? tint : t.visor; }
         }
         if !AiUsageApp.compact: Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 12px; overflow: elide; }
+    }
+    if dense: HorizontalLayout {
+        spacing: 6px;
+        Text {
+            width: 30%;
+            text: entry.label;
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 12px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Rectangle {
+                height: 5px;
+                background: t.muted.with-alpha(0.25);
+                Rectangle { x: 0; height: parent.height; width: parent.width * fill; background: hot ? tint : t.visor; }
+            }
+        }
+        Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 12px; vertical-alignment: center; }
     }
 }
 
@@ -59,40 +94,66 @@ component AccountCard inherits Rectangle {
     in property <UsageCard> account;
     in property <Colors> t;
     in property <int> index;
+    // lista (app com uma célula de largura): cartão baixo, para os quatro caberem num 1x2
+    in property <bool> dense;
+    property <length> mascot-w: dense ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
     border-width: 1px;
     border-color: t.muted.with-alpha(0.35);
     background: t.bg0.mix(t.bg1, 0.6);
     HorizontalLayout {
-        padding: 10px;
-        spacing: 10px;
+        padding: dense ? 7px : 10px;
+        spacing: dense ? 9px : 10px;
         VerticalLayout {
             alignment: center;
+            spacing: dense ? 4px : 8px;
             Mascot {
                 theme: root.t;
                 frame: account.mascot;
                 mood: account.mood;
                 reaction: account.reaction;
-                width: Skin.mascot-size;
-                height: Skin.mascot-size * 14 / 16;
+                voice: "cyber.ai_usage:" + account.name;   // id na conversa entre mascotes
+                width: mascot-w;
+                height: mascot-w * 14 / 16;
                 poked => { AiUsageApp.mascot-poked(root.index); }
+            }
+            HorizontalLayout {
+                alignment: center;
+                LaunchButton {
+                    px: dense ? 2px : 3px;
+                    tint: account.button;
+                    edge: account.button-edge;
+                    label: "Abrir " + account.name + " no terminal";
+                    clicked => { AiUsageApp.launch(root.index); }
+                }
             }
         }
         VerticalLayout {
             horizontal-stretch: 1;
-            spacing: 7px;
+            alignment: center;
+            spacing: dense ? 3px : 7px;
             HorizontalLayout {
                 spacing: 9px;
-                Text { text: account.name; color: t.text; font-size: 17px; font-weight: 700; vertical-alignment: center; }
+                Text { text: account.name; color: t.text; font-size: dense ? 15px : 17px; font-weight: 700; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 12px; overflow: elide; vertical-alignment: center; }
             }
-            if !AiUsageApp.compact || account.lines.length == 0: Text { text: account.status; color: account.stale ? t.warn : t.muted; font-size: 13px; wrap: word-wrap; }
-            for entry in account.lines: Meter { entry: entry; t: root.t; }
+            // no denso, o status só aparece quando não há leitura (é o que explica o vazio)
+            if account.lines.length == 0 || (!dense && !AiUsageApp.compact): Text {
+                text: account.status;
+                color: account.stale ? t.warn : t.muted;
+                font-size: dense ? 12px : 13px;
+                wrap: dense ? no-wrap : word-wrap;
+                overflow: elide;
+            }
+            for entry in account.lines: Meter { entry: entry; t: root.t; dense: root.dense; }
         }
     }
 }
 
 export component AiUsageView inherits Rectangle {
+    // largura do app na grade, em células: 1 = lista; 2 ou mais = cartões lado a lado,
+    // um por célula, e os que sobram vão para a linha de baixo
+    in property <int> span: 1;
     property <Colors> t: AiUsageApp.theme;
     VerticalLayout {
         spacing: 8px;
@@ -103,14 +164,17 @@ export component AiUsageView inherits Rectangle {
         }
         scroll := ScrollView {
             vertical-stretch: 1;
-            // grade: quantas colunas de pelo menos `min-card` couberem; lista: uma só
             property <length> gap: 8px;
-            property <length> min-card: 340px;
             property <length> area: self.visible-width;
             property <int> n: AiUsageApp.cards.length;
-            property <int> cols: !AiUsageApp.grid || n == 0 ? 1
-                : min(n, max(1, floor((area + gap) / (min-card + gap))));
+            property <int> cols: max(1, min(n, root.span));
             property <length> cw: (area - (cols - 1) * gap) / cols;
+            // altura que cada linha de cartões teria sem rolar; abaixo de `full-h` os
+            // cartões ficam densos (1x2 com os quatro em lista, 2x1 com duas linhas)
+            property <int> rows: max(1, ceil(n / cols));
+            property <length> row-h: (self.visible-height - (rows - 1) * gap) / rows;
+            property <length> full-h: 170px;
+            property <bool> dense: row-h < full-h;
             VerticalLayout {
                 alignment: start;
                 spacing: scroll.gap;
@@ -122,7 +186,7 @@ export component AiUsageView inherits Rectangle {
                         width: scroll.cw;
                         // o layout passa a altura do cartão para a linha; cartões da linha ficam iguais
                         VerticalLayout {
-                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; }
+                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; dense: scroll.dense; }
                         }
                     }
                 }

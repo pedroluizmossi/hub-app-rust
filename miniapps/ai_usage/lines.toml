@@ -1,0 +1,41 @@
+# Falas das mascotes das assinaturas de IA ({s} = "Codex", "Claude", "Kiro", "OpenCode Go";
+# {v} = maior % usado; em [forecast], minutos até o limite acabar). Formato: src/core/chatter.rs. O que não estiver aqui vem das falas
+# genéricas (src/hub/lines.toml).
+
+[trouble]
+pt = ["ai... gastei {v}% do meu limite (T_T)", "acho que falei demais hoje... {v}%!", "ai ai, meu limite tá acabando (T_T)"]
+en = ["oops... i used {v}% of my limit (T_T)", "i talked too much today... {v}%!", "uh oh, my limit is running out (T_T)"]
+de = ["oje... {v}% von meinem Limit (T_T)"]
+
+[trouble.answer]
+pt = ["pega leve com o {a}, hein! ^^'", "{a}, bebe uma água e descansa <3"]
+en = ["go easy on {a}, okay? ^^'", "{a}, drink some water and rest <3"]
+de = ["langsam mit {a}, ja? ^^'"]
+
+[strain]
+pt = ["tô pensando bastante hoje... {v}% (o.o)", "ufa, muita pergunta hoje! :3"]
+en = ["thinking a lot today... {v}% (o.o)", "phew, so many questions today! :3"]
+
+[forecast]
+pt = ["nesse ritmo eu canso em {v} min (o.o)", "calma! assim não chego até a renovação >_<", "tô gastando rápido demais... (o.o)"]
+en = ["at this pace i'm out in {v} min (o.o)", "slow down! i won't last until the reset >_<", "burning through my limit too fast... (o.o)"]
+de = ["bei dem Tempo bin ich in {v} min leer (o.o)"]
+
+[forecast.answer]
+pt = ["{a}, respira um pouco! ^^'", "deixa o {a} descansar um pouquinho <3"]
+en = ["{a}, take a breath! ^^'", "let {a} rest a little <3"]
+de = ["{a}, mach mal Pause! ^^'"]
+
+[recovered]
+pt = ["meu limite renovou! bora conversar \\o/", "descansei e voltei ^_^"]
+en = ["my limit reset! let's chat \\o/", "rested and back ^_^"]
+de = ["Limit zurückgesetzt! \\o/"]
+
+[idle]
+pt = ["alguém quer conversar comigo? hihi", "tô pensando... (o.o)", "{b}, me pergunta alguma coisa! :3"]
+en = ["anyone want to chat? hehe", "thinking... (o.o)", "{b}, ask me something! :3"]
+de = ["will jemand plaudern? hihi"]
+
+[reply.idle]
+pt = ["eu sei a resposta! é 42 ^_^", "hmm, deixa eu pensar... (o.o)"]
+en = ["i know the answer! it's 42 ^_^", "hmm, let me think... (o.o)"]

@@ -102,6 +102,7 @@ hub-app-rust/
       docker.rs               docker ps / stats / events
       media.rs                MPRIS pelo D-Bus: o que está tocando e comandos do player
       ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go)
+      ports.rs                portas escutando, pelo `ss -lntup` + /proc/<pid>/cmdline
     skin/
       mod.rs                  visuais da janela (tabela SKINS) e `apply` para o global Skin
       backdrop.rs             fundos desenhados em Rust (pontos, CRT, papel, cidade)
@@ -115,6 +116,9 @@ hub-app-rust/
       docker.rs  vitals.rs    lógica de cada mini-app
       cdplayer.rs             CD Player: faixa, progresso, comandos e humor
       ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
+      ai_pace.rs              previsão de esgotamento pelo ritmo de uso (duas janelas) e gráfico da última hora
+      ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
+      todo.rs                 To-do rápido: lista salva em ~/.config/miniutils/todo.json
 ```
 
 ## O mini-app
@@ -218,6 +222,35 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (timer de
 - Listas do Slint só são recriadas quando o conteúdo muda de fato: recriar uma lista destrói
   os componentes dentro dela (um select aberto fecha). Ver `rebuild_settings`.
 
+### Conversa entre mascotes
+
+```
+app ──Fact──► hub (timer de 100 ms) ──► Director ──► global Chatter ──► caixa de diálogo
+     (take_facts)    voices() da página aberta        (src/hub/chatter.rs)  + pulinho/"..." no Mascot
+```
+
+- Um app não fala com outro. Ele registra fatos sobre si (`core/chatter.rs`: `Trouble`,
+  `Strain`, `Forecast`, `Recovered`, `Poked`), diz quais mascotes tem na tela (`MiniApp::voices`) e
+  traz as próprias falas (`MiniApp::lines`, o `miniapps/<app>/lines.toml`). Mudança de humor
+  vira fato com `chatter::mood_fact`. Os três métodos têm padrão vazio: app que não
+  implementa fica fora da conversa, e app sem `lines.toml` usa as falas genéricas
+  (`src/hub/lines.toml`).
+- `lines.toml`: o que a mascote diz em cada caso (`[trouble]`, `[strain]`, `[forecast]`,
+  `[recovered]`, `[poked]`, `[idle]`), o que os outros respondem (`[trouble.answer]`) e o que ela responde
+  aos outros (`[reply.strain]`, com `about` para limitar o assunto). Formato e lacunas no
+  topo de `core/chatter.rs`; um teste confere pt e en em tudo, lacunas e tamanho.
+- O diretor não conhece nenhum app: escolhe quem responde (primeiro quem tem resposta
+  própria para o caso, depois outro app), sorteia o idioma da conversa (pt, en, às vezes
+  de) e "digita" uma fala por vez. Quem fala dá pulinhos e quem ouve mostra "..." (o
+  `Mascot` compara o próprio `voice`, "app:nome", com `Chatter.speaker`/`listener`).
+- Só com a janela aberta no painel e a opção "Mascotes conversam" (`chatter`: nunca, às
+  vezes, bastante) ligada. Quem responde é da página aberta; alarme ou recuperação de outra
+  página aparece no app de quem responde, com o nome da página. Com tudo calmo por um
+  tempo, sai um papo à toa (`[idle]`).
+- Contra falatório: intervalo entre conversas puxadas por fatos (depende da opção), assunto
+  repetido só depois de 10 min, cutucada com intervalo curto próprio. Alarme fura o
+  intervalo. Fato que não dá para mostrar é descartado.
+
 ## Janela, grade e visual
 
 - **Telas:** `current` = `"panel"` (painel) ou `"apps"` (configurações). O modo de edição é
@@ -260,10 +293,11 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 
 **Fase 1 (atual)** — mini-apps compilados junto, contrato estável:
 - [x] Manifesto, registro, ligar/desligar, configuração em TOML com migrações
-- [x] Provedores sys, gpu, docker, media e ai_usage compartilhados
+- [x] Provedores sys, gpu, docker, media, ai_usage e ports compartilhados
 - [x] Mini-apps Docker e Sinais vitais (com avisos sustentados)
 - [x] Mini-app CD Player (MPRIS: faixa, progresso, comandos, notificação opcional)
 - [x] Mini-app Assinaturas de IA (limites e créditos por conta)
+- [x] Mini-apps Portas abertas e To-do rápido
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 

@@ -1,0 +1,30 @@
+# Falas da mascote do Docker na conversa entre mascotes. Formato: src/core/chatter.rs.
+# O que não estiver aqui vem das falas genéricas (src/hub/lines.toml).
+
+# um container caiu, entrou em loop ou ficou unhealthy ({s} = nome do container)
+[trouble]
+pt = ["{s} caiu! (o_o)", "ih... {s} parou de responder (T_T)"]
+en = ["{s} went down! (o_o)", "uh oh... {s} stopped answering (T_T)"]
+de = ["{s} ist abgestürzt! (o_o)"]
+
+[trouble.answer]
+pt = ["{s} foi tirar um cochilo? zzz", "força, {a}! reinicia ele com carinho <3"]
+en = ["did {s} take a nap? zzz", "go {a}! restart it gently <3"]
+de = ["macht {s} ein Nickerchen? zzz"]
+
+[recovered]
+pt = ["{s} voltou! \\o/", "{s} acordou e tá rodando de novo ^_^"]
+en = ["{s} is back! \\o/", "{s} woke up and is running again ^_^"]
+de = ["{s} ist wieder da! \\o/"]
+
+# CPU, RAM ou GPU agitada: o Docker assume a culpa
+[reply.strain]
+about = ["CPU", "RAM", "GPU"]
+pt = ["foi mal... acho que fui eu u.u", "eram só uns containers... juro! ^^'"]
+en = ["sorry... i think that was me u.u", "just a few containers... i promise! ^^'"]
+de = ["Entschuldigung... das war wohl ich u.u"]
+
+[idle]
+pt = ["meus containers tão quietinhos hoje ^_^", "alguém quer um container fresquinho? :3"]
+en = ["my containers are so calm today ^_^", "anyone want a fresh container? :3"]
+de = ["meine Container schlafen... zzz"]

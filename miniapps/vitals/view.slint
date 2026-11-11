@@ -53,6 +53,7 @@ component Card inherits Rectangle {
                 frame: v.mascot;
                 mood: v.mood;
                 reaction: v.reaction;
+                voice: "cyber.vitals:" + v.title;   // id na conversa entre mascotes
                 poked => { VitalsApp.mascot-poked(index); }
                 // compacto (cartão baixo ou estreito): 2/3 da referência
                 width: compact || slim ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;

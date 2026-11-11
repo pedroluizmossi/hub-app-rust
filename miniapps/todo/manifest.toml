@@ -1,0 +1,31 @@
+id = "cyber.todo"
+name = "To-do rápido"
+description = "Uma lista curta de tarefas, salva no computador; a mascote comemora quando zera."
+icon = "capivara"
+api = 1
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
+
+[[settings]]
+key = "hide_done"
+label = "Esconder tarefas feitas"
+type = "bool"
+default = false
+
+[[settings]]
+key = "done_last"
+label = "Tarefas feitas vão para o fim da lista"
+type = "bool"
+default = true
+
+[[settings]]
+key = "mascot"
+label = "Mascote"
+type = "choice"
+default = "capivara"
+options = ["capivara", "coruja", "neko", "sapo", "coelho", "chaleira", "cogumelo", "gatopao", "pato"]

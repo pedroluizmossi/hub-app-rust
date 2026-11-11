@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::core::bus::Event;
+use crate::core::chatter::{self, Fact, FactKind, Voice};
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
 use crate::mascot::anim::{Animator, Reaction};
@@ -106,6 +107,8 @@ pub struct VitalsMini {
     anims: [Animator; N],
     /// Reação mostrada agora em cada cartão.
     reactions: [Option<Reaction>; N],
+    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    facts: Vec<Fact>,
 }
 
 impl VitalsMini {
@@ -126,6 +129,7 @@ impl VitalsMini {
             mascots: Default::default(),
             anims: std::array::from_fn(|i| Animator::new(i as u32)),
             reactions: [None; N],
+            facts: Vec::new(),
         }));
 
         // easter egg: cutucar a mascote algumas vezes
@@ -138,6 +142,8 @@ impl VitalsMini {
                 return;
             }
             let mood = a.vitals[i].mood;
+            let voice = a.voice(i);
+            a.facts.push(Fact { kind: FactKind::Poked, voice, subject: String::new(), value: None });
             if a.anims[i].poke(mood, Instant::now()) && a.refresh_mascot(i) {
                 let card = a.card(i);
                 a.cards.set_row_data(i, card);
@@ -153,6 +159,17 @@ impl VitalsMini {
         let look = self.anims[i].look(self.vitals[i].mood, Instant::now());
         let reaction_changed = std::mem::replace(&mut self.reactions[i], look.reaction) != look.reaction;
         self.mascots[i].update_look(sprites::get(&key), theme, &look) || reaction_changed
+    }
+
+    /// A mascote do cartão `i`, para a conversa entre mascotes.
+    fn voice(&self, i: usize) -> Voice {
+        Voice {
+            app: self.manifest.id.clone(),
+            name: TITLES[i].to_string(),
+            sprite: sprites::get(&self.mascot_of(i)),
+            theme: self.host.theme_for(&self.manifest),
+            mood: self.vitals[i].mood,
+        }
     }
 
     fn mascot_of(&self, i: usize) -> String {
@@ -314,6 +331,7 @@ impl VitalsMini {
             )
         };
         let swap = self.swap_frac;
+        let before: [Mood; N] = std::array::from_fn(|i| self.vitals[i].mood);
         for (i, v) in self.vitals.iter_mut().enumerate() {
             if i == NET {
                 // rede não preocupa: dorme parada, fica contente quando tem tráfego
@@ -337,6 +355,13 @@ impl VitalsMini {
                 mood = mood.worst(Mood::Busy);
             }
             v.mood = mood;
+        }
+        // conversa entre mascotes: quem piorou ou melhorou conta (a rede não preocupa)
+        for i in 0..NET {
+            let v = &self.vitals[i];
+            if let Some(f) = chatter::mood_fact(before[i], v.mood, self.voice(i), TITLES[i], Some(v.value)) {
+                self.facts.push(f);
+            }
         }
     }
 
@@ -435,6 +460,18 @@ impl MiniApp for VitalsMini {
         // no hub, sinais vitais só preocupam quando algo satura ou esquenta
         let worst = self.vitals[..NET].iter().map(|v| v.mood).fold(Mood::Sleep, Mood::worst);
         if worst >= Mood::Busy { worst } else { Mood::Sleep }
+    }
+
+    fn take_facts(&mut self) -> Vec<Fact> {
+        std::mem::take(&mut self.facts)
+    }
+
+    fn voices(&self) -> Vec<Voice> {
+        (0..N).filter(|&i| self.vitals[i].available).map(|i| self.voice(i)).collect()
+    }
+
+    fn lines(&self) -> &'static str {
+        include_str!("../../miniapps/vitals/lines.toml")
     }
 
     fn mascot_key(&self) -> String {

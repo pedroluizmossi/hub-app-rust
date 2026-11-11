@@ -5,6 +5,7 @@
 
 mod appearance;
 mod bind;
+mod chatter;
 mod grid;
 mod pages;
 mod settings;
@@ -75,6 +76,9 @@ pub struct Hub {
     page: Cell<usize>,
     /// O que a barra lateral mostra agora (ver `rebuild_pages`).
     pages_fingerprint: RefCell<String>,
+    /// Conversa entre mascotes (ver `chatter.rs`) e o que a caixa de diálogo mostra agora.
+    chatter: RefCell<chatter::Director>,
+    chat_shown: Cell<Option<(u64, usize, bool)>>,
 }
 
 /// De quanto em quanto tempo o tooltip da bandeja acompanha números que só mudam de valor
@@ -110,6 +114,8 @@ impl Hub {
         registry.add(crate::apps::vitals::VitalsMini::create(host.clone(), &ui) as AppRef);
         registry.add(crate::apps::cdplayer::CdPlayerMini::create(host.clone(), &ui) as AppRef);
         registry.add(crate::apps::ai_usage::AiUsageMini::create(host.clone(), &ui) as AppRef);
+        registry.add(crate::apps::ports::PortsMini::create(host.clone(), &ui) as AppRef);
+        registry.add(crate::apps::todo::TodoMini::create(host.clone(), &ui) as AppRef);
 
         let hub = Rc::new(Hub {
             host,
@@ -135,6 +141,8 @@ impl Hub {
             settings_fingerprint: RefCell::new(String::new()),
             page: Cell::new(0),
             pages_fingerprint: RefCell::new(String::new()),
+            chatter: RefCell::new(chatter::Director::default()),
+            chat_shown: Cell::new(None),
         });
         hub.ui.set_max_columns(layout::MAX_COLS as i32);
         hub.ui.set_max_rows(layout::MAX_ROWS as i32);
@@ -143,6 +151,7 @@ impl Hub {
         hub.open_tab(tab.as_deref().unwrap_or_default());
         hub.rebuild_lists();
         Self::bind(&hub);
+        hub.load_lines();
 
         // bandeja: se não houver (GNOME sem AppIndicator), a janela fica sempre aberta
         match Tray::spawn(hub.ui.as_weak(), sprites::get("neko"), themes::get("neon"), Mood::Sleep) {
@@ -202,6 +211,8 @@ impl Hub {
         self.rebuild_pages(false);
 
         self.sync_tray();
+        // conversa entre mascotes: fatos novos e a fala que está sendo "digitada"
+        self.chat_tick();
     }
 
     /// A bandeja mostra a mascote (e o tema) do app em pior estado, ou a escolhida na config.

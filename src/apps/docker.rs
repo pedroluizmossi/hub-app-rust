@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::core::bus::{Event, Topic};
+use crate::core::chatter::{Fact, FactKind, Voice};
 use crate::core::exec::{self, Exec};
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp, Report};
@@ -58,6 +59,8 @@ pub struct DockerMini {
     anim: Animator,
     /// Reação mostrada agora.
     reaction: Option<Reaction>,
+    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    facts: Vec<Fact>,
 }
 
 impl DockerMini {
@@ -83,6 +86,7 @@ impl DockerMini {
             mascot: Default::default(),
             anim: Animator::new(7),
             reaction: None,
+            facts: Vec::new(),
         }));
         Self::bind(&app, ui);
         app
@@ -102,6 +106,8 @@ impl DockerMini {
                     return;
                 }
                 let mood = a.mood;
+                let voice = a.voice();
+                a.facts.push(Fact { kind: FactKind::Poked, voice, subject: String::new(), value: None });
                 if a.anim.poke(mood, Instant::now()) {
                     a.push_mascot(&ui);
                 }
@@ -331,6 +337,15 @@ impl DockerMini {
                     false,
                 ),
             };
+            // conversa entre mascotes: o Docker conta o que houve com o container
+            let (kind, subject) = match ev {
+                DockerEvent::Crash { name, .. } | DockerEvent::Restarting(name) | DockerEvent::Unhealthy(name) => {
+                    (FactKind::Trouble, name)
+                }
+                DockerEvent::Recovered(name) => (FactKind::Recovered, name),
+            };
+            let voice = self.voice();
+            self.facts.push(Fact { kind, voice, subject: subject.clone(), value: None });
             if !said && (urgent || events.len() == 1) {
                 self.say(title.clone());
                 said = true;
@@ -342,6 +357,17 @@ impl DockerMini {
             if notify && (urgent || notify_recovery) {
                 self.host.notifier.borrow_mut().send(&key, &title, &body, urgent);
             }
+        }
+    }
+
+    /// A mascote do Docker, para a conversa entre mascotes.
+    fn voice(&self) -> Voice {
+        Voice {
+            app: self.manifest.id.clone(),
+            name: self.manifest.name.clone(),
+            sprite: sprites::get(&self.mascot_key()),
+            theme: self.host.theme_for(&self.manifest),
+            mood: self.mood,
         }
     }
 
@@ -727,6 +753,18 @@ impl MiniApp for DockerMini {
 
     fn mascot_key(&self) -> String {
         self.host.config.borrow().string(&self.manifest, "mascot")
+    }
+
+    fn take_facts(&mut self) -> Vec<Fact> {
+        std::mem::take(&mut self.facts)
+    }
+
+    fn voices(&self) -> Vec<Voice> {
+        vec![self.voice()]
+    }
+
+    fn lines(&self) -> &'static str {
+        include_str!("../../miniapps/docker/lines.toml")
     }
 
     fn summary(&self) -> String {

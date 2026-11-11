@@ -93,6 +93,8 @@ mod tests {
             include_str!("../../miniapps/vitals/manifest.toml"),
             include_str!("../../miniapps/cdplayer/manifest.toml"),
             include_str!("../../miniapps/ai_usage/manifest.toml"),
+            include_str!("../../miniapps/ports/manifest.toml"),
+            include_str!("../../miniapps/todo/manifest.toml"),
         ] {
             let m = Manifest::parse(text).unwrap();
             for s in &m.settings {

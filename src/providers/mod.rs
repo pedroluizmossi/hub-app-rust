@@ -3,6 +3,7 @@ pub mod ai_usage;
 pub mod docker;
 pub mod gpu;
 pub mod media;
+pub mod ports;
 pub mod sys;
 
 use std::time::Duration;
@@ -28,5 +29,15 @@ pub fn spawn_all(bus: &mut Bus) {
     let mut ai_usage = ai_usage::UsageProvider::default();
     bus.spawn_polled(Topic::AiUsage, Duration::from_secs(60), move |_, poked| {
         Some(Event::AiUsage(ai_usage.collect(poked)))
+    });
+    // `ss` é barato: a cada 3 s com a janela aberta, a cada 15 s escondida (só a bandeja vê)
+    let mut last_ports: Option<std::time::Instant> = None;
+    bus.spawn_polled(Topic::Ports, Duration::from_secs(3), move |poker, poked| {
+        let due = last_ports.is_none_or(|t| t.elapsed() >= Duration::from_secs(15));
+        if !(poked || poker.visible() || due) {
+            return None;
+        }
+        last_ports = Some(std::time::Instant::now());
+        Some(Event::Ports(ports::collect()))
     });
 }

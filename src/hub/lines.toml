@@ -1,0 +1,62 @@
+# Falas genéricas das mascotes: valem para qualquer app que não declarou aquele caso no
+# próprio miniapps/<app>/lines.toml. Formato e lacunas: src/core/chatter.rs.
+
+[poked]
+pt = ["ei! cócegas não! (>_<)", "hihi, isso faz cosquinha!", "opa! tô acordado, tô acordado!", "me cutucou? quer brincar? :3"]
+en = ["hey! no tickling! (>_<)", "hehe, that tickles!", "boop! you found me :3"]
+de = ["hey! nicht kitzeln! (>_<)"]
+
+[reply.poked]
+pt = ["{a} tá virando celebridade ^_^", "eu vi isso! hihi", "cutuca eu também! o/"]
+en = ["{a} is so popular today ^_^", "i saw that! hehe", "poke me too! o/"]
+de = ["ich hab's gesehen! hihi"]
+
+[trouble]
+pt = ["socorro! {s} tá no vermelho! (>_<)", "aaah, {s} passou do limite!", "{s} em {v}%... tá pegando fogo!! (T_T)"]
+en = ["help! {s} is in the red! (>_<)", "aaah, {s} went over the limit!", "{s} at {v}%... it's on fire!! (T_T)"]
+de = ["Hilfe! {s} ist im roten Bereich! (>_<)"]
+
+[reply.trouble]
+pt = ["respira, {a}! tô aqui com você <3", "calma, calma... vai passar ^^", "abraço de pixel pra você, {a}! <3"]
+en = ["breathe, {a}! i'm right here <3", "easy, easy... it'll pass ^^", "pixel hug for you, {a}! <3"]
+de = ["ruhig, {a}! ich bin da <3"]
+
+[strain]
+pt = ["{s} em {v}%... tô suando aqui :3", "ufa! {s} tá trabalhando pesado"]
+en = ["{s} at {v}%... i'm sweating here :3", "phew! {s} is working hard"]
+de = ["{s} bei {v}%... ich schwitze :3"]
+
+[reply.strain]
+pt = ["força, {a}! \\o/", "você consegue, {a}! ^_^"]
+en = ["you got this, {a}! \\o/", "go go {a}! ^_^"]
+de = ["du schaffst das, {a}! \\o/"]
+
+[forecast]
+pt = ["nesse ritmo {s} não aguenta muito... (o.o)", "{s} tá gastando rápido demais!", "{s} estoura em {v} min se continuar assim!"]
+en = ["{s} won't last long at this pace... (o.o)", "{s} is burning through too fast!", "{s} runs out in {v} min at this pace!"]
+de = ["{s} hält bei dem Tempo nicht lange... (o.o)"]
+
+[reply.forecast]
+pt = ["vai com calma, {a}! ^^'", "devagar e sempre, {a} :3"]
+en = ["take it easy, {a}! ^^'", "slow and steady, {a} :3"]
+de = ["immer mit der Ruhe, {a}! ^^'"]
+
+[recovered]
+pt = ["{s} voltou ao normal! \\o/", "ufa, passou! tô bem de novo ^_^"]
+en = ["{s} is back to normal! \\o/", "phew, all better now ^_^"]
+de = ["{s} ist wieder okay! \\o/"]
+
+[reply.recovered]
+pt = ["eba!! (^o^)/", "sabia que você conseguia, {a}! <3"]
+en = ["yay!! (^o^)/", "knew you could do it, {a}! <3"]
+de = ["juhu!! (^o^)/"]
+
+[idle]
+pt = ["tudo quieto por aqui... :3", "alguém viu o mouse? (o.o)", "tô com sono... zzz", "{b}, você tá bem? ^^", "que dia bom pra rodar uns processos ^_^"]
+en = ["so quiet today... :3", "has anyone seen the mouse? (o.o)", "i'm sleepy... zzz", "{b}, are you okay? ^^"]
+de = ["so ruhig heute... :3"]
+
+[reply.idle]
+pt = ["tô ótimo, {a}! ^_^", "shh, tô cochilando... zzz", "eu vi o mouse passando ali! o/", "hihi, também tô de boa :3"]
+en = ["i'm great, {a}! ^_^", "shh, i'm napping... zzz", "i saw the mouse go by! o/"]
+de = ["mir geht's gut, {a}! ^_^"]

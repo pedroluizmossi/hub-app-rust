@@ -111,9 +111,26 @@ pub fn get(name: &str) -> Option<&'static Sprite> {
     MASCOTS.iter().find(|sprite| sprite.key == key)
 }
 
+/// Cores do botão de terminal de uma mascote: o corpo (a cor da paleta que mais aparece
+/// no desenho) e o contorno (a cor `k`).
+pub fn button_colors(sprite: &Sprite) -> Option<(u32, u32)> {
+    let px = sprite.pixel.as_ref()?;
+    let count = |c: u8| sprite.grid.iter().map(|row| row.bytes().filter(|&b| b == c).count()).sum::<usize>();
+    let body = px.pal.iter().filter(|(c, _)| *c != b'k').max_by_key(|(c, _)| count(*c))?.1;
+    let edge = px.pal.iter().find(|(c, _)| *c == b'k').map_or(px.eye, |(_, rgb)| *rgb);
+    Some((body, edge))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn botao_tem_a_cor_do_corpo() {
+        let claude = get("Claude").and_then(button_colors).unwrap();
+        assert_eq!(claude, (0xd97757, 0x422a2a));
+        assert!(MASCOTS.iter().all(|s| button_colors(s).is_some()));
+    }
     use crate::mascot::{anim::Look, render, themes, Mood};
 
     #[test]

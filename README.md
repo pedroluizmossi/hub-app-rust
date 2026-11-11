@@ -16,6 +16,13 @@ Mini-apps incluídos:
   "sem disco"; com a opção ligada, notifica quando a faixa muda.
 - **Assinaturas de IA**: janelas de uso do Codex, Claude Code e OpenCode Go e créditos do
   Kiro. Ligue o app em **Configurações › Apps**; ele começa desligado.
+- **Portas abertas**: o que está escutando em cada porta (pelo `ss`), com o programa, se é só
+  local ou aberta para a rede, atalho para abrir no navegador e botão de encerrar o processo
+  (dois cliques para confirmar). Sem root, só aparecem os processos do seu usuário. Começa
+  desligado.
+- **To-do rápido**: lista curta de tarefas, salva em `~/.config/miniutils/todo.json`. Enter
+  acrescenta, clique marca como feita; a mascote comemora quando a lista zera. Começa
+  desligado.
 
 Em **Configurações › Apps › CD Player**, a opção **Mostrar música e controles no menu da
 bandeja** acrescenta a faixa e os controles ao menu do ícone. A faixa também aparece no
@@ -33,6 +40,14 @@ cada três minutos, Kiro a cada quinze. **Atualizar** antecipa as leituras, resp
 pausa após HTTP 429. Em falhas de conexão, o último valor é marcado como antigo; falhas de
 autenticação removem a leitura anterior. O cartão
 do Kiro mostra créditos incluídos, sem somar créditos adicionais.
+
+Quando o ritmo da última hora indica que um limite acaba antes de renovar, a linha da
+janela mostra a previsão ("Acaba ~16:10 · renova 18:00"). Se o ritmo dos últimos vinte
+minutos aponta o mesmo, a mascote fica agitada mesmo abaixo do percentual configurado e
+avisa as outras. A
+previsão precisa de quinze minutos de leituras, só vale para janelas com horário de
+renovação e pode ser desligada nas opções do app. Ao lado do percentual, uma linha fina
+mostra o uso da última hora. No modo compacto o texto e a linha não aparecem.
 
 O Claude usa o login OAuth de `~/.claude/.credentials.json` (ou `CLAUDE_CONFIG_DIR`). Se o
 token estiver vencendo, o MiniUtils tenta renová-lo e gravar o resultado no mesmo arquivo,

@@ -94,6 +94,8 @@ impl Exec {
     pub fn open_terminal(&self, title: &str, argv: &[&str]) -> anyhow::Result<()> {
         let program = argv.first().ok_or_else(|| anyhow::anyhow!("comando vazio"))?;
         self.check(program)?;
+        // caminho completo: o terminal pode não ter as pastas do usuário no PATH
+        let path = locate(program).ok_or_else(|| ExecError::NotFound(program.to_string()))?;
         let (term, prefix) = terminal().ok_or_else(|| anyhow::anyhow!("nenhum terminal encontrado (defina $TERMINAL)"))?;
         let mut cmd = Command::new(&term);
         if term.ends_with("konsole") {
@@ -101,7 +103,12 @@ impl Exec {
         } else if term.ends_with("xfce4-terminal") || term.ends_with("gnome-terminal") {
             cmd.args(["--title", title]);
         }
-        cmd.args(prefix).args(argv).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.args(prefix).arg(&path).args(&argv[1..]);
+        // começa na pasta pessoal, não na pasta de onde o app foi aberto
+        if let Some(home) = std::env::var_os("HOME") {
+            cmd.current_dir(home);
+        }
+        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         cmd.spawn()?;
         Ok(())
     }
@@ -226,6 +233,20 @@ pub fn which(program: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|d| d.join(program).is_file()))
         .unwrap_or(false)
+}
+
+/// Caminho de um programa: no PATH ou nas pastas onde instaladores de CLI costumam pôr
+/// binários do usuário. Aberto pelo menu do sistema, o app pode não ter essas pastas no
+/// PATH (elas entram pelo `.bashrc`/`.zshrc`), e o terminal não acharia o programa.
+fn locate(program: &str) -> Option<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> =
+        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        for d in [".local/bin", ".opencode/bin", ".cargo/bin", ".bun/bin", ".npm-global/bin", ".volta/bin"] {
+            dirs.push(home.join(d));
+        }
+    }
+    dirs.into_iter().map(|d| d.join(program)).find(|p| p.is_file())
 }
 
 /// Terminal disponível e o argumento que separa o comando a executar.

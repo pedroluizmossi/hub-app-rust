@@ -5,6 +5,7 @@ use std::time::Duration;
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, VecModel};
 
 use super::Hub;
+use super::chatter::Pace;
 use crate::core::config::Config;
 use crate::mascot::{sprites, themes};
 use crate::skin;
@@ -23,6 +24,8 @@ impl Hub {
         self.ui.set_skins(ModelRc::new(VecModel::from(labels)));
         self.ui.set_skin_index(skin::index_of(&key) as i32);
         self.ui.set_nav_top(self.host.config.borrow().nav == "top");
+        let chatter = self.host.config.borrow().chatter.clone();
+        self.ui.set_chatter_index(Pace::KEYS.iter().position(|k| *k == chatter).unwrap_or(1) as i32);
         self.apply_motion();
         self.apply_tray_choices();
         self.schedule_backdrop();
@@ -103,6 +106,20 @@ impl Hub {
         }
         // a área do painel muda de largura e avisa sozinha (`backdrop-resized`)
         self.ui.set_nav_top(nav == "top");
+    }
+
+    /// Quanto as mascotes conversam (índice em `Pace::KEYS`: nunca, às vezes, bastante).
+    pub(super) fn choose_chatter(&self, i: usize) {
+        let Some(key) = Pace::KEYS.get(i) else { return };
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.chatter == *key {
+                return;
+            }
+            cfg.chatter = key.to_string();
+            cfg.save();
+        }
+        self.ui.set_chatter_index(i as i32);
     }
 
     /// Troca o visual. Os apps com tema "auto" mudam junto.

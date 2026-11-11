@@ -1,0 +1,286 @@
+// Tela do mini-app Portas. Responsiva: se adapta à célula do painel em que está.
+//   estreita (< 520 px): sem contadores grandes e sem linha de comando
+//   baixa (< 260 px): mascote menor
+import { ListView } from "std-widgets.slint";
+import { Colors, Skin, Icons } from "../../ui/theme.slint";
+import { Mascot, IconButton, TextButton, Counter, SearchBox, SqSwitch } from "../../ui/widgets.slint";
+
+export struct PortRow {
+    port: int,
+    // "tcp" | "udp"
+    proto: string,
+    // nome do programa ("(outro usuário)" quando o ss não diz)
+    process: string,
+    // linha de comando completa ("" se não deu para ler)
+    cmd: string,
+    // 0 = desconhecido (não dá para encerrar)
+    pid: int,
+    // "só local", "rede toda" ou o IP
+    addr-text: string,
+    local: bool,
+    exposed: bool,
+    // http://… para abrir no navegador ("" no UDP)
+    url: string,
+    // primeiro clique em "encerrar" dado: o próximo confirma
+    armed: bool,
+    // abriu há pouco
+    fresh: bool,
+}
+
+// Estado do mini-app, preenchido pelo Rust (src/apps/ports.rs).
+export global PortsApp {
+    in property <Colors> theme;
+    in property <[PortRow]> rows;
+    // só TCP
+    in property <int> total;
+    in property <int> mine;
+    in property <int> exposed;
+    in property <bool> ok: true;
+    in property <bool> missing;
+    in property <string> error-text;
+    in property <image> mascot;
+    in property <string> mood: "sleep";
+    in property <string> reaction;
+    in property <string> speech;
+    in property <bool> show-udp;
+    in-out property <string> search;
+
+    callback kill(int /* pid */);
+    callback open-url(string);
+    callback search-edited(string);
+    callback toggle-udp();
+    callback mascot-poked();
+    callback refresh();
+}
+
+component Row inherits Rectangle {
+    in property <PortRow> p;
+    in property <bool> narrow;
+    property <Colors> t: PortsApp.theme;
+    property <color> addr-color: p.exposed ? t.warn : p.local ? t.ok : t.visor;
+    property <length> btn: narrow ? 34px : 38px;
+    height: narrow ? 50px : 56px;
+    background: p.armed ? t.alarm.with-alpha(0.1) : p.fresh ? t.visor.with-alpha(0.08) : hover.has-hover ? t.visor.with-alpha(0.05) : transparent;
+
+    hover := TouchArea { }
+
+    Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        // a porta, grande; clicável quando dá para abrir no navegador
+        Rectangle {
+            width: narrow ? 64px : 76px;
+            Text {
+                x: 0;
+                text: ":" + p.port;
+                color: link.has-hover && p.url != "" ? t.text : p.pid > 0 ? t.visor : t.sub;
+                font-family: Skin.font-mono;
+                font-size: narrow ? 15px : 17px;
+                font-weight: 700;
+                vertical-alignment: center;
+                height: parent.height;
+            }
+            link := TouchArea {
+                enabled: p.url != "";
+                mouse-cursor: p.url != "" ? pointer : default;
+                clicked => { PortsApp.open-url(p.url); }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 3px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: p.process;
+                    color: p.pid > 0 ? t.text : t.sub;
+                    font-size: 14px;
+                    font-weight: p.pid > 0 ? 700 : 400;
+                    overflow: elide;
+                }
+                if p.proto == "udp": Rectangle {
+                    border-width: 1px;
+                    border-color: t.fur.with-alpha(0.5);
+                    background: t.fur.with-alpha(0.14);
+                    width: udp.preferred-width + 10px;
+                    udp := Text { text: "udp"; color: t.fur.mix(t.text, 0.7); font-family: Skin.font-mono; font-size: 11px; }
+                }
+                if p.fresh: Text { text: "nova"; color: t.visor; font-family: Skin.font-mono; font-size: 11px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            HorizontalLayout {
+                Text {
+                    text: p.addr-text;
+                    color: addr-color;
+                    font-family: Skin.font-mono;
+                    font-size: 12px;
+                    horizontal-stretch: 0;
+                }
+                Text {
+                    text: narrow || p.cmd == "" ? (p.pid > 0 ? " · pid " + p.pid : "") : " · " + p.cmd;
+                    color: t.sub;
+                    font-family: Skin.font-mono;
+                    font-size: 12px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            horizontal-stretch: 0;
+            spacing: 6px;
+            padding-top: (root.height - btn) / 2;
+            padding-bottom: (root.height - btn) / 2;
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.chevron-right;
+                ink: t.visor;
+                edge: t.visor.with-alpha(0.4);
+                enabled: p.url != "";
+                label: "Abrir no navegador";
+                clicked => { PortsApp.open-url(p.url); }
+            }
+            // dois cliques: o primeiro arma (fica vermelho), o segundo encerra
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.close;
+                ink: p.armed ? t.alarm : t.fur;
+                edge: p.armed ? t.alarm : t.fur.with-alpha(0.5);
+                enabled: p.pid > 0;
+                label: p.armed ? "Confirmar: encerrar " + p.process : "Encerrar " + p.process;
+                clicked => { PortsApp.kill(p.pid); }
+            }
+        }
+    }
+}
+
+export component PortsView inherits Rectangle {
+    property <Colors> t: PortsApp.theme;
+    property <bool> narrow: self.width < 520px;
+    property <bool> short: self.height < 260px;
+    property <bool> bad: !PortsApp.ok && !PortsApp.missing;
+    property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+    property <length> mascot-h: mascot-w * 14 / 16;
+
+  VerticalLayout {
+    spacing: 12px;
+
+    // mascote + fala + contadores
+    HorizontalLayout {
+        spacing: 16px;
+        Rectangle {
+            width: mascot-w + 8px;
+            height: mascot-h + 8px;
+            background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
+            Mascot {
+                theme: t;
+                frame: PortsApp.mascot;
+                mood: PortsApp.mood;
+                reaction: PortsApp.reaction;
+                poked => { PortsApp.mascot-poked(); }
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Text {
+                text: PortsApp.missing ? "ss não instalado" : !PortsApp.ok ? "Não consegui ler as portas" : PortsApp.speech;
+                color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
+                font-size: short ? 15px : 19px;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+            Text {
+                text: !PortsApp.ok ? PortsApp.error-text
+                    : PortsApp.total + " TCP · " + PortsApp.mine + (PortsApp.mine == 1 ? " sua · " : " suas · ") + PortsApp.exposed + " na rede toda";
+                color: t.sub;
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+        if !narrow: HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+            Counter { theme: t; label: "TCP"; value: PortsApp.total; tint: t.visor; }
+            Counter { theme: t; label: "SUAS"; value: PortsApp.mine; tint: t.ok; }
+            Counter { theme: t; label: "REDE"; value: PortsApp.exposed; tint: t.warn; }
+        }
+    }
+
+    // busca e filtros
+    HorizontalLayout {
+        spacing: 12px;
+        SearchBox {
+            theme: t;
+            text <=> PortsApp.search;
+            placeholder: narrow ? "buscar…" : "buscar por porta ou programa";
+            horizontal-stretch: 1;
+            edited(text) => { PortsApp.search-edited(text); }
+        }
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 8px;
+            alignment: center;
+            SqSwitch {
+                width: 34px;
+                height: 18px;
+                knob: 12px;
+                accent: t.fur;
+                label: "Mostrar UDP";
+                off-track: t.bg1;
+                off-edge: t.muted;
+                off-knob: t.sub;
+                on-knob: t.bg0;
+                checked: PortsApp.show-udp;
+                toggled => { PortsApp.toggle-udp(); }
+            }
+            Text { text: "udp"; color: t.sub; font-size: 14px; vertical-alignment: center; }
+        }
+        TextButton {
+            text: "atualizar";
+            icon: Icons.refresh;
+            ink: t.visor;
+            compact: narrow;
+            horizontal-stretch: 0;
+            width: narrow ? 40px : self.min-width;
+            clicked => { PortsApp.refresh(); }
+        }
+    }
+
+    // lista
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 50px;
+        border-width: 1px;
+        border-color: t.muted.with-alpha(0.45);
+        background: t.bg1.mix(t.bg0, 0.6);
+
+        if PortsApp.rows.length == 0: Text {
+            text: PortsApp.missing ? "Instale o iproute2 para ver as portas." : PortsApp.search != "" ? "Nenhuma porta bate com esse filtro." : "Nenhuma porta escutando.";
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        ListView {
+            for p in PortsApp.rows: Row { p: p; narrow: narrow; }
+        }
+    }
+  }
+}

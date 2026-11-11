@@ -1,0 +1,44 @@
+id = "cyber.ports"
+name = "Portas abertas"
+description = "O que está escutando em cada porta, com atalho para abrir no navegador e encerrar o processo."
+icon = "coruja"
+api = 1
+uses = ["ports"]
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
+
+[[settings]]
+key = "show_udp"
+label = "Mostrar UDP"
+type = "bool"
+default = false
+
+[[settings]]
+key = "hide_others"
+label = "Esconder portas de outros usuários (sem processo)"
+type = "bool"
+default = false
+
+[[settings]]
+key = "notify_new"
+label = "Notificar quando uma porta nova abrir"
+type = "bool"
+default = false
+
+[[settings]]
+key = "warn_exposed"
+label = "Mascote agitada com porta sua aberta para a rede"
+type = "bool"
+default = false
+
+[[settings]]
+key = "mascot"
+label = "Mascote"
+type = "choice"
+default = "coruja"
+options = ["coruja", "rato", "polvo", "neko", "robo", "hacker", "kitsune", "morcego"]

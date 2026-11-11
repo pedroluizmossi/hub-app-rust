@@ -1,11 +1,14 @@
 // Componentes reutilizáveis pelos mini-apps e pela moldura. Cantos retos, linhas finas
 // e ícones de traço, como no design da Toca.
 import { Colors, Moods, Anim, Skin, Icons } from "theme.slint";
+import { Chatter } from "chatter.slint";
 
 // Mascote em pixel art. O quadro (piscar, LED, glitch) vem desenhado do Rust;
 // flutuar e pular são deslocamentos aqui, sem redesenhar a imagem. `reaction` é uma reação
 // curta por cima do humor ("celebrate", "surprised"; ver src/mascot/anim.rs). Cliques na
-// mascote chamam `poked` (o Rust decide se vira easter egg).
+// mascote chamam `poked` (o Rust decide se vira easter egg). `voice` é o id da mascote na
+// conversa entre mascotes ("app:nome", o mesmo do Rust): falando, ela dá pulinhos; ouvindo,
+// mostra "..." em cima da cabeça. Sem `voice`, fica fora da conversa.
 export component Mascot inherits Rectangle {
     in property <Colors> theme;
     in property <image> frame;
@@ -13,7 +16,10 @@ export component Mascot inherits Rectangle {
     in property <string> reaction;
     in property <bool> moving: !Anim.calm;
     in property <bool> aura: true;
+    in property <string> voice;
     callback poked;
+    property <bool> talking: voice != "" && voice == Chatter.speaker;
+    property <bool> listening: voice != "" && voice == Chatter.listener;
     property <int> f: Anim.frame;
     property <bool> party: reaction == "celebrate";
     property <bool> startled: reaction == "surprised";
@@ -52,6 +58,7 @@ export component Mascot inherits Rectangle {
                 : startled ? (mod(f, 2) == 0 ? -2px : 2px)
                 : mood == "alarm" ? (mod(f, 2) == 0 ? -1px : 1px) : 0;
             y: !moving ? 0
+                : talking ? (mod(f, 2) == 0 ? -parent.height * 0.08 : 0)
                 : party ? (mod(f, 4) < 2 ? -parent.height * 0.24 : 0)
                 : startled ? -parent.height * 0.12
                 : mood == "busy" || mood == "happy" ? (mod(f, 4) < 2 ? -parent.height * 0.1 : 0)
@@ -91,6 +98,18 @@ export component Mascot inherits Rectangle {
                 y: stage.height * (k < 2 ? 0.3 : 0.05) - step * stage.height * 0.035;
                 background: mod(k, 2) == 0 ? theme.ok : theme.visor;
                 opacity: 1 - step / 8;
+            }
+        }
+        // ouvindo quem fala: "..." em pixel em cima da cabeça (os pontos acendem em sequência)
+        if listening: Rectangle {
+            for k in 3: Rectangle {
+                property <length> s: max(2px, stage.height * 0.08);
+                x: stage.width * 0.62 + k * s * 1.6;
+                y: -s * 0.5;
+                width: s;
+                height: s;
+                background: theme.visor;
+                opacity: !moving || mod(f, 4) >= k ? 1 : 0.25;
             }
         }
         // susto (easter egg): "?" em cima da cabeça
@@ -353,6 +372,18 @@ export component Select inherits Rectangle {
         clicked => { popup.show(); }
     }
 
+    // Opção clicada, à espera de ser avisada. Não dá para chamar `chosen` direto do clique:
+    // depois de `popup.close()` a lista já foi destruída e a chamada some sem erro; e
+    // antes dele, o Rust pode refazer a lista de configurações e destruir este Select com
+    // a lista ainda aberta. O `changed` roda depois do clique, com a lista já fechada.
+    property <int> picked: -1;
+    changed picked => {
+        if picked >= 0 {
+            root.chosen(picked);
+            picked = -1;
+        }
+    }
+
     property <length> item-h: 32px;
     // A lista é desenhada dentro da janela: longa demais (32 mascotes), passaria da borda
     // e as últimas opções não seriam alcançáveis. Mostra no máximo 8 e meia (a meia avisa
@@ -401,9 +432,10 @@ export component Select inherits Rectangle {
                     }
                     item := TouchArea {
                         mouse-cursor: pointer;
+                        // guarda a escolha e fecha; o aviso sai de `changed picked`
                         clicked => {
+                            root.picked = i;
                             popup.close();
-                            root.chosen(i);
                         }
                     }
                 }
@@ -624,5 +656,117 @@ export component HeaderButton inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// Botão redondo de fliperama em pixel art, que lança algo no terminal. Desenhado numa
+// grade de 14 × 14 (uma camada de `Path` por cor, sem anti-alias), com a base 3 pixels
+// abaixo da tampa fazendo a lateral 3D. Ao clicar, a tampa desce na base em degraus de
+// pixel, acende e solta faíscas quadradas; com "reduzir movimento" só desce.
+//
+//   ....######....    # contorno   + @ brilho
+//   ..##+++++o##..    o tampa      - sombra de baixo
+//   .#+@@@oooooo#.    > _ ícone
+//   #+o>>oooooooo#
+//   #ooo>>ooooooo#
+//   #oooo>>oooooo#
+//   #ooo>>ooooooo#
+//   #-o>>ooo___o-#
+//   #-oooooooooo-#
+//   .#--oooooo--#.
+//   ..##------##..
+//   ....######....
+export component LaunchButton inherits Rectangle {
+    in property <color> tint: Skin.accent;   // cor da tampa
+    in property <color> edge: Skin.edge;     // contorno e ícone
+    in property <length> px: 3px;            // tamanho de um pixel da arte
+    in property <string> label;              // leitores de tela (o botão só tem ícone)
+    callback clicked;
+    width: 14 * px;
+    height: (14 + depth) * px;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { root.fire(); }
+
+    property <int> depth: 3;                 // altura da lateral, em pixels da arte
+    // animação do clique: `p` vai de 0 a 1 em `burst`; só lê o relógio enquanto anima
+    property <bool> bursting;
+    property <duration> started;
+    property <duration> burst: 450ms;
+    property <float> p: bursting ? min(1, max(0, (animation-tick() - started) / burst)) : 1;
+    // quanto a tampa desce (em pixels da arte): 2 apertado, 1 no fim da animação
+    property <int> sink: touch.pressed || (bursting && p < 0.3) ? 2 : bursting && p < 0.55 ? 1 : 0;
+    property <color> face: bursting && p < 0.45 ? tint.brighter(0.55) : touch.has-hover ? tint.brighter(0.12) : tint;
+
+    // camadas da arte (geradas a partir do desenho acima)
+    property <string> l-outline: "M4 0h6v1H4zM2 1h2v1H2zM10 1h2v1H10zM1 2h1v1H1zM12 2h1v1H12zM1 3h1v1H1zM12 3h1v1H12zM0 4h1v6H0zM13 4h1v6H13zM1 10h1v2H1zM12 10h1v2H12zM2 12h2v1H2zM10 12h2v1H10zM4 13h6v1H4z";
+    property <string> l-inner: "M4 1h6v1H4zM2 2h10v2H2zM1 4h12v6H1zM2 10h10v2H2zM4 12h6v1H4z";
+    property <string> l-shade: "M1 8h1v2H1zM12 8h1v2H12zM2 10h2v1H2zM10 10h2v1H10zM2 11h10v1H2zM4 12h6v1H4z";
+    property <string> l-light: "M4 1h6v1H4zM2 2h1v1H2zM1 4h1v1H1zM2 3h1v1H2z";
+    property <string> l-spec: "M3 2h3v1H3zM3 3h1v1H3z";
+
+    function fire() {
+        if !Anim.calm {
+            started = animation-tick();
+            bursting = true;
+        }
+        root.clicked();
+    }
+
+    Timer {
+        interval: burst;
+        running: bursting;
+        triggered => { bursting = false; }
+    }
+
+    // base: a lateral, que aparece embaixo da tampa
+    Rectangle {
+        y: depth * px;
+        width: 14 * px;
+        height: 14 * px;
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-inner; fill: tint.darker(0.55); }
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-outline; fill: edge; }
+    }
+
+    // tampa
+    Rectangle {
+        y: sink * px;
+        width: 14 * px;
+        height: 14 * px;
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-inner; fill: face; }
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-shade; fill: face.darker(0.3); }
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-light; fill: face.brighter(0.35); }
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-spec; fill: white; }
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: l-outline; fill: edge; }
+        // ">_"; o cursor pisca com o mouse em cima
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: "M3 4h2v1H3zM4 5h2v1H4zM5 6h2v1H5zM4 7h2v1H4zM3 8h2v1H3z"; fill: edge; }
+        Path { width: 100%; height: 100%; viewbox-width: 14; viewbox-height: 14; anti-alias: false;
+            commands: "M8 8h3v1H8z"; fill: edge;
+            opacity: touch.has-hover && !Anim.calm && mod(Anim.frame, 8) >= 4 ? 0 : 1; }
+    }
+
+    // faíscas: 8 pixels que pulam em volta e somem, presos à grade da arte
+    for k in (bursting ? 8 : 0): Rectangle {
+        property <angle> a: k * 45deg + 22.5deg;
+        property <float> d: 7.5 + p * 6;     // distância do centro, em pixels da arte
+        x: round(7 + cos(a) * d - 0.5) * px;
+        y: round(7 + sink + sin(a) * d - 0.5) * px;
+        width: px;
+        height: px;
+        background: mod(k, 2) == 0 ? white : tint.brighter(0.3);
+        opacity: p < 0.7 ? 1 : 0.4;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.fire(); }
     }
 }
