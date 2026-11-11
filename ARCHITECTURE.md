@@ -59,6 +59,7 @@ hub-app-rust/
   AGENTS.md                   regras para agentes de código (compilar, validar, UI)
   ARCHITECTURE.md             este documento
   DESIGN.md                   visuais, temas, telas, apps e mascotes: como criar
+  install.sh, install.ps1     instalação em uma linha (Linux, Windows) a partir do último Release
   tools/sprite-import/        converte PNG (folha de quadros 16×14) em animação de mascote,
                               pela paleta cor -> papel; `cargo run -p sprite-import -- --help`
   examples/                   plugins de exemplo (plugin-uptime, plugin-top), app externo de

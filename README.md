@@ -70,6 +70,46 @@ conversa é lida ou salva.
 A arquitetura e o roteiro estão em [ARCHITECTURE.md](ARCHITECTURE.md). Como criar visuais,
 temas, telas, mini-apps e mascotes está em [DESIGN.md](DESIGN.md).
 
+## Instalar
+
+Uma linha instala (ou atualiza) a última versão publicada em
+[Releases](https://github.com/pedroluizmossi/hub-app-rust/releases), só para o seu usuário,
+sem senha de administrador. O script confere a soma SHA-256 do pacote antes de instalar.
+
+**Linux** (x86_64, glibc 2.35 ou mais nova: Ubuntu 22.04+, Fedora 36+, Debian 12+, Arch…):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.sh | sh
+```
+
+Instala em `~/.local/bin/miniutils`, com atalho no menu de aplicativos.
+
+**Windows 10 ou 11** (no PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.ps1 | iex
+```
+
+Instala em `%LOCALAPPDATA%\Programs\MiniUtils`, com atalho no Menu Iniciar. Se o MiniUtils
+estiver aberto, ele é fechado para a troca e aberto de novo na bandeja. O executável não
+é assinado: baixado pelo navegador, o Windows pode mostrar o aviso do SmartScreen ("Mais
+informações › Executar assim mesmo").
+
+Para desinstalar (a configuração é mantida):
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.sh | sh -s -- --uninstall
+```
+
+```powershell
+# Windows
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.ps1))) -Uninstall
+```
+
+Também dá para baixar o `.tar.gz` ou o `.zip` da página do Release e rodar o `miniutils`
+de dentro da pasta.
+
 ## Compilar e rodar
 
 Precisa de Rust (via [rustup](https://rustup.rs)).
@@ -172,7 +212,8 @@ cargo test
 - **Lançamento** (`.github/workflows/release.yml`): uma tag `vX.Y.Z` igual à `version` do
   `Cargo.toml` compila a versão final nos dois sistemas e publica um Release com
   `miniutils-<versão>-linux-x86_64.tar.gz`, `miniutils-<versão>-windows-x86_64.zip` e as
-  somas SHA-256.
+  somas SHA-256. Os testes não rodam nele: crie a tag num commit que passou no CI. O
+  `install.sh` e o `install.ps1` dependem desses nomes de arquivo; mudou um, mude os dois.
 
   ```bash
   git tag v0.2.0 && git push origin v0.2.0
