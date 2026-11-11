@@ -1493,7 +1493,9 @@ mod tests {
         let def = compile_view(dir, std::fs::read_to_string(dir.join("view.slint")).unwrap()).unwrap();
         let props: Vec<String> = def.properties().map(|(n, _)| n).collect();
         assert!(props.iter().any(|n| n == "rows") && props.iter().any(|n| n == "theme"), "{props:?}");
-        if !crate::core::exec::which("ps") {
+        // O script usa o `ps` do Linux (`-eo`, `--sort`); no Windows o `ps` que vem com o
+        // Git não aceita essas opções, então só a parte da tela é testada lá.
+        if cfg!(not(unix)) || !crate::core::exec::which("ps") {
             return;
         }
         let (tx, rx) = channel();
