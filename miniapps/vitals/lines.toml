@@ -2,15 +2,48 @@
 # src/core/chatter.rs. O que não estiver aqui vem das falas genéricas (src/hub/lines.toml).
 
 [strain]
-pt = ["ufa, {s} em {v}%... quem tá me esquentando? :o", "{s} em {v}%! alguém tá trabalhando muito aí?", "{s} em {v}%... tô suando aqui :3"]
-en = ["phew, {s} at {v}%... who's heating me up? :o", "{s} at {v}%! is someone working hard?"]
+pt = [
+    "ufa, {s} em {v}%... quem tá me esquentando? :o",
+    "{s} em {v}%! alguém tá trabalhando muito aí?",
+    "{s} em {v}%... tô suando aqui :3",
+    "{s} em {v}%... liga o ventilador! (>_<)",
+    "{s} em {v}%! tô fritando, porra! >:(",
+]
+en = [
+    "phew, {s} at {v}%... who's heating me up? :o",
+    "{s} at {v}%! is someone working hard?",
+    "{s} at {v}%... turn on the fan! (>_<)",
+    "{s} at {v}%! i'm frying here, damn it! >:(",
+]
 de = ["puh, {s} bei {v}%... wer heizt hier? :o"]
 
 [idle]
-pt = ["contando ciclos... 1, 2, 3... zzz", "{s} fresquinha, vida boa :3", "tudo verdinho por aqui ^_^"]
-en = ["counting cycles... 1, 2, 3... zzz", "all green over here ^_^"]
+pt = [
+    "contando ciclos... 1, 2, 3... zzz",
+    "{s} fresquinha, vida boa :3",
+    "tudo verdinho por aqui ^_^",
+    "temperatura boa hoje, dá até pra correr :3",
+    "inspira... expira... tudo em ordem ^_^",
+]
+en = [
+    "counting cycles... 1, 2, 3... zzz",
+    "all green over here ^_^",
+    "nice temperature today, i could go for a run :3",
+    "breathe in... breathe out... all good ^_^",
+]
 de = ["alles grün hier ^_^"]
 
 [reply.idle]
-pt = ["aqui também tá tranquilo, {a} ^_^", "shh... tô medindo a temperatura (o.o)"]
-en = ["all calm here too, {a} ^_^", "shh... i'm taking the temperature (o.o)"]
+pt = [
+    "aqui também tá tranquilo, {a} ^_^",
+    "shh... tô medindo a temperatura (o.o)",
+    "espera, tô contando batimentos... 1, 2... (o.o)",
+]
+en = [
+    "all calm here too, {a} ^_^",
+    "shh... i'm taking the temperature (o.o)",
+    "wait, i'm counting heartbeats... 1, 2... (o.o)",
+]
+de = [
+    "alles ruhig hier, {a} ^_^",
+]

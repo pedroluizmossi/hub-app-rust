@@ -241,8 +241,9 @@ Regras para qualquer pixel art:
 ### Pôr a mascote em uso
 
 1. Acrescente a entrada em `SPRITES` (`src/mascot/sprites.rs`) com `key` e `label`.
-2. Ofereça-a nas opções `mascot`/`*_mascot` dos manifestos que fizerem sentido (listas
-   curtas, até ~10 opções: cada opção é uma linha no select).
+2. Ela já pode ser escolhida em todo lugar: o seletor de mascote mostra todas. Se ela
+   combina com um app, ponha-a nas opções `mascot`/`*_mascot` do manifesto dele: essas são
+   as sugeridas e aparecem primeiro na grade (o hub completa a lista com as outras).
 3. `cargo test`: `todas_as_mascotes_tem_16x14` e `mascotes_pixel_tem_cor_para_cada_letra`
    pegam linha torta e letra sem cor.
 

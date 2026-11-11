@@ -27,8 +27,8 @@
 //! Casos: `trouble`, `strain`, `recovered`, `poked` e `idle` (papo à toa). Lacunas:
 //! `{a}` quem conta, `{b}` quem responde, `{s}` o assunto (vazio vira o nome de quem conta),
 //! `{v}` o número do fato. Variante com `{v}` só sai quando o fato tem número, e com `{b}`
-//! só quando alguém responde. Tom fofo, kaomoji em ASCII (a fonte pode não ter emoji), até
-//! ~60 caracteres (duas linhas da caixa de diálogo).
+//! só quando alguém responde. Tom fofo, com algumas falas bravas (de palavrão); kaomoji em
+//! ASCII (a fonte pode não ter emoji); até ~60 caracteres (duas linhas da caixa de diálogo).
 
 use serde::Deserialize;
 

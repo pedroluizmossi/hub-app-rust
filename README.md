@@ -23,6 +23,14 @@ Mini-apps incluídos:
 - **To-do rápido**: lista curta de tarefas, salva em `~/.config/miniutils/todo.json`. Enter
   acrescenta, clique marca como feita; a mascote comemora quando a lista zera. Começa
   desligado.
+- **Agentes de IA**: as sessões do Claude Code, Codex e OpenCode: quem está trabalhando (e
+  em quê: a última ferramenta usada, sem o comando inteiro), quem espera por você e quem
+  terminou, com os subagentes contados na linha de quem os disparou. Cada sessão é um cartão com
+  o que a ferramenta informa (no Claude: modelo, esforço, branch, tokens, duração do último
+  turno, último pedido e os subagentes). Clique no cartão mostra as opções: abrir a pasta
+  do projeto, abrir um terminal nela e, em sessão parada do Codex ou do OpenCode, retomar
+  a sessão. Só lê o que as ferramentas já gravam no disco, sem mexer na configuração
+  delas; pode notificar quando um agente termina ou espera. Começa desligado.
 
 Em **Configurações › Apps › CD Player**, a opção **Mostrar música e controles no menu da
 bandeja** acrescenta a faixa e os controles ao menu do ícone. A faixa também aparece no

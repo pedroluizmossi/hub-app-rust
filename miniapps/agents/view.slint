@@ -1,0 +1,490 @@
+// Tela do mini-app Agentes de IA. Responsiva: se adapta à célula do painel em que está.
+//   estreita (< 520 px): sem contadores grandes, estado menor, detalhes sem recuo
+//   baixa (< 260 px): mascote menor e cartões só com o cabeçalho (sem os detalhes)
+// Cada sessão é um cartão: cabeçalho (mascote, título, estado) e, abaixo, o que a
+// ferramenta informar (etiquetas de modelo/esforço/branch, tokens, último turno, último
+// pedido, subagentes). O que vier vazio some, então o cartão de uma ferramenta que informa
+// menos é só mais baixo. Clicar no cartão abre os botões de ação; outro clique fecha.
+// Sessão com subagentes trabalhando ganha uma faixa em que eles andam de um lado para o outro.
+import { ListView } from "std-widgets.slint";
+import { Colors, Skin, Icons, Anim } from "../../ui/theme.slint";
+import { Mascot, Counter, TextButton } from "../../ui/widgets.slint";
+
+// Um subagente no cartão da sessão que o disparou.
+export struct AgentSub {
+    // tipo ("Explore", "web-fetch"…; "" = não sei)
+    kind: string,
+    title: string,
+    // "working" | "idle"
+    state: string,
+    state-text: string,
+}
+
+export struct AgentRow {
+    title: string,
+    // "Claude · 2 subagentes ativos · Edit: bus.rs" (parada, a pasta no lugar da ação)
+    info: string,
+    // "working" | "waiting" | "idle"
+    state: string,
+    // "trabalhando há 3 min", "esperando você: permissão", "parado há 12 min"
+    state-text: string,
+    // subagente cuja sessão de origem não está na lista
+    sub: bool,
+    // mascote da ferramenta, já no humor do estado
+    mascot: image,
+    // sessão parada do Codex ou do OpenCode: dá para retomar num terminal
+    can-resume: bool,
+    // cartão clicado: mostra os botões
+    open: bool,
+    // subagentes trabalhando agora (no máximo 6 aparecem andando)
+    walkers: int,
+    // mascote de um subagente trabalhando
+    walker: image,
+    // detalhes: "" (ou false) = a ferramenta não informa, e a parte some do cartão
+    model: string,
+    effort: string,
+    branch: string,
+    has-tokens: bool,
+    tok-in: string,
+    tok-out: string,
+    tok-cache: string,
+    // duração do último turno
+    turn: string,
+    // "316 mensagens · resposta completa"
+    turn-note: string,
+    // último pedido do usuário
+    prompt: string,
+    subs: [AgentSub],
+    // subagentes além dos listados
+    more-subs: int,
+}
+
+// Estado do mini-app, preenchido pelo Rust (src/apps/agents.rs).
+export global AgentsApp {
+    in property <Colors> theme;
+    in property <[AgentRow]> rows;
+    in property <int> working;
+    in property <int> waiting;
+    in property <int> idle;
+    // nenhuma das ferramentas está instalada
+    in property <bool> missing;
+    // fontes que não deu para ler ("" = tudo certo)
+    in property <string> error-text;
+    in property <image> mascot;
+    in property <string> mood: "sleep";
+    in property <string> reaction;
+    in property <string> speech;
+
+    callback mascot-poked();
+    // todos recebem o índice da linha
+    callback toggle(int);          // abre ou fecha as opções
+    callback open-dir(int);        // pasta no gerenciador de arquivos
+    callback open-terminal(int);   // terminal na pasta
+    callback resume(int);          // retoma a sessão num terminal
+}
+
+// Etiqueta pequena: modelo, esforço, branch.
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <string> text;
+    in property <color> ink;
+    property <Colors> t: AgentsApp.theme;
+    height: 20px;
+    width: row.preferred-width + 14px;
+    horizontal-stretch: 0;
+    border-width: 1px;
+    border-color: ink.with-alpha(0.45);
+    background: ink.with-alpha(0.12);
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 5px;
+        if label != "": Text {
+            text: root.label;
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.text;
+            color: ink.mix(t.text, 0.55);
+            font-family: Skin.font-mono;
+            font-size: 11px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Um número com a legenda ao lado: "45 k saída".
+component Stat inherits HorizontalLayout {
+    in property <string> value;
+    in property <string> label;
+    in property <color> ink;
+    property <Colors> t: AgentsApp.theme;
+    spacing: 4px;
+    horizontal-stretch: 0;
+    Text {
+        text: root.value;
+        color: ink;
+        font-family: Skin.font-mono;
+        font-size: 13px;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+    Text {
+        text: root.label;
+        color: t.sub;
+        font-family: Skin.font-mono;
+        font-size: 11px;
+        vertical-alignment: center;
+    }
+}
+
+component Row inherits Rectangle {
+    in property <AgentRow> a;
+    in property <int> index;
+    in property <bool> narrow;
+    // célula baixa: só o cabeçalho
+    in property <bool> compact;
+    property <Colors> t: AgentsApp.theme;
+    property <color> ink: a.state == "waiting" ? t.warn : a.state == "working" ? t.ok : t.sub;
+    property <bool> dim: a.state == "idle";
+    property <length> base: narrow ? 50px : 56px;
+    property <length> inset: a.sub ? 28px : 12px;
+    property <length> face-w: narrow ? 32px : 40px;
+    // os detalhes começam alinhados com o título (na célula estreita, com a mascote)
+    property <length> text-x: narrow ? inset : inset + face-w + 12px;
+
+    // alturas de cada parte do cartão (0 = a parte não aparece)
+    property <bool> has-chips: !compact && (a.model != "" || a.effort != "" || a.branch != "");
+    property <bool> has-stats: !compact && (a.has-tokens || a.turn != "");
+    property <bool> has-prompt: !compact && a.prompt != "";
+    property <int> sub-lines: compact ? 0 : a.subs.length + (a.more-subs > 0 ? 1 : 0);
+    property <length> chips-h: has-chips ? 26px : 0;
+    property <length> stats-h: has-stats ? 22px : 0;
+    property <length> prompt-h: has-prompt ? 20px : 0;
+    property <length> sub-h: 19px;
+    property <length> subs-h: sub-lines * sub-h + (sub-lines > 0 ? 4px : 0);
+    property <length> details-h: chips-h + stats-h + prompt-h + subs-h
+        + (has-chips || has-stats || has-prompt || sub-lines > 0 ? 8px : 0);
+    // faixa dos subagentes trabalhando
+    property <length> walk-h: a.walkers > 0 ? 30px : 0;
+    property <length> options-h: a.open ? 46px : 0;
+
+    height: base + details-h + walk-h + options-h;
+    background: a.state == "waiting" ? t.warn.with-alpha(0.1) : a.open ? t.visor.with-alpha(0.08) : hover.has-hover ? t.visor.with-alpha(0.05) : transparent;
+
+    // clique no cartão: abre ou fecha as opções
+    hover := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { AgentsApp.toggle(root.index); }
+    }
+
+    Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
+    // faixa do estado na borda esquerda
+    Rectangle { x: 0; width: 3px; background: a.state == "idle" ? transparent : ink; }
+
+    // cabeçalho: mascote, título, estado
+    HorizontalLayout {
+        y: 0;
+        height: base;
+        padding-left: inset;
+        padding-right: 12px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: a.mascot;
+                image-rendering: pixelated;
+                width: face-w;
+                height: self.width * 14 / 16;
+                opacity: dim ? 0.6 : 1;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 3px;
+            Text {
+                text: a.title;
+                color: dim ? t.sub.mix(t.text, 0.5) : t.text;
+                font-size: 14px;
+                font-weight: dim ? 400 : 700;
+                overflow: elide;
+            }
+            Text {
+                text: a.info;
+                color: t.sub;
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 0;
+            max-width: narrow ? 130px : 240px;
+            text: a.state-text;
+            color: ink;
+            font-family: Skin.font-mono;
+            font-size: 12px;
+            font-weight: dim ? 400 : 700;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    // detalhes: cada parte tem altura fixa e some quando a ferramenta não informa
+    if details-h > 0: Rectangle {
+        x: text-x;
+        y: base - 2px;
+        width: root.width - text-x - 12px;
+        height: details-h;
+        clip: true;
+        opacity: dim ? 0.8 : 1;
+
+        // etiquetas: modelo, esforço, branch
+        if has-chips: HorizontalLayout {
+            x: 0;
+            y: 0;
+            height: chips-h;
+            alignment: start;
+            spacing: 6px;
+            padding-bottom: 6px;
+            if a.model != "": Chip { text: a.model; ink: t.visor; }
+            if a.effort != "": Chip { label: "esforço"; text: a.effort; ink: t.fur; }
+            if a.branch != "": Chip { label: "branch"; text: a.branch; ink: t.ok; }
+        }
+
+        // números: tokens da sessão e o último turno
+        if has-stats: HorizontalLayout {
+            x: 0;
+            y: chips-h;
+            height: stats-h;
+            alignment: start;
+            spacing: narrow ? 10px : 16px;
+            if a.has-tokens: Stat { value: a.tok-in; label: narrow ? "ent." : "entrada"; ink: t.text; }
+            if a.has-tokens: Stat { value: a.tok-out; label: "saída"; ink: t.text; }
+            if a.has-tokens: Stat { value: a.tok-cache; label: "cache"; ink: t.text; }
+            if a.turn != "": Stat {
+                value: a.turn;
+                label: narrow || a.turn-note == "" ? "último turno" : "último turno · " + a.turn-note;
+                ink: t.visor;
+            }
+        }
+
+        // último pedido do usuário
+        if has-prompt: HorizontalLayout {
+            x: 0;
+            y: chips-h + stats-h;
+            width: parent.width;
+            height: prompt-h;
+            spacing: 6px;
+            Rectangle {
+                width: 2px;
+                background: t.fur.with-alpha(0.6);
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: a.prompt;
+                color: t.sub.mix(t.text, 0.45);
+                font-size: 12px;
+                font-italic: true;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        // subagentes: ponto do estado, tipo, o que faz e há quanto tempo
+        for s[i] in a.subs: HorizontalLayout {
+            property <color> dot: s.state == "working" ? t.ok : t.muted;
+            x: 0;
+            y: chips-h + stats-h + prompt-h + 4px + i * sub-h;
+            width: parent.width;
+            height: sub-h;
+            spacing: 6px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle { width: 6px; height: 6px; background: dot; }
+            }
+            if s.kind != "": Text {
+                horizontal-stretch: 0;
+                text: s.kind;
+                color: t.fur.mix(t.text, 0.6);
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: s.title;
+                color: s.state == "working" ? t.text : t.sub;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                horizontal-stretch: 0;
+                text: s.state-text;
+                color: s.state == "working" ? t.ok : t.sub;
+                font-family: Skin.font-mono;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+        if !compact && a.more-subs > 0: Text {
+            x: 12px;
+            y: chips-h + stats-h + prompt-h + 4px + a.subs.length * sub-h;
+            height: sub-h;
+            text: "e mais " + a.more-subs + (a.more-subs == 1 ? " subagente" : " subagentes");
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+
+    // subagentes trabalhando: cada um anda de um lado para o outro, fora de compasso.
+    // Com "reduzir movimento", ficam parados, espalhados pela faixa.
+    if a.walkers > 0: Rectangle {
+        x: inset;
+        y: base + details-h - 2px;
+        width: root.width - inset - 12px;
+        height: walk-h;
+        // o chão
+        Rectangle { y: parent.height - 7px; height: 1px; background: t.ok.with-alpha(0.35); }
+        for k in a.walkers: Image {
+            // passos de uma ponta à outra; cada subagente começa num ponto diferente
+            property <int> span: 14 + k * 3;
+            property <int> step: mod(Anim.frame + k * 7, span * 2);
+            property <float> pos: Anim.calm ? (k + 0.5) / a.walkers : (step < span ? step : span * 2 - step) / span;
+            source: a.walker;
+            image-rendering: pixelated;
+            width: 22px;
+            height: self.width * 14 / 16;
+            x: pos * (parent.width - self.width);
+            // passinho: sobe e desce a cada quadro
+            y: parent.height - 8px - self.height - (!Anim.calm && mod(Anim.frame + k, 2) == 0 ? 2px : 0);
+            animate x { duration: 220ms; easing: linear; }
+            animate y { duration: 110ms; easing: ease-out; }
+        }
+    }
+
+    // opções do cartão clicado
+    if a.open: HorizontalLayout {
+        y: base + details-h + walk-h;
+        height: options-h;
+        padding-left: inset;
+        padding-right: 12px;
+        padding-bottom: 10px;
+        spacing: 8px;
+        alignment: start;
+        TextButton {
+            text: "Abrir pasta";
+            icon: Icons.grid;
+            ink: t.visor;
+            font-size: 13px;
+            clicked => { AgentsApp.open-dir(root.index); }
+        }
+        TextButton {
+            text: narrow ? "Terminal" : "Terminal na pasta";
+            icon: Icons.terminal;
+            ink: t.visor;
+            font-size: 13px;
+            clicked => { AgentsApp.open-terminal(root.index); }
+        }
+        if a.can-resume: TextButton {
+            text: narrow ? "Retomar" : "Retomar sessão";
+            icon: Icons.play;
+            ink: t.ok;
+            font-size: 13px;
+            clicked => { AgentsApp.resume(root.index); }
+        }
+    }
+}
+
+export component AgentsView inherits Rectangle {
+    property <Colors> t: AgentsApp.theme;
+    property <bool> narrow: self.width < 520px;
+    property <bool> short: self.height < 260px;
+    property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+    property <length> mascot-h: mascot-w * 14 / 16;
+
+  VerticalLayout {
+    spacing: 12px;
+
+    // mascote + fala + contadores
+    HorizontalLayout {
+        spacing: 16px;
+        Rectangle {
+            width: mascot-w + 8px;
+            height: mascot-h + 8px;
+            background: AgentsApp.waiting > 0 ? t.warn.with-alpha(0.16) : t.fur.with-alpha(0.1);
+            Mascot {
+                theme: t;
+                frame: AgentsApp.mascot;
+                mood: AgentsApp.mood;
+                reaction: AgentsApp.reaction;
+                poked => { AgentsApp.mascot-poked(); }
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Text {
+                text: AgentsApp.speech;
+                color: t.text;
+                font-size: short ? 15px : 19px;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+            Text {
+                text: AgentsApp.error-text != "" ? AgentsApp.error-text
+                    : AgentsApp.working + " trabalhando · " + AgentsApp.waiting + " esperando você · " + AgentsApp.idle + (AgentsApp.idle == 1 ? " parado" : " parados");
+                color: AgentsApp.error-text != "" ? t.warn.mix(t.text, 0.6) : t.sub;
+                font-family: Skin.font-mono;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+        if !narrow: HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+            Counter { theme: t; label: "ATIVOS"; value: AgentsApp.working; tint: t.ok; }
+            Counter { theme: t; label: "ESPERA"; value: AgentsApp.waiting; tint: t.warn; }
+            Counter { theme: t; label: "LIVRES"; value: AgentsApp.idle; tint: t.visor; }
+        }
+    }
+
+    // lista
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 50px;
+        border-width: 1px;
+        border-color: t.muted.with-alpha(0.45);
+        background: t.bg1.mix(t.bg0, 0.6);
+
+        if AgentsApp.rows.length == 0: Text {
+            text: AgentsApp.missing ? "Não achei Claude Code, Codex nem OpenCode nesta máquina." : "Nenhuma sessão aberta ou recente.";
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        ListView {
+            for a[i] in AgentsApp.rows: Row { a: a; index: i; narrow: narrow; compact: short; }
+        }
+    }
+  }
+}

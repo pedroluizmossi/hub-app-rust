@@ -3,13 +3,34 @@
 
 # um container caiu, entrou em loop ou ficou unhealthy ({s} = nome do container)
 [trouble]
-pt = ["{s} caiu! (o_o)", "ih... {s} parou de responder (T_T)"]
-en = ["{s} went down! (o_o)", "uh oh... {s} stopped answering (T_T)"]
-de = ["{s} ist abgestürzt! (o_o)"]
+pt = [
+    "{s} caiu! (o_o)",
+    "ih... {s} parou de responder (T_T)",
+    "caralho, {s} caiu de novo?! >:(",
+    "{s} morreu. que container de merda! >:(",
+]
+en = [
+    "{s} went down! (o_o)",
+    "uh oh... {s} stopped answering (T_T)",
+    "ffs, {s} crashed again?! >:(",
+    "{s} died. what a piece of crap! >:(",
+]
+de = [
+    "{s} ist abgestürzt! (o_o)",
+    "Scheiße, {s} ist schon wieder weg! >:(",
+]
 
 [trouble.answer]
-pt = ["{s} foi tirar um cochilo? zzz", "força, {a}! reinicia ele com carinho <3"]
-en = ["did {s} take a nap? zzz", "go {a}! restart it gently <3"]
+pt = [
+    "{s} foi tirar um cochilo? zzz",
+    "força, {a}! reinicia ele com carinho <3",
+    "dá um restart nele, {a}! sem dó >:)",
+]
+en = [
+    "did {s} take a nap? zzz",
+    "go {a}! restart it gently <3",
+    "restart it, {a}! no mercy >:)",
+]
 de = ["macht {s} ein Nickerchen? zzz"]
 
 [recovered]
@@ -20,11 +41,44 @@ de = ["{s} ist wieder da! \\o/"]
 # CPU, RAM ou GPU agitada: o Docker assume a culpa
 [reply.strain]
 about = ["CPU", "RAM", "GPU"]
-pt = ["foi mal... acho que fui eu u.u", "eram só uns containers... juro! ^^'"]
-en = ["sorry... i think that was me u.u", "just a few containers... i promise! ^^'"]
+pt = [
+    "foi mal... acho que fui eu u.u",
+    "eram só uns containers... juro! ^^'",
+    "tá, fui eu. mas a culpa é do build! >:(",
+]
+en = [
+    "sorry... i think that was me u.u",
+    "just a few containers... i promise! ^^'",
+    "fine, it was me. blame the build! >:(",
+]
 de = ["Entschuldigung... das war wohl ich u.u"]
 
 [idle]
-pt = ["meus containers tão quietinhos hoje ^_^", "alguém quer um container fresquinho? :3"]
-en = ["my containers are so calm today ^_^", "anyone want a fresh container? :3"]
-de = ["meine Container schlafen... zzz"]
+pt = [
+    "meus containers tão quietinhos hoje ^_^",
+    "alguém quer um container fresquinho? :3",
+    "arrumei meus containers em fila, olha que lindo ^_^",
+    "um container, dois containers... zzz",
+    "hoje ninguém caiu. tô orgulhoso \\o/",
+]
+en = [
+    "my containers are so calm today ^_^",
+    "anyone want a fresh container? :3",
+    "lined up all my containers, look how neat ^_^",
+    "one container, two containers... zzz",
+    "nobody crashed today. so proud \\o/",
+]
+de = [
+    "meine Container schlafen... zzz",
+    "heute ist keiner abgestürzt \\o/",
+]
+
+[reply.idle]
+pt = [
+    "tô ocupado empilhando containers, {a} :3",
+    "se cair alguma coisa, não fui eu! (o.o)",
+]
+en = [
+    "busy stacking containers, {a} :3",
+    "if something crashes, it wasn't me! (o.o)",
+]

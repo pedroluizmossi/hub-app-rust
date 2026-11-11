@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use slint::{ComponentHandle, ModelRc, SharedString, Timer, VecModel};
+use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, VecModel};
 
 use super::Hub;
 use super::chatter::Pace;
@@ -33,10 +33,16 @@ impl Hub {
 
     /// Opções e escolhas do ícone da bandeja (índice 0 = automático).
     pub(super) fn apply_tray_choices(&self) {
-        let (icon, theme) = {
+        let (icon, theme, skin_key) = {
             let cfg = self.host.config.borrow();
-            (cfg.tray_icon.clone(), cfg.tray_theme.clone())
+            (cfg.tray_icon.clone(), cfg.tray_theme.clone(), cfg.skin.clone())
         };
+        // desenhos para o seletor: no tema escolhido para a bandeja ou, no automático, no
+        // do visual da janela; o "Automático" (índice 0) fica sem desenho
+        let shown = themes::THEMES.iter().find(|t| t.key == theme).unwrap_or(themes::get(skin::get(&skin_key).app_theme));
+        let images: Vec<Image> =
+            std::iter::once(Image::default()).chain(super::settings::mascot_images(shown)).collect();
+        self.ui.set_tray_icon_images(ModelRc::new(VecModel::from(images)));
         let auto = |label: &str| std::iter::once(SharedString::from(label));
         let icons: Vec<SharedString> =
             auto("Automático").chain(sprites::SPRITES.iter().map(|s| s.label.into())).collect();

@@ -103,6 +103,10 @@ hub-app-rust/
       media.rs                MPRIS pelo D-Bus: o que está tocando e comandos do player
       ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go)
       ports.rs                portas escutando, pelo `ss -lntup` + /proc/<pid>/cmdline
+      agents/                 sessões dos codificadores de IA e o estado de cada uma, lido dos
+                              arquivos que as ferramentas já gravam (só leitura). Uma fonte por
+                              ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`) atrás do trait
+                              `Source`; o que cada uma sabe a mais vai em `Details` (opcional)
     skin/
       mod.rs                  visuais da janela (tabela SKINS) e `apply` para o global Skin
       backdrop.rs             fundos desenhados em Rust (pontos, CRT, papel, cidade)
@@ -119,6 +123,7 @@ hub-app-rust/
       ai_pace.rs              previsão de esgotamento pelo ritmo de uso (duas janelas) e gráfico da última hora
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
       todo.rs                 To-do rápido: lista salva em ~/.config/miniutils/todo.json
+      agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou
 ```
 
 ## O mini-app
@@ -146,7 +151,7 @@ options = ["auto", "neon", "matrix", "aconchego"]
 ```
 
 - `uses` liga os provedores quando o app é ativado e os solta quando é desativado. Os nomes
-  são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`): um nome desconhecido
+  são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`, `ports`, `agents`): um nome desconhecido
   faz o manifesto falhar no parse, e no Rust o provedor é sempre `Topic::…`, nunca uma string.
 - `permissions.exec` é a allowlist do executor para aquele app.
 - `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice`). Um
@@ -298,6 +303,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - [x] Mini-app CD Player (MPRIS: faixa, progresso, comandos, notificação opcional)
 - [x] Mini-app Assinaturas de IA (limites e créditos por conta)
 - [x] Mini-apps Portas abertas e To-do rápido
+- [x] Mini-app Agentes de IA (Claude Code, Codex e OpenCode, só leitura)
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 

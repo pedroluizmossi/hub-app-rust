@@ -3,8 +3,18 @@
 # genéricas (src/hub/lines.toml).
 
 [trouble]
-pt = ["ai... gastei {v}% do meu limite (T_T)", "acho que falei demais hoje... {v}%!", "ai ai, meu limite tá acabando (T_T)"]
-en = ["oops... i used {v}% of my limit (T_T)", "i talked too much today... {v}%!", "uh oh, my limit is running out (T_T)"]
+pt = [
+    "ai... gastei {v}% do meu limite (T_T)",
+    "acho que falei demais hoje... {v}%!",
+    "ai ai, meu limite tá acabando (T_T)",
+    "{v}%?! porra, eu avisei que ia acabar! >:(",
+]
+en = [
+    "oops... i used {v}% of my limit (T_T)",
+    "i talked too much today... {v}%!",
+    "uh oh, my limit is running out (T_T)",
+    "{v}%?! damn it, i told you it would run out! >:(",
+]
 de = ["oje... {v}% von meinem Limit (T_T)"]
 
 [trouble.answer]
@@ -15,10 +25,23 @@ de = ["langsam mit {a}, ja? ^^'"]
 [strain]
 pt = ["tô pensando bastante hoje... {v}% (o.o)", "ufa, muita pergunta hoje! :3"]
 en = ["thinking a lot today... {v}% (o.o)", "phew, so many questions today! :3"]
+de = [
+    "viele Fragen heute... {v}% (o.o)",
+]
 
 [forecast]
-pt = ["nesse ritmo eu canso em {v} min (o.o)", "calma! assim não chego até a renovação >_<", "tô gastando rápido demais... (o.o)"]
-en = ["at this pace i'm out in {v} min (o.o)", "slow down! i won't last until the reset >_<", "burning through my limit too fast... (o.o)"]
+pt = [
+    "nesse ritmo eu canso em {v} min (o.o)",
+    "calma! assim não chego até a renovação >_<",
+    "tô gastando rápido demais... (o.o)",
+    "{v} min e eu apago! para de perguntar, cacete >:(",
+]
+en = [
+    "at this pace i'm out in {v} min (o.o)",
+    "slow down! i won't last until the reset >_<",
+    "burning through my limit too fast... (o.o)",
+    "{v} min and i'm out! stop asking, damn it >:(",
+]
 de = ["bei dem Tempo bin ich in {v} min leer (o.o)"]
 
 [forecast.answer]
@@ -32,10 +55,40 @@ en = ["my limit reset! let's chat \\o/", "rested and back ^_^"]
 de = ["Limit zurückgesetzt! \\o/"]
 
 [idle]
-pt = ["alguém quer conversar comigo? hihi", "tô pensando... (o.o)", "{b}, me pergunta alguma coisa! :3"]
-en = ["anyone want to chat? hehe", "thinking... (o.o)", "{b}, ask me something! :3"]
-de = ["will jemand plaudern? hihi"]
+pt = [
+    "alguém quer conversar comigo? hihi",
+    "tô pensando... (o.o)",
+    "{b}, me pergunta alguma coisa! :3",
+    "{b}, sabia que eu sei contar até um trilhão? hihi",
+    "tô treinando piadas. quer ouvir uma? :3",
+    "pensando em nada. é difícil! (o.o)",
+]
+en = [
+    "anyone want to chat? hehe",
+    "thinking... (o.o)",
+    "{b}, ask me something! :3",
+    "{b}, did you know i can count to a trillion? hehe",
+    "practicing jokes. wanna hear one? :3",
+    "thinking about nothing. it's hard! (o.o)",
+]
+de = [
+    "will jemand plaudern? hihi",
+    "ich denke an nichts. schwer! (o.o)",
+]
 
 [reply.idle]
-pt = ["eu sei a resposta! é 42 ^_^", "hmm, deixa eu pensar... (o.o)"]
-en = ["i know the answer! it's 42 ^_^", "hmm, let me think... (o.o)"]
+pt = [
+    "eu sei a resposta! é 42 ^_^",
+    "hmm, deixa eu pensar... (o.o)",
+    "boa pergunta! não faço ideia ^_^",
+    "segundo meus cálculos... sei lá :3",
+]
+en = [
+    "i know the answer! it's 42 ^_^",
+    "hmm, let me think... (o.o)",
+    "good question! no idea ^_^",
+    "according to my calculations... dunno :3",
+]
+de = [
+    "gute Frage! keine Ahnung ^_^",
+]

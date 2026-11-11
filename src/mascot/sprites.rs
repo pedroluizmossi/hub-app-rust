@@ -874,3 +874,10 @@ pub static SPRITES: &[Sprite] = &[
 pub fn get(key: &str) -> &'static Sprite {
     SPRITES.iter().find(|s| s.key == key).unwrap_or(&SPRITES[0])
 }
+
+/// As alternativas de uma opção são mascotes: todas são chaves de `SPRITES` (ou "auto"), e
+/// há pelo menos uma mascote. É como o hub reconhece uma opção de mascote num manifesto.
+pub fn is_choice(options: &[String]) -> bool {
+    let sprite = |o: &String| SPRITES.iter().any(|s| s.key == *o);
+    options.iter().any(sprite) && options.iter().all(|o| o == "auto" || sprite(o))
+}

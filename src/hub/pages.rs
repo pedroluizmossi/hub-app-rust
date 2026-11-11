@@ -76,6 +76,7 @@ impl Hub {
         self.ui.set_pages(ModelRc::new(VecModel::from(infos)));
         self.ui.set_page_names(ModelRc::new(VecModel::from(names)));
         self.ui.set_mascots(ModelRc::new(VecModel::from(mascots)));
+        self.ui.set_mascot_images(ModelRc::new(VecModel::from(super::settings::mascot_images(theme))));
         self.ui.set_page(current as i32);
     }
 

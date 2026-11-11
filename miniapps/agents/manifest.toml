@@ -1,0 +1,45 @@
+id = "cyber.agents"
+name = "Agentes de IA"
+description = "Sessões do Claude Code, Codex e OpenCode: quem está trabalhando, quem espera você e quem já terminou."
+icon = "robo"
+api = 1
+uses = ["agents"]
+
+[permissions]
+# só para retomar uma sessão parada num terminal (`codex resume <id>`, `opencode -s <id>`)
+exec = ["codex", "opencode"]
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
+
+[[settings]]
+key = "recent"
+label = "Mostrar sessões paradas há até (min)"
+type = "int"
+default = 60
+min = 5
+max = 720
+step = 5
+
+[[settings]]
+key = "notify_waiting"
+label = "Notificar quando um agente esperar por você"
+type = "bool"
+default = false
+
+[[settings]]
+key = "notify_done"
+label = "Notificar quando um agente terminar"
+type = "bool"
+default = false
+
+[[settings]]
+key = "mascot"
+label = "Mascote"
+type = "choice"
+default = "robo"
+options = ["robo", "coruja", "polvo", "neko", "hacker", "kitsune", "rato", "morcego"]

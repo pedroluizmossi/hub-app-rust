@@ -452,6 +452,169 @@ export component Select inherits Rectangle {
     }
 }
 
+// Miniatura de uma mascote num seletor. Imagem vazia = opção sem desenho ("Automático"),
+// mostrada com um brilho em pixel.
+component MascotThumb inherits Rectangle {
+    in property <image> source;
+    in property <color> ink: Skin.accent;
+    if source.width > 0: Image {
+        source: root.source;
+        image-rendering: pixelated;
+        width: min(root.width, root.height * 16 / 14);
+        height: self.width * 14 / 16;
+    }
+    if source.width == 0: Path {
+        width: min(root.width, root.height) * 0.6;
+        height: self.width;
+        commands: "M3 0h1v2H3zM3 5h1v2H3zM0 3h2v1H0zM5 3h2v1H5zM2 2h3v3H2z";
+        viewbox-width: 7;
+        viewbox-height: 7;
+        fill: ink;
+        anti-alias: false;
+    }
+}
+
+// Seletor de mascote: o botão mostra a mascote atual desenhada e o nome; ao clicar, abre
+// uma grade com todas (imagem e nome), que rola. `images[i]` é o desenho de `options[i]`.
+// A grade fica alinhada à direita do botão e usa quantas colunas couberem até a borda
+// esquerda da janela.
+export component MascotSelect inherits Rectangle {
+    in property <[string]> options;
+    in property <[image]> images;
+    in property <int> index;
+    in property <color> accent: Skin.accent;
+    in property <string> label;
+    callback chosen(int);
+    width: 240px;
+    height: 36px;
+    border-width: 1px;
+    border-color: touch.has-hover ? accent : Skin.field-edge;
+    background: Skin.field;
+    accessible-role: combobox;
+    accessible-label: label;
+    accessible-value: options[index];
+    accessible-action-default => { popup.show(); }
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            MascotThumb { width: 30px; height: 26px; source: images[index]; ink: accent; }
+        }
+        Text {
+            text: options[index];
+            color: Skin.ink;
+            font-size: 14px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { icon: Icons.chevron; ink: accent; size: 14px; }
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+
+    // Mesma espera do `Select`: a escolha só é avisada depois que a grade fechou.
+    property <int> picked: -1;
+    changed picked => {
+        if picked >= 0 {
+            root.chosen(picked);
+            picked = -1;
+        }
+    }
+
+    property <length> tile-w: 66px;
+    property <length> tile-h: 66px;
+    // espaço do lado esquerdo da janela até a borda direita do botão: a grade cabe nele
+    property <length> room: self.absolute-position.x + self.width - 12px;
+    property <int> cols: max(2, min(5, floor(room / tile-w)));
+    property <int> rows: ceil(options.length / cols);
+    property <length> full-h: rows * tile-h;
+    // no máximo 4 linhas e um pedaço da quinta (avisa que há mais); o resto rola
+    property <length> list-h: min(full-h, 4.4 * tile-h);
+    property <length> grid-w: cols * tile-w;
+
+    popup := PopupWindow {
+        x: root.width - self.width;
+        y: root.height + 2px;
+        width: grid-w + 8px;
+        height: list-h + 2px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Skin.field;
+            border-width: 1px;
+            border-color: accent;
+            flick := Flickable {
+                x: 1px;
+                y: 1px;
+                width: grid-w;
+                height: list-h;
+                content-width: self.width;
+                content-height: full-h;
+                // abre com a linha da mascote atual à vista (uma acima, para dar contexto)
+                content-y: -max(0px, min((floor(index / cols) - 1) * tile-h, full-h - list-h));
+                for o[i] in options: Rectangle {
+                    x: mod(i, cols) * tile-w;
+                    y: floor(i / cols) * tile-h;
+                    width: tile-w;
+                    height: tile-h;
+                    Rectangle {
+                        x: 2px;
+                        y: 2px;
+                        width: parent.width - 4px;
+                        height: parent.height - 4px;
+                        background: i == index ? accent.with-alpha(0.18) : item.has-hover ? Skin.hover : transparent;
+                        border-width: i == index ? 1px : 0;
+                        border-color: accent;
+                    }
+                    MascotThumb {
+                        x: (parent.width - self.width) / 2;
+                        y: 6px;
+                        width: 44px;
+                        height: 38px;
+                        source: images[i];
+                        ink: accent;
+                    }
+                    Text {
+                        x: 3px;
+                        y: parent.height - 19px;
+                        width: parent.width - 6px;
+                        text: o;
+                        color: i == index ? accent : Skin.ink;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                    item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.picked = i;
+                            popup.close();
+                        }
+                    }
+                }
+            }
+            // onde estamos na grade, quando ela rola
+            if full-h > list-h: Rectangle {
+                x: parent.width - 5px;
+                y: 1px + (-flick.content-y / full-h) * list-h;
+                width: 3px;
+                height: list-h * (list-h / full-h);
+                background: accent.with-alpha(0.55);
+            }
+        }
+    }
+}
+
 // Barra segmentada; `part` (ex.: o que é do Docker) aparece por cima.
 export component SegBar inherits Rectangle {
     in property <Colors> theme;

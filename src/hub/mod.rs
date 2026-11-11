@@ -116,6 +116,7 @@ impl Hub {
         registry.add(crate::apps::ai_usage::AiUsageMini::create(host.clone(), &ui) as AppRef);
         registry.add(crate::apps::ports::PortsMini::create(host.clone(), &ui) as AppRef);
         registry.add(crate::apps::todo::TodoMini::create(host.clone(), &ui) as AppRef);
+        registry.add(crate::apps::agents::AgentsMini::create(host.clone(), &ui) as AppRef);
 
         let hub = Rc::new(Hub {
             host,

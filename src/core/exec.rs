@@ -92,6 +92,11 @@ impl Exec {
 
     /// Abre um terminal rodando `argv` (o programa precisa estar na allowlist).
     pub fn open_terminal(&self, title: &str, argv: &[&str]) -> anyhow::Result<()> {
+        self.open_terminal_in(title, None, argv)
+    }
+
+    /// Como `open_terminal`, começando na pasta `dir` (`None` = a pasta pessoal).
+    pub fn open_terminal_in(&self, title: &str, dir: Option<&std::path::Path>, argv: &[&str]) -> anyhow::Result<()> {
         let program = argv.first().ok_or_else(|| anyhow::anyhow!("comando vazio"))?;
         self.check(program)?;
         // caminho completo: o terminal pode não ter as pastas do usuário no PATH
@@ -103,10 +108,22 @@ impl Exec {
         } else if term.ends_with("xfce4-terminal") || term.ends_with("gnome-terminal") {
             cmd.args(["--title", title]);
         }
+        let dir = dir.filter(|d| d.is_dir());
+        // o konsole pode reaproveitar um processo já aberto, com outra pasta: pede a pasta nele
+        if let (Some(dir), true) = (dir, term.ends_with("konsole")) {
+            cmd.arg("--workdir").arg(dir);
+        }
         cmd.args(prefix).arg(&path).args(&argv[1..]);
-        // começa na pasta pessoal, não na pasta de onde o app foi aberto
-        if let Some(home) = std::env::var_os("HOME") {
-            cmd.current_dir(home);
+        // sem pasta pedida, começa na pessoal, não na pasta de onde o app foi aberto
+        match dir {
+            Some(dir) => {
+                cmd.current_dir(dir);
+            }
+            None => {
+                if let Some(home) = std::env::var_os("HOME") {
+                    cmd.current_dir(home);
+                }
+            }
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         cmd.spawn()?;
@@ -227,6 +244,29 @@ pub fn open_url(url: &str) {
         return;
     }
     let _ = Command::new("xdg-open").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
+/// Abre uma pasta no gerenciador de arquivos padrão (serviço do host, fora da allowlist).
+/// Só pastas que existem: nada de abrir arquivo ou endereço por este caminho.
+pub fn open_dir(dir: &std::path::Path) -> bool {
+    dir.is_absolute()
+        && dir.is_dir()
+        && Command::new("xdg-open").arg(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
+}
+
+/// Abre um terminal na pasta `dir`, com o shell do usuário (serviço do host, fora da
+/// allowlist: não roda nenhum programa escolhido pelo mini-app).
+pub fn open_terminal_at(dir: &std::path::Path) -> anyhow::Result<()> {
+    anyhow::ensure!(dir.is_absolute() && dir.is_dir(), "pasta não encontrada: {}", dir.display());
+    let (term, _) = terminal().ok_or_else(|| anyhow::anyhow!("nenhum terminal encontrado (defina $TERMINAL)"))?;
+    let mut cmd = Command::new(&term);
+    // o konsole pode reaproveitar um processo já aberto, com outra pasta: pede a pasta nele
+    if term.ends_with("konsole") {
+        cmd.arg("--workdir").arg(dir);
+    }
+    cmd.current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.spawn()?;
+    Ok(())
 }
 
 pub fn which(program: &str) -> bool {

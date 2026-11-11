@@ -1,39 +1,140 @@
 # Falas genéricas das mascotes: valem para qualquer app que não declarou aquele caso no
 # próprio miniapps/<app>/lines.toml. Formato e lacunas: src/core/chatter.rs.
+#
+# Tom: fofo na maioria; algumas falas são bravas, com palavrão (as com ">:("), para a
+# mascote perder a paciência de vez em quando. O diretor não repete as últimas falas ditas.
 
 [poked]
-pt = ["ei! cócegas não! (>_<)", "hihi, isso faz cosquinha!", "opa! tô acordado, tô acordado!", "me cutucou? quer brincar? :3"]
-en = ["hey! no tickling! (>_<)", "hehe, that tickles!", "boop! you found me :3"]
-de = ["hey! nicht kitzeln! (>_<)"]
+pt = [
+    "ei! cócegas não! (>_<)",
+    "hihi, isso faz cosquinha!",
+    "opa! tô acordado, tô acordado!",
+    "me cutucou? quer brincar? :3",
+    "boop! de novo? hihi",
+    "ai! meu pixel! (>_<)",
+    "tava trabalhando, juro! ...tá, tava dormindo zzz",
+    "para de me cutucar, porra! >:(",
+    "cutuca a sua avó! >:(",
+]
+en = [
+    "hey! no tickling! (>_<)",
+    "hehe, that tickles!",
+    "boop! you found me :3",
+    "boop! again? hehe",
+    "ow! my pixel! (>_<)",
+    "i was working! ...okay, i was napping zzz",
+    "stop poking me, damn it! >:(",
+    "go poke someone else, jerk! >:(",
+]
+de = [
+    "hey! nicht kitzeln! (>_<)",
+    "hör auf, verdammt! >:(",
+]
 
 [reply.poked]
-pt = ["{a} tá virando celebridade ^_^", "eu vi isso! hihi", "cutuca eu também! o/"]
-en = ["{a} is so popular today ^_^", "i saw that! hehe", "poke me too! o/"]
-de = ["ich hab's gesehen! hihi"]
+pt = [
+    "{a} tá virando celebridade ^_^",
+    "eu vi isso! hihi",
+    "cutuca eu também! o/",
+    "hihi, {a} levou um susto!",
+    "bem feito, {a}! tava folgado demais >:)",
+]
+en = [
+    "{a} is so popular today ^_^",
+    "i saw that! hehe",
+    "poke me too! o/",
+    "hehe, {a} got startled!",
+    "serves you right, {a}! >:)",
+]
+de = [
+    "ich hab's gesehen! hihi",
+    "armer {a}! hihi",
+]
 
 [trouble]
-pt = ["socorro! {s} tá no vermelho! (>_<)", "aaah, {s} passou do limite!", "{s} em {v}%... tá pegando fogo!! (T_T)"]
-en = ["help! {s} is in the red! (>_<)", "aaah, {s} went over the limit!", "{s} at {v}%... it's on fire!! (T_T)"]
-de = ["Hilfe! {s} ist im roten Bereich! (>_<)"]
+pt = [
+    "socorro! {s} tá no vermelho! (>_<)",
+    "aaah, {s} passou do limite!",
+    "{s} em {v}%... tá pegando fogo!! (T_T)",
+    "puta merda, {s} tá no vermelho! >:(",
+    "que merda, {s} em {v}%! assim não dá >:(",
+]
+en = [
+    "help! {s} is in the red! (>_<)",
+    "aaah, {s} went over the limit!",
+    "{s} at {v}%... it's on fire!! (T_T)",
+    "holy shit, {s} is in the red! >:(",
+    "damn it, {s} at {v}%! come on >:(",
+]
+de = [
+    "Hilfe! {s} ist im roten Bereich! (>_<)",
+    "Scheiße! {s} ist im roten Bereich! >:(",
+]
 
 [reply.trouble]
-pt = ["respira, {a}! tô aqui com você <3", "calma, calma... vai passar ^^", "abraço de pixel pra você, {a}! <3"]
-en = ["breathe, {a}! i'm right here <3", "easy, easy... it'll pass ^^", "pixel hug for you, {a}! <3"]
-de = ["ruhig, {a}! ich bin da <3"]
+pt = [
+    "respira, {a}! tô aqui com você <3",
+    "calma, calma... vai passar ^^",
+    "abraço de pixel pra você, {a}! <3",
+    "vai dar certo, {a}! tô torcendo \\o/",
+    "aguenta firme, {a}! que dia de merda, hein",
+]
+en = [
+    "breathe, {a}! i'm right here <3",
+    "easy, easy... it'll pass ^^",
+    "pixel hug for you, {a}! <3",
+    "it'll be okay, {a}! rooting for you \\o/",
+    "hang in there, {a}! what a shitty day, huh",
+]
+de = [
+    "ruhig, {a}! ich bin da <3",
+    "das wird schon, {a}! \\o/",
+]
 
 [strain]
-pt = ["{s} em {v}%... tô suando aqui :3", "ufa! {s} tá trabalhando pesado"]
-en = ["{s} at {v}%... i'm sweating here :3", "phew! {s} is working hard"]
+pt = [
+    "{s} em {v}%... tô suando aqui :3",
+    "ufa! {s} tá trabalhando pesado",
+    "{s} em {v}%! quem é o folgado aí, hein?! >:(",
+]
+en = [
+    "{s} at {v}%... i'm sweating here :3",
+    "phew! {s} is working hard",
+    "{s} at {v}%! who's the freeloader here?! >:(",
+]
 de = ["{s} bei {v}%... ich schwitze :3"]
 
 [reply.strain]
-pt = ["força, {a}! \\o/", "você consegue, {a}! ^_^"]
-en = ["you got this, {a}! \\o/", "go go {a}! ^_^"]
-de = ["du schaffst das, {a}! \\o/"]
+pt = [
+    "força, {a}! \\o/",
+    "você consegue, {a}! ^_^",
+    "bebe uma aguinha, {a}! :3",
+    "não fui eu, juro! (o.o)",
+]
+en = [
+    "you got this, {a}! \\o/",
+    "go go {a}! ^_^",
+    "have some water, {a}! :3",
+    "wasn't me, i swear! (o.o)",
+]
+de = [
+    "du schaffst das, {a}! \\o/",
+    "das war ich nicht! (o.o)",
+]
 
 [forecast]
-pt = ["nesse ritmo {s} não aguenta muito... (o.o)", "{s} tá gastando rápido demais!", "{s} estoura em {v} min se continuar assim!"]
-en = ["{s} won't last long at this pace... (o.o)", "{s} is burning through too fast!", "{s} runs out in {v} min at this pace!"]
+pt = [
+    "nesse ritmo {s} não aguenta muito... (o.o)",
+    "{s} tá gastando rápido demais!",
+    "{s} estoura em {v} min se continuar assim!",
+    "para de gastar {s}, cacete! >:(",
+]
+en = [
+    "{s} won't last long at this pace... (o.o)",
+    "{s} is burning through too fast!",
+    "{s} runs out in {v} min at this pace!",
+    "stop burning {s}, damn it! >:(",
+]
 de = ["{s} hält bei dem Tempo nicht lange... (o.o)"]
 
 [reply.forecast]
@@ -42,21 +143,97 @@ en = ["take it easy, {a}! ^^'", "slow and steady, {a} :3"]
 de = ["immer mit der Ruhe, {a}! ^^'"]
 
 [recovered]
-pt = ["{s} voltou ao normal! \\o/", "ufa, passou! tô bem de novo ^_^"]
-en = ["{s} is back to normal! \\o/", "phew, all better now ^_^"]
-de = ["{s} ist wieder okay! \\o/"]
+pt = [
+    "{s} voltou ao normal! \\o/",
+    "ufa, passou! tô bem de novo ^_^",
+    "{s} voltou. já era hora, cacete! \\o/",
+]
+en = [
+    "{s} is back to normal! \\o/",
+    "phew, all better now ^_^",
+    "{s} is back. about damn time! \\o/",
+]
+de = [
+    "{s} ist wieder okay! \\o/",
+    "{s} läuft wieder. endlich! \\o/",
+]
 
 [reply.recovered]
-pt = ["eba!! (^o^)/", "sabia que você conseguia, {a}! <3"]
-en = ["yay!! (^o^)/", "knew you could do it, {a}! <3"]
-de = ["juhu!! (^o^)/"]
+pt = [
+    "eba!! (^o^)/",
+    "sabia que você conseguia, {a}! <3",
+    "bem-vindo de volta, {a}! ^_^",
+    "ufa, que susto você me deu, {a}! (T_T)",
+]
+en = [
+    "yay!! (^o^)/",
+    "knew you could do it, {a}! <3",
+    "welcome back, {a}! ^_^",
+    "phew, you scared me, {a}! (T_T)",
+]
+de = [
+    "juhu!! (^o^)/",
+    "willkommen zurück, {a}! ^_^",
+]
 
 [idle]
-pt = ["tudo quieto por aqui... :3", "alguém viu o mouse? (o.o)", "tô com sono... zzz", "{b}, você tá bem? ^^", "que dia bom pra rodar uns processos ^_^"]
-en = ["so quiet today... :3", "has anyone seen the mouse? (o.o)", "i'm sleepy... zzz", "{b}, are you okay? ^^"]
-de = ["so ruhig heute... :3"]
+pt = [
+    "tudo quieto por aqui... :3",
+    "alguém viu o mouse? (o.o)",
+    "tô com sono... zzz",
+    "{b}, você tá bem? ^^",
+    "que dia bom pra rodar uns processos ^_^",
+    "só mais cinco minutinhos... zzz",
+    "pra onde vão os pixels quando a janela fecha? (o.o)",
+    "aposto que pisco mais rápido que você, {b}! :3",
+    "contei meus bits hoje. tão todos aqui \\o/",
+    "ei, você aí do outro lado! oi! o/",
+    "sonhei que eu era um ícone de 64 pixels... (o.o)",
+    "que tédio da porra... zzz",
+    "tô de saco cheio de ficar parado aqui >:(",
+]
+en = [
+    "so quiet today... :3",
+    "has anyone seen the mouse? (o.o)",
+    "i'm sleepy... zzz",
+    "{b}, are you okay? ^^",
+    "five more minutes... zzz",
+    "where do pixels go when the window closes? (o.o)",
+    "bet i can blink faster than you, {b}! :3",
+    "counted my bits today. all here \\o/",
+    "hey, you out there! hi! o/",
+    "this is boring as hell... zzz",
+    "i'm so damn tired of sitting here >:(",
+]
+de = [
+    "so ruhig heute... :3",
+    "noch fünf Minuten... zzz",
+    "mir ist so verdammt langweilig >:(",
+]
 
 [reply.idle]
-pt = ["tô ótimo, {a}! ^_^", "shh, tô cochilando... zzz", "eu vi o mouse passando ali! o/", "hihi, também tô de boa :3"]
-en = ["i'm great, {a}! ^_^", "shh, i'm napping... zzz", "i saw the mouse go by! o/"]
-de = ["mir geht's gut, {a}! ^_^"]
+pt = [
+    "tô ótimo, {a}! ^_^",
+    "shh, tô cochilando... zzz",
+    "eu vi o mouse passando ali! o/",
+    "hihi, também tô de boa :3",
+    "hihi, {a}, você pensa cada coisa :3",
+    "hmm? tava distraído contando pixels (o.o)",
+    "fala mais baixo, tem processo dormindo zzz",
+    "concordo com tudo que você disse, {a} ^_^",
+    "cala a boca, {a}, tô tentando dormir! >:(",
+]
+en = [
+    "i'm great, {a}! ^_^",
+    "shh, i'm napping... zzz",
+    "i saw the mouse go by! o/",
+    "hehe, {a}, the things you think of :3",
+    "hm? i was busy counting pixels (o.o)",
+    "keep it down, there are processes sleeping zzz",
+    "shut up, {a}, i'm trying to sleep! >:(",
+]
+de = [
+    "mir geht's gut, {a}! ^_^",
+    "pssst, {a}! ich schlafe zzz",
+    "halt die Klappe, {a}! >:(",
+]

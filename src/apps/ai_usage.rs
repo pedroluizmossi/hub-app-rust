@@ -16,7 +16,7 @@ use crate::providers::ai_usage::{self as provider, UsageSnapshot, UsageWindow};
 use crate::ui::{AiUsageApp, HubWindow, UsageCard, UsageLine};
 
 #[path = "ai_mascots.rs"]
-mod ai_mascots;
+pub(super) mod ai_mascots;
 #[path = "ai_pace.rs"]
 mod ai_pace;
 use ai_pace::Forecast;

@@ -38,6 +38,8 @@ const HOLD_MAX: Duration = Duration::from_millis(5500);
 const GAP: Duration = Duration::from_millis(350);
 /// Intervalo mínimo entre conversas de cutucada.
 const POKE_COOLDOWN: Duration = Duration::from_secs(10);
+/// Quantas falas ditas o diretor lembra para não repetir (ver `pick_text`).
+const RECENT: usize = 32;
 /// Tempo antes de comentar de novo o mesmo assunto (app + assunto + tipo).
 const TOPIC_COOLDOWN: Duration = Duration::from_secs(600);
 
@@ -115,6 +117,9 @@ pub struct Director {
     quiet_since: Option<Instant>,
     /// Calma necessária para o próximo papo à toa (sorteada).
     idle_wait: Duration,
+    /// Últimas falas ditas (o modelo, antes de preencher as lacunas), da mais antiga para
+    /// a mais nova.
+    recent: VecDeque<String>,
     rng: u64,
 }
 
@@ -139,6 +144,7 @@ impl Director {
             topics: HashMap::new(),
             quiet_since: None,
             idle_wait: Duration::from_secs(480),
+            recent: VecDeque::new(),
             rng: seed | 1,
         }
     }
@@ -361,9 +367,29 @@ impl Director {
         if usable(a, lang, ctx) && b.is_none_or(|b| usable(b, lang, ctx)) { lang } else { Lang::Pt }
     }
 
+    /// Sorteia uma variante sem repetir as últimas ditas: primeiro entre as que não saíram
+    /// há pouco; se todas saíram, entre a metade dita há mais tempo (com duas variantes,
+    /// elas se alternam; com uma só, não há o que fazer).
     fn pick_text(&mut self, say: &Say, lang: Lang, ctx: Ctx) -> Option<String> {
         let options: Vec<&String> = say.variants(lang).iter().filter(|t| ctx.allows(t)).collect();
-        self.pick(&options).map(|t| t.to_string())
+        // posição na memória: quanto maior, mais recente; `None` = não saiu há pouco
+        let said = |t: &String| self.recent.iter().rposition(|r| r == t);
+        let fresh: Vec<&String> = options.iter().copied().filter(|t| said(t).is_none()).collect();
+        let pool = if fresh.is_empty() {
+            let mut old = options.clone();
+            old.sort_by_key(|t| said(t));
+            old.truncate(options.len().div_ceil(2));
+            old
+        } else {
+            fresh
+        };
+        let text = self.pick(&pool).map(|t| t.to_string())?;
+        self.recent.retain(|r| *r != text);
+        self.recent.push_back(text.clone());
+        if self.recent.len() > RECENT {
+            self.recent.pop_front();
+        }
+        Some(text)
     }
 
     fn pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T> {
@@ -568,6 +594,30 @@ mod tests {
         names.extend(run(&mut d, &mut t, &voices, 20).into_iter().filter(|n| n != "CPU"));
         assert_eq!(names, ["CPU", "Docker"]);
         assert!(d.view(t).is_none(), "a conversa termina");
+    }
+
+    #[test]
+    fn nao_repete_a_mesma_fala_em_seguida() {
+        let ctx = Ctx { value: None, has_b: true };
+        let say = |n: usize| Say { pt: (0..n).map(|i| format!("fala {i}")).collect(), ..Default::default() };
+        for seed in 1..10 {
+            // quatro variantes: as quatro saem antes de qualquer repetição, e depois
+            // nunca a mesma duas vezes seguidas (nem com só uma no meio)
+            let mut d = Director::with_seed(seed);
+            let four = say(4);
+            let said: Vec<String> = (0..40).map(|_| d.pick_text(&four, Lang::Pt, ctx).unwrap()).collect();
+            let mut first: Vec<&String> = said[..4].iter().collect();
+            first.sort();
+            first.dedup();
+            assert_eq!(first.len(), 4, "{said:?}");
+            assert!(said.windows(3).all(|w| w[0] != w[1] && w[0] != w[2]), "{said:?}");
+            // duas variantes se alternam; uma só continua saindo
+            let two = say(2);
+            let said: Vec<String> = (0..10).map(|_| d.pick_text(&two, Lang::Pt, ctx).unwrap()).collect();
+            assert!(said.windows(2).all(|w| w[0] != w[1]), "{said:?}");
+            assert!(d.pick_text(&say(1), Lang::Pt, ctx).is_some());
+            assert!(d.pick_text(&say(1), Lang::Pt, ctx).is_some());
+        }
     }
 
     #[test]

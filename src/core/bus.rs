@@ -10,7 +10,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::providers::{ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, ports::PortsSnapshot, sys::SysSnapshot};
+use crate::providers::{agents::AgentsSnapshot, ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, ports::PortsSnapshot, sys::SysSnapshot};
 
 /// Um provedor de dados. É o nome usado em `uses` no manifesto (em snake_case) e a chave
 /// de tudo no barramento: um nome errado não compila (ou não passa do parse do manifesto).
@@ -23,6 +23,7 @@ pub enum Topic {
     Media,
     AiUsage,
     Ports,
+    Agents,
 }
 
 impl Topic {
@@ -34,6 +35,7 @@ impl Topic {
             Topic::Media => "media",
             Topic::AiUsage => "ai_usage",
             Topic::Ports => "ports",
+            Topic::Agents => "agents",
         }
     }
 }
@@ -47,6 +49,7 @@ pub enum Event {
     Media(MediaSnapshot),
     AiUsage(UsageSnapshot),
     Ports(PortsSnapshot),
+    Agents(AgentsSnapshot),
 }
 
 impl Event {
@@ -59,6 +62,7 @@ impl Event {
             Event::Media(_) => Topic::Media,
             Event::AiUsage(_) => Topic::AiUsage,
             Event::Ports(_) => Topic::Ports,
+            Event::Agents(_) => Topic::Agents,
         }
     }
 }
@@ -200,7 +204,7 @@ mod tests {
         struct Uses {
             uses: Vec<Topic>,
         }
-        let all = [Topic::Sys, Topic::Gpu, Topic::Docker, Topic::Media, Topic::AiUsage, Topic::Ports];
+        let all = [Topic::Sys, Topic::Gpu, Topic::Docker, Topic::Media, Topic::AiUsage, Topic::Ports, Topic::Agents];
         let text = format!("uses = [{}]", all.map(|t| format!("\"{}\"", t.name())).join(", "));
         assert_eq!(toml::from_str::<Uses>(&text).unwrap().uses, all);
         assert!(toml::from_str::<Uses>("uses = [\"dockre\"]").is_err());

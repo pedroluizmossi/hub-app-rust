@@ -1,12 +1,45 @@
 //! Aba Configurações: a lista de apps e o formulário gerado do manifesto de cada um.
 
-use slint::{ModelRc, SharedString, VecModel};
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use slint::{Image, ModelRc, SharedString, VecModel};
 
 use super::Hub;
 use crate::core::manifest::{Manifest, SettingKind};
 use crate::core::miniapp::AppRef;
+use crate::mascot::themes::Theme;
 use crate::mascot::{Mood, render, sprites, themes};
 use crate::ui::{AppInfo, SettingRow};
+
+thread_local! {
+    /// Mascotes já desenhadas para os seletores, por tema (a UI só existe nesta thread).
+    static GALLERY: RefCell<HashMap<&'static str, Vec<Image>>> = RefCell::new(HashMap::new());
+}
+
+/// Todas as mascotes desenhadas no tema `theme`, na ordem de `sprites::SPRITES`: é o que
+/// os seletores de mascote mostram. Desenha uma vez por tema e reaproveita.
+pub(super) fn mascot_images(theme: &'static Theme) -> Vec<Image> {
+    GALLERY.with(|g| {
+        g.borrow_mut()
+            .entry(theme.key)
+            .or_insert_with(|| sprites::SPRITES.iter().map(|s| render::image(s, theme, Mood::Idle, 1)).collect())
+            .clone()
+    })
+}
+
+/// Desenho de cada alternativa de uma escolha de mascote ("auto" fica sem desenho, e o
+/// seletor mostra um brilho). Vazio se a opção não é de mascote: aí a tela usa a lista.
+fn option_images(options: &[String], theme: &'static Theme) -> Vec<Image> {
+    if !sprites::is_choice(options) {
+        return Vec::new();
+    }
+    let all = mascot_images(theme);
+    options
+        .iter()
+        .map(|o| sprites::SPRITES.iter().position(|s| s.key == *o).map_or_else(Image::default, |i| all[i].clone()))
+        .collect()
+}
 
 /// O que o usuário fez num campo da aba Apps.
 pub(super) enum Input {
@@ -59,6 +92,7 @@ impl Hub {
 
     pub(super) fn settings_of(&self, m: &Manifest) -> Vec<SettingRow> {
         let cfg = self.host.config.borrow();
+        let theme = self.host.theme_for(m);
         m.settings
             .iter()
             .map(|s| {
@@ -84,6 +118,7 @@ impl Hub {
                         s.options.iter().map(|o| SharedString::from(option_label(o))).collect::<Vec<_>>(),
                     )),
                     index: s.options.iter().position(|o| Some(o.as_str()) == v.as_str()).unwrap_or(0) as i32,
+                    images: ModelRc::new(VecModel::from(option_images(&s.options, theme))),
                 }
             })
             .collect()
@@ -141,4 +176,28 @@ fn split_unit(label: &str) -> (String, String) {
         }
     }
     (label.to_string(), String::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconhece_as_opcoes_de_mascote_dos_manifestos() {
+        let docker = Manifest::parse(include_str!("../../miniapps/docker/manifest.toml")).unwrap();
+        let vitals = Manifest::parse(include_str!("../../miniapps/vitals/manifest.toml")).unwrap();
+        assert!(sprites::is_choice(&docker.setting("mascot").unwrap().options));
+        assert!(!sprites::is_choice(&docker.setting("theme").unwrap().options), "tema não é mascote");
+        // "auto" entre as alternativas continua sendo escolha de mascote, e fica sem desenho
+        let gpu = &vitals.setting("gpu_mascot").unwrap().options;
+        assert!(gpu.iter().any(|o| o == "auto") && sprites::is_choice(gpu));
+        let images = option_images(gpu, themes::get("neon"));
+        assert_eq!(images.len(), gpu.len());
+        for (o, img) in gpu.iter().zip(&images) {
+            assert_eq!(img.size().width == 0, o == "auto", "{o}");
+        }
+        assert!(option_images(&docker.setting("theme").unwrap().options, themes::get("neon")).is_empty());
+        // só "auto" (sem nenhuma mascote) não é escolha de mascote
+        assert!(!sprites::is_choice(&["auto".to_string()]));
+    }
 }
