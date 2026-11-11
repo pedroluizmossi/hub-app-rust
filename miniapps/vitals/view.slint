@@ -9,6 +9,7 @@ export struct VitalCard {
     title: string,
     mascot: image,
     mood: string,
+    reaction: string,    // reação curta por cima do humor (src/mascot/anim.rs)
     available: bool,
     value: float,        // 0..100
     value-text: string,  // "37%"
@@ -22,10 +23,13 @@ export struct VitalCard {
 export global VitalsApp {
     in property <Colors> theme;
     in property <[VitalCard]> cards;
+    // clicaram na mascote do cartão (easter egg)
+    callback mascot-poked(int);
 }
 
 component Card inherits Rectangle {
     in property <VitalCard> v;
+    in property <int> index;      // posição do cartão (para o clique na mascote)
     property <Colors> t: VitalsApp.theme;
     property <bool> compact: self.height < 150px;
     property <bool> slim: self.width < 220px;
@@ -48,6 +52,8 @@ component Card inherits Rectangle {
                 theme: t;
                 frame: v.mascot;
                 mood: v.mood;
+                reaction: v.reaction;
+                poked => { VitalsApp.mascot-poked(index); }
                 width: compact || slim ? 48px : 72px;
                 height: compact || slim ? 42px : 63px;
             }
@@ -113,6 +119,7 @@ export component VitalsView inherits Rectangle {
         // o último cartão se estica pelo resto da linha
         property <int> span: i == n - 1 ? cols - c : 1;
         v: v;
+        index: i;
         x: c * (cw + gap);
         y: floor(i / cols) * (ch + gap);
         width: span * cw + (span - 1) * gap;

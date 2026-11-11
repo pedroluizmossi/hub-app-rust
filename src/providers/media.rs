@@ -18,6 +18,14 @@ const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 const PROPS: &str = "org.freedesktop.DBus.Properties";
 /// Depois de falhar, espera isto antes de tentar o barramento de novo.
 const RETRY: Duration = Duration::from_secs(10);
+/// Prazo de cada chamada D-Bus. O zbus não tem prazo por padrão: um player travado
+/// (navegador congelado, processo parado) prenderia a thread do provedor para sempre.
+const CALL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Conexão com o barramento da sessão, com prazo nas chamadas.
+fn connect() -> zbus::Result<Connection> {
+    zbus::blocking::connection::Builder::session()?.method_timeout(CALL_TIMEOUT).build()
+}
 
 /// O que está tocando, num instante.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -110,7 +118,7 @@ impl MediaProvider {
             if self.retry_at.is_some_and(|t| Instant::now() < t) {
                 return self.fail("barramento indisponível");
             }
-            match Connection::session() {
+            match connect() {
                 Ok(c) => {
                     self.conn = Some(c);
                     self.retry_at = None;
@@ -239,7 +247,7 @@ pub fn send(service: &str, verb: &str, seek_us: i64) -> anyhow::Result<()> {
     if !valid_service(service) {
         anyhow::bail!("player inválido");
     }
-    let conn = Connection::session()?;
+    let conn = connect()?;
     match verb {
         "raise" => {
             let root = Proxy::new(&conn, service, PATH, ROOT)?;

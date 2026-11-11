@@ -64,6 +64,8 @@ pub struct Stats {
 pub struct DockerSnapshot {
     pub ok: bool,
     pub error: String,
+    /// O comando `docker` não existe nesta máquina (não é falha: não há o que vigiar).
+    pub missing: bool,
     pub containers: Vec<Container>,
     /// Por nome do container.
     pub stats: HashMap<String, Stats>,
@@ -73,6 +75,15 @@ pub struct DockerSnapshot {
 const PS_EVERY: Duration = Duration::from_secs(15);
 /// `docker stats` roda à parte, e só quando há container rodando.
 const STATS_EVERY: Duration = Duration::from_secs(5);
+/// Com a janela escondida os dados só alimentam o humor da bandeja: cada chamada é um
+/// processo da CLI (e o `stats` ainda espera a segunda amostra), então coleta mais devagar.
+/// As mudanças de estado continuam chegando na hora pelo `docker events`.
+const PS_EVERY_HIDDEN: Duration = Duration::from_secs(60);
+const STATS_EVERY_HIDDEN: Duration = Duration::from_secs(30);
+/// Prazo de uma chamada da CLI: daemon travado ou `DOCKER_HOST` inalcançável não prendem
+/// a thread do provedor (o `stats --no-stream` leva 1 a 2 s por si só).
+const CLI_TIMEOUT: Duration = Duration::from_secs(10);
+const STATS_TIMEOUT: Duration = Duration::from_secs(15);
 /// Espera antes de reconectar o `docker events`: cresce de 2 s até 30 s.
 const RETRY_FIRST: Duration = Duration::from_secs(2);
 const RETRY_MAX: Duration = Duration::from_secs(30);
@@ -91,6 +102,7 @@ pub struct DockerProvider {
     stats: HashMap<String, Stats>,
     ok: bool,
     error: String,
+    missing: bool,
     last_ps: Option<Instant>,
     last_stats: Option<Instant>,
     /// Cache do `docker inspect` por id, junto com o estado em que foi lido.
@@ -102,7 +114,34 @@ pub struct DockerProvider {
 impl DockerProvider {
     /// Chamado a cada segundo enquanto há assinantes. Devolve um snapshot só se algo foi lido.
     pub fn collect(&mut self, poker: &Poker, poked: bool) -> Option<DockerSnapshot> {
-        if !self.watching.swap(true, Ordering::Relaxed) {
+        let now = Instant::now();
+        let (ps_every, stats_every) =
+            if poker.visible() { (PS_EVERY, STATS_EVERY) } else { (PS_EVERY_HIDDEN, STATS_EVERY_HIDDEN) };
+        let mut changed = false;
+
+        // pedido de leitura (evento, ação do usuário, janela abrindo) força tudo
+        if poked || self.last_ps.is_none_or(|t| now - t >= ps_every) {
+            self.last_ps = Some(now);
+            changed = true;
+            match exec::run_timeout("docker", &["ps", "-a", "--no-trunc", "--format", "{{json .}}"], CLI_TIMEOUT) {
+                Ok(out) => {
+                    self.containers = parse_ps(&out);
+                    self.ok = true;
+                    self.missing = false;
+                    self.error.clear();
+                    self.inspect(poked);
+                }
+                Err(e) => {
+                    self.containers.clear();
+                    self.ok = false;
+                    self.missing = e.not_found();
+                    self.error = e.brief();
+                }
+            }
+        }
+
+        // sem o comando não há o que vigiar; a thread sobe quando ele aparecer
+        if !self.missing && !self.watching.swap(true, Ordering::Relaxed) {
             let (p, flag) = (poker.clone(), self.watching.clone());
             std::thread::Builder::new()
                 .name("docker-events".into())
@@ -110,34 +149,13 @@ impl DockerProvider {
                 .expect("não consegui criar a thread do docker events");
         }
 
-        let now = Instant::now();
-        let mut changed = false;
-
-        // pedido de leitura (evento, ação do usuário) força tudo; senão, ps a cada 15 s
-        if poked || self.last_ps.is_none_or(|t| now - t >= PS_EVERY) {
-            self.last_ps = Some(now);
-            changed = true;
-            match exec::run("docker", &args(&["ps", "-a", "--no-trunc", "--format", "{{json .}}"])) {
-                Ok(out) => {
-                    self.containers = parse_ps(&out);
-                    self.ok = true;
-                    self.error.clear();
-                    self.inspect(poked);
-                }
-                Err(e) => {
-                    self.containers.clear();
-                    self.ok = false;
-                    self.error = first_line(&e.to_string());
-                }
-            }
-        }
-
         if self.containers.iter().any(|c| c.state == "running") {
-            if poked || self.last_stats.is_none_or(|t| now - t >= STATS_EVERY) {
+            if poked || self.last_stats.is_none_or(|t| now - t >= stats_every) {
                 self.last_stats = Some(now);
-                self.stats = exec::run("docker", &args(&["stats", "--no-stream", "--format", "{{json .}}"]))
-                    .map(|o| parse_stats(&o))
-                    .unwrap_or_default();
+                self.stats =
+                    exec::run_timeout("docker", &["stats", "--no-stream", "--format", "{{json .}}"], STATS_TIMEOUT)
+                        .map(|o| parse_stats(&o))
+                        .unwrap_or_default();
                 changed = true;
             }
         } else {
@@ -151,6 +169,7 @@ impl DockerProvider {
         changed.then(|| DockerSnapshot {
             ok: self.ok,
             error: self.error.clone(),
+            missing: self.missing,
             containers: self.containers.clone(),
             stats: self.stats.clone(),
         })
@@ -167,11 +186,11 @@ impl DockerProvider {
             .map(|c| c.id.clone())
             .collect();
         if !stale.is_empty() {
-            let mut cmd = Command::new("docker");
-            cmd.args(["inspect", "--format", INSPECT_FORMAT]).arg("--").args(&stale);
+            let mut args = vec!["inspect", "--format", INSPECT_FORMAT, "--"];
+            args.extend(stale.iter().map(String::as_str));
             // um id que sumiu faz o inspect sair com erro, mas os outros vêm no stdout
-            if let Ok(out) = cmd.stdin(Stdio::null()).stderr(Stdio::null()).output() {
-                let got = parse_inspect(&String::from_utf8_lossy(&out.stdout));
+            if let Ok(out) = exec::output_timeout("docker", &args, CLI_TIMEOUT) {
+                let got = parse_inspect(&out.stdout);
                 for c in &self.containers {
                     if let Some(i) = got.get(&c.id) {
                         self.inspected.insert(c.id.clone(), (c.state.clone(), *i));
@@ -267,17 +286,22 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
     while poker.subscribed() {
         let started = Instant::now();
         let spawned = Command::new("docker")
-            .args(["events", "--filter", "type=container", "--format", "{{json .}}"])
+            .args(events_args())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn();
-        let Ok(mut child) = spawned else {
-            if !sleep_subscribed(&poker, retry) {
-                break;
+        let mut child = match spawned {
+            Ok(child) => child,
+            // o comando sumiu: quem decide voltar a vigiar é o `collect`, quando o ps responder
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) => {
+                if !sleep_subscribed(&poker, retry) {
+                    break;
+                }
+                retry = (retry * 2).min(RETRY_MAX);
+                continue;
             }
-            retry = (retry * 2).min(RETRY_MAX);
-            continue;
         };
         // reconectou: eventos perdidos enquanto estava fora são lidos num ps
         if !first {
@@ -329,6 +353,19 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
     watching.store(false, Ordering::Relaxed);
 }
 
+/// Argumentos do `docker events`: o filtro vai para o daemon, para que os eventos que não
+/// interessam (cada `exec_*` de um healthcheck, por exemplo) nem cheguem a acordar a thread.
+/// O daemon casa `health_status` por prefixo ("health_status: healthy").
+fn events_args() -> Vec<String> {
+    let mut a: Vec<String> = vec!["events".into(), "--filter".into(), "type=container".into()];
+    for action in RELEVANT {
+        a.push("--filter".into());
+        a.push(format!("event={action}"));
+    }
+    a.extend(["--format".into(), "{{json .}}".into()]);
+    a
+}
+
 /// Dorme `d`, a menos que o provedor perca os assinantes. `false` se perdeu.
 fn sleep_subscribed(poker: &Poker, d: Duration) -> bool {
     let end = Instant::now() + d;
@@ -351,14 +388,6 @@ fn relevant(line: &str) -> bool {
     // "health_status: healthy" -> "health_status"; "exec_start: sh" fica de fora
     let name = action.split(':').next().unwrap_or_default().trim();
     RELEVANT.contains(&name)
-}
-
-fn args(a: &[&str]) -> Vec<String> {
-    a.iter().map(|s| s.to_string()).collect()
-}
-
-fn first_line(s: &str) -> String {
-    s.lines().next().unwrap_or_default().chars().take(160).collect()
 }
 
 fn str_of(v: &Value, key: &str) -> String {

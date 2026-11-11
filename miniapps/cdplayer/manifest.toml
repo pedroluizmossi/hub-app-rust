@@ -19,6 +19,12 @@ type = "bool"
 default = false
 
 [[settings]]
+key = "tray_controls"
+label = "Mostrar música e controles no menu da bandeja"
+type = "bool"
+default = false
+
+[[settings]]
 key = "seek"
 label = "Pulo de avançar/voltar (s)"
 type = "int"

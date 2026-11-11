@@ -21,9 +21,22 @@ raw-window-handle = "0.6"
 # MPRIS (o que está tocando) pelo mesmo zbus que o ksni já traz; sem dependência nova
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 toml = "1.2.1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+chrono = "0.4"
 
 [build-dependencies]
 slint-build = "1.18.1"
+
+# `cargo run` sem --release: o Slint (renderizador por software) e o desenho dos fundos e das
+# mascotes, pixel a pixel, ficam lentos demais sem otimização. As dependências compilam
+# otimizadas uma vez só (ficam em cache); o código do projeto, com otimização leve, ainda
+# recompila rápido e mantém os símbolos de depuração.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

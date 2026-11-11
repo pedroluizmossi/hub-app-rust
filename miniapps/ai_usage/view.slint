@@ -1,0 +1,100 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors, Skin } from "../../ui/theme.slint";
+import { TextButton } from "../../ui/widgets.slint";
+
+export struct UsageLine {
+    label: string,
+    value: float,
+    detail: string,
+    reset: string,
+    // "alarm" | "busy" | "idle": quem decide os limites é o Rust (um lugar só)
+    level: string,
+}
+
+export struct UsageCard {
+    name: string,
+    status: string,
+    plan: string,
+    stale: bool,
+    lines: [UsageLine],
+}
+
+export global AiUsageApp {
+    in property <Colors> theme;
+    in property <[UsageCard]> cards;
+    callback refresh();
+}
+
+component Meter inherits Rectangle {
+    in property <UsageLine> entry;
+    in property <Colors> t;
+    property <bool> hot: entry.level == "alarm" || entry.level == "busy";
+    property <color> tint: entry.level == "alarm" ? t.alarm : t.warn;
+    height: 43px;
+    background: transparent;
+    VerticalLayout {
+        spacing: 3px;
+        HorizontalLayout {
+            Text { text: entry.label; color: t.sub; font-family: Skin.font-mono; font-size: 11px; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 11px; }
+        }
+        Rectangle {
+            height: 4px;
+            background: t.muted.with-alpha(0.25);
+            Rectangle { height: parent.height; width: parent.width * min(max(entry.value, 0), 100) / 100; background: hot ? tint : t.visor; }
+        }
+        Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 10px; overflow: elide; }
+    }
+}
+
+component AccountCard inherits Rectangle {
+    in property <UsageCard> account;
+    in property <Colors> t;
+    border-width: 1px;
+    border-color: t.muted.with-alpha(0.35);
+    background: t.bg0.mix(t.bg1, 0.6);
+    VerticalLayout {
+        padding: 10px;
+        spacing: 5px;
+        HorizontalLayout {
+            spacing: 9px;
+            Image {
+                width: 32px;
+                height: 28px;
+                source: account.name == "Claude" ? @image-url("icons/claude.svg")
+                    : account.name == "Codex" ? @image-url("icons/codex.svg")
+                    : account.name == "Kiro" ? @image-url("icons/kiro.svg")
+                    : account.name == "OpenCode Go" ? @image-url("icons/opencode.svg")
+                    : @image-url("");
+                image-fit: contain;
+                image-rendering: pixelated;
+            }
+            Text { text: account.name; color: t.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 10px; overflow: elide; vertical-alignment: center; }
+        }
+        Text { text: account.status; color: account.stale ? t.warn : t.muted; font-size: 11px; wrap: word-wrap; }
+        for entry in account.lines: Meter { entry: entry; t: root.t; }
+    }
+}
+
+export component AiUsageView inherits Rectangle {
+    property <Colors> t: AiUsageApp.theme;
+    VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            Text { text: "ASSINATURAS DE IA"; color: t.text; font-family: Skin.font-mono; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            TextButton { text: "Atualizar"; ink: t.visor; height: 28px; font-size: 11px; clicked => { AiUsageApp.refresh(); } }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: start;
+                spacing: 8px;
+                for account in AiUsageApp.cards: AccountCard { account: account; t: root.t; }
+            }
+        }
+    }
+}

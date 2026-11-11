@@ -14,6 +14,35 @@ Mini-apps incluídos:
 - **CD Player**: o que está tocando, pelo MPRIS: disco em pixel art girando, faixa, artista,
   progresso e controles de tocar/pausar, faixa e avançar/voltar. Sem player aberto, fica em
   "sem disco"; com a opção ligada, notifica quando a faixa muda.
+- **Assinaturas de IA**: janelas de uso do Codex, Claude Code e OpenCode Go e créditos do
+  Kiro. Ligue o app em **Configurações › Apps**; ele começa desligado.
+
+Em **Configurações › Apps › CD Player**, a opção **Mostrar música e controles no menu da
+bandeja** acrescenta a faixa e os controles ao menu do ícone. A faixa também aparece no
+tooltip da bandeja. No GNOME é necessária uma extensão de AppIndicator.
+
+### Assinaturas de IA
+
+O MiniUtils consulta diretamente os serviços usando os logins locais dos clientes oficiais.
+Os endpoints de Claude, Codex e Kiro não são públicos e podem mudar. A variável
+`KIRO_API_KEY` tem prioridade sobre o login OAuth no banco do Kiro. A variável deve
+estar presente no ambiente em que o MiniUtils é iniciado.
+
+As consultas ocorrem somente enquanto o mini-app está ligado: Claude, Codex e OpenCode a
+cada três minutos, Kiro a cada quinze. **Atualizar** antecipa as leituras, respeitando a
+pausa após HTTP 429. Em falhas de conexão, o último valor é marcado como antigo; falhas de
+autenticação removem a leitura anterior. O cartão
+do Kiro mostra créditos incluídos, sem somar créditos adicionais.
+
+O Claude usa o login OAuth de `~/.claude/.credentials.json` (ou `CLAUDE_CONFIG_DIR`). Se o
+token estiver vencendo, o MiniUtils tenta renová-lo e gravar o resultado no mesmo arquivo,
+preservando os demais campos. Isso compartilha credenciais com o Claude Code: se ambos
+renovarem simultaneamente, pode ser necessário entrar novamente no Claude. Não imprima nem
+compartilhe esse arquivo. O uso direto não exige uma sessão ativa do Claude Code.
+
+Para Codex, Kiro e OpenCode, o MiniUtils lê as credenciais existentes sem renová-las. Quando
+expirarem, atualize o login no cliente correspondente; o cartão informará a falha. Nenhuma
+conversa é lida ou salva.
 
 A arquitetura e o roteiro estão em [ARCHITECTURE.md](ARCHITECTURE.md). Como criar visuais,
 temas, telas, mini-apps e mascotes está em [DESIGN.md](DESIGN.md).
@@ -31,7 +60,7 @@ Opções:
 
 ```text
 --hidden     inicia só na bandeja (para o autostart)
---tab <id>   abre numa aba: cyber.docker, cyber.vitals ou apps
+--tab <nome> abre numa página do painel (pelo nome, ex.: Geral) ou em apps (configurações)
 ```
 
 Clique na mascote da bandeja: o hub abre como popup junto do ícone e some quando você

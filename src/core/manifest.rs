@@ -2,6 +2,8 @@
 
 use serde::Deserialize;
 
+use super::bus::Topic;
+
 /// Versão do contrato entre host e mini-apps que este binário entende.
 pub const API_VERSION: u32 = 1;
 
@@ -17,7 +19,7 @@ pub struct Manifest {
     pub api: u32,
     /// Provedores de dados que o app assina enquanto está ativo.
     #[serde(default)]
-    pub uses: Vec<String>,
+    pub uses: Vec<Topic>,
     #[serde(default)]
     pub permissions: Permissions,
     #[serde(default)]
@@ -89,6 +91,8 @@ mod tests {
         for text in [
             include_str!("../../miniapps/docker/manifest.toml"),
             include_str!("../../miniapps/vitals/manifest.toml"),
+            include_str!("../../miniapps/cdplayer/manifest.toml"),
+            include_str!("../../miniapps/ai_usage/manifest.toml"),
         ] {
             let m = Manifest::parse(text).unwrap();
             for s in &m.settings {
@@ -99,6 +103,12 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn rejeita_provedor_desconhecido() {
+        assert!(Manifest::parse("id='x'\nname='x'\napi=1\nuses=['sys']").is_ok());
+        assert!(Manifest::parse("id='x'\nname='x'\napi=1\nuses=['sis']").is_err());
     }
 
     #[test]

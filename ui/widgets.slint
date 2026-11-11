@@ -3,14 +3,20 @@
 import { Colors, Moods, Anim, Skin, Icons } from "theme.slint";
 
 // Mascote em pixel art. O quadro (piscar, LED, glitch) vem desenhado do Rust;
-// flutuar e pular são deslocamentos aqui, sem redesenhar a imagem.
+// flutuar e pular são deslocamentos aqui, sem redesenhar a imagem. `reaction` é uma reação
+// curta por cima do humor ("celebrate", "surprised"; ver src/mascot/anim.rs). Cliques na
+// mascote chamam `poked` (o Rust decide se vira easter egg).
 export component Mascot inherits Rectangle {
     in property <Colors> theme;
     in property <image> frame;
     in property <string> mood: "idle";
-    in property <bool> moving: true;
+    in property <string> reaction;
+    in property <bool> moving: !Anim.calm;
     in property <bool> aura: true;
+    callback poked;
     property <int> f: Anim.frame;
+    property <bool> party: reaction == "celebrate";
+    property <bool> startled: reaction == "surprised";
     property <color> accent: Moods.color(theme, mood);
     preferred-width: 64px;
     preferred-height: 56px;
@@ -34,8 +40,12 @@ export component Mascot inherits Rectangle {
         image-rendering: pixelated;
         width: parent.width;
         height: parent.height;
-        x: !moving ? 0 : mood == "alarm" ? (mod(f, 2) == 0 ? -1px : 1px) : 0;
+        x: !moving ? 0
+            : startled ? (mod(f, 2) == 0 ? -2px : 2px)
+            : mood == "alarm" ? (mod(f, 2) == 0 ? -1px : 1px) : 0;
         y: !moving ? 0
+            : party ? (mod(f, 4) < 2 ? -parent.height * 0.24 : 0)
+            : startled ? -parent.height * 0.12
             : mood == "busy" || mood == "happy" ? (mod(f, 4) < 2 ? -parent.height * 0.1 : 0)
             : mood == "idle" ? (mod(f, 16) < 8 ? -parent.height * 0.04 : 0)
             : 0;
@@ -60,6 +70,33 @@ export component Mascot inherits Rectangle {
         font-size: parent.height * 0.3;
         font-weight: 900;
         opacity: mod(f, 4) < 2 ? 1 : 0.3;
+    }
+
+    // comemoração: faíscas quadradas que sobem e somem, em volta da cabeça
+    if party: Rectangle {
+        for k in 4: Rectangle {
+            property <int> step: mod(f + k * 3, 8);
+            property <length> s: max(2px, root.height * 0.07);
+            width: s;
+            height: s;
+            x: root.width * (k == 0 ? 0.04 : k == 1 ? 0.84 : k == 2 ? 0.18 : 0.7);
+            y: root.height * (k < 2 ? 0.3 : 0.05) - step * root.height * 0.035;
+            background: mod(k, 2) == 0 ? theme.ok : theme.visor;
+            opacity: 1 - step / 8;
+        }
+    }
+    // susto (easter egg): "?" em cima da cabeça
+    if startled: Text {
+        text: "?";
+        x: parent.width * 0.8;
+        y: -parent.height * 0.08;
+        color: theme.visor;
+        font-size: parent.height * 0.32;
+        font-weight: 900;
+    }
+
+    TouchArea {
+        clicked => { root.poked(); }
     }
 }
 
@@ -308,22 +345,38 @@ export component Select inherits Rectangle {
     }
 
     property <length> item-h: 32px;
+    // A lista é desenhada dentro da janela: longa demais (32 mascotes), passaria da borda
+    // e as últimas opções não seriam alcançáveis. Mostra no máximo 8 e meia (a meia avisa
+    // que há mais) e o resto rola.
+    property <length> full-h: options.length * item-h;
+    property <length> list-h: min(full-h, 8.5 * item-h);
     // Altura explícita: sem ela o Slint calcula uma área clicável menor que a lista, e um
     // clique na parte de baixo conta como "fora" e fecha a lista sem escolher.
     popup := PopupWindow {
         x: 0;
         y: root.height + 2px;
         width: root.width;
-        height: options.length * item-h + 2px;
+        height: list-h + 2px;
+        // arrastar para rolar termina num clique dentro da lista: só fecha ao escolher ou clicar fora
+        close-policy: close-on-click-outside;
         Rectangle {
             width: 100%;
             height: 100%;
             background: Skin.field;
             border-width: 1px;
             border-color: accent;
-            VerticalLayout {
-                padding: 1px;
+            flick := Flickable {
+                x: 1px;
+                y: 1px;
+                width: parent.width - 2px;
+                height: list-h;
+                content-width: self.width;
+                content-height: full-h;
+                // abre com a opção atual à vista (algumas acima dela, para dar contexto)
+                content-y: -max(0px, min((index - 3) * item-h, full-h - list-h));
                 for o[i] in options: Rectangle {
+                    y: i * item-h;
+                    width: flick.width;
                     height: item-h;
                     background: i == index ? accent.with-alpha(0.18) : item.has-hover ? Skin.hover : transparent;
                     HorizontalLayout {
@@ -339,9 +392,20 @@ export component Select inherits Rectangle {
                     }
                     item := TouchArea {
                         mouse-cursor: pointer;
-                        clicked => { root.chosen(i); }
+                        clicked => {
+                            popup.close();
+                            root.chosen(i);
+                        }
                     }
                 }
+            }
+            // onde estamos na lista, quando ela rola
+            if full-h > list-h: Rectangle {
+                x: parent.width - 4px;
+                y: 1px + (-flick.content-y / full-h) * list-h;
+                width: 3px;
+                height: list-h * (list-h / full-h);
+                background: accent.with-alpha(0.55);
             }
         }
     }

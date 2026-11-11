@@ -22,7 +22,7 @@ pub fn display_name() -> String {
 
 /// Versão atual do formato do arquivo. Ao mudar a estrutura, suba o número e
 /// acrescente a migração correspondente em `migra`.
-pub const VERSAO_ATUAL: u32 = 3;
+pub const VERSAO_ATUAL: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -31,13 +31,19 @@ pub struct Config {
     pub version: u32,
     /// Nome exibido na janela, na bandeja e nas notificações (o usuário pode trocar).
     pub name: String,
-    /// Colunas da grade do painel.
-    pub columns: u32,
-    /// Linhas da grade do painel.
-    pub rows: u32,
+    /// Páginas do painel (a barra lateral), cada uma com a sua grade e os seus apps.
+    pub pages: Vec<Page>,
     /// Visual da janela (ver `src/skin`).
     pub skin: String,
-    /// Posição e tamanho de cada app na grade, em células: `[layout."cyber.docker"]`.
+    /// Reduzir movimento: mascotes sem pulos nem tremores, e sem reações nem easter eggs.
+    pub reduce_motion: bool,
+    /// Onde ficam as páginas: `"side"` (barra lateral) ou `"top"` (abas no cabeçalho).
+    pub nav: String,
+    /// Mascote do ícone da bandeja: `"auto"` (a do app em pior estado) ou uma mascote.
+    pub tray_icon: String,
+    /// Tema do ícone da bandeja: `"auto"` (o do app mostrado) ou um tema.
+    pub tray_theme: String,
+    /// Posição e tamanho de cada app na grade da sua página, em células: `[layout."cyber.docker"]`.
     pub layout: BTreeMap<String, Rect>,
     /// Tamanho da janela em pixels lógicos (lembrado entre aberturas).
     pub window: Option<(u32, u32)>,
@@ -48,6 +54,28 @@ pub struct Config {
     /// Como salvar, conforme o arquivo lido (não vai para o TOML).
     #[serde(skip)]
     estado: Estado,
+}
+
+/// Uma página do painel: aparece na barra lateral e tem a própria grade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Page {
+    /// Nome mostrado na barra lateral.
+    pub name: String,
+    /// Mascote do ícone na barra lateral (chave de `mascot::sprites`).
+    pub icon: String,
+    /// Colunas da grade.
+    pub columns: u32,
+    /// Linhas da grade.
+    pub rows: u32,
+    /// Apps desta página, ligados ou não. Um app fica em uma página só.
+    pub apps: Vec<String>,
+}
+
+impl Default for Page {
+    fn default() -> Self {
+        Page { name: "Geral".into(), icon: "neko".into(), columns: 2, rows: 1, apps: Vec::new() }
+    }
 }
 
 /// O que fazer ao salvar, conforme o arquivo que foi lido.
@@ -66,9 +94,15 @@ impl Default for Config {
         Config {
             version: VERSAO_ATUAL,
             name: APP_NAME.into(),
-            columns: 2,
-            rows: 1,
+            pages: vec![Page {
+                apps: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
+                ..Page::default()
+            }],
             skin: "neon".into(),
+            reduce_motion: false,
+            nav: "side".into(),
+            tray_icon: "auto".into(),
+            tray_theme: "auto".into(),
             window: None,
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
@@ -79,33 +113,95 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Retângulos dos apps ligados, na ordem de `enabled`.
-    pub fn rects(&self) -> Vec<Rect> {
-        self.enabled.iter().map(|id| self.layout.get(id).copied().unwrap_or(Rect::new(0, 0, 1, 1))).collect()
+    /// Página onde o app está, se estiver em alguma.
+    pub fn page_of(&self, id: &str) -> Option<usize> {
+        self.pages.iter().position(|p| p.apps.iter().any(|a| a == id))
     }
 
-    /// Garante que todo app ligado tem lugar na grade e que ninguém se sobrepõe. Cada um
-    /// fica onde está se couber; senão vai para a primeira vaga e, sem vaga, a grade cresce.
-    /// Devolve `true` se mudou algo.
-    pub fn arrange(&mut self) -> bool {
-        let before = (self.columns, self.rows, self.layout.clone());
-        self.columns = self.columns.clamp(1, layout::MAX_COLS);
-        self.rows = self.rows.clamp(1, layout::MAX_ROWS);
-        let (cols, mut rows) = (self.columns, self.rows);
+    /// Apps ligados da página, na ordem da página.
+    pub fn page_apps(&self, page: usize) -> Vec<String> {
+        self.pages.get(page).map_or_else(Vec::new, |p| p.apps.iter().filter(|a| self.is_enabled(a)).cloned().collect())
+    }
 
-        let mut placed: Vec<Rect> = Vec::new();
-        for id in &self.enabled {
-            // sem lugar guardado: uma célula, na primeira vaga
-            let want = self.layout.get(id).copied().unwrap_or(Rect::new(cols, 0, 1, 1));
-            let (r, used) = layout::add(&placed, want, cols, rows);
-            rows = used;
-            placed.push(r);
+    /// Retângulos dos apps ligados da página, na ordem de `page_apps`.
+    pub fn rects(&self, page: usize) -> Vec<Rect> {
+        self.page_apps(page).iter().map(|id| self.layout.get(id).copied().unwrap_or(Rect::new(0, 0, 1, 1))).collect()
+    }
+
+    /// Põe o app no fim da página `to` (tirando-o de onde estava). A posição é escolhida
+    /// pelo próximo `arrange`: fica onde estava se couber, senão vai para a primeira vaga.
+    pub fn move_to_page(&mut self, id: &str, to: usize) {
+        if to >= self.pages.len() || self.page_of(id) == Some(to) {
+            return;
         }
-        for (id, r) in self.enabled.iter().zip(placed) {
-            self.layout.insert(id.clone(), r);
+        for p in &mut self.pages {
+            p.apps.retain(|a| a != id);
         }
-        self.rows = rows;
-        before != (self.columns, self.rows, self.layout.clone())
+        self.pages[to].apps.push(id.to_string());
+    }
+
+    /// Página nova no fim, com uma mascote que ainda não está em uso. Devolve o índice.
+    pub fn add_page(&mut self) -> usize {
+        let n = self.pages.len() + 1;
+        let icon = crate::mascot::sprites::SPRITES
+            .iter()
+            .map(|s| s.key)
+            .find(|k| !self.pages.iter().any(|p| p.icon == *k))
+            .unwrap_or("neko");
+        self.pages.push(Page { name: format!("Página {n}"), icon: icon.into(), ..Page::default() });
+        self.pages.len() - 1
+    }
+
+    /// Apaga a página; os apps dela vão para a anterior (ou a primeira). A última não sai.
+    pub fn remove_page(&mut self, i: usize) -> bool {
+        if self.pages.len() <= 1 || i >= self.pages.len() {
+            return false;
+        }
+        let page = self.pages.remove(i);
+        let dest = i.saturating_sub(1).min(self.pages.len() - 1);
+        self.pages[dest].apps.extend(page.apps);
+        true
+    }
+
+    /// Garante que há ao menos uma página e que todo app ligado está em exatamente uma.
+    fn ensure_pages(&mut self) {
+        if self.pages.is_empty() {
+            self.pages.push(Page::default());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for p in &mut self.pages {
+            p.apps.retain(|a| seen.insert(a.clone()));
+        }
+        let orphans: Vec<String> = self.enabled.iter().filter(|id| !seen.contains(*id)).cloned().collect();
+        self.pages[0].apps.extend(orphans);
+    }
+
+    /// Garante que todo app ligado tem página e lugar na grade, e que ninguém se sobrepõe.
+    /// Cada um fica onde está se couber; senão vai para a primeira vaga e, sem vaga, a grade
+    /// cresce. Devolve `true` se mudou algo.
+    pub fn arrange(&mut self) -> bool {
+        let before = (self.pages.clone(), self.layout.clone());
+        self.ensure_pages();
+        for i in 0..self.pages.len() {
+            let ids = self.page_apps(i);
+            let p = &mut self.pages[i];
+            p.columns = p.columns.clamp(1, layout::MAX_COLS);
+            p.rows = p.rows.clamp(1, layout::MAX_ROWS);
+            let (cols, mut rows) = (p.columns, p.rows);
+            let mut placed: Vec<Rect> = Vec::new();
+            for id in &ids {
+                // sem lugar guardado: uma célula, na primeira vaga
+                let want = self.layout.get(id).copied().unwrap_or(Rect::new(cols, 0, 1, 1));
+                let (r, used) = layout::add(&placed, want, cols, rows);
+                rows = used;
+                placed.push(r);
+            }
+            for (id, r) in ids.iter().zip(placed) {
+                self.layout.insert(id.clone(), r);
+            }
+            self.pages[i].rows = rows;
+        }
+        before != (self.pages.clone(), self.layout.clone())
     }
 
     pub fn path() -> PathBuf {
@@ -151,6 +247,11 @@ impl Config {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Config::default();
         };
+        // Vazio não é uma config antiga (sem `version`), é uma gravação que não terminou:
+        // migrá-lo guardaria um backup vazio e gravaria os padrões como se fossem escolha.
+        if text.trim().is_empty() {
+            return Config::default();
+        }
         let mut tabela: toml::Table = match text.parse() {
             Ok(t) => t,
             Err(e) => return Self::quebrada(&e.to_string()),
@@ -223,7 +324,7 @@ impl Config {
         }
         match toml::to_string_pretty(self) {
             Ok(text) => {
-                if let Err(e) = std::fs::write(path, text) {
+                if let Err(e) = write_atomic(path, text.as_bytes()) {
                     eprintln!("miniutils: não consegui salvar {}: {e}", path.display());
                 }
             }
@@ -262,6 +363,24 @@ impl Config {
     }
 }
 
+/// Grava `bytes` em `path` sem nunca deixar o arquivo pela metade: escreve num temporário
+/// ao lado, garante que foi para o disco e só então o põe no lugar (o `rename` é atômico).
+/// Disco cheio, queda de energia ou o processo morto no meio deixam o arquivo anterior intacto.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = com_sufixo(path, ".tmp");
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
 /// Desserializa a tabela TOML (já migrada) na configuração.
 fn desserializa(tabela: toml::Table) -> Result<Config, String> {
     toml::Value::Table(tabela).try_into::<Config>().map_err(|e| e.to_string())
@@ -274,6 +393,7 @@ fn migra(t: &mut toml::Table, de: u32) {
             0 => migra_0_para_1(t),
             1 => migra_1_para_2(t),
             2 => migra_2_para_3(t),
+            3 => migra_3_para_4(t),
             _ => {}
         }
     }
@@ -334,6 +454,19 @@ fn migra_2_para_3(t: &mut toml::Table) {
     if !lista.iter().any(|v| v.as_str() == Some("cyber.cd")) {
         lista.push(toml::Value::String("cyber.cd".to_string()));
     }
+}
+
+/// v3 -> v4: a grade única vira a página "Geral" (barra lateral), com as colunas, as
+/// linhas e os apps ligados de antes. As posições em `layout` continuam valendo.
+fn migra_3_para_4(t: &mut toml::Table) {
+    let mut page = toml::Table::new();
+    page.insert("name".into(), toml::Value::String("Geral".into()));
+    page.insert("icon".into(), toml::Value::String("neko".into()));
+    page.insert("columns".into(), t.remove("columns").unwrap_or(toml::Value::Integer(2)));
+    page.insert("rows".into(), t.remove("rows").unwrap_or(toml::Value::Integer(1)));
+    let apps = t.get("enabled").cloned().unwrap_or_else(|| toml::Value::Array(Vec::new()));
+    page.insert("apps".into(), apps);
+    t.insert("pages".into(), toml::Value::Array(vec![toml::Value::Table(page)]));
 }
 
 fn rect_toml(r: Rect) -> toml::Value {
@@ -403,6 +536,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn arquivo_vazio_nao_e_migrado_e_a_gravacao_nao_deixa_resto() {
+        let tmp = Tmp::new("vazio");
+        let path = tmp.arquivo();
+        // uma gravação antiga interrompida deixou o arquivo vazio
+        std::fs::write(&path, "  \n").unwrap();
+        let mut cfg = Config::load_from(&path);
+        assert!(cfg.estado == Estado::Normal);
+        // nada de backup de um arquivo vazio, nem regravação "migrada"
+        assert_eq!(std::fs::read_dir(&tmp.0).unwrap().count(), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "  \n");
+
+        cfg.name = "Meu hub".into();
+        cfg.save_to(&path);
+        // o temporário virou o arquivo; não sobra nada ao lado
+        assert_eq!(std::fs::read_dir(&tmp.0).unwrap().count(), 1);
+        assert_eq!(Config::load_from(&path).name, "Meu hub");
+
+        // sem conseguir gravar (o destino é um diretório), o que existe fica como está
+        let ocupado = tmp.0.join("ocupado");
+        std::fs::create_dir_all(ocupado.join("dentro")).unwrap();
+        assert!(write_atomic(&ocupado, b"x").is_err());
+        assert!(ocupado.join("dentro").is_dir());
+        assert!(!com_sufixo(&ocupado, ".tmp").exists());
+    }
+
     const V0: &str = r#"
 columns = 3
 enabled = ["cyber.docker", "cyber.vitals"]
@@ -420,7 +579,7 @@ warn = 70
 
         let cfg = Config::load_from(&t.arquivo());
         assert_eq!(cfg.version, VERSAO_ATUAL);
-        assert_eq!(cfg.columns, 3);
+        assert_eq!(cfg.pages[0].columns, 3);
         assert_eq!(cfg.apps["cyber.docker"]["theme"].as_str(), Some("matrix"));
         assert_eq!(cfg.apps["cyber.vitals"]["theme"].as_str(), Some("matrix"));
         assert_eq!(cfg.apps["cyber.vitals"]["warn"].as_integer(), Some(70));
@@ -462,7 +621,7 @@ warn = 70
         assert_eq!(cfg.layout["cyber.docker"], Rect::new(0, 0, 2, 1));
         assert_eq!(cfg.layout["cyber.vitals"], Rect::new(2, 0, 1, 2));
         assert_eq!(cfg.layout["outro"], Rect::new(0, 0, 2, 1));
-        assert_eq!(cfg.rows, 2);
+        assert_eq!(cfg.pages[0].rows, 2);
         assert!(com_sufixo(&t.arquivo(), ".bak").exists());
     }
 
@@ -483,24 +642,75 @@ warn = 70
 
     #[test]
     fn arrange_acha_lugar_para_app_religado() {
-        let mut cfg = Config { columns: 2, rows: 1, enabled: vec!["a".into()], ..Config::default() };
+        let page = Page { columns: 2, rows: 1, apps: vec!["a".into(), "b".into()], ..Page::default() };
+        let mut cfg = Config { pages: vec![page], enabled: vec!["a".into()], ..Config::default() };
         cfg.layout.insert("a".into(), Rect::new(0, 0, 2, 1));
         cfg.layout.insert("b".into(), Rect::new(0, 0, 1, 1));
         cfg.enabled.push("b".into());
         assert!(cfg.arrange());
         assert_eq!(cfg.layout["a"], Rect::new(0, 0, 2, 1));
         assert_eq!(cfg.layout["b"], Rect::new(0, 1, 1, 1));
-        assert_eq!(cfg.rows, 2);
+        assert_eq!(cfg.pages[0].rows, 2);
         assert!(!cfg.arrange());
+    }
+
+    #[test]
+    fn v3_vira_pagina_geral() {
+        let t = Tmp::new("v3");
+        std::fs::write(
+            t.arquivo(),
+            "version = 3\ncolumns = 3\nrows = 2\nenabled = [\"cyber.docker\", \"cyber.cd\"]\n\
+             [layout.\"cyber.docker\"]\nx = 1\ny = 1\nw = 2\nh = 1\n",
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&t.arquivo());
+        assert_eq!(cfg.version, VERSAO_ATUAL);
+        assert_eq!(cfg.pages.len(), 1);
+        let p = &cfg.pages[0];
+        assert_eq!((p.name.as_str(), p.columns, p.rows), ("Geral", 3, 2));
+        assert_eq!(p.apps, vec!["cyber.docker".to_string(), "cyber.cd".to_string()]);
+        assert_eq!(cfg.layout["cyber.docker"], Rect::new(1, 1, 2, 1));
+        let novo = std::fs::read_to_string(t.arquivo()).unwrap();
+        let tabela: toml::Table = novo.parse().unwrap();
+        assert!(!tabela.contains_key("columns") && !tabela.contains_key("rows"));
+    }
+
+    #[test]
+    fn app_ligado_sem_pagina_vai_para_a_primeira() {
+        let mut cfg = Config { pages: vec![Page::default(), Page::default()], enabled: vec!["a".into()], ..Config::default() };
+        cfg.arrange();
+        assert_eq!(cfg.page_of("a"), Some(0));
+        assert_eq!(cfg.page_apps(0), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn mover_e_apagar_paginas() {
+        let mut cfg = Config { pages: vec![Page::default()], enabled: vec!["a".into(), "b".into()], ..Config::default() };
+        cfg.arrange();
+        let p = cfg.add_page();
+        assert_eq!(p, 1);
+        assert_ne!(cfg.pages[1].icon, cfg.pages[0].icon);
+        cfg.move_to_page("b", 1);
+        cfg.arrange();
+        assert_eq!(cfg.page_apps(0), vec!["a".to_string()]);
+        assert_eq!(cfg.page_apps(1), vec!["b".to_string()]);
+        // app movido fica onde estava, se couber na grade nova
+        assert_eq!(cfg.rects(1), vec![Rect::new(1, 0, 1, 1)]);
+
+        assert!(cfg.remove_page(1));
+        assert_eq!(cfg.page_of("b"), Some(0));
+        // a última página não sai
+        assert!(!cfg.remove_page(0));
     }
 
     #[test]
     fn versao_atual_carrega_sem_migrar_nem_criar_backup() {
         let t = Tmp::new("atual");
-        std::fs::write(t.arquivo(), format!("version = {VERSAO_ATUAL}\ncolumns = 4\nenabled = []\n")).unwrap();
+        std::fs::write(t.arquivo(), format!("version = {VERSAO_ATUAL}\nskin = \"matrix\"\nenabled = []\n")).unwrap();
 
         let cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.columns, 4);
+        assert_eq!(cfg.skin, "matrix");
         assert!(cfg.enabled.is_empty());
         assert!(!com_sufixo(&t.arquivo(), ".bak").exists());
     }
@@ -508,12 +718,12 @@ warn = 70
     #[test]
     fn versao_futura_so_leitura() {
         let t = Tmp::new("futura");
-        let original = format!("version = {}\ncolumns = 4\nnovidade = true\n", VERSAO_ATUAL + 1);
+        let original = format!("version = {}\nskin = \"matrix\"\nnovidade = true\n", VERSAO_ATUAL + 1);
         std::fs::write(t.arquivo(), &original).unwrap();
 
         let mut cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.columns, 4);
-        cfg.columns = 1;
+        assert_eq!(cfg.skin, "matrix");
+        cfg.skin = "neon".into();
         cfg.save_to(&t.arquivo());
         assert_eq!(std::fs::read_to_string(t.arquivo()).unwrap(), original);
         assert!(!com_sufixo(&t.arquivo(), ".bak").exists());
@@ -522,19 +732,19 @@ warn = 70
     #[test]
     fn toml_quebrado_e_preservado_ao_salvar() {
         let t = Tmp::new("quebrado");
-        let quebrado = "columns = [\n";
+        let quebrado = "skin = [\n";
         std::fs::write(t.arquivo(), quebrado).unwrap();
 
         let mut cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.columns, Config::default().columns);
+        assert_eq!(cfg.skin, Config::default().skin);
         // nada é gravado até o primeiro save
         assert_eq!(std::fs::read_to_string(t.arquivo()).unwrap(), quebrado);
 
-        cfg.columns = 3;
+        cfg.skin = "matrix".into();
         cfg.save_to(&t.arquivo());
         assert_eq!(std::fs::read_to_string(com_sufixo(&t.arquivo(), ".quebrado")).unwrap(), quebrado);
         let novo = Config::load_from(&t.arquivo());
-        assert_eq!(novo.columns, 3);
+        assert_eq!(novo.skin, "matrix");
         assert_eq!(novo.version, VERSAO_ATUAL);
     }
 

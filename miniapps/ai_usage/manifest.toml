@@ -1,0 +1,13 @@
+id = "cyber.ai_usage"
+name = "Assinaturas de IA"
+description = "Limites e créditos do Codex, Claude, Kiro e OpenCode Go."
+icon = "robo"
+api = 1
+uses = ["ai_usage"]
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]

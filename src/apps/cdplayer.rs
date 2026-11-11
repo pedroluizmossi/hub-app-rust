@@ -2,14 +2,13 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use slint::ComponentHandle;
 
-use crate::core::bus::Event;
+use crate::core::bus::{Event, Topic};
 use crate::core::manifest::Manifest;
-use crate::core::miniapp::{Host, MiniApp};
+use crate::core::miniapp::{Host, MiniApp, Report};
 use crate::mascot::{Mood, disc, render};
 use crate::providers::media::{self, MediaSnapshot};
 use crate::ui::{CdPlayerApp, HubWindow};
@@ -36,8 +35,6 @@ pub struct CdPlayerMini {
     /// Falha do último comando, mostrada no topo por `ERROR_TTL`.
     error: String,
     error_at: Option<Instant>,
-    /// Onde a thread do comando deixa o erro para a UI (que não é `Send`).
-    command_error: Arc<Mutex<Option<String>>>,
 }
 
 impl CdPlayerMini {
@@ -56,7 +53,6 @@ impl CdPlayerMini {
             baseline: false,
             error: String::new(),
             error_at: None,
-            command_error: Default::default(),
         }));
         Self::bind(&app, ui);
         app
@@ -74,27 +70,22 @@ impl CdPlayerMini {
 
     /// Comando do player numa thread: o D-Bus pode demorar e a UI não espera.
     fn command(app: &Rc<RefCell<Self>>, verb: &str) {
-        let (player, step, poker) = {
+        let (player, step, poker, reporter) = {
             let a = app.borrow();
             if !media::valid_service(&a.snap.player) {
                 return;
             }
             let step = a.host.config.borrow().int(&a.manifest, "seek").clamp(1, 300) as i64 * 1_000_000;
-            (a.snap.player.clone(), step, a.host.bus.poker("media"))
+            (a.snap.player.clone(), step, a.host.bus.poker(Topic::Media), a.host.reporter(&a.manifest))
         };
-        let slot = app.borrow().command_error.clone();
         let verb = verb.to_string();
         std::thread::Builder::new()
             .name("mpris-comando".into())
             .spawn(move || {
                 let result = media::send(&player, &verb, step);
                 poker.poke();
-                if let Err(e) = result {
-                    let msg = format!("{verb}: {}", e.to_string().lines().next().unwrap_or_default());
-                    if let Ok(mut slot) = slot.lock() {
-                        *slot = Some(msg);
-                    }
-                }
+                // a falha chega ao app por `on_report`
+                reporter.result(&verb, &result);
             })
             .expect("não consegui criar a thread do comando MPRIS");
     }
@@ -209,7 +200,7 @@ impl MiniApp for CdPlayerMini {
         self.announced = None;
         self.spin = 0;
         self.mood = self.compute_mood();
-        self.host.bus.poke("media");
+        self.host.bus.poke(Topic::Media);
         self.push(ui);
     }
 
@@ -228,14 +219,18 @@ impl MiniApp for CdPlayerMini {
         self.push(ui);
     }
 
-    fn tick(&mut self, _frame: u32, ui: &HubWindow) {
-        // o erro que a thread do comando deixou, e a falha que some sozinha
-        let novo = self.command_error.lock().ok().and_then(|mut s| s.take());
-        if let Some(msg) = novo {
-            self.error = msg;
+    fn on_report(&mut self, report: &Report, ui: &HubWindow) {
+        // um comando que deu certo aparece na próxima leitura do player
+        if let Report::Error(msg) = report {
+            self.error = msg.clone();
             self.error_at = Some(Instant::now());
             self.push(ui);
-        } else if self.error_at.is_some_and(|t| t.elapsed() >= ERROR_TTL) {
+        }
+    }
+
+    fn tick(&mut self, _frame: u32, ui: &HubWindow) {
+        // a falha de um comando some sozinha
+        if self.error_at.is_some_and(|t| t.elapsed() >= ERROR_TTL) {
             self.error.clear();
             self.error_at = None;
             self.push(ui);
@@ -267,6 +262,20 @@ impl MiniApp for CdPlayerMini {
     fn summary(&self) -> String {
         self.snap.summary()
     }
+
+    fn tray_media(&self) -> Option<crate::tray::TrayMedia> {
+        if !self.host.config.borrow().bool(&self.manifest, "tray_controls") {
+            return None;
+        }
+        Some(crate::tray::TrayMedia {
+            summary: self.snap.summary(),
+            playing: self.snap.playing(),
+            can_play_pause: self.snap.has_player()
+                && if self.snap.playing() { self.snap.can_pause } else { self.snap.can_play },
+            can_previous: self.snap.can_previous,
+            can_next: self.snap.can_next,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -286,18 +295,12 @@ mod tests {
             baseline: false,
             error: String::new(),
             error_at: None,
-            command_error: Default::default(),
         }
     }
 
     /// Host de verdade, sem tocar em disco nem abrir threads.
     fn test_host() -> Rc<Host> {
-        Rc::new(Host {
-            config: RefCell::new(crate::core::config::Config::default()),
-            bus: crate::core::bus::Bus::default(),
-            notifier: Default::default(),
-            settings_dirty: Default::default(),
-        })
+        Rc::new(Host::new(crate::core::config::Config::default(), crate::core::bus::Bus::default()))
     }
 
     #[test]
@@ -366,5 +369,28 @@ mod tests {
         assert_eq!(a.announced.as_deref(), Some("org.mpris.MediaPlayer2.x|Faixa atual"));
         assert_eq!(a.error, "comando falhou");
         assert_eq!(a.error_at, Some(at));
+    }
+
+    #[test]
+    fn menu_da_bandeja_respeita_configuracao_e_capacidades() {
+        let mut a = app();
+        assert!(a.tray_media().is_none());
+        a.host.config.borrow_mut().set("cyber.cd", "tray_controls", toml::Value::Boolean(true));
+        a.snap = MediaSnapshot {
+            ok: true,
+            player: "org.mpris.MediaPlayer2.x".into(),
+            title: "Música".into(),
+            artist: "Artista".into(),
+            state: "Playing".into(),
+            can_pause: true,
+            can_next: true,
+            ..Default::default()
+        };
+        let media = a.tray_media().unwrap();
+        assert_eq!(media.summary, "CD Player: Música — Artista");
+        assert!(media.playing && media.can_play_pause && media.can_next);
+        assert!(!media.can_previous);
+        a.snap.state = "Paused".into();
+        assert!(!a.tray_media().unwrap().can_play_pause);
     }
 }

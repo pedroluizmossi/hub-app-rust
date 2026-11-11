@@ -5,6 +5,7 @@
 
 use super::sprites::{Pixel, Sprite};
 use super::themes::Theme;
+use super::anim::{Look, Reaction};
 
 pub const W: usize = 16;
 pub const H: usize = 14;
@@ -122,6 +123,8 @@ struct Painter<'a> {
     t: &'a Theme,
     mood: Mood,
     frame: u32,
+    blink: bool,
+    reaction: Option<Reaction>,
     fur: u32,
     ear: u32,
 }
@@ -129,17 +132,27 @@ struct Painter<'a> {
 impl Painter<'_> {
     fn eye(&self) -> Option<u32> {
         let f = self.frame;
+        match self.reaction {
+            Some(Reaction::Celebrate) => return Some(lighter(self.t.ok, 1.4)),
+            Some(Reaction::Surprised) => return Some(WHITE),
+            None => {}
+        }
         match self.mood {
             Mood::Sleep => None,
             Mood::Alarm => Some(if f % 4 < 2 { self.t.alarm } else { lighter(self.t.alarm, 1.6) }),
             Mood::Busy => Some(if f % 6 < 3 { self.t.warn } else { darker(self.t.warn, 1.35) }),
             Mood::Happy => (f % 10 < 7).then(|| lighter(self.t.ok, 1.25)),
-            Mood::Idle => (f % 25 != 0).then(|| lighter(self.t.outline, 2.2)),
+            Mood::Idle => (!self.blink).then(|| lighter(self.t.outline, 2.2)),
         }
     }
 
     fn led(&self) -> u32 {
         let on = self.frame % 4 < 2;
+        match self.reaction {
+            Some(Reaction::Celebrate) => return if self.frame % 2 == 0 { self.t.ok } else { lighter(self.t.visor, 1.5) },
+            Some(Reaction::Surprised) => return lighter(self.t.visor, 1.6),
+            None => {}
+        }
         match self.mood {
             Mood::Sleep => darker(self.t.visor, 2.8),
             Mood::Alarm => if on { self.t.alarm } else { self.t.outline },
@@ -194,17 +207,20 @@ impl Painter<'_> {
 }
 
 /// Cor de um pixel de mascote "pixel" (paleta própria): só o olho segue o humor/tema.
-fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, mood: Mood, frame: u32) -> Option<u32> {
+fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, look: &Look) -> Option<u32> {
+    let (mood, frame) = (look.mood, look.frame);
     let ch = row[x];
     let dim = |c: u32| if mood == Mood::Sleep { darker(c, 1.2) } else { c };
     if ch != b'e' {
         return px.color(ch).map(dim);
     }
-    let open = match mood {
-        Mood::Sleep => None,
-        Mood::Alarm => Some(if frame % 4 < 2 { theme.alarm } else { lighter(theme.alarm, 1.5) }),
-        Mood::Busy => Some(if frame % 6 < 3 { theme.warn } else { darker(theme.warn, 1.35) }),
-        Mood::Happy | Mood::Idle => (frame % 25 != 0).then_some(px.eye),
+    let open = match (look.reaction, mood) {
+        (Some(Reaction::Celebrate), _) => Some(lighter(theme.ok, 1.4)),
+        (Some(Reaction::Surprised), _) => Some(WHITE),
+        (None, Mood::Sleep) => None,
+        (None, Mood::Alarm) => Some(if frame % 4 < 2 { theme.alarm } else { lighter(theme.alarm, 1.5) }),
+        (None, Mood::Busy) => Some(if frame % 6 < 3 { theme.warn } else { darker(theme.warn, 1.35) }),
+        (None, Mood::Happy | Mood::Idle) => (!look.blink).then_some(px.eye),
     };
     // olho fechado: some na cor do vizinho (mais escura), como uma pálpebra
     open.or_else(|| {
@@ -213,8 +229,14 @@ fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, mood: Mood, frame
     })
 }
 
-/// Desenha um quadro RGBA (16×14, linha a linha) da mascote.
+/// Desenha um quadro RGBA (16×14, linha a linha) da mascote, com a piscada pelo quadro.
 pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4]; W * H] {
+    render_look(sprite, theme, &Look::from_frame(mood, frame))
+}
+
+/// Desenha a mascote como o `Animator` mandou (piscada e reação próprias).
+pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W * H] {
+    let (mood, frame) = (look.mood, look.frame);
     if let Some(px) = &sprite.pixel {
         let glitch = mood == Mood::Alarm && frame % 6 < 2;
         let mut out = [[0u8; 4]; W * H];
@@ -222,7 +244,7 @@ pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4
             let row = row.as_bytes();
             let shift: isize = if glitch && (4..8).contains(&y) { if y % 2 == 0 { 1 } else { -1 } } else { 0 };
             for x in 0..row.len().min(W) {
-                let Some(c) = pixel_cell(px, row, x, theme, mood, frame) else { continue };
+                let Some(c) = pixel_cell(px, row, x, theme, look) else { continue };
                 let dx = x as isize + shift;
                 if (0..W as isize).contains(&dx) {
                     out[y * W + dx as usize] = [(c >> 16) as u8, (c >> 8) as u8, c as u8, 255];
@@ -236,6 +258,8 @@ pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4
         t: theme,
         mood,
         frame,
+        blink: look.blink,
+        reaction: look.reaction,
         fur: sprite.fur.unwrap_or(theme.fur),
         ear: sprite.ear.unwrap_or(theme.ear),
     };
@@ -278,9 +302,10 @@ pub struct Cache {
 }
 
 impl Cache {
-    /// Atualiza para o quadro dado. Devolve `true` se mudou; aí `image()` tem a imagem nova.
-    pub fn update(&mut self, sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> bool {
-        let px = render(sprite, theme, mood, frame);
+    /// Atualiza para o que o `Animator` mandou desenhar. Devolve `true` se mudou; aí
+    /// `image()` tem a imagem nova.
+    pub fn update_look(&mut self, sprite: &Sprite, theme: &Theme, look: &Look) -> bool {
+        let px = render_look(sprite, theme, look);
         if self.px.as_deref() == Some(&px) {
             return false;
         }

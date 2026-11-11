@@ -1,9 +1,19 @@
 //! Ícone na bandeja (StatusNotifierItem via D-Bus): a mascote no humor do hub.
 
 use ksni::blocking::TrayMethods;
+use slint::ComponentHandle;
 
 use crate::mascot::{Mood, render, sprites::Sprite, themes::Theme};
 use crate::ui::HubWindow;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayMedia {
+    pub summary: String,
+    pub playing: bool,
+    pub can_play_pause: bool,
+    pub can_previous: bool,
+    pub can_next: bool,
+}
 
 pub struct AppTray {
     icons: Vec<ksni::Icon>,
@@ -11,6 +21,7 @@ pub struct AppTray {
     ui: slint::Weak<HubWindow>,
     /// Marca o item "Fixar janela" do menu.
     pinned: bool,
+    media: Option<TrayMedia>,
 }
 
 impl ksni::Tray for AppTray {
@@ -41,7 +52,7 @@ impl ksni::Tray for AppTray {
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::*;
-        vec![
+        let mut items: Vec<ksni::MenuItem<Self>> = vec![
             StandardItem {
                 label: "Mostrar / esconder".into(),
                 activate: Box::new(|t: &mut Self| {
@@ -59,6 +70,33 @@ impl ksni::Tray for AppTray {
                 ..Default::default()
             }
             .into(),
+        ];
+        if let Some(media) = &self.media {
+            items.push(MenuItem::Separator);
+            // D-BusMenu interpreta sublinhados como atalhos de teclado.
+            items.push(StandardItem {
+                label: media.summary.replace('_', "__"),
+                enabled: false,
+                ..Default::default()
+            }.into());
+            for (label, verb, enabled) in [
+                ("Faixa anterior", "prev", media.can_previous),
+                (if media.playing { "Pausar" } else { "Tocar" }, "play-pause", media.can_play_pause),
+                ("Próxima faixa", "next", media.can_next),
+            ] {
+                items.push(StandardItem {
+                    label: label.into(),
+                    enabled,
+                    activate: Box::new(move |t: &mut Self| {
+                        let _ = t.ui.upgrade_in_event_loop(move |ui| {
+                            ui.global::<crate::ui::CdPlayerApp>().invoke_command(verb.into());
+                        });
+                    }),
+                    ..Default::default()
+                }.into());
+            }
+        }
+        items.extend([
             MenuItem::Separator,
             StandardItem {
                 label: "Sair".into(),
@@ -69,7 +107,8 @@ impl ksni::Tray for AppTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        ]);
+        items
     }
 }
 
@@ -91,16 +130,21 @@ pub struct Tray {
 impl Tray {
     /// Cria o ícone. Falha se não houver bandeja (ex.: GNOME sem a extensão AppIndicator).
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
-        let tray = AppTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui, pinned: false };
+        let tray = AppTray { icons: icons(sprite, theme, mood), tooltip: String::new(), ui, pinned: false, media: None };
         let handle = tray.spawn()?;
         Ok(Tray { handle })
     }
 
-    pub fn update(&self, sprite: &Sprite, theme: &Theme, mood: Mood, tooltip: String) {
-        let icons = icons(sprite, theme, mood);
+    /// Atualiza tooltip e menu; o ícone só é redesenhado quando `icon` vem (a mascote, o
+    /// tema ou o humor mudaram). O ksni avisa o painel só do que mudou de fato.
+    pub fn update(&self, icon: Option<(&Sprite, &Theme, Mood)>, tooltip: String, media: Option<TrayMedia>) {
+        let icons = icon.map(|(sprite, theme, mood)| icons(sprite, theme, mood));
         self.handle.update(move |t| {
-            t.icons = icons;
+            if let Some(icons) = icons {
+                t.icons = icons;
+            }
             t.tooltip = tooltip;
+            t.media = media;
         });
     }
 

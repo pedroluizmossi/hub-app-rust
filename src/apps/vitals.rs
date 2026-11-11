@@ -11,6 +11,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use crate::core::bus::Event;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
+use crate::mascot::anim::{Animator, Reaction};
 use crate::mascot::{Mood, render, sprites};
 use crate::providers::docker::format_bytes;
 use crate::providers::gpu::GpuSnapshot;
@@ -98,10 +99,13 @@ pub struct VitalsMini {
     /// Swap em uso (0..1), para o humor da RAM.
     swap_frac: f32,
     watches: Watches,
-    frame: u32,
     cards: Rc<VecModel<VitalCard>>,
     /// Último quadro de cada mascote: só troca a imagem quando os pixels mudam.
     mascots: [render::Cache; N],
+    /// Piscada e reações de cada mascote (cada uma no seu ritmo).
+    anims: [Animator; N],
+    /// Reação mostrada agora em cada cartão.
+    reactions: [Option<Reaction>; N],
 }
 
 impl VitalsMini {
@@ -110,7 +114,7 @@ impl VitalsMini {
             .expect("manifesto dos Sinais vitais inválido");
         let cards = Rc::new(VecModel::from(vec![VitalCard::default(); N]));
         ui.global::<VitalsApp>().set_cards(ModelRc::from(cards.clone()));
-        Rc::new(RefCell::new(VitalsMini {
+        let app = Rc::new(RefCell::new(VitalsMini {
             host,
             manifest,
             vitals: Default::default(),
@@ -118,17 +122,37 @@ impl VitalsMini {
             net_history: VecDeque::new(),
             swap_frac: 0.0,
             watches: Watches::default(),
-            frame: 1,
             cards,
             mascots: Default::default(),
-        }))
+            anims: std::array::from_fn(|i| Animator::new(i as u32)),
+            reactions: [None; N],
+        }));
+
+        // easter egg: cutucar a mascote algumas vezes
+        let a = Rc::downgrade(&app);
+        ui.global::<VitalsApp>().on_mascot_poked(move |i| {
+            let Some(a) = a.upgrade() else { return };
+            let mut a = a.borrow_mut();
+            let i = i as usize;
+            if i >= N || a.host.config.borrow().reduce_motion {
+                return;
+            }
+            let mood = a.vitals[i].mood;
+            if a.anims[i].poke(mood, Instant::now()) && a.refresh_mascot(i) {
+                let card = a.card(i);
+                a.cards.set_row_data(i, card);
+            }
+        });
+        app
     }
 
-    /// Redesenha a mascote `i` no quadro atual; `true` se a imagem mudou.
+    /// Redesenha a mascote `i` agora; `true` se a imagem ou a reação mudou.
     fn refresh_mascot(&mut self, i: usize) -> bool {
         let key = self.mascot_of(i);
         let theme = self.host.theme_for(&self.manifest);
-        self.mascots[i].update(sprites::get(&key), theme, self.vitals[i].mood, self.frame)
+        let look = self.anims[i].look(self.vitals[i].mood, Instant::now());
+        let reaction_changed = std::mem::replace(&mut self.reactions[i], look.reaction) != look.reaction;
+        self.mascots[i].update_look(sprites::get(&key), theme, &look) || reaction_changed
     }
 
     fn mascot_of(&self, i: usize) -> String {
@@ -323,6 +347,7 @@ impl VitalsMini {
             title: TITLES[i].into(),
             mascot: self.mascots[i].image(),
             mood: v.mood.as_str().into(),
+            reaction: self.reactions[i].map_or("", Reaction::as_str).into(),
             available: v.available,
             value: v.value,
             value_text: if v.value_text.is_empty() { format!("{:.0}%", v.value) } else { v.value_text.clone() }.into(),
@@ -386,13 +411,14 @@ impl MiniApp for VitalsMini {
         self.push_cards();
     }
 
-    fn tick(&mut self, frame: u32, _ui: &HubWindow) {
-        // só redesenha as mascotes que mudaram; o resto muda com as leituras
-        self.frame = frame;
+    fn tick(&mut self, _frame: u32, _ui: &HubWindow) {
+        // só redesenha as mascotes que mudaram; o resto muda com as leituras.
+        // O ritmo vem do relógio de cada `Animator`, não do quadro do hub.
         for i in 0..N {
             if self.refresh_mascot(i) {
                 if let Some(mut c) = self.cards.row_data(i) {
                     c.mascot = self.mascots[i].image();
+                    c.reaction = self.reactions[i].map_or("", Reaction::as_str).into();
                     self.cards.set_row_data(i, c);
                 }
             }

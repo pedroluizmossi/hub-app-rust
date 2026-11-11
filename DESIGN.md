@@ -122,8 +122,8 @@ Para criar uma tela (ex.: "Sobre"):
 1. Escolha um nome e trate-o em `current`: um cabeçalho `Bar { … }` e o conteúdo, com
    `if current == "<nome>": …`. O cabeçalho usa `Title`/`HeaderButton`, para seguir o visual.
 2. Dê um caminho de volta: botão "Fechar" e **Esc** (no `FocusScope` da janela).
-3. Se fizer sentido abrir por linha de comando, aceite o nome em `tab_name` (`src/hub.rs`)
-   para `--tab <nome>`.
+3. Um app novo, ao ser ligado, entra na página aberta; o usuário muda de página nas
+   Configurações. `--tab <nome>` abre uma página pelo nome (ver `Hub::open_tab`).
 4. Rodapé, fundo e moldura vêm do visual automaticamente; não desenhe os seus.
 5. Conteúdo longo vai num `ScrollView` com `VerticalLayout { alignment: start; … }`.
    Blocos com muitas opções começam **recolhidos** (veja o acordeão das configurações).
@@ -266,6 +266,7 @@ O que isso impõe:
 | `Path` não gira (`rotation-angle`) | um segundo ícone (`chevron` / `chevron-right`) |
 | Padrões repetidos e gradientes radiais são caros | desenhe em Rust numa imagem (`backdrop.rs`) |
 | `PopupWindow` sem altura explícita tem área clicável menor que o desenho | sempre dê `height` ao popup (`Select`) |
+| `PopupWindow` é desenhado dentro da janela e não rola sozinho | lista longa precisa de altura máxima e `Flickable` (o `Select` mostra 8 opções e meia e rola o resto) |
 | Recriar um modelo destrói os componentes dentro dele (um popup aberto fecha) | só refaça listas quando o conteúdo mudar (`rebuild_settings`) |
 | Largura que depende da largura da janela dentro de um layout gera "binding loop" | tamanhos fixos ou `horizontal-stretch`, nunca `root.width` dentro do próprio layout |
 | Cada imagem nova redesenha a região | o cache de quadros (`render::Cache`) só troca a imagem quando os pixels mudam |

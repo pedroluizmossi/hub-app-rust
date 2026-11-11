@@ -30,6 +30,8 @@ export global Moods {
 // Quadro de animação (~8/s), avançado pelo Rust só com a janela visível.
 export global Anim {
     in property <int> frame;
+    // "reduzir movimento" (config `reduce_motion`): mascotes paradas, sem pulos nem tremores
+    in property <bool> calm: false;
 }
 
 // Visual da janela (a "skin"): fundo, moldura, cabeçalho, fontes e cores da interface.
@@ -109,6 +111,8 @@ export global Icons {
     out property <string> grid: "M3 3h8v8H3zM13 3h8v4h-8zM13 9h8v12h-8zM3 13h8v8H3z";
     out property <string> chevron: "M6 9l6 6l6-6";
     out property <string> chevron-right: "M9 6l6 6l-6 6";
+    out property <string> chevron-up: "M6 15l6-6l6 6";
+    out property <string> plus: "M12 5v14M5 12h14";
     // em pixel (quadro 7×7, preenchidos), para os botões "chunky"
     out property <string> px-pin: "M2 0h3v1H2zM2 1h1v2H2zM4 1h1v2H4zM1 3h5v1H1zM3 4h1v3H3z";
     out property <string> px-gear: "M3 0h1v1H3zM0 3h1v1H0zM6 3h1v1H6zM3 6h1v1H3zM1 1h1v1H1zM5 1h1v1H5zM1 5h1v1H1zM5 5h1v1H5zM2 2h3v1H2zM2 3h1v1H2zM4 3h1v1H4zM2 4h3v1H2z";

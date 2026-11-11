@@ -1,5 +1,32 @@
 //! Provedores de dados compartilhados entre os mini-apps.
+pub mod ai_usage;
 pub mod docker;
 pub mod gpu;
 pub mod media;
 pub mod sys;
+
+use std::time::Duration;
+
+use crate::core::bus::{Bus, Event, Topic};
+
+/// Registra todos os provedores no barramento. Cada um só coleta enquanto algum
+/// mini-app ligado o assina.
+pub fn spawn_all(bus: &mut Bus) {
+    let mut sys = sys::SysProvider::default();
+    bus.spawn(Topic::Sys, Duration::from_secs(2), move || Event::Sys(sys.collect()));
+    // NVIDIA: um `nvidia-smi` de vida longa entrega as leituras; aqui só pega a mais nova
+    let mut gpu = gpu::GpuProvider::detect();
+    bus.spawn(Topic::Gpu, Duration::from_secs(2), move || Event::Gpu(gpu.collect()));
+    // `docker events` traz as mudanças; ps é rede de segurança e stats roda à parte
+    let mut docker = docker::DockerProvider::default();
+    bus.spawn_polled(Topic::Docker, Duration::from_secs(1), move |poker, poked| {
+        docker.collect(poker, poked).map(Event::Docker)
+    });
+    // MPRIS: lê o player ativo a cada segundo e só publica o que mudou
+    let mut media = media::MediaProvider::default();
+    bus.spawn_polled(Topic::Media, Duration::from_secs(1), move |_, poked| media.collect(poked).map(Event::Media));
+    let mut ai_usage = ai_usage::UsageProvider::default();
+    bus.spawn_polled(Topic::AiUsage, Duration::from_secs(60), move |_, poked| {
+        Some(Event::AiUsage(ai_usage.collect(poked)))
+    });
+}

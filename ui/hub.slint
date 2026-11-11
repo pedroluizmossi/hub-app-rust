@@ -2,11 +2,12 @@
 // mini-apps numa grade, cada um com o próprio tema. O botão de layout liga o modo de
 // edição (arrastar pelo topo, puxar as bordas); a engrenagem abre as configurações.
 import { ScrollView } from "std-widgets.slint";
-import { Colors, Anim, Skin, Icons } from "theme.slint";
+import { Colors, Anim, Skin, Icons, Moods } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, HeaderButton } from "widgets.slint";
 import { DockerView, DockerApp, ContainerRow } from "../miniapps/docker/view.slint";
 import { VitalsView, VitalsApp, VitalCard } from "../miniapps/vitals/view.slint";
 import { CdPlayerView, CdPlayerApp } from "../miniapps/cdplayer/view.slint";
+import { AiUsageView, AiUsageApp, UsageCard, UsageLine } from "../miniapps/ai_usage/view.slint";
 
 import "fonts/ChakraPetch-Regular.ttf";
 import "fonts/ChakraPetch-Medium.ttf";
@@ -17,7 +18,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine }
 
 // Posição de um app na grade do painel (em células).
 export struct GridCell {
@@ -66,6 +67,17 @@ export struct AppInfo {
     mood: string,
     theme: Colors,
     settings: [SettingRow],
+    page: int,           // página onde o app está
+}
+
+// Uma página do painel (item da barra lateral).
+export struct PageInfo {
+    name: string,
+    icon: image,         // mascote da página, no humor do pior app dela
+    icon-index: int,     // mascote escolhida (índice na lista de mascotes)
+    mood: string,        // pior humor dos apps ligados da página
+    theme: Colors,       // tema usado no ícone (o do visual)
+    apps: int,           // apps ligados na página
 }
 
 // ---- configurações ------------------------------------------------------------
@@ -117,11 +129,63 @@ component SettingLine inherits Rectangle {
     }
 }
 
+/// Uma preferência com título, explicação e um seletor à direita.
+component ChoiceRow inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> hint;
+    in property <[string]> options;
+    in property <int> index;
+    callback chosen(int);
+    spacing: 16px;
+    min-height: 44px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text { text: root.title; color: Skin.ink; font-size: 14px; }
+        Text { text: root.hint; color: Skin.sub; font-size: 12px; wrap: word-wrap; }
+    }
+    VerticalLayout {
+        alignment: center;
+        Select {
+            width: 220px;
+            options: root.options;
+            index: root.index;
+            accent: Skin.accent;
+            label: root.title;
+            chosen(i) => { root.chosen(i); }
+        }
+    }
+}
+
 component AppsView inherits ScrollView {
     in property <[AppInfo]> apps;
     in property <[string]> skins;          // visuais da janela (rótulos)
     in property <int> skin-index;
     callback skin-chosen(int);
+    // ícone da bandeja: mascote e tema (índice 0 = automático)
+    in property <[string]> tray-icons;
+    in property <int> tray-icon-index;
+    in property <[string]> tray-themes;
+    in property <int> tray-theme-index;
+    callback tray-icon-chosen(int);
+    callback tray-theme-chosen(int);
+    // onde ficam as páginas (0 = barra lateral, 1 = abas em cima)
+    in property <int> nav-index;
+    callback nav-chosen(int);
+    // reduzir movimento (mascotes paradas, sem reações)
+    in property <bool> reduce-motion;
+    callback reduce-motion-toggled();
+    // páginas: lista, nomes (para o seletor de cada app) e mascotes disponíveis
+    in property <[PageInfo]> pages;
+    in property <[string]> page-names;
+    in property <[string]> mascots;
+    callback page-added();
+    callback page-removed(int);
+    callback page-renamed(int, string);
+    callback page-icon-chosen(int, int);
+    callback page-moved(int, int /* -1 sobe, +1 desce */);
+    callback app-page-chosen(string, int);
     callback edit-layout();
     callback toggle-app(string);
     // app com as opções abertas (um por vez; fica aqui porque a lista é refeita pelo Rust)
@@ -187,6 +251,20 @@ component AppsView inherits ScrollView {
                 padding: 16px;
                 spacing: 10px;
                 Text { text: "Aparência"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                ChoiceRow {
+                    title: "Visual da janela";
+                    hint: "Fundo, moldura, fontes e cores. Apps com o tema “Acompanha a janela” mudam junto.";
+                    options: skins;
+                    index: skin-index;
+                    chosen(i) => { root.skin-chosen(i); }
+                }
+                ChoiceRow {
+                    title: "Páginas";
+                    hint: "Onde as páginas aparecem: numa barra à esquerda ou como abas no cabeçalho.";
+                    options: ["Barra lateral", "Abas em cima"];
+                    index: nav-index;
+                    chosen(i) => { root.nav-chosen(i); }
+                }
                 HorizontalLayout {
                     spacing: 16px;
                     min-height: 44px;
@@ -194,9 +272,9 @@ component AppsView inherits ScrollView {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Visual da janela"; color: Skin.ink; font-size: 14px; }
+                        Text { text: "Reduzir movimento"; color: Skin.ink; font-size: 14px; }
                         Text {
-                            text: "Fundo, moldura, fontes e cores. Apps com o tema “Acompanha a janela” mudam junto.";
+                            text: "Mascotes sem pulos nem tremores, e sem comemorações nem surpresas.";
                             color: Skin.sub;
                             font-size: 12px;
                             wrap: word-wrap;
@@ -204,14 +282,131 @@ component AppsView inherits ScrollView {
                     }
                     VerticalLayout {
                         alignment: center;
-                        Select {
-                            width: 220px;
-                            options: skins;
-                            index: skin-index;
-                            accent: Skin.accent;
-                            label: "Visual da janela";
-                            chosen(i) => { root.skin-chosen(i); }
+                        SqSwitch {
+                            checked: reduce-motion;
+                            label: "Reduzir movimento";
+                            toggled => { root.reduce-motion-toggled(); }
                         }
+                    }
+                }
+                ChoiceRow {
+                    title: "Ícone da bandeja";
+                    hint: "Mascote mostrada na bandeja. No automático, é a do app em pior estado.";
+                    options: tray-icons;
+                    index: tray-icon-index;
+                    chosen(i) => { root.tray-icon-chosen(i); }
+                }
+                ChoiceRow {
+                    title: "Cores do ícone";
+                    hint: "Tema da mascote na bandeja. No automático, segue o tema do app mostrado.";
+                    options: tray-themes;
+                    index: tray-theme-index;
+                    chosen(i) => { root.tray-theme-chosen(i); }
+                }
+            }
+        }
+
+        // páginas da barra lateral
+        Rectangle {
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.surface-edge;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Páginas"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                        Text {
+                            text: "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo.";
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Nova página";
+                            font-size: 13px;
+                            clicked => { root.page-added(); }
+                        }
+                    }
+                }
+                for p[i] in pages: HorizontalLayout {
+                    spacing: 10px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 40px;
+                            height: 35px;
+                            background: p.theme.bg1;
+                            Image { source: p.icon; image-rendering: pixelated; width: 32px; height: 28px; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Rectangle {
+                            height: 34px;
+                            border-width: 1px;
+                            border-color: name.has-focus ? Skin.accent : Skin.field-edge;
+                            background: Skin.field;
+                            name := TextInput {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                text: p.name;
+                                color: Skin.ink;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                single-line: true;
+                                accessible-label: "Nome da página " + (i + 1);
+                                accepted => { root.page-renamed(i, self.text); }
+                                changed has-focus => {
+                                    if !self.has-focus && self.text != p.name { root.page-renamed(i, self.text); }
+                                }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Select {
+                            width: 150px;
+                            options: mascots;
+                            index: p.icon-index;
+                            accent: Skin.accent;
+                            label: "Ícone da página " + p.name;
+                            chosen(k) => { root.page-icon-chosen(i, k); }
+                        }
+                    }
+                    IconButton {
+                        width: 34px;
+                        height: 34px;
+                        icon: Icons.chevron-up;
+                        enabled: i > 0;
+                        label: "Subir " + p.name;
+                        clicked => { root.page-moved(i, -1); }
+                    }
+                    IconButton {
+                        width: 34px;
+                        height: 34px;
+                        icon: Icons.chevron;
+                        enabled: i < pages.length - 1;
+                        label: "Descer " + p.name;
+                        clicked => { root.page-moved(i, 1); }
+                    }
+                    IconButton {
+                        width: 34px;
+                        height: 34px;
+                        icon: Icons.close;
+                        ink: Skin.danger;
+                        enabled: pages.length > 1;
+                        label: "Apagar " + p.name + " (os apps vão para a página anterior)";
+                        clicked => { root.page-removed(i); }
                     }
                 }
             }
@@ -288,6 +483,28 @@ component AppsView inherits ScrollView {
                 }
                 if open: Rectangle { height: 1px; background: Skin.surface-edge; }
                 if open: VerticalLayout {
+                    if page-names.length > 1: HorizontalLayout {
+                        spacing: 16px;
+                        min-height: 44px;
+                        Text {
+                            text: "Página";
+                            color: Skin.ink;
+                            font-size: 14px;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Select {
+                                width: 220px;
+                                options: page-names;
+                                index: app.page;
+                                accent: accent;
+                                label: "Página de " + app.name;
+                                chosen(k) => { root.app-page-chosen(app.id, k); }
+                            }
+                        }
+                    }
                     for s in app.settings: SettingLine {
                         s: s;
                         accent: accent;
@@ -304,6 +521,194 @@ component AppsView inherits ScrollView {
             color: Skin.dim;
             font-size: 11px;
             horizontal-alignment: center;
+        }
+    }
+}
+
+// ---- barra lateral -----------------------------------------------------------------
+
+// Um item da barra lateral: ícone em pixel e nome embaixo; marca de alerta no canto.
+component RailItem inherits Rectangle {
+    in property <image> icon;
+    in property <string> icon-path;   // traço 24×24, quando não há imagem
+    in property <string> text;
+    in property <bool> selected;
+    in property <color> badge: transparent;
+    callback clicked;
+    height: 58px;
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-item-selected: selected;
+    accessible-action-default => { root.clicked(); }
+    background: selected ? Skin.panel-ink.with-alpha(0.16) : touch.has-hover ? Skin.panel-ink.with-alpha(0.08) : transparent;
+    animate background { duration: 120ms; }
+
+    if selected: Rectangle { x: 0; width: 3px; background: Skin.accent; }
+    VerticalLayout {
+        padding-top: 6px;
+        padding-bottom: 5px;
+        spacing: 3px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            if icon-path == "": Image {
+                source: icon;
+                image-rendering: pixelated;
+                width: 32px;
+                height: 28px;
+            }
+            if icon-path != "": Rectangle {
+                width: 32px;
+                height: 28px;
+                Icon { icon: icon-path; ink: selected ? Skin.panel-ink : Skin.panel-sub; size: 20px; }
+            }
+        }
+        Text {
+            text: root.text;
+            color: selected ? Skin.panel-ink : Skin.panel-sub;
+            font-size: 10px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+    if badge != transparent: Rectangle {
+        x: parent.width - 16px;
+        y: 6px;
+        width: 8px;
+        height: 8px;
+        background: badge;
+        border-width: 1px;
+        border-color: Skin.panel;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Barra lateral: as páginas do painel em cima; nova página e configurações embaixo.
+component Rail inherits Rectangle {
+    in property <[PageInfo]> pages;
+    in property <int> current;          // página aberta
+    in property <bool> settings;        // as configurações estão abertas
+    callback selected(int);
+    callback add();
+    callback open-settings();
+    width: 68px;
+    background: Skin.panel;
+    // linha à direita, como a do cabeçalho
+    Rectangle { x: parent.width - 1px; width: 1px; background: Skin.line; }
+
+    VerticalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        padding-right: 1px;
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: start;
+                spacing: 2px;
+                for p[i] in pages: RailItem {
+                    icon: p.icon;
+                    text: p.name;
+                    selected: !settings && i == current;
+                    badge: p.mood == "alarm" ? Skin.bad : p.mood == "busy" ? Moods.color(p.theme, "busy") : transparent;
+                    clicked => { root.selected(i); }
+                }
+                RailItem {
+                    icon-path: Icons.plus;
+                    text: "nova";
+                    clicked => { root.add(); }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Skin.line; }
+        RailItem {
+            icon-path: Icons.gear;
+            text: "config";
+            selected: settings;
+            clicked => { root.open-settings(); }
+        }
+    }
+}
+
+// Uma aba de página no cabeçalho: mascote pequena e nome; sublinhada quando aberta.
+component TopTab inherits Rectangle {
+    in property <image> icon;
+    in property <string> icon-path;
+    in property <string> text;
+    in property <bool> selected;
+    in property <color> badge: transparent;
+    callback clicked;
+    height: 36px;
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-item-selected: selected;
+    accessible-action-default => { root.clicked(); }
+    background: selected ? Skin.panel-ink.with-alpha(0.16) : touch.has-hover ? Skin.panel-ink.with-alpha(0.08) : transparent;
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 6px;
+        VerticalLayout {
+            alignment: center;
+            if icon-path == "": Image { source: icon; image-rendering: pixelated; width: 24px; height: 21px; }
+            if icon-path != "": Icon { icon: icon-path; ink: Skin.panel-sub; size: 16px; }
+        }
+        if text != "": Text {
+            text: root.text;
+            color: selected ? Skin.panel-ink : Skin.panel-sub;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+    if selected: Rectangle { y: parent.height - 2px; height: 2px; background: Skin.accent; }
+    if badge != transparent: Rectangle {
+        x: 4px;
+        y: 4px;
+        width: 7px;
+        height: 7px;
+        background: badge;
+        border-width: 1px;
+        border-color: Skin.panel;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Abas das páginas no cabeçalho (navegação "top"); rolam de lado se não couberem.
+component TopTabs inherits Flickable {
+    in property <[PageInfo]> pages;
+    in property <int> current;
+    callback selected(int);
+    callback add();
+    interactive: true;
+    content-width: max(self.width, row.preferred-width);
+    row := HorizontalLayout {
+        height: root.height;
+        spacing: 2px;
+        alignment: start;
+        for p[i] in pages: VerticalLayout {
+            alignment: center;
+            TopTab {
+                icon: p.icon;
+                text: p.name;
+                selected: i == current;
+                badge: p.mood == "alarm" ? Skin.bad : p.mood == "busy" ? Moods.color(p.theme, "busy") : transparent;
+                clicked => { root.selected(i); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            TopTab {
+                icon-path: Icons.plus;
+                accessible-label: "Nova página";
+                clicked => { root.add(); }
+            }
         }
     }
 }
@@ -417,6 +822,12 @@ component Dashboard inherits ScrollView {
             height: parent.height - 24px;
         }
         if c.id == "cyber.cd": CdPlayerView {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+        }
+        if c.id == "cyber.ai_usage": AiUsageView {
             x: 12px;
             y: 12px;
             width: parent.width - 24px;
@@ -582,8 +993,17 @@ component ResizeHandles inherits Rectangle {
 
 // Fundo da janela: polígono com os cantos superior direito e inferior esquerdo cortados
 // (ou retângulo, com chanfro 0). A borda tem a espessura do visual.
+//
+// Retângulo de verdade quando o chanfro é 0 (a maioria dos visuais): um `Path` do tamanho
+// da janela é rasterizado inteiro, preenchimento e traço, em todo quadro, por menor que
+// seja a área que mudou.
 component Frame inherits Rectangle {
-    Path {
+    if Skin.chamfer == 0: Rectangle {
+        background: Skin.bg;
+        border-width: Skin.border;
+        border-color: Skin.edge;
+    }
+    if Skin.chamfer > 0: Path {
         property <float> w: self.width / 1px;
         property <float> h: self.height / 1px;
         property <float> c: Skin.chamfer / 1px;
@@ -592,12 +1012,9 @@ component Frame inherits Rectangle {
         height: 100%;
         viewbox-width: w;
         viewbox-height: h;
-        commands: c > 0
-            ? "M " + b + " " + b + " L " + (w - c) + " " + b + " L " + (w - b) + " " + c
-                + " L " + (w - b) + " " + (h - b) + " L " + c + " " + (h - b)
-                + " L " + b + " " + (h - c) + " Z"
-            : "M " + b + " " + b + " L " + (w - b) + " " + b + " L " + (w - b) + " " + (h - b)
-                + " L " + b + " " + (h - b) + " Z";
+        commands: "M " + b + " " + b + " L " + (w - c) + " " + b + " L " + (w - b) + " " + c
+            + " L " + (w - b) + " " + (h - b) + " L " + c + " " + (h - b)
+            + " L " + b + " " + (h - c) + " Z";
         fill: Skin.bg;
         stroke: Skin.edge;
         stroke-width: Skin.border;
@@ -696,6 +1113,9 @@ export component HubWindow inherits Window {
     in property <[GridCell]> cells;        // apps ligados, posicionados na grade
     in property <int> columns: 2;
     in property <int> rows: 1;
+    // limites da grade (`layout::MAX_COLS` / `MAX_ROWS`)
+    in property <int> max-columns: 6;
+    in property <int> max-rows: 6;
     in property <string> grid-tag;         // "// 2 APPS · 3 × 2"
     in-out property <string> current: "panel";   // "panel" | "apps" (configurações)
     in-out property <bool> editing: false;
@@ -705,12 +1125,24 @@ export component HubWindow inherits Window {
     in property <bool> cols-up-ok;
     in property <bool> rows-down-ok;
     in property <bool> rows-up-ok;
-    in property <string> summary;
     // nome exibido (`name` na config)
     in property <string> app-name: "MiniUtils";
     // visual da janela: opções (rótulos) e a escolhida
     in property <[string]> skins;
     in property <int> skin-index;
+    // ícone da bandeja: mascote e tema (índice 0 = automático)
+    in property <[string]> tray-icons;
+    in property <int> tray-icon-index;
+    in property <[string]> tray-themes;
+    in property <int> tray-theme-index;
+    // páginas do painel (barra lateral) e a aberta
+    in property <[PageInfo]> pages;
+    in property <int> page;
+    in property <[string]> page-names;
+    in property <[string]> mascots;          // rótulos das mascotes (ícone das páginas)
+    // páginas como abas no cabeçalho em vez da barra lateral (`nav = "top"`)
+    in property <bool> nav-top: false;
+    in property <bool> reduce-motion: false;
     // fundo desenhado pelo Rust para o tamanho da área do painel
     in property <image> backdrop;
     // relógio e saudação ("boa noite · 21:57"), para os visuais que mostram
@@ -740,6 +1172,17 @@ export component HubWindow inherits Window {
     callback show-requested(string);
     callback quit();
     callback skin-chosen(int);
+    callback tray-icon-chosen(int);
+    callback tray-theme-chosen(int);
+    callback nav-chosen(int);
+    callback reduce-motion-toggled();
+    callback page-selected(int);
+    callback page-added();
+    callback page-removed(int);
+    callback page-renamed(int, string);
+    callback page-icon-chosen(int, int);
+    callback page-moved(int, int);
+    callback app-page-chosen(string, int);
     // a área do painel mudou de tamanho (pixels lógicos): o Rust redesenha o fundo
     callback backdrop-resized(float, float);
 
@@ -772,7 +1215,14 @@ export component HubWindow inherits Window {
                     padding-right: 12px;
                     spacing: 12px;
                     Title { }
-                    Text {
+                    if nav-top: TopTabs {
+                        horizontal-stretch: 1;
+                        pages: pages;
+                        current: page;
+                        selected(i) => { root.page-selected(i); }
+                        add => { root.page-added(); }
+                    }
+                    if !nav-top: Text {
                         text: Skin.tag == "grid" ? grid-tag : Skin.tag == "greeting" ? greeting : "";
                         color: Skin.tag-ink;
                         font-family: Skin.tag == "grid" ? Skin.font-mono : Skin.font-ui;
@@ -807,7 +1257,7 @@ export component HubWindow inherits Window {
                                 clicked => { root.editing = true; }
                             }
                         }
-                        VerticalLayout {
+                        if nav-top: VerticalLayout {
                             alignment: center;
                             HeaderButton {
                                 text: "Configurações";
@@ -858,7 +1308,7 @@ export component HubWindow inherits Window {
                                 height: 32px;
                                 value: columns;
                                 minimum: 1;
-                                maximum: 6;
+                                maximum: max-columns;
                                 value-width: 24px;
                                 font-size: 14px;
                                 accent: Skin.accent;
@@ -879,7 +1329,7 @@ export component HubWindow inherits Window {
                                 height: 32px;
                                 value: rows;
                                 minimum: 1;
-                                maximum: 6;
+                                maximum: max-rows;
                                 value-width: 24px;
                                 font-size: 14px;
                                 accent: Skin.accent;
@@ -961,8 +1411,21 @@ export component HubWindow inherits Window {
                 }
             }
 
+            // barra lateral (páginas) e, ao lado, o painel ou as configurações
+            HorizontalLayout {
+            vertical-stretch: 1;
+            if !nav-top: Rail {
+                pages: pages;
+                current: page;
+                settings: current == "apps";
+                selected(i) => { root.page-selected(i); }
+                add => { root.page-added(); }
+                open-settings => { root.select-tab(current == "apps" ? "panel" : "apps"); }
+            }
+
             // painel, sobre o fundo do visual
             if current == "panel": area := Rectangle {
+                horizontal-stretch: 1;
                 vertical-stretch: 1;
                 changed width => { root.backdrop-resized(self.width / 1px, self.height / 1px); }
                 changed height => { root.backdrop-resized(self.width / 1px, self.height / 1px); }
@@ -989,10 +1452,30 @@ export component HubWindow inherits Window {
 
             if current == "apps": AppsView {
                 vertical-stretch: 1;
+                horizontal-stretch: 1;
                 apps: apps;
+                pages: pages;
+                page-names: page-names;
+                mascots: mascots;
+                nav-index: nav-top ? 1 : 0;
+                nav-chosen(i) => { root.nav-chosen(i); }
+                reduce-motion: reduce-motion;
+                reduce-motion-toggled => { root.reduce-motion-toggled(); }
+                page-added => { root.page-added(); }
+                page-removed(i) => { root.page-removed(i); }
+                page-renamed(i, n) => { root.page-renamed(i, n); }
+                page-icon-chosen(i, k) => { root.page-icon-chosen(i, k); }
+                page-moved(i, d) => { root.page-moved(i, d); }
+                app-page-chosen(id, k) => { root.app-page-chosen(id, k); }
                 skins: skins;
                 skin-index: skin-index;
                 skin-chosen(i) => { root.skin-chosen(i); }
+                tray-icons: tray-icons;
+                tray-icon-index: tray-icon-index;
+                tray-themes: tray-themes;
+                tray-theme-index: tray-theme-index;
+                tray-icon-chosen(i) => { root.tray-icon-chosen(i); }
+                tray-theme-chosen(i) => { root.tray-theme-chosen(i); }
                 edit-layout => {
                     root.editing = true;
                     root.select-tab("panel");
@@ -1001,6 +1484,7 @@ export component HubWindow inherits Window {
                 setting-toggled(a, k) => { root.setting-toggled(a, k); }
                 setting-int(a, k, v) => { root.setting-int(a, k, v); }
                 setting-chosen(a, k, i) => { root.setting-chosen(a, k, i); }
+            }
             }
 
             // rodapé: barra de status (Terminal) ou faixa de madeira (Aconchego)

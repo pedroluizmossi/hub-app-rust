@@ -41,7 +41,7 @@ está em [DESIGN.md](DESIGN.md).
  │  Núcleo        Registro de mini-apps ── manifest.toml, liga/desliga            │
  │                Serviços: Executor (allowlist) · Config (TOML, versionada) ·    │
  │                          Visuais + temas + mascotes · Notificações · Grade     │
- │                Provedores: sys · gpu · docker · media (MPRIS)                  │
+ │                Provedores: sys · gpu · docker · media (MPRIS) · ai_usage       │
  │                           (thread própria, coleta 1×, distribui)               │
  └────────────────────────────────────────────────────────────────────────────────┘
    /proc + /sys + hwmon     nvidia-smi / amdgpu      docker CLI      D-Bus (MPRIS)
@@ -65,30 +65,41 @@ hub-app-rust/
   miniapps/
     <app>/manifest.toml       manifesto (id, provedores, permissões, configurações)
     <app>/view.slint          tela do app (global <App>App + componente <App>View)
-    docker/ vitals/ cdplayer/
+    docker/ vitals/ cdplayer/ ai_usage/
   src/
     main.rs                   argumentos (--hidden, --tab) e event loop
-    hub.rs                    o host: liga config, registro, provedores, janela, bandeja,
-                              grade, modo de edição, visual, relógio
+    hub/                      o host, um `impl Hub` dividido por assunto:
+      mod.rs                  estado, montagem, laço de dados e de animação, bandeja
+      window.rs               popup: abrir, esconder, fixar, fade, tamanho lembrado
+      appearance.rs           visual, fundo, ícone da bandeja, movimento, relógio
+      pages.rs                páginas: barra lateral, página aberta, edição
+      grid.rs                 grade do painel e modo de edição (mover, redimensionar)
+      settings.rs             Configurações: lista de apps e formulário do manifesto
+      bind.rs                 callbacks da tela e eventos da janela
     instance.rs               instância única por socket Unix (a 2ª só pede para abrir)
     ui.rs                     tipos gerados do Slint
     tray.rs                   ícone na bandeja com a mascote do app em pior estado
     popup.rs                  popup de bandeja: posição, fora da barra de tarefas, X11/XWayland
     core/
-      miniapp.rs              o trait MiniApp e o Host (serviços)
+      miniapp.rs              o trait MiniApp, o Host (serviços) e o Reporter (recado de
+                              uma ação em segundo plano para o app que a pediu)
       manifest.rs             formato do manifest.toml
       registry.rs             liga/desliga mini-apps e distribui eventos
       config.rs               ~/.config/miniutils/config.toml (versão, migrações, nome exibido)
       layout.rs               grade do painel: posições, encaixe ao arrastar (settle), vagas
-      exec.rs                 executor com allowlist
+      exec.rs                 executor com allowlist; todo comando tem prazo (`run_timeout`)
+                              e erro tipado (`ExecError`: negado, ausente, prazo, falhou)
       notify.rs               notificações (no máximo 1/min por evento)
-      bus.rs                  provedores em threads, assinaturas, "poke" para ler já
+      bus.rs                  provedores em threads (`Topic`), assinaturas, "poke" para
+                              ler já, janela visível ou escondida
     providers/
+      mod.rs                  `spawn_all`: registra todos os provedores no barramento
       sys.rs                  CPU (uso, GHz, carga), RAM e swap, temperatura, rede
                               (interface, IP), partições e leitura/escrita dos discos
-      gpu.rs                  nvidia-smi ou amdgpu via sysfs
+      gpu.rs                  NVIDIA por um `nvidia-smi -l` de vida longa; senão amdgpu via sysfs
       docker.rs               docker ps / stats / events
       media.rs                MPRIS pelo D-Bus: o que está tocando e comandos do player
+      ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go)
     skin/
       mod.rs                  visuais da janela (tabela SKINS) e `apply` para o global Skin
       backdrop.rs             fundos desenhados em Rust (pontos, CRT, papel, cidade)
@@ -96,10 +107,12 @@ hub-app-rust/
       sprites.rs              sprites: 12 por papéis de cor (16×14, inclui o CD) + 20 "pixel" (12×12)
       themes.rs               temas de cor dos apps
       render.rs               sprite + tema + humor + quadro -> imagem RGBA 16×14
+      anim.rs                 piscada e reações curtas (`Animator`, `Reaction`)
       disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
     apps/
       docker.rs  vitals.rs    lógica de cada mini-app
       cdplayer.rs             CD Player: faixa, progresso, comandos e humor
+      ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
 ```
 
 ## O mini-app
@@ -126,7 +139,9 @@ default = "auto"
 options = ["auto", "neon", "matrix", "aconchego"]
 ```
 
-- `uses` liga os provedores quando o app é ativado e os solta quando é desativado.
+- `uses` liga os provedores quando o app é ativado e os solta quando é desativado. Os nomes
+  são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`): um nome desconhecido
+  faz o manifesto falhar no parse, e no Rust o provedor é sempre `Topic::…`, nunca uma string.
 - `permissions.exec` é a allowlist do executor para aquele app.
 - `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice`). Um
   rótulo terminado em ` (%)` ou ` (°C)` vira a unidade do stepper.
@@ -140,18 +155,34 @@ pub trait MiniApp {
     fn enable(&mut self, ui: &HubWindow) {}              // ligou: prepara estado, preenche a tela
     fn disable(&mut self, ui: &HubWindow) {}             // desligou: solta o que segura
     fn on_event(&mut self, ev: &Event, ui: &HubWindow);  // leitura de um provedor
-    fn tick(&mut self, frame: u32, ui: &HubWindow) {}    // quadro de animação (~8/s, janela visível)
+    fn on_report(&mut self, r: &Report, ui: &HubWindow) {} // uma ação em segundo plano terminou
+    fn tick(&mut self, frame: u32, ui: &HubWindow) {}    // quadro (4 a 8/s), janela aberta na página do app
     fn settings_changed(&mut self, ui: &HubWindow) {}    // mudou configuração, tema ou visual
     fn mood(&self) -> Mood;                              // sleep < idle < happy < busy < alarm
     fn mascot_key(&self) -> String { /* icon */ }        // mascote na bandeja
     fn summary(&self) -> String;                         // linha do tooltip da bandeja
+    fn tray_media(&self) -> Option<TrayMedia> { None }   // faixa e controles no menu da bandeja
 }
 ```
 
 O `Host` oferece `config`, `bus`, `notifier`, `theme_for(manifest)` (resolve "auto" pelo
-visual) e `exec_for(manifest)` (executor com a allowlist do app).
+visual), `exec_for(manifest)` (executor com a allowlist do app) e `reporter(manifest)`.
 
-A bandeja mostra a mascote e o tema do app em **pior** humor.
+**Ações em segundo plano.** Um comando demorado (`docker stop`, um comando do player) roda
+numa thread, que leva um `Reporter` e no fim deixa um recado: `done()` ou `error(msg)`. O hub
+entrega o recado na thread da UI por `on_report`, e o app o guarda no próprio estado. A thread
+nunca escreve na tela: o que ela escrevesse seria apagado pela leitura seguinte do provedor.
+
+Reações das mascotes (`src/mascot/anim.rs`): o `Mood` é o estado que dura; uma reação
+(`Celebrate`, `Surprised`) é um pico curto por cima dele, medido pelo relógio (não pelo
+quadro). Cada mascote tem um `Animator`, que também defasa a piscada para mascotes iguais não
+piscarem juntas. Um alerta interrompe a reação; reações têm prioridade e intervalo mínimo.
+O Docker comemora quando um container volta; três cliques rápidos numa mascote disparam o
+easter egg (nunca durante um alerta). `reduce_motion` na config desliga movimento e reações.
+A bandeja não mostra reações, só o humor.
+
+A bandeja mostra a mascote e o tema do app em **pior** humor, a menos que a config fixe
+outra mascote (`tray_icon`) ou outro tema (`tray_theme`). O humor continua vindo dos apps.
 
 Como criar um app novo, passo a passo: [DESIGN.md › Mini-apps](DESIGN.md#5-mini-apps).
 
@@ -166,8 +197,19 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (timer de
 
 - Provedores rodam em threads próprias (`bus.spawn` / `spawn_polled`) e dormem quando
   ninguém assina. `poke` pede uma leitura imediata (ex.: depois de parar um container).
-- O Docker é por eventos (`docker events`), com `ps` de reserva a cada 15 s e `stats` a cada
-  5 s só com containers rodando.
+- O Docker é por eventos (`docker events`, com o filtro de ações aplicado no daemon), com
+  `ps` de reserva a cada 15 s e `stats` a cada 5 s só com containers rodando. Com a janela
+  escondida os dados só alimentam a bandeja: `ps` a cada 60 s e `stats` a cada 30 s; ao abrir
+  a janela, o hub pede uma leitura completa (`Bus::set_visible`, `Poker::visible`).
+- Nenhuma chamada externa espera para sempre: comandos têm prazo (`exec::run_timeout` mata o
+  grupo de processos ao estourar) e as chamadas D-Bus do MPRIS têm `method_timeout`. Um
+  daemon ou player travado vira erro na tela, não uma thread presa mostrando dado velho.
+- Programa ausente não é falha: sem `docker` no PATH o app mostra "não instalado" e dorme,
+  em vez de pôr a bandeja em alarme. `nvidia-smi` presente mas sem funcionar cai para o amdgpu.
+- A NVIDIA é lida de um único `nvidia-smi -l 2` de vida longa (uma thread guarda a linha mais
+  nova), encerrado quando ninguém pede leitura há 10 s.
+- A bandeja só recebe o que muda (`sync_tray`): o ícone é redesenhado quando a mascote, o
+  tema ou o humor mudam; texto que só muda de valor ("CPU 37%") vai no máximo a cada 15 s.
 - A UI só é tocada na thread do event loop do Slint.
 - O quadro de animação (mascotes, cursor do Terminal) roda só com a janela visível: 8/s com
   o mouse sobre a janela, 4/s fora. Flutuar e pular são animações do Slint, sem redesenhar.
@@ -178,7 +220,14 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (timer de
 
 - **Telas:** `current` = `"panel"` (painel) ou `"apps"` (configurações). O modo de edição é
   um estado do painel (`editing`). Esc volta das configurações, conclui a edição ou fecha o popup.
-- **Grade:** colunas × linhas (até 6 × 6); cada app guarda `x`, `y`, `w`, `h` na config.
+- **Páginas:** a barra lateral (`Rail`) lista as páginas do painel; cada uma tem nome,
+  mascote (no humor do pior app dela, com marca de alerta), a própria grade e os seus apps.
+  Um app fica numa página só. Embaixo da barra: nova página e configurações. Nas
+  Configurações, o cartão Páginas renomeia, troca o ícone, reordena e apaga (os apps vão
+  para a página anterior); cada app tem um seletor "Página". Só os apps da página aberta animam.
+  Com `nav = "top"` (Aparência › Páginas), as páginas viram abas no cabeçalho (`TopTabs`) no
+  lugar da barra lateral, e a engrenagem volta para o cabeçalho.
+- **Grade:** colunas × linhas (até 6 × 6) por página; cada app guarda `x`, `y`, `w`, `h` na config.
   `layout::settle` resolve um arrasto (o app arrastado fica; os outros ficam onde estão ou vão
   para a primeira vaga; se não couber, o arrasto é recusado). `Config::arrange` garante lugar
   para apps religados.
@@ -191,22 +240,28 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (timer de
 `~/.config/miniutils/config.toml`, versionada (`version`). Ao mudar a estrutura, suba
 `VERSAO_ATUAL` e acrescente a migração em `config::migra`; o arquivo antigo vira `.bak`.
 Arquivo de versão mais nova é só lido (nunca sobrescrito); TOML quebrado vira `.quebrado`.
+A gravação é atômica (temporário ao lado + `rename`): uma queda no meio deixa o arquivo
+anterior intacto. Arquivo vazio conta como ausente, não como versão 0 a migrar.
 
 | Versão | Mudança |
 |---|---|
 | 0 → 1 | `theme` global vira tema de cada app |
 | 1 → 2 | a grade passa a guardar posição (`x`, `y`) e ganha `rows` |
+| 2 → 3 | o CD Player entra ligado |
+| 3 → 4 | `columns` e `rows` viram a página "Geral" em `[[pages]]`, com os apps ligados |
 
-Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se faltar), `skin`.
+Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se faltar), `skin`,
+`nav` (`"side"` ou `"top"`), `reduce_motion`, `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
 Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copiada.
 
 ## Roteiro
 
 **Fase 1 (atual)** — mini-apps compilados junto, contrato estável:
 - [x] Manifesto, registro, ligar/desligar, configuração em TOML com migrações
-- [x] Provedores sys, gpu, docker e media compartilhados
+- [x] Provedores sys, gpu, docker, media e ai_usage compartilhados
 - [x] Mini-apps Docker e Sinais vitais (com avisos sustentados)
 - [x] Mini-app CD Player (MPRIS: faixa, progresso, comandos, notificação opcional)
+- [x] Mini-app Assinaturas de IA (limites e créditos por conta)
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 
@@ -227,6 +282,8 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 | Mascote desenhada em Rust | Pixel art nítida em qualquer escala (`image-rendering: pixelated`); humor, piscar e glitch mudam pixels sem assets |
 | Visual e tema como tabelas | Criar um visual ou tema novo não mexe em layout (princípio 7) |
 | `docker` CLI em vez de `bollard` | Paridade com o CyberDock, menos dependências (sem hyper/tokio), passa pela allowlist |
+| `nvidia-smi -l` de vida longa | Um processo novo a cada 2 s custava fork, exec e a inicialização da NVML toda vez, inclusive com a janela escondida |
+| Prazo em toda chamada externa | Um `docker`, `nvidia-smi` ou player travado prendia a thread do provedor, e a tela seguia mostrando a última leitura como boa |
 | MPRIS pelo `zbus` | O `ksni` já traz o zbus; nenhuma dependência nova |
 | Threads em vez de tokio | Poucos provedores com polling/eventos não justificam um runtime async |
 | Mini-apps compilados na fase 1 | Contrato de plugin nasce de apps reais (princípio 6) |

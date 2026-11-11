@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::bus::Event;
-use super::miniapp::{AppRef, Host};
+use super::miniapp::{AppRef, Host, Report};
 use crate::mascot::Mood;
 use crate::ui::HubWindow;
 
@@ -49,7 +49,7 @@ impl Registry {
     fn activate(&self, app: &AppRef, ui: &HubWindow) {
         let mut a = app.borrow_mut();
         for p in &a.manifest().uses {
-            self.host.bus.subscribe(p);
+            self.host.bus.subscribe(*p);
         }
         a.enable(ui);
     }
@@ -57,7 +57,7 @@ impl Registry {
     fn deactivate(&self, app: &AppRef, ui: &HubWindow) {
         let mut a = app.borrow_mut();
         for p in &a.manifest().uses {
-            self.host.bus.unsubscribe(p);
+            self.host.bus.unsubscribe(*p);
         }
         a.disable(ui);
     }
@@ -86,14 +86,9 @@ impl Registry {
     /// Entrega cada leitura só aos apps ligados que assinam aquele provedor.
     pub fn dispatch(&self, events: &[Event], ui: &HubWindow) {
         for ev in events {
-            let topic = match ev {
-                Event::Sys(_) => "sys",
-                Event::Gpu(_) => "gpu",
-                Event::Docker(_) => "docker",
-                Event::Media(_) => "media",
-            };
+            let topic = ev.topic();
             for app in self.enabled() {
-                let uses = app.borrow().manifest().uses.iter().any(|u| u == topic);
+                let uses = app.borrow().manifest().uses.contains(&topic);
                 if uses {
                     app.borrow_mut().on_event(ev, ui);
                 }
@@ -101,24 +96,38 @@ impl Registry {
         }
     }
 
-    /// O app ligado em pior estado (o primeiro, em caso de empate).
-    pub fn worst(&self) -> Option<AppRef> {
-        let mut best: Option<(Mood, AppRef)> = None;
-        for app in self.enabled() {
-            let m = app.borrow().mood();
-            if best.as_ref().is_none_or(|(b, _)| m > *b) {
-                best = Some((m, app.clone()));
+    /// Entrega o resultado das ações em segundo plano ao app que as pediu (se ainda ligado).
+    pub fn deliver(&self, reports: &[(String, Report)], ui: &HubWindow) {
+        for (id, report) in reports {
+            if !self.is_enabled(id) {
+                continue;
+            }
+            if let Some(app) = self.find(id) {
+                app.borrow_mut().on_report(report, ui);
             }
         }
-        best.map(|(_, a)| a)
     }
 
-    pub fn mood(&self) -> Mood {
-        self.enabled().iter().map(|a| a.borrow().mood()).fold(Mood::Sleep, Mood::worst)
+    /// O app em pior estado entre `apps` (o primeiro, em caso de empate).
+    pub fn worst_of(apps: &[AppRef]) -> Option<AppRef> {
+        let mut best: Option<(Mood, &AppRef)> = None;
+        for app in apps {
+            let m = app.borrow().mood();
+            if best.as_ref().is_none_or(|(b, _)| m > *b) {
+                best = Some((m, app));
+            }
+        }
+        best.map(|(_, a)| a.clone())
     }
 
-    pub fn summary(&self) -> String {
-        let lines: Vec<String> = self.enabled().iter().map(|a| a.borrow().summary()).collect();
+    /// O pior humor entre `apps`.
+    pub fn mood_of(apps: &[AppRef]) -> Mood {
+        apps.iter().map(|a| a.borrow().mood()).fold(Mood::Sleep, Mood::worst)
+    }
+
+    /// Uma linha por app, para o tooltip da bandeja.
+    pub fn summary_of(apps: &[AppRef]) -> String {
+        let lines: Vec<String> = apps.iter().map(|a| a.borrow().summary()).collect();
         if lines.is_empty() { "Nenhum mini-app ligado".into() } else { lines.join("\n") }
     }
 }

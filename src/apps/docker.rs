@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::core::bus::Event;
+use crate::core::bus::{Event, Topic};
 use crate::core::exec::{self, Exec};
 use crate::core::manifest::Manifest;
-use crate::core::miniapp::{Host, MiniApp};
+use crate::core::miniapp::{Host, MiniApp, Report};
+use crate::mascot::anim::{Animator, Reaction};
 use crate::mascot::{Mood, render, sprites};
 use crate::providers::docker::{
     Container, DockerSnapshot, Stats, format_age, format_bytes, valid_container_name, valid_project_name,
@@ -19,7 +20,6 @@ use crate::ui::{ContainerRow, DockerApp, HubWindow};
 
 const CRASH_WINDOW: Duration = Duration::from_secs(5 * 60);
 const SPEECH_TTL: Duration = Duration::from_secs(45);
-const HAPPY_FOR: Duration = Duration::from_secs(6);
 
 #[derive(Clone, PartialEq)]
 pub struct Prev {
@@ -45,7 +45,8 @@ pub struct DockerMini {
     baseline: bool,
     crashes: HashMap<String, Instant>,
     speech: Option<(String, Instant)>,
-    happy_until: Option<Instant>,
+    /// Fala de uma ação em curso ("Parando web…"): sai quando a ação termina.
+    working: Option<String>,
     search: String,
     /// Projetos com o grupo recolhido ("" = avulsos).
     collapsed: HashSet<String>,
@@ -53,6 +54,10 @@ pub struct DockerMini {
     rows: Rc<VecModel<ContainerRow>>,
     /// Último quadro da mascote: só troca a imagem quando os pixels mudam.
     mascot: render::Cache,
+    /// Piscada e reações da mascote (comemora quando um container volta).
+    anim: Animator,
+    /// Reação mostrada agora.
+    reaction: Option<Reaction>,
 }
 
 impl DockerMini {
@@ -70,12 +75,14 @@ impl DockerMini {
             baseline: false,
             crashes: HashMap::new(),
             speech: None,
-            happy_until: None,
+            working: None,
             search: String::new(),
             collapsed: HashSet::new(),
             mood: Mood::Sleep,
             rows,
             mascot: Default::default(),
+            anim: Animator::new(7),
+            reaction: None,
         }));
         Self::bind(&app, ui);
         app
@@ -84,6 +91,22 @@ impl DockerMini {
     fn bind(app: &Rc<RefCell<Self>>, ui: &HubWindow) {
         let g = ui.global::<DockerApp>();
         let weak_ui = ui.as_weak();
+
+        // easter egg: cutucar a mascote algumas vezes
+        let a = Rc::downgrade(app);
+        let w = weak_ui.clone();
+        g.on_mascot_poked(move || {
+            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
+                let mut a = a.borrow_mut();
+                if a.host.config.borrow().reduce_motion {
+                    return;
+                }
+                let mood = a.mood;
+                if a.anim.poke(mood, Instant::now()) {
+                    a.push_mascot(&ui);
+                }
+            }
+        });
 
         let a = Rc::downgrade(app);
         let w = weak_ui.clone();
@@ -161,7 +184,7 @@ impl DockerMini {
         let a = Rc::downgrade(app);
         g.on_refresh(move || {
             if let Some(a) = a.upgrade() {
-                a.borrow().host.bus.poke("docker");
+                a.borrow().host.bus.poke(Topic::Docker);
             }
         });
     }
@@ -170,14 +193,20 @@ impl DockerMini {
         self.speech = Some((text, Instant::now()));
     }
 
+    /// Fala enquanto uma ação roda em segundo plano; o resultado chega por `on_report`.
+    fn say_working(&mut self, text: String) {
+        self.working = Some(text.clone());
+        self.say(text);
+    }
+
     fn action(&mut self, verb: &str, name: &str, ui: &HubWindow) {
         if !valid_container_name(name) {
             return;
         }
         let result = match verb {
             "start" | "stop" | "restart" | "pause" | "unpause" => {
-                let poker = self.host.bus.poker("docker");
-                let weak = ui.as_weak();
+                let poker = self.host.bus.poker(Topic::Docker);
+                let reporter = self.host.reporter(&self.manifest);
                 let label = match verb {
                     "start" => "Iniciando",
                     "stop" => "Parando",
@@ -185,14 +214,11 @@ impl DockerMini {
                     "unpause" => "Retomando",
                     _ => "Reiniciando",
                 };
-                self.say(format!("{label} {name}…"));
-                let name2 = name.to_string();
+                self.say_working(format!("{label} {name}…"));
+                let prefix = format!("Falhou em {name}");
                 self.exec.run_async("docker", &[verb, name], move |r| {
                     poker.poke();
-                    if let Err(e) = r {
-                        let msg = format!("Falhou em {name2}: {}", e.to_string().lines().next().unwrap_or_default());
-                        let _ = weak.upgrade_in_event_loop(move |ui| ui.global::<DockerApp>().set_speech(msg.into()));
-                    }
+                    reporter.result(&prefix, &r);
                 });
                 Ok(())
             }
@@ -220,17 +246,14 @@ impl DockerMini {
             "restart" => "Reiniciando",
             _ => return,
         };
-        self.say(format!("{label} stack {project}…"));
-        let poker = self.host.bus.poker("docker");
-        let weak = ui.as_weak();
-        let project2 = project.to_string();
+        self.say_working(format!("{label} stack {project}…"));
+        let poker = self.host.bus.poker(Topic::Docker);
+        let reporter = self.host.reporter(&self.manifest);
+        let prefix = format!("Falhou na stack {project}");
         // start/stop/restart funcionam só com o nome do projeto, sem o arquivo do compose
         self.exec.run_async("docker", &["compose", "-p", project, verb], move |r| {
             poker.poke();
-            if let Err(e) = r {
-                let msg = format!("Falhou na stack {project2}: {}", e.to_string().lines().next().unwrap_or_default());
-                let _ = weak.upgrade_in_event_loop(move |ui| ui.global::<DockerApp>().set_speech(msg.into()));
-            }
+            reporter.result(&prefix, &r);
         });
         self.push_header(ui);
     }
@@ -312,8 +335,9 @@ impl DockerMini {
                 self.say(title.clone());
                 said = true;
             }
-            if !urgent {
-                self.happy_until = Some(Instant::now() + HAPPY_FOR);
+            // container de volta: a mascote comemora (reação curta, não um humor)
+            if !urgent && !self.host.config.borrow().reduce_motion {
+                self.anim.trigger(Reaction::Celebrate, Instant::now());
             }
             if notify && (urgent || notify_recovery) {
                 self.host.notifier.borrow_mut().send(&key, &title, &body, urgent);
@@ -323,26 +347,42 @@ impl DockerMini {
 
     fn compute_mood(&self) -> Mood {
         let s = &self.snap;
+        // sem Docker na máquina não há o que vigiar: dorme, não alarma
+        if s.missing {
+            return Mood::Sleep;
+        }
         if !s.ok || s.containers.iter().any(|c| self.is_problem(c)) {
             return Mood::Alarm;
         }
-        if self.happy_until.is_some_and(|t| Instant::now() < t) {
-            return Mood::Happy;
-        }
-        let busy_cpu = self.host.config.borrow().int(&self.manifest, "busy_cpu") as f32;
+        let busy_cpu = self.busy_cpu();
         if s.stats.values().any(|st| st.cpu >= busy_cpu) {
             return Mood::Busy;
         }
         if s.containers.iter().any(|c| c.state == "running") { Mood::Idle } else { Mood::Sleep }
     }
 
+    /// A partir de quanto de CPU um container conta como "ocupado" (configuração do app).
+    fn busy_cpu(&self) -> f32 {
+        self.host.config.borrow().int(&self.manifest, "busy_cpu") as f32
+    }
+
     // ---- tela ---------------------------------------------------------------
 
-    /// Redesenha a mascote no quadro dado; `true` se a imagem mudou.
-    fn refresh_mascot(&mut self, frame: u32) -> bool {
+    /// Redesenha a mascote agora; `true` se a imagem ou a reação mudou.
+    fn refresh_mascot(&mut self) -> bool {
         let key = self.mascot_key();
         let theme = self.host.theme_for(&self.manifest);
-        self.mascot.update(sprites::get(&key), theme, self.mood, frame)
+        let look = self.anim.look(self.mood, Instant::now());
+        let reaction_changed = std::mem::replace(&mut self.reaction, look.reaction) != look.reaction;
+        self.mascot.update_look(sprites::get(&key), theme, &look) || reaction_changed
+    }
+
+    /// Redesenha a mascote e entrega imagem e reação à tela.
+    fn push_mascot(&mut self, ui: &HubWindow) {
+        self.refresh_mascot();
+        let g = ui.global::<DockerApp>();
+        g.set_mascot(self.mascot.image());
+        g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
     }
 
     fn counts(&self) -> (i32, i32, i32) {
@@ -359,7 +399,12 @@ impl DockerMini {
         g.set_stopped(stopped);
         g.set_errors(errors);
         g.set_ok(self.snap.ok);
-        g.set_error_text(self.snap.error.clone().into());
+        g.set_missing(self.snap.missing);
+        g.set_error_text(if self.snap.missing {
+            "O comando docker não foi encontrado no PATH.".into()
+        } else {
+            SharedString::from(self.snap.error.as_str())
+        });
         g.set_mood(self.mood.as_str().into());
         g.set_hide_stopped(self.host.config.borrow().bool(&self.manifest, "hide_stopped"));
         g.set_sort(self.host.config.borrow().string(&self.manifest, "sort").into());
@@ -407,6 +452,7 @@ impl DockerMini {
         let groups = group_by_project(&self.snap.containers, &list, |c| self.is_problem(c));
         let grouped = groups.iter().any(|g| !g.project.is_empty());
         let mut rows: Vec<ContainerRow> = Vec::with_capacity(list.len() + groups.len());
+        let busy_cpu = self.busy_cpu();
         for g in &groups {
             if grouped {
                 // com busca ativa, mostra tudo: senão o resultado fica escondido no grupo recolhido
@@ -416,7 +462,7 @@ impl DockerMini {
                     continue;
                 }
             }
-            rows.extend(g.items.iter().map(|c| self.row(c)));
+            rows.extend(g.items.iter().map(|c| self.row(c, busy_cpu)));
         }
         ui.global::<DockerApp>().set_grouped(grouped);
         // só troca o modelo quando algo mudou: evita reconstruir a lista à toa
@@ -428,7 +474,7 @@ impl DockerMini {
         self.push_header(ui);
     }
 
-    fn row(&self, c: &Container) -> ContainerRow {
+    fn row(&self, c: &Container, busy_cpu: f32) -> ContainerRow {
         let problem = self.is_problem(c);
         let state_text = if c.health == "unhealthy" {
             "unhealthy".to_string()
@@ -462,7 +508,7 @@ impl DockerMini {
             paused: c.state == "paused",
             problem,
             state_text: state_text.into(),
-            cpu: st.cpu,
+            busy: running && st.cpu >= busy_cpu,
             usage_text: if running { format!("{:.0}% · {}", st.cpu, format_bytes(st.mem as f64)).into() } else { "".into() },
             port_text: port_text.into(),
             url: if running { url.into() } else { "".into() },
@@ -620,8 +666,7 @@ impl MiniApp for DockerMini {
     fn enable(&mut self, ui: &HubWindow) {
         self.baseline = false; // sem histórico: não acusa eventos antigos
         ui.global::<DockerApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
-        self.refresh_mascot(1);
-        ui.global::<DockerApp>().set_mascot(self.mascot.image());
+        self.push_mascot(ui);
         self.push_header(ui);
     }
 
@@ -639,23 +684,40 @@ impl MiniApp for DockerMini {
         self.refresh_rows(ui);
     }
 
-    fn tick(&mut self, frame: u32, ui: &HubWindow) {
-        // o humor "feliz" e a fala expiram sozinhos
+    fn on_report(&mut self, report: &Report, ui: &HubWindow) {
+        let working = self.working.take();
+        match report {
+            // a falha fica na fala (com o prazo normal), em vez de sumir na próxima leitura
+            Report::Error(msg) => self.say(msg.clone()),
+            // deu certo: tira o "Parando X…", a menos que outra fala já tenha entrado
+            Report::Done => {
+                if self.speech.as_ref().map(|(t, _)| t) == working.as_ref() {
+                    self.speech = None;
+                }
+            }
+        }
+        self.push_header(ui);
+    }
+
+    fn tick(&mut self, _frame: u32, ui: &HubWindow) {
+        // a fala expira sozinha
         let mood = self.compute_mood();
         if mood != self.mood {
             self.mood = mood;
             self.push_header(ui);
         }
-        if self.refresh_mascot(frame) {
-            ui.global::<DockerApp>().set_mascot(self.mascot.image());
+        // o ritmo vem do relógio do `Animator`, não do quadro do hub
+        if self.refresh_mascot() {
+            let g = ui.global::<DockerApp>();
+            g.set_mascot(self.mascot.image());
+            g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
         }
     }
 
     fn settings_changed(&mut self, ui: &HubWindow) {
         ui.global::<DockerApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.mood = self.compute_mood();
-        self.refresh_mascot(1);
-        ui.global::<DockerApp>().set_mascot(self.mascot.image());
+        self.push_mascot(ui);
         self.refresh_rows(ui);
     }
 
@@ -668,6 +730,9 @@ impl MiniApp for DockerMini {
     }
 
     fn summary(&self) -> String {
+        if self.snap.missing {
+            return "Docker: não instalado".into();
+        }
         if !self.snap.ok {
             return "Docker: fora do ar".into();
         }
