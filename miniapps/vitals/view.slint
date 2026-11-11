@@ -1,6 +1,7 @@
-// Tela do mini-app Sinais vitais: um cartão por recurso, cada um com sua mascote.
-// Responsiva: os 4 cartões ficam em 4×1, 2×2 ou 1×4 conforme o formato da célula,
-// e ficam compactos (sem histórico e detalhe) quando baixos.
+// Tela do mini-app Sinais vitais: um cartão por recurso (CPU, RAM, GPU, disco, rede),
+// cada um com sua mascote. Responsiva: os cartões ficam numa linha, em 2 colunas ou em
+// 1 coluna conforme o formato da célula (o último ocupa o que sobrar da linha), e ficam
+// compactos (sem histórico) quando baixos.
 import { Colors, Moods, Skin } from "../../ui/theme.slint";
 import { Mascot, SegBar, Sparkline } from "../../ui/widgets.slint";
 
@@ -21,7 +22,6 @@ export struct VitalCard {
 export global VitalsApp {
     in property <Colors> theme;
     in property <[VitalCard]> cards;
-    in property <string> net-text;
 }
 
 component Card inherits Rectangle {
@@ -85,7 +85,8 @@ component Card inherits Rectangle {
             }
             SegBar { theme: t; value: v.value; tint: tint; off: t.muted.with-alpha(0.35); segments: slim ? 10 : 20; }
             if !compact: Sparkline { commands: v.spark; tint: tint.with-alpha(0.7); height: 22px; }
-            if !compact: Text {
+            // o detalhe (GHz, swap, partições, IP…) aparece sempre que couber; só o gráfico some
+            if root.height >= 88px: Text {
                 text: v.available ? v.detail : "não encontrado";
                 color: t.sub;
                 font-family: Skin.font-mono;
@@ -98,33 +99,23 @@ component Card inherits Rectangle {
 
 export component VitalsView inherits Rectangle {
     property <Colors> t: VitalsApp.theme;
+    property <int> n: VitalsApp.cards.length;
     property <length> gap: 10px;
-    property <length> footer: 18px;
-    property <length> area-h: self.height - footer - gap;
-    // 4 colunas se for bem largo, 2 se couber, senão 1
-    property <int> cols: self.width >= 4 * 200px + 3 * gap && self.width / area-h > 2.4 ? 4
+    // todos numa linha se for bem largo, 2 colunas se couber, senão 1
+    property <int> cols: self.width >= n * 170px + (n - 1) * gap && self.width / self.height > 2.4 ? n
         : self.width >= 2 * 190px + gap ? 2 : 1;
-    property <int> rows: 4 / cols;
+    property <int> rows: ceil(n / cols);
     property <length> cw: (self.width - (cols - 1) * gap) / cols;
-    property <length> ch: max(64px, (area-h - (rows - 1) * gap) / rows);
+    property <length> ch: max(64px, (self.height - (rows - 1) * gap) / rows);
 
     for v[i] in VitalsApp.cards: Card {
+        property <int> c: mod(i, cols);
+        // o último cartão se estica pelo resto da linha
+        property <int> span: i == n - 1 ? cols - c : 1;
         v: v;
-        x: mod(i, cols) * (cw + gap);
+        x: c * (cw + gap);
         y: floor(i / cols) * (ch + gap);
-        width: cw;
+        width: span * cw + (span - 1) * gap;
         height: ch;
-    }
-
-    Text {
-        y: parent.height - footer;
-        height: footer;
-        width: parent.width;
-        text: VitalsApp.net-text;
-        color: t.sub;
-        font-family: Skin.font-mono;
-        font-size: 12px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
     }
 }

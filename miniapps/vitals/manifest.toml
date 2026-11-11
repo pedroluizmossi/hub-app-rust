@@ -1,6 +1,6 @@
 id = "cyber.vitals"
 name = "Sinais vitais"
-description = "CPU, RAM, GPU e disco, cada um com uma mascote que segue a carga."
+description = "CPU, RAM, GPU, disco e rede, cada um com uma mascote que segue a carga."
 icon = "chip"
 api = 1
 uses = ["sys", "gpu"]
@@ -31,6 +31,12 @@ max = 100
 step = 5
 
 [[settings]]
+key = "alerts"
+label = "Avisar quando algo ficar alto por um tempo"
+type = "bool"
+default = true
+
+[[settings]]
 key = "show_temps"
 label = "Mostrar temperaturas"
 type = "bool"
@@ -58,26 +64,33 @@ step = 5
 key = "cpu_mascot"
 label = "Mascote da CPU"
 type = "choice"
-default = "chip"
-options = ["chip", "robo", "neko", "kitsune", "usagi", "yurei", "hacker", "sapo"]
+default = "abelha"
+options = ["abelha", "chip", "robo", "neko", "kitsune", "polvo", "hacker", "sapo"]
 
 [[settings]]
 key = "ram_mascot"
 label = "Mascote da RAM"
 type = "choice"
-default = "sapo"
-options = ["sapo", "neko", "robo", "kitsune", "usagi", "yurei", "hacker", "chip"]
+default = "slime"
+options = ["slime", "sapo", "neko", "robo", "kitsune", "fantasma", "chip"]
 
 [[settings]]
 key = "gpu_mascot"
 label = "Mascote da GPU"
 type = "choice"
 default = "auto"
-options = ["auto", "nvidia", "amd", "robo", "neko", "chip"]
+options = ["auto", "nvidia", "amd", "robo", "neko", "chip", "vagalume"]
 
 [[settings]]
 key = "disk_mascot"
 label = "Mascote do disco"
 type = "choice"
-default = "disquete"
-options = ["disquete", "robo", "neko", "yurei", "chip"]
+default = "tartaruga"
+options = ["tartaruga", "disquete", "caracol", "robo", "neko", "yurei", "chip"]
+
+[[settings]]
+key = "net_mascot"
+label = "Mascote da rede"
+type = "choice"
+default = "rato"
+options = ["rato", "caracol", "usagi", "kitsune", "coruja", "neko", "robo"]

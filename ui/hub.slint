@@ -6,6 +6,7 @@ import { Colors, Anim, Skin, Icons } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, HeaderButton } from "widgets.slint";
 import { DockerView, DockerApp, ContainerRow } from "../miniapps/docker/view.slint";
 import { VitalsView, VitalsApp, VitalCard } from "../miniapps/vitals/view.slint";
+import { CdPlayerView, CdPlayerApp } from "../miniapps/cdplayer/view.slint";
 
 import "fonts/ChakraPetch-Regular.ttf";
 import "fonts/ChakraPetch-Medium.ttf";
@@ -16,7 +17,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp }
 
 // Posição de um app na grade do painel (em células).
 export struct GridCell {
@@ -123,11 +124,14 @@ component AppsView inherits ScrollView {
     callback skin-chosen(int);
     callback edit-layout();
     callback toggle-app(string);
+    // app com as opções abertas (um por vez; fica aqui porque a lista é refeita pelo Rust)
+    in-out property <string> open-app;
     callback setting-toggled(string, string);
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
 
     VerticalLayout {
+        alignment: start;
         padding-left: 16px;
         padding-right: 16px;
         padding-top: 12px;
@@ -219,12 +223,28 @@ component AppsView inherits ScrollView {
             border-width: 1px;
             border-color: accent.mix(Skin.surface-edge, 0.3);
             opacity: app.enabled ? 1 : 0.55;
+            property <bool> open: root.open-app == app.id;
 
             VerticalLayout {
                 padding: 16px;
                 spacing: 14px;
-                HorizontalLayout {
+                // cabeçalho do app: clicar abre/fecha as opções (o interruptor tem o próprio clique)
+                head := Rectangle {
+                    min-height: head-row.preferred-height;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.open-app = open ? "" : app.id; }
+                    }
+                    head-row := HorizontalLayout {
                     spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            icon: open ? Icons.chevron : Icons.chevron-right;
+                            ink: open ? accent : Skin.dim;
+                            size: 16px;
+                        }
+                    }
                     VerticalLayout {
                         alignment: center;
                         Rectangle {
@@ -245,6 +265,12 @@ component AppsView inherits ScrollView {
                         spacing: 4px;
                         Text { text: app.name; color: Skin.ink; font-size: 17px; font-weight: 700; }
                         Text { text: app.description; color: Skin.sub; font-size: 13px; wrap: word-wrap; }
+                        if !open: Text {
+                            text: app.settings.length + (app.settings.length == 1 ? " opção" : " opções") + " · clique para abrir";
+                            color: Skin.dim;
+                            font-family: Skin.font-mono;
+                            font-size: 11px;
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
@@ -258,9 +284,10 @@ component AppsView inherits ScrollView {
                             toggled => { root.toggle-app(app.id); }
                         }
                     }
+                    }
                 }
-                Rectangle { height: 1px; background: Skin.surface-edge; }
-                VerticalLayout {
+                if open: Rectangle { height: 1px; background: Skin.surface-edge; }
+                if open: VerticalLayout {
                     for s in app.settings: SettingLine {
                         s: s;
                         accent: accent;
@@ -384,6 +411,12 @@ component Dashboard inherits ScrollView {
             height: parent.height - 28px;
         }
         if c.id == "cyber.vitals": VitalsView {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+        }
+        if c.id == "cyber.cd": CdPlayerView {
             x: 12px;
             y: 12px;
             width: parent.width - 24px;

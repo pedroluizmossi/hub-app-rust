@@ -1,0 +1,249 @@
+// Tela do mini-app CD Player: um deck com o disco girando (pixel art colorida pelo tema),
+// o display com faixa/artista e os controles do player MPRIS ativo.
+//
+// Responsiva, como os outros apps: o disco encolhe com a altura da célula, o texto some
+// em células estreitas e os botões de pulo só aparecem quando há largura.
+import { Colors, Moods, Anim, Skin, Icons } from "../../ui/theme.slint";
+import { IconButton, TextButton } from "../../ui/widgets.slint";
+
+// Estado do mini-app, preenchido pelo Rust (src/apps/cdplayer.rs).
+export global CdPlayerApp {
+    in property <Colors> theme;
+    // o barramento respondeu
+    in property <bool> ok: true;
+    in property <string> error-text;
+    // "TOCANDO" | "PAUSADO" | "PARADO" | "SEM DISCO" | "SEM BARRAMENTO"
+    in property <string> state-text: "SEM DISCO";
+    // nome do player: "Firefox", "plasma-browser-integration"…
+    in property <string> source;
+    in property <string> title;
+    in property <string> artist;
+    in property <string> album;
+    in property <bool> playing;
+    in property <bool> has-player;
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    in property <bool> can-seek;
+    // 0..1
+    in property <float> progress;
+    // "1:23 / 4:30"
+    in property <string> time-text;
+    // segundos do pulo, para o rótulo dos botões ("10")
+    in property <string> seek-label: "10";
+    in property <image> disc;
+    in property <string> mood: "sleep";
+    // play-pause | next | prev | back | fwd | raise
+    callback command(string);
+}
+
+export component CdPlayerView inherits Rectangle {
+    property <Colors> t: CdPlayerApp.theme;
+    property <bool> narrow: self.width < 430px;
+    property <bool> short: self.height < 180px;
+    property <color> accent: Moods.color(t, CdPlayerApp.mood);
+    property <length> disc-size: min(narrow ? 84px : 112px, max(44px, self.height - 84px));
+    property <length> btn: short ? 34px : 38px;
+
+    VerticalLayout {
+        spacing: short ? 6px : 9px;
+
+        // faixa do topo: LED do estado, estado e a fonte (player) ou o erro
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    background: accent;
+                    opacity: CdPlayerApp.playing ? (mod(Anim.frame, 8) < 5 ? 1 : 0.25) : 1;
+                }
+            }
+            Text {
+                text: CdPlayerApp.state-text;
+                color: accent;
+                font-family: Skin.font-mono;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 2px;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if !CdPlayerApp.ok: Text {
+                text: CdPlayerApp.error-text;
+                color: t.alarm;
+                font-family: Skin.font-mono;
+                font-size: 10px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if CdPlayerApp.ok && CdPlayerApp.source != "": Text {
+                text: CdPlayerApp.source;
+                color: t.muted;
+                font-family: Skin.font-mono;
+                font-size: 10px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        // disco + display
+        HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 1;
+
+            // poço do disco: o CD desenhado em Rust (pixel art) gira enquanto toca
+            Rectangle {
+                width: disc-size;
+                height: disc-size;
+                background: t.bg1.mix(t.bg0, 0.5);
+                border-width: 1px;
+                border-color: CdPlayerApp.playing ? t.muted : t.muted.with-alpha(0.5);
+                Image {
+                    source: CdPlayerApp.disc;
+                    image-rendering: pixelated;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - 10px;
+                    height: parent.height - 10px;
+                }
+            }
+
+            // display: faixa, artista, álbum, progresso e tempo
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                min-height: disc-size;
+                background: t.bg0.mix(t.bg1, 0.72);
+                border-width: 1px;
+                border-color: t.muted.with-alpha(0.45);
+
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: short ? 5px : 9px;
+                    padding-bottom: short ? 5px : 9px;
+                    spacing: short ? 2px : 4px;
+
+                    Text {
+                        text: CdPlayerApp.title != "" ? CdPlayerApp.title : CdPlayerApp.has-player ? "faixa sem título" : "sem disco";
+                        color: CdPlayerApp.has-player ? t.text : t.muted;
+                        font-size: short ? 14px : narrow ? 16px : 19px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+                    if !short && CdPlayerApp.artist != "": Text {
+                        text: CdPlayerApp.artist;
+                        color: t.sub;
+                        font-size: 13px;
+                        overflow: elide;
+                    }
+                    if !short && !narrow: Text {
+                        text: CdPlayerApp.album;
+                        color: t.muted;
+                        font-family: Skin.font-mono;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+
+                    Rectangle { vertical-stretch: 1; min-height: 2px; }
+
+                    // barra de progresso
+                    Rectangle {
+                        height: 4px;
+                        background: t.muted.with-alpha(0.35);
+                        Rectangle {
+                            width: parent.width * min(max(CdPlayerApp.progress, 0), 1);
+                            height: parent.height;
+                            background: accent;
+                        }
+                    }
+                    HorizontalLayout {
+                        Text {
+                            text: CdPlayerApp.has-player ? CdPlayerApp.time-text : "--:--";
+                            color: CdPlayerApp.has-player ? t.sub : t.muted;
+                            font-family: Skin.font-mono;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        if !narrow: Text {
+                            text: "MPRIS";
+                            color: t.muted;
+                            font-family: Skin.font-mono;
+                            font-size: 10px;
+                            letter-spacing: 1.5px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // controles do player
+        HorizontalLayout {
+            spacing: 6px;
+            if !narrow: TextButton {
+                text: "−" + CdPlayerApp.seek-label + "s";
+                ink: CdPlayerApp.can-seek ? t.sub : t.muted;
+                height: btn;
+                font-size: 12px;
+                horizontal-stretch: 0;
+                clicked => { if CdPlayerApp.can-seek { CdPlayerApp.command("back"); } }
+            }
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.prev;
+                ink: t.text;
+                edge: t.muted;
+                enabled: CdPlayerApp.can-prev;
+                label: "Faixa anterior";
+                clicked => { CdPlayerApp.command("prev"); }
+            }
+            // play/pause: bloco cheio no acento
+            Rectangle {
+                width: short ? 42px : 46px;
+                height: self.width;
+                background: accent;
+                IconButton {
+                    width: parent.width;
+                    height: parent.height;
+                    icon: CdPlayerApp.playing ? Icons.pause : Icons.play;
+                    ink: t.bg0;
+                    edge: transparent;
+                    label: CdPlayerApp.playing ? "Pausar" : "Tocar";
+                    clicked => { CdPlayerApp.command("play-pause"); }
+                }
+            }
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.next;
+                ink: t.text;
+                edge: t.muted;
+                enabled: CdPlayerApp.can-next;
+                label: "Próxima faixa";
+                clicked => { CdPlayerApp.command("next"); }
+            }
+            if !narrow: TextButton {
+                text: "+" + CdPlayerApp.seek-label + "s";
+                ink: CdPlayerApp.can-seek ? t.sub : t.muted;
+                height: btn;
+                font-size: 12px;
+                horizontal-stretch: 0;
+                clicked => { if CdPlayerApp.can-seek { CdPlayerApp.command("fwd"); } }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if !narrow: TextButton {
+                text: "abrir";
+                ink: CdPlayerApp.has-player ? t.visor : t.muted;
+                edge: t.visor;
+                height: btn;
+                font-size: 12px;
+                horizontal-stretch: 0;
+                clicked => { if CdPlayerApp.has-player { CdPlayerApp.command("raise"); } }
+            }
+        }
+    }
+}

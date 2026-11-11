@@ -22,7 +22,7 @@ pub fn display_name() -> String {
 
 /// Versão atual do formato do arquivo. Ao mudar a estrutura, suba o número e
 /// acrescente a migração correspondente em `migra`.
-pub const VERSAO_ATUAL: u32 = 2;
+pub const VERSAO_ATUAL: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -71,7 +71,7 @@ impl Default for Config {
             skin: "neon".into(),
             window: None,
             layout: BTreeMap::new(),
-            enabled: vec!["cyber.docker".into(), "cyber.vitals".into()],
+            enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
             apps: BTreeMap::new(),
             estado: Estado::Normal,
         }
@@ -273,6 +273,7 @@ fn migra(t: &mut toml::Table, de: u32) {
         match v {
             0 => migra_0_para_1(t),
             1 => migra_1_para_2(t),
+            2 => migra_2_para_3(t),
             _ => {}
         }
     }
@@ -325,6 +326,14 @@ fn migra_1_para_2(t: &mut toml::Table) {
     }
     t.insert("layout".into(), toml::Value::Table(lay));
     t.insert("rows".into(), toml::Value::Integer(rows.clamp(1, layout::MAX_ROWS) as i64));
+}
+
+/// v2 -> v3: o mini-app CD Player entra ligado (na primeira vaga livre da grade).
+fn migra_2_para_3(t: &mut toml::Table) {
+    let Some(lista) = t.get_mut("enabled").and_then(|v| v.as_array_mut()) else { return };
+    if !lista.iter().any(|v| v.as_str() == Some("cyber.cd")) {
+        lista.push(toml::Value::String("cyber.cd".to_string()));
+    }
 }
 
 fn rect_toml(r: Rect) -> toml::Value {
@@ -418,7 +427,7 @@ warn = 70
 
         // arquivo migrado gravado com a versão, sem `mascot`; original guardado no .bak
         let novo = std::fs::read_to_string(t.arquivo()).unwrap();
-        assert!(novo.contains("version = 2"));
+        assert!(novo.contains(&format!("version = {VERSAO_ATUAL}")));
         assert!(!novo.contains("mascot"));
         assert_eq!(std::fs::read_to_string(com_sufixo(&t.arquivo(), ".bak")).unwrap(), V0);
     }
@@ -458,6 +467,21 @@ warn = 70
     }
 
     #[test]
+    fn v2_liga_o_cd_player_uma_vez_so() {
+        let t = Tmp::new("v2-cd");
+        std::fs::write(t.arquivo(), "version = 2\ncolumns = 2\nenabled = [\"cyber.docker\"]\n").unwrap();
+
+        let cfg = Config::load_from(&t.arquivo());
+        assert_eq!(cfg.version, VERSAO_ATUAL);
+        assert_eq!(cfg.enabled, vec!["cyber.docker".to_string(), "cyber.cd".to_string()]);
+        assert!(com_sufixo(&t.arquivo(), ".bak").exists());
+
+        // já migrado: reler não duplica o app
+        let cfg = Config::load_from(&t.arquivo());
+        assert_eq!(cfg.enabled.iter().filter(|e| *e == "cyber.cd").count(), 1);
+    }
+
+    #[test]
     fn arrange_acha_lugar_para_app_religado() {
         let mut cfg = Config { columns: 2, rows: 1, enabled: vec!["a".into()], ..Config::default() };
         cfg.layout.insert("a".into(), Rect::new(0, 0, 2, 1));
@@ -471,9 +495,9 @@ warn = 70
     }
 
     #[test]
-    fn v2_atual_carrega_sem_migrar_nem_criar_backup() {
-        let t = Tmp::new("v2");
-        std::fs::write(t.arquivo(), "version = 2\ncolumns = 4\nenabled = []\n").unwrap();
+    fn versao_atual_carrega_sem_migrar_nem_criar_backup() {
+        let t = Tmp::new("atual");
+        std::fs::write(t.arquivo(), format!("version = {VERSAO_ATUAL}\ncolumns = 4\nenabled = []\n")).unwrap();
 
         let cfg = Config::load_from(&t.arquivo());
         assert_eq!(cfg.columns, 4);
@@ -484,8 +508,8 @@ warn = 70
     #[test]
     fn versao_futura_so_leitura() {
         let t = Tmp::new("futura");
-        let original = "version = 3\ncolumns = 4\nnovidade = true\n";
-        std::fs::write(t.arquivo(), original).unwrap();
+        let original = format!("version = {}\ncolumns = 4\nnovidade = true\n", VERSAO_ATUAL + 1);
+        std::fs::write(t.arquivo(), &original).unwrap();
 
         let mut cfg = Config::load_from(&t.arquivo());
         assert_eq!(cfg.columns, 4);
@@ -520,7 +544,7 @@ warn = 70
         let mut cfg = Config::load_from(&t.arquivo());
         cfg.save_to(&t.arquivo());
         let texto = std::fs::read_to_string(t.arquivo()).unwrap();
-        assert!(texto.contains("version = 2"));
+        assert!(texto.contains(&format!("version = {VERSAO_ATUAL}")));
         assert!(!com_sufixo(&t.arquivo(), ".quebrado").exists());
     }
 }

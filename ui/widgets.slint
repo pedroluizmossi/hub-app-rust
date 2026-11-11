@@ -307,18 +307,24 @@ export component Select inherits Rectangle {
         clicked => { popup.show(); }
     }
 
+    property <length> item-h: 32px;
+    // Altura explícita: sem ela o Slint calcula uma área clicável menor que a lista, e um
+    // clique na parte de baixo conta como "fora" e fecha a lista sem escolher.
     popup := PopupWindow {
         x: 0;
         y: root.height + 2px;
         width: root.width;
+        height: options.length * item-h + 2px;
         Rectangle {
+            width: 100%;
+            height: 100%;
             background: Skin.field;
             border-width: 1px;
             border-color: accent;
             VerticalLayout {
                 padding: 1px;
                 for o[i] in options: Rectangle {
-                    height: 32px;
+                    height: item-h;
                     background: i == index ? accent.with-alpha(0.18) : item.has-hover ? Skin.hover : transparent;
                     HorizontalLayout {
                         padding-left: 10px;

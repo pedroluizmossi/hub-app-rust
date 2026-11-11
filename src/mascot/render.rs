@@ -3,7 +3,7 @@
 //! Mesmas regras de cor do `Mascot.qml` do CyberDock. A animação de piscar, LED e glitch
 //! vem do número do quadro; flutuar/pular é feito no Slint (sem redesenhar).
 
-use super::sprites::Sprite;
+use super::sprites::{Pixel, Sprite};
 use super::themes::Theme;
 
 pub const W: usize = 16;
@@ -193,8 +193,44 @@ impl Painter<'_> {
     }
 }
 
+/// Cor de um pixel de mascote "pixel" (paleta própria): só o olho segue o humor/tema.
+fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, mood: Mood, frame: u32) -> Option<u32> {
+    let ch = row[x];
+    let dim = |c: u32| if mood == Mood::Sleep { darker(c, 1.2) } else { c };
+    if ch != b'e' {
+        return px.color(ch).map(dim);
+    }
+    let open = match mood {
+        Mood::Sleep => None,
+        Mood::Alarm => Some(if frame % 4 < 2 { theme.alarm } else { lighter(theme.alarm, 1.5) }),
+        Mood::Busy => Some(if frame % 6 < 3 { theme.warn } else { darker(theme.warn, 1.35) }),
+        Mood::Happy | Mood::Idle => (frame % 25 != 0).then_some(px.eye),
+    };
+    // olho fechado: some na cor do vizinho (mais escura), como uma pálpebra
+    open.or_else(|| {
+        let side = row.get(x.wrapping_sub(1)).or(row.get(x + 1)).and_then(|c| px.color(*c))?;
+        Some(darker(side, 1.4))
+    })
+}
+
 /// Desenha um quadro RGBA (16×14, linha a linha) da mascote.
 pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4]; W * H] {
+    if let Some(px) = &sprite.pixel {
+        let glitch = mood == Mood::Alarm && frame % 6 < 2;
+        let mut out = [[0u8; 4]; W * H];
+        for (y, row) in sprite.grid.iter().enumerate() {
+            let row = row.as_bytes();
+            let shift: isize = if glitch && (4..8).contains(&y) { if y % 2 == 0 { 1 } else { -1 } } else { 0 };
+            for x in 0..row.len().min(W) {
+                let Some(c) = pixel_cell(px, row, x, theme, mood, frame) else { continue };
+                let dx = x as isize + shift;
+                if (0..W as isize).contains(&dx) {
+                    out[y * W + dx as usize] = [(c >> 16) as u8, (c >> 8) as u8, c as u8, 255];
+                }
+            }
+        }
+        return out;
+    }
     let p = Painter {
         s: sprite,
         t: theme,
@@ -310,6 +346,30 @@ mod tests {
                 assert_eq!(row.len(), W, "{} tem linha com largura errada", s.key);
             }
         }
+    }
+
+    #[test]
+    fn mascotes_pixel_tem_cor_para_cada_letra() {
+        for s in sprites::SPRITES.iter().filter(|s| s.pixel.is_some()) {
+            let px = s.pixel.as_ref().unwrap();
+            for row in s.grid {
+                for ch in row.bytes().filter(|c| *c != b'.' && *c != b'e') {
+                    assert!(px.color(ch).is_some(), "{}: sem cor para '{}'", s.key, ch as char);
+                }
+            }
+            assert!(s.grid.iter().any(|r| r.contains('e')), "{} sem olho", s.key);
+        }
+        assert_eq!(sprites::SPRITES.iter().filter(|s| s.pixel.is_some()).count(), 20);
+    }
+
+    #[test]
+    fn mascote_pixel_fecha_o_olho_e_muda_no_alarme() {
+        let s = sprites::get("capivara");
+        let t = themes::get("neon");
+        let awake = render(s, t, Mood::Idle, 1);
+        assert_ne!(awake, render(s, t, Mood::Sleep, 1));
+        assert_ne!(awake, render(s, t, Mood::Alarm, 3));
+        assert!(awake.iter().any(|p| p[3] == 255));
     }
 
     #[test]

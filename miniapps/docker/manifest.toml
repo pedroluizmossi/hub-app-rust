@@ -54,4 +54,4 @@ key = "mascot"
 label = "Mascote"
 type = "choice"
 default = "neko"
-options = ["neko", "robo", "kitsune", "usagi", "yurei", "hacker"]
+options = ["neko", "polvo", "pato", "coruja", "robo", "kitsune", "usagi", "yurei", "hacker"]

@@ -1,0 +1,28 @@
+id = "cyber.cd"
+name = "CD Player"
+description = "O que está tocando: disco girando, faixa e controles do player."
+icon = "cd"
+api = 1
+uses = ["media"]
+
+[[settings]]
+key = "theme"
+label = "Tema"
+type = "choice"
+default = "auto"
+options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
+
+[[settings]]
+key = "notify_track"
+label = "Notificar quando a faixa mudar"
+type = "bool"
+default = false
+
+[[settings]]
+key = "seek"
+label = "Pulo de avançar/voltar (s)"
+type = "int"
+default = 10
+min = 5
+max = 60
+step = 5

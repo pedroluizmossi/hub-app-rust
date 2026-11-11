@@ -60,6 +60,8 @@ pub struct Hub {
     backdrop_gen: Rc<Cell<u32>>,
     /// Minuto mostrado no relógio ("21:57").
     clock: RefCell<String>,
+    /// O que a lista das Configurações mostra agora (ver `rebuild_settings`).
+    settings_fingerprint: RefCell<String>,
 }
 
 /// Um app sendo movido ou redimensionado no modo de edição.
@@ -86,6 +88,11 @@ impl Hub {
         bus.spawn_polled("docker", Duration::from_secs(1), move |poker, poked| {
             docker.collect(poker, poked).map(crate::core::bus::Event::Docker)
         });
+        // MPRIS: lê o player ativo a cada segundo e só publica o que mudou
+        let mut media = crate::providers::media::MediaProvider::default();
+        bus.spawn_polled("media", Duration::from_secs(1), move |_, poked| {
+            media.collect(poked).map(crate::core::bus::Event::Media)
+        });
 
         let host = Rc::new(Host {
             config: RefCell::new(Config::load()),
@@ -98,6 +105,7 @@ impl Hub {
         let mut registry = Registry::new(host.clone());
         registry.add(crate::apps::docker::DockerMini::create(host.clone(), &ui) as AppRef);
         registry.add(crate::apps::vitals::VitalsMini::create(host.clone(), &ui) as AppRef);
+        registry.add(crate::apps::cdplayer::CdPlayerMini::create(host.clone(), &ui) as AppRef);
 
         let hub = Rc::new(Hub {
             host,
@@ -120,6 +128,7 @@ impl Hub {
             backdrop_size: Cell::new((0.0, 0.0)),
             backdrop_gen: Rc::new(Cell::new(0)),
             clock: RefCell::new(String::new()),
+            settings_fingerprint: RefCell::new(String::new()),
         });
         hub.apply_skin();
         hub.registry.start(&hub.ui);
@@ -564,8 +573,18 @@ impl Hub {
         }
     }
 
-    /// Lista da aba Apps, cada app com o arranjo e o formulário gerado do manifesto.
+    /// Lista das Configurações, cada app com o formulário gerado do manifesto.
+    ///
+    /// Só é refeita quando muda o que ela mostra: refazer a lista recria os campos e
+    /// fecharia um select aberto (era o que acontecia a cada leitura de CPU).
     fn rebuild_settings(&self) {
+        let fingerprint = {
+            let cfg = self.host.config.borrow();
+            format!("{:?}|{:?}|{}|{}", cfg.enabled, cfg.apps, cfg.skin, cfg.columns)
+        };
+        if self.settings_fingerprint.replace(fingerprint.clone()) == fingerprint {
+            return;
+        }
         let apps: Vec<AppInfo> = self.registry.all().iter().map(|a| self.app_info(a)).collect();
         self.ui.set_apps(ModelRc::new(VecModel::from(apps)));
     }
@@ -886,7 +905,6 @@ impl Hub {
             return;
         }
         self.ui.set_summary(SharedString::from(summary.replace('\n', "   ·   ")));
-        self.rebuild_settings(); // humor dos apps na aba Apps
         if let Some(tray) = self.tray.borrow().as_ref() {
             tray.update(sprites::get(&sprite), theme, mood, summary.clone());
         }

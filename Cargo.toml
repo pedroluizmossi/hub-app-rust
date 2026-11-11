@@ -18,6 +18,8 @@ slint = { version = "1.18.1", default-features = false, features = ["std", "back
 # janela popup: tirar da barra de tarefas (X11 / XWayland)
 x11rb = "0.13"
 raw-window-handle = "0.6"
+# MPRIS (o que está tocando) pelo mesmo zbus que o ksni já traz; sem dependência nova
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 toml = "1.2.1"
 
 [build-dependencies]

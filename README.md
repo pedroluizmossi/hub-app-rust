@@ -11,8 +11,12 @@ Mini-apps incluídos:
   entra em loop ou fica unhealthy. Também manda notificações.
 - **Sinais vitais**: CPU, RAM, GPU (NVIDIA ou AMD) e disco, cada um com a própria mascote,
   histórico do último minuto e temperatura.
+- **CD Player**: o que está tocando, pelo MPRIS: disco em pixel art girando, faixa, artista,
+  progresso e controles de tocar/pausar, faixa e avançar/voltar. Sem player aberto, fica em
+  "sem disco"; com a opção ligada, notifica quando a faixa muda.
 
-A arquitetura e o roteiro estão em [ARCHITECTURE.md](ARCHITECTURE.md).
+A arquitetura e o roteiro estão em [ARCHITECTURE.md](ARCHITECTURE.md). Como criar visuais,
+temas, telas, mini-apps e mascotes está em [DESIGN.md](DESIGN.md).
 
 ## Compilar e rodar
 
@@ -61,6 +65,8 @@ MINIUTILS_DEBUG=1            mostra eventos de foco e de janela no terminal
 - Uma bandeja do sistema (StatusNotifierItem): KDE, XFCE, Cinnamon e MATE já têm. No GNOME,
   instale a extensão *AppIndicator*. Sem bandeja, o hub continua funcionando como janela.
 - Docker acessível sem `sudo` (usuário no grupo `docker`).
+- Um player MPRIS para o CD Player (Firefox, Chromium, VLC, mpv, Spotify…). Sem player, o
+  app mostra "sem disco".
 - `nvidia-smi` para GPUs NVIDIA. Placas AMD são lidas direto do driver `amdgpu`.
 - Um terminal para os botões de logs e shell: usa `$TERMINAL`, ou detecta konsole,
   gnome-terminal, kgx, xfce4-terminal, alacritty, kitty, foot e outros.

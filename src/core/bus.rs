@@ -10,7 +10,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::providers::{docker::DockerSnapshot, gpu::GpuSnapshot, sys::SysSnapshot};
+use crate::providers::{docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, sys::SysSnapshot};
 
 /// Uma leitura de um provedor.
 #[derive(Debug, Clone)]
@@ -18,6 +18,7 @@ pub enum Event {
     Sys(SysSnapshot),
     Gpu(GpuSnapshot),
     Docker(DockerSnapshot),
+    Media(MediaSnapshot),
 }
 
 #[derive(Default)]

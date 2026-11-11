@@ -90,6 +90,7 @@ impl Registry {
                 Event::Sys(_) => "sys",
                 Event::Gpu(_) => "gpu",
                 Event::Docker(_) => "docker",
+                Event::Media(_) => "media",
             };
             for app in self.enabled() {
                 let uses = app.borrow().manifest().uses.iter().any(|u| u == topic);
