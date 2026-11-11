@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
@@ -11,7 +11,8 @@ use super::ai_usage::ai_mascots;
 use crate::core::bus::Event;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
-use crate::mascot::anim::{Animator, Reaction};
+use super::kit::{HeaderMascot, Speech, plural};
+use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
 use crate::providers::agents::{Agent, AgentsSnapshot, State, Tool, clip};
 use crate::ui::{AgentRow, AgentSub, AgentsApp, HubWindow};
@@ -30,7 +31,7 @@ pub struct AgentsMini {
     prev: HashMap<(Tool, String), State>,
     /// Primeira leitura depois de ligar: nada conta como mudança.
     baseline: bool,
-    speech: Option<(String, Instant)>,
+    speech: Speech,
     mood: Mood,
     rows: Rc<VecModel<AgentRow>>,
     /// A sessão de cada linha da tela, na mesma ordem (os cliques vêm pelo índice).
@@ -43,9 +44,7 @@ pub struct AgentsMini {
     cards: Vec<Card>,
     /// Mascote de cada ferramenta em cada estado (parada: desenhada uma vez por tema).
     faces: HashMap<(Tool, State), slint::Image>,
-    mascot: render::Cache,
-    anim: Animator,
-    reaction: Option<Reaction>,
+    face: HeaderMascot,
 }
 
 impl AgentsMini {
@@ -60,101 +59,97 @@ impl AgentsMini {
             snap: AgentsSnapshot::default(),
             prev: HashMap::new(),
             baseline: false,
-            speech: None,
+            speech: Speech::new(SPEECH_TTL),
             mood: Mood::Sleep,
             rows,
             shown: Vec::new(),
             selected: None,
             cards: Vec::new(),
             faces: HashMap::new(),
-            mascot: Default::default(),
-            anim: Animator::new(13),
-            reaction: None,
+            face: HeaderMascot::new(13),
         }));
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
         ui.global::<AgentsApp>().on_mascot_poked(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let mut a = a.borrow_mut();
-                if a.host.config.borrow().reduce_motion {
-                    return;
-                }
-                let mood = a.mood;
-                if a.anim.poke(mood, Instant::now()) {
+                let (mood, reduce) = (a.mood, a.host.config.borrow().reduce_motion);
+                if a.face.poke(mood, reduce) {
                     a.push_mascot(&ui);
                 }
             }
         });
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
-        ui.global::<AgentsApp>().on_toggle(move |row| {
+        ui.global::<AgentsApp>().on_toggle(move |key| {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let mut a = a.borrow_mut();
-                let key = a.shown.get(row.max(0) as usize).map(|s| (s.tool, s.id.clone()));
+                let key = a.find(&key).map(|s| (s.tool, s.id.clone()));
                 a.selected = if a.selected == key { None } else { key };
                 a.refresh(&ui);
             }
         });
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
-        ui.global::<AgentsApp>().on_open_terminal(move |row| {
+        ui.global::<AgentsApp>().on_open_terminal(move |key| {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
-                a.borrow_mut().open_terminal(row.max(0) as usize, &ui);
+                a.borrow_mut().open_terminal(&key, &ui);
             }
         });
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
-        ui.global::<AgentsApp>().on_open_dir(move |row| {
+        ui.global::<AgentsApp>().on_open_dir(move |key| {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
-                a.borrow_mut().open_dir(row.max(0) as usize, &ui);
+                a.borrow_mut().open_dir(&key, &ui);
             }
         });
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
-        ui.global::<AgentsApp>().on_resume(move |row| {
+        ui.global::<AgentsApp>().on_resume(move |key| {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
-                a.borrow_mut().resume(row.max(0) as usize, &ui);
+                a.borrow_mut().resume(&key, &ui);
             }
         });
         app
     }
 
+    /// Sessão mostrada com a chave `key` (ver `session_key`).
+    fn find(&self, key: &str) -> Option<&Agent> {
+        self.shown.iter().find(|a| session_key(a) == key)
+    }
+
     /// Abre a pasta da sessão no gerenciador de arquivos.
-    fn open_dir(&mut self, row: usize, ui: &HubWindow) {
-        let Some(a) = self.shown.get(row) else { return };
+    fn open_dir(&mut self, key: &str, ui: &HubWindow) {
+        let Some(a) = self.find(key) else { return };
         if !crate::core::exec::open_dir(std::path::Path::new(&a.cwd)) {
-            self.say(format!("Não achei a pasta {}.", a.cwd));
+            self.speech.say(format!("Não achei a pasta {}.", a.cwd));
         }
         self.selected = None;
         self.refresh(ui);
     }
 
     /// Abre um terminal na pasta da sessão.
-    fn open_terminal(&mut self, row: usize, ui: &HubWindow) {
-        let Some(a) = self.shown.get(row) else { return };
+    fn open_terminal(&mut self, key: &str, ui: &HubWindow) {
+        let Some(a) = self.find(key) else { return };
         if let Err(e) = crate::core::exec::open_terminal_at(std::path::Path::new(&a.cwd)) {
-            self.say(format!("Não deu para abrir o terminal: {e}"));
+            self.speech.say(format!("Não deu para abrir o terminal: {e}"));
         }
         self.selected = None;
         self.refresh(ui);
     }
 
     /// Retoma uma sessão parada num terminal novo, na pasta dela.
-    fn resume(&mut self, row: usize, ui: &HubWindow) {
-        let Some(a) = self.shown.get(row).cloned() else { return };
+    fn resume(&mut self, key: &str, ui: &HubWindow) {
+        let Some(a) = self.find(key).cloned() else { return };
         let Some(argv) = resume_argv(&a) else { return };
         let dir = std::path::Path::new(&a.cwd);
         let opened = self.host.exec_for(&self.manifest).open_terminal_in(a.tool.name(), Some(dir), &argv);
-        self.say(match opened {
+        self.speech.say(match opened {
             Ok(()) => format!("Retomando no terminal: {}", a.title),
             Err(e) => format!("Não deu para abrir o {}: {e}", a.tool.name()),
         });
         self.selected = None;
         self.refresh(ui);
-    }
-
-    fn say(&mut self, text: String) {
-        self.speech = Some((text, Instant::now()));
     }
 
     /// Compara com a leitura anterior: quem terminou e quem passou a esperar o usuário.
@@ -171,11 +166,11 @@ impl AgentsMini {
                 let Some(change) = change(before, a) else { continue };
                 let (title, body, notify, urgent) = match change {
                     Change::Waiting => {
-                        self.anim.trigger(Reaction::Surprised, Instant::now());
+                        self.face.react(Reaction::Surprised);
                         ("Agente esperando você", format!("{} espera por você: {}", a.tool.name(), a.title), notify_waiting, true)
                     }
                     Change::Done => {
-                        self.anim.trigger(Reaction::Celebrate, Instant::now());
+                        self.face.react(Reaction::Celebrate);
                         ("Agente terminou", format!("{} terminou: {}", a.tool.name(), a.title), notify_done, false)
                     }
                     Change::Stopped => {
@@ -185,7 +180,7 @@ impl AgentsMini {
                 if notify {
                     self.host.notifier.borrow_mut().send(&format!("agents:{}:{}", a.tool.name(), a.id), title, &body, urgent);
                 }
-                self.say(body);
+                self.speech.say(body);
             }
         }
         self.prev = cur;
@@ -271,8 +266,8 @@ impl AgentsMini {
         let errors: Vec<String> = self.snap.errors.iter().map(|(t, e)| format!("{}: {e}", t.name())).collect();
         g.set_error_text(errors.join(" · ").into());
         g.set_mood(self.mood.as_str().into());
-        let speech = match &self.speech {
-            Some((t, at)) if at.elapsed() < SPEECH_TTL => t.clone(),
+        let speech = match self.speech.current() {
+            Some(t) => t.to_string(),
             _ if waiting > 0 => format!("{} por você!", plural(waiting, "agente esperando", "agentes esperando")),
             _ if working > 0 => format!("{}.", plural(working, "agente trabalhando", "agentes trabalhando")),
             _ if idle > 0 => "Tudo parado por aqui.".into(),
@@ -294,6 +289,7 @@ impl AgentsMini {
             })
             .collect();
         AgentRow {
+            key: c.key.as_str().into(),
             title: c.title.as_str().into(),
             info: c.info.as_str().into(),
             state: state_key(c.state).into(),
@@ -319,19 +315,17 @@ impl AgentsMini {
         }
     }
 
+    /// Redesenha a mascote; `true` se mudou.
     fn refresh_mascot(&mut self) -> bool {
-        let key = self.mascot_key();
-        let theme = self.host.theme_for(&self.manifest);
-        let look = self.anim.look(self.mood, Instant::now());
-        let reaction_changed = std::mem::replace(&mut self.reaction, look.reaction) != look.reaction;
-        self.mascot.update_look(sprites::get(&key), theme, &look) || reaction_changed
+        let sprite = sprites::get(&self.mascot_key());
+        self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
     }
 
     fn push_mascot(&mut self, ui: &HubWindow) {
         self.refresh_mascot();
         let g = ui.global::<AgentsApp>();
-        g.set_mascot(self.mascot.image());
-        g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+        g.set_mascot(self.face.image());
+        g.set_reaction(self.face.reaction());
     }
 }
 
@@ -414,6 +408,8 @@ struct SubLine {
 /// informa; a tela esconde o que estiver vazio.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Card {
+    /// Identifica a sessão nos cliques (ver `session_key`).
+    key: String,
     tool: Tool,
     state: State,
     title: String,
@@ -439,6 +435,12 @@ struct Card {
     more_subs: usize,
 }
 
+/// Chave estável de uma sessão para a tela: os cliques chegam com ela, não com a posição
+/// da linha, que muda quando a lista se reordena entre uma leitura e outra.
+fn session_key(a: &Agent) -> String {
+    format!("{}:{}", a.tool.name(), a.id)
+}
+
 fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool) -> Card {
     let d = &a.details;
     let mut note = Vec::new();
@@ -450,6 +452,7 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool) -> Card {
         note.push(stop_text(&d.stop_reason));
     }
     Card {
+        key: session_key(a),
         tool: a.tool,
         state: a.state,
         title: a.title.clone(),
@@ -545,11 +548,6 @@ fn state_key(s: State) -> &'static str {
     }
 }
 
-/// "1 agente", "3 agentes".
-fn plural(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
-
 /// "há 3 min", "há 2 h"; `None` com menos de um minuto ou sem hora conhecida.
 fn ago(since_ms: i64, now: i64) -> Option<String> {
     let min = (now - since_ms) / 60_000;
@@ -602,7 +600,7 @@ impl MiniApp for AgentsMini {
     fn disable(&mut self, _ui: &HubWindow) {
         self.snap = AgentsSnapshot::default();
         self.prev.clear();
-        self.speech = None;
+        self.speech.clear();
         self.mood = Mood::Sleep;
         self.shown.clear();
         self.selected = None;
@@ -618,10 +616,12 @@ impl MiniApp for AgentsMini {
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
+        // a fala vence no prazo mesmo sem leitura nova
+        if self.speech.take_expired() {
+            self.refresh(ui);
+        }
         if self.refresh_mascot() {
-            let g = ui.global::<AgentsApp>();
-            g.set_mascot(self.mascot.image());
-            g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+            self.push_mascot(ui);
         }
     }
 

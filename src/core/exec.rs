@@ -75,6 +75,13 @@ impl Exec {
         }
     }
 
+    /// Roda e espera (com prazo), na thread de quem chama: para quem já está numa thread
+    /// própria (o script de um plugin). Nunca na thread da UI.
+    pub fn run_blocking(&self, program: &str, args: &[&str], limit: Duration) -> Result<String, ExecError> {
+        self.check(program)?;
+        run_timeout(program, args, limit)
+    }
+
     /// Roda em segundo plano (thread própria) e chama `done` com o stdout, ou com o erro.
     /// O comando é morto se passar de `ACTION_TIMEOUT`.
     pub fn run_async<F>(&self, program: &str, args: &[&str], done: F)
@@ -126,7 +133,7 @@ impl Exec {
             }
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        cmd.spawn()?;
+        spawn_detached(&mut cmd)?;
         Ok(())
     }
 }
@@ -243,7 +250,7 @@ pub fn open_url(url: &str) {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return;
     }
-    let _ = Command::new("xdg-open").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    let _ = spawn_detached(Command::new("xdg-open").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()));
 }
 
 /// Abre uma pasta no gerenciador de arquivos padrão (serviço do host, fora da allowlist).
@@ -251,7 +258,18 @@ pub fn open_url(url: &str) {
 pub fn open_dir(dir: &std::path::Path) -> bool {
     dir.is_absolute()
         && dir.is_dir()
-        && Command::new("xdg-open").arg(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
+        && spawn_detached(Command::new("xdg-open").arg(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())).is_ok()
+}
+
+/// Lança um programa que segue sozinho (navegador, terminal, gerenciador de arquivos).
+/// Uma thread espera ele sair: sem o `wait`, o processo vira zumbi até o app fechar, e o
+/// app fica dias na bandeja.
+fn spawn_detached(cmd: &mut Command) -> std::io::Result<()> {
+    let mut child = cmd.spawn()?;
+    let _ = std::thread::Builder::new().name("miniutils-reap".into()).spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// Abre um terminal na pasta `dir`, com o shell do usuário (serviço do host, fora da
@@ -265,7 +283,7 @@ pub fn open_terminal_at(dir: &std::path::Path) -> anyhow::Result<()> {
         cmd.arg("--workdir").arg(dir);
     }
     cmd.current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    cmd.spawn()?;
+    spawn_detached(&mut cmd)?;
     Ok(())
 }
 
@@ -289,29 +307,39 @@ fn locate(program: &str) -> Option<std::path::PathBuf> {
     dirs.into_iter().map(|d| d.join(program)).find(|p| p.is_file())
 }
 
+/// Terminais conhecidos e o argumento que separa o comando a executar.
+const KNOWN_TERMINALS: &[(&str, &[&str])] = &[
+    ("konsole", &["-e"]),
+    ("gnome-terminal", &["--"]),
+    ("kgx", &["--"]),
+    ("ptyxis", &["--"]),
+    ("xfce4-terminal", &["-x"]),
+    ("mate-terminal", &["-x"]),
+    ("tilix", &["-e"]),
+    ("alacritty", &["-e"]),
+    ("kitty", &[]),
+    ("foot", &[]),
+    ("wezterm", &["start", "--"]),
+    ("xterm", &["-e"]),
+    ("x-terminal-emulator", &["-e"]),
+];
+
+/// Argumento que separa o comando para o terminal `term` (nome ou caminho). Terminal fora
+/// da lista recebe `-e`, o mais comum.
+fn terminal_prefix(term: &str) -> &'static [&'static str] {
+    let name = std::path::Path::new(term).file_name().and_then(|n| n.to_str()).unwrap_or(term);
+    KNOWN_TERMINALS.iter().find(|(t, _)| *t == name).map_or(&["-e"], |(_, p)| *p)
+}
+
 /// Terminal disponível e o argumento que separa o comando a executar.
 fn terminal() -> Option<(String, &'static [&'static str])> {
     if let Ok(t) = std::env::var("TERMINAL") {
         if which(&t) || std::path::Path::new(&t).is_file() {
-            return Some((t, &["-e"]));
+            let prefix = terminal_prefix(&t);
+            return Some((t, prefix));
         }
     }
-    const KNOWN: &[(&str, &[&str])] = &[
-        ("konsole", &["-e"]),
-        ("gnome-terminal", &["--"]),
-        ("kgx", &["--"]),
-        ("ptyxis", &["--"]),
-        ("xfce4-terminal", &["-x"]),
-        ("mate-terminal", &["-x"]),
-        ("tilix", &["-e"]),
-        ("alacritty", &["-e"]),
-        ("kitty", &[]),
-        ("foot", &[]),
-        ("wezterm", &["start", "--"]),
-        ("xterm", &["-e"]),
-        ("x-terminal-emulator", &["-e"]),
-    ];
-    KNOWN.iter().find(|(t, _)| which(t)).map(|(t, p)| (t.to_string(), *p))
+    KNOWN_TERMINALS.iter().find(|(t, _)| which(t)).map(|(t, p)| (t.to_string(), *p))
 }
 
 #[cfg(test)]
@@ -350,6 +378,14 @@ mod tests {
         let r = run_timeout("sh", &["-c", "sleep 30; echo tarde"], Duration::from_millis(200));
         assert!(matches!(r, Err(ExecError::Timeout { .. })), "{r:?}");
         assert!(inicio.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn terminal_de_fora_usa_o_separador_certo() {
+        assert_eq!(terminal_prefix("kitty"), &[] as &[&str]);
+        assert_eq!(terminal_prefix("/usr/bin/gnome-terminal"), &["--"]);
+        assert_eq!(terminal_prefix("wezterm"), &["start", "--"]);
+        assert_eq!(terminal_prefix("st"), &["-e"]);
     }
 
     #[test]

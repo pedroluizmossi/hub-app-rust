@@ -56,6 +56,9 @@ hub-app-rust/
   AGENTS.md                   regras para agentes de código (compilar, validar, UI)
   ARCHITECTURE.md             este documento
   DESIGN.md                   visuais, temas, telas, apps e mascotes: como criar
+  tools/sprite-import/        converte PNG (folha de quadros 16×14) em animação de mascote,
+                              pela paleta cor -> papel; `cargo run -p sprite-import -- --help`
+  examples/                   plugin de exemplo (plugin-uptime) e a loja de teste (loja/preparar.sh)
   ui/                         crate `miniutils-ui`: só a interface, compilada à parte
     Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
                               dos mini-apps); src/lib.rs reexporta os tipos gerados
@@ -71,7 +74,8 @@ hub-app-rust/
   src/
     main.rs                   argumentos (--hidden, --tab) e event loop
     hub/                      o host, um `impl Hub` dividido por assunto:
-      mod.rs                  estado, montagem, laço de dados e de animação, bandeja
+      mod.rs                  estado, montagem, `update` (acordado pelo barramento),
+                              quadro de animação, bandeja
       window.rs               popup: abrir, esconder, fixar, fade, tamanho lembrado
       appearance.rs           visual, fundo, ícone da bandeja, movimento, relógio
       pages.rs                páginas: barra lateral, página aberta, edição
@@ -94,6 +98,8 @@ hub-app-rust/
       notify.rs               notificações (no máximo 1/min por evento)
       bus.rs                  provedores em threads (`Topic`), assinaturas, "poke" para
                               ler já, janela visível ou escondida
+      wake.rs                 despertador da thread da UI: leitura ou recado novo agenda
+                              uma atualização (sem timer de varredura)
     providers/
       mod.rs                  `spawn_all`: registra todos os provedores no barramento
       sys.rs                  CPU (uso, GHz, carga), RAM e swap, temperatura, rede
@@ -115,8 +121,14 @@ hub-app-rust/
       themes.rs               temas de cor dos apps
       render.rs               sprite + tema + humor + quadro -> imagem RGBA 16×14
       anim.rs                 piscada e reações curtas (`Animator`, `Reaction`)
+      clips.rs, clips/        animações quadro a quadro por mascote (`<chave>.toml`): humor
+                              com entrada/saída/variações, reação, duração por quadro;
+                              `MINIUTILS_CLIPS=<pasta>` lê do disco e recarrega ao salvar
+      preview.rs              `miniutils --previa <mascote> [animação]`: GIF em todos os temas
       disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
     apps/
+      kit.rs                  peças comuns: mascote do cabeçalho (`HeaderMascot`), fala
+                              com prazo (`Speech`), `plural`, `unix_now`
       docker.rs  vitals.rs    lógica de cada mini-app
       cdplayer.rs             CD Player: faixa, progresso, comandos e humor
       ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
@@ -167,17 +179,31 @@ pub trait MiniApp {
     fn disable(&mut self, ui: &HubWindow) {}             // desligou: solta o que segura
     fn on_event(&mut self, ev: &Event, ui: &HubWindow);  // leitura de um provedor
     fn on_report(&mut self, r: &Report, ui: &HubWindow) {} // uma ação em segundo plano terminou
+    fn window_shown(&mut self, ui: &HubWindow) {}        // a janela abriu (ex.: pedir leitura nova)
     fn tick(&mut self, frame: u32, ui: &HubWindow) {}    // quadro (4 a 8/s), janela aberta na página do app
     fn settings_changed(&mut self, ui: &HubWindow) {}    // mudou configuração, tema ou visual
     fn mood(&self) -> Mood;                              // sleep < idle < happy < busy < alarm
     fn mascot_key(&self) -> String { /* icon */ }        // mascote na bandeja
     fn summary(&self) -> String;                         // linha do tooltip da bandeja
     fn tray_media(&self) -> Option<TrayMedia> { None }   // faixa e controles no menu da bandeja
+    fn tray_command(&mut self, verb: &str, ui: &HubWindow) {} // controle de mídia escolhido no menu
+    fn take_facts(&mut self) -> Vec<Fact> { vec![] }     // conversa entre mascotes (ver abaixo)
+    fn voices(&self) -> Vec<Voice> { vec![] }
+    fn lines(&self) -> &'static str { "" }
 }
 ```
 
+O hub não conhece nenhum app: o que um app precisa quando a janela abre ou quando o menu
+da bandeja manda um comando chega pelo trait.
+
 O `Host` oferece `config`, `bus`, `notifier`, `theme_for(manifest)` (resolve "auto" pelo
-visual), `exec_for(manifest)` (executor com a allowlist do app) e `reporter(manifest)`.
+visual), `exec_for(manifest)` (executor com a allowlist do app), `reporter(manifest)` e
+`set_setting`/`toggle_setting` (muda uma opção do app pela própria tela, grava e redesenha
+as Configurações).
+
+O que os apps repetiam está em `src/apps/kit.rs`: `HeaderMascot` (piscada, reações,
+cutucada e cache do quadro da mascote do cabeçalho) e `Speech` (fala com prazo; chame
+`take_expired` no `tick` para ela sumir na hora certa).
 
 **Ações em segundo plano.** Um comando demorado (`docker stop`, um comando do player) roda
 numa thread, que leva um `Reporter` e no fim deixa um recado: `done()` ou `error(msg)`. O hub
@@ -200,18 +226,26 @@ Como criar um app novo, passo a passo: [DESIGN.md › Mini-apps](DESIGN.md#5-min
 ## Fluxo de dados
 
 ```
-provedor (thread) ──snapshot──► canal ──► thread da UI (timer de 100 ms esvazia o canal)
-                                              │
+provedor (thread) ──snapshot──► canal ──► Waker ──► thread da UI: Hub::update
+                                                         │
                                   para cada app ativo que usa o provedor:
                                       app.on_event() → globals/modelos do Slint
+                                  depois: humor das páginas, bandeja, conversa
 ```
 
-- Provedores rodam em threads próprias (`bus.spawn` / `spawn_polled`) e dormem quando
-  ninguém assina. `poke` pede uma leitura imediata (ex.: depois de parar um container).
+- Nada na thread da UI roda por varredura. Cada leitura de provedor e cada recado de ação
+  em segundo plano toca o despertador (`core/wake.rs`), que agenda um `Hub::update` no event
+  loop; vários toques antes do hub atender viram uma atualização. Com a janela aberta, o
+  quadro de animação também confere humor, bandeja e conversa (é onde chegam os efeitos
+  dos cliques nas telas). Com a janela escondida, só os eventos acordam o hub.
+- Provedores rodam em threads próprias (`bus.spawn` / `spawn_polled`). Sem assinante, a
+  thread dorme numa `Condvar` até alguém assinar; com assinante, até o próximo intervalo ou
+  um `poke` (leitura imediata, ex.: depois de parar um container).
 - O Docker é por eventos (`docker events`, com o filtro de ações aplicado no daemon), com
   `ps` de reserva a cada 15 s e `stats` a cada 5 s só com containers rodando. Com a janela
   escondida os dados só alimentam a bandeja: `ps` a cada 60 s e `stats` a cada 30 s; ao abrir
-  a janela, o hub pede uma leitura completa (`Bus::set_visible`, `Poker::visible`).
+  a janela, o app pede uma leitura completa (`MiniApp::window_shown`; `Bus::set_visible`,
+  `Poker::visible`).
 - Nenhuma chamada externa espera para sempre: comandos têm prazo (`exec::run_timeout` mata o
   grupo de processos ao estourar) e as chamadas D-Bus do MPRIS têm `method_timeout`. Um
   daemon ou player travado vira erro na tela, não uma thread presa mostrando dado velho.
@@ -220,17 +254,19 @@ provedor (thread) ──snapshot──► canal ──► thread da UI (timer de
 - A NVIDIA é lida de um único `nvidia-smi -l 2` de vida longa (uma thread guarda a linha mais
   nova), encerrado quando ninguém pede leitura há 10 s.
 - A bandeja só recebe o que muda (`sync_tray`): o ícone é redesenhado quando a mascote, o
-  tema ou o humor mudam; texto que só muda de valor ("CPU 37%") vai no máximo a cada 15 s.
+  tema ou o humor mudam; texto que só muda de valor ("CPU 37%") vai no máximo a cada 15 s
+  (um timer de uma vez manda o texto adiado, mesmo sem leitura nova).
 - A UI só é tocada na thread do event loop do Slint.
-- O quadro de animação (mascotes, cursor do Terminal) roda só com a janela visível: 8/s com
-  o mouse sobre a janela, 4/s fora. Flutuar e pular são animações do Slint, sem redesenhar.
+- O quadro de animação (mascotes, cursor do Terminal, relógio) roda só com a janela
+  visível — o timer para ao esconder: 8/s com o mouse sobre a janela, 4/s fora. Flutuar e
+  pular são animações do Slint, sem redesenhar.
 - Listas do Slint só são recriadas quando o conteúdo muda de fato: recriar uma lista destrói
   os componentes dentro dela (um select aberto fecha). Ver `rebuild_settings`.
 
 ### Conversa entre mascotes
 
 ```
-app ──Fact──► hub (timer de 100 ms) ──► Director ──► global Chatter ──► caixa de diálogo
+app ──Fact──► hub (update/quadro) ──► Director ──► global Chatter ──► caixa de diálogo
      (take_facts)    voices() da página aberta        (src/hub/chatter.rs)  + pulinho/"..." no Mascot
 ```
 
@@ -246,8 +282,9 @@ app ──Fact──► hub (timer de 100 ms) ──► Director ──► globa
   topo de `core/chatter.rs`; um teste confere pt e en em tudo, lacunas e tamanho.
 - O diretor não conhece nenhum app: escolhe quem responde (primeiro quem tem resposta
   própria para o caso, depois outro app), sorteia o idioma da conversa (pt, en, às vezes
-  de) e "digita" uma fala por vez. Quem fala dá pulinhos e quem ouve mostra "..." (o
-  `Mascot` compara o próprio `voice`, "app:nome", com `Chatter.speaker`/`listener`).
+  de) e "digita" uma fala por vez (quadros de 100 ms só enquanto há fala no ar). Quem fala
+  dá pulinhos e quem ouve mostra "..." (o `Mascot` compara o próprio `voice`, "app:nome",
+  com `Chatter.speaker`/`listener`; o id vem do Rust, `Voice::id_of`).
 - Só com a janela aberta no painel e a opção "Mascotes conversam" (`chatter`: nunca, às
   vezes, bastante) ligada. Quem responde é da página aberta; alarme ou recuperação de outra
   página aparece no app de quem responde, com o nome da página. Com tudo calmo por um
@@ -307,10 +344,39 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 
-**Fase 2** — plugins externos sem recompilar:
-- Views em `.slint` carregadas pelo `slint-interpreter` a partir de `~/.local/share/miniutils/miniapps/`
-- Lógica em Rhai, com acesso só aos serviços do host (executor com allowlist, config, notify)
-- Widget flutuante na área de trabalho (layer-shell no KDE/wlroots; janela comum no GNOME)
+**Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin.rs`
+e `src/store.rs`):
+- Dois tipos de plugin, nenhum com código nativo:
+  - **simples** (`[run]`): o host roda um comando da allowlist a cada N segundos e mostra a
+    saída numa tela genérica (`ui/plugin.slint`);
+  - **com tela própria** (`[ui]`): `view.slint` interpretado pelo `slint-interpreter` e
+    encaixado na célula por um `ComponentContainer` (recurso experimental do Slint 1.18,
+    ligado em `ui/build.rs`); a lógica é um `main.rhai` numa thread só dele, com limite de
+    operações, sem acesso a arquivo (`no_module`) e só com a API do host (mudar
+    propriedades da tela, humor, rodar programas da allowlist, notificar). A tela só
+    importa `std-widgets.slint` e `miniutils.slint` (o `Theme`, servido pelo host, com as
+    cores do tema do app e as fontes do visual); o host a encaixa como janela de fundo
+    transparente e com a fonte da interface do visual.
+- Loja na janela (Configurações > Loja de plugins, `ui/store.slint`, `src/hub/store.rs`) e
+  na linha de comando (`miniutils --help`): listar, instalar, atualizar e remover sem
+  reiniciar (o app aberto relê a pasta; a linha de comando avisa pelo socket da instância).
+- O índice (`registry.json`, no modelo do marketplace do Omarchy) fixa o commit revisado de
+  cada plugin e é assinado com ed25519 (`registry.json.sig`). Por padrão vale a loja
+  oficial (github.com/pedroluizmossi/miniutils-store; índice e chave em
+  `store::OFFICIAL_INDEX`/`OFFICIAL_KEY`); a config (`store_index`, `store_key`) troca por
+  outra. Índice que não é o oficial, sem chave, só é aceito se for local. A instalação clona sem
+  hooks, confere o commit, valida manifesto, tela e script, confere que as permissões
+  anunciadas batem com as pedidas e mostra o que o plugin vai executar (numa atualização,
+  as permissões novas aparecem em destaque) antes do segundo clique.
+- Exemplos: `examples/plugin-uptime/` (simples), `examples/plugin-top/` (tela e script) e
+  `examples/loja/preparar.sh` (repositório, índice e chave; `--nova-versao` para testar a
+  atualização).
+- Limites conhecidos: a tela de um plugin pode ler imagens do disco (`@image-url`); o
+  script não tem rede (de propósito); um plugin com tela custa a compilação do `.slint` ao
+  ligar e alguns MB de memória.
+
+**Fase 2** (resto) — widget flutuante na área de trabalho (layer-shell no KDE/wlroots;
+janela comum no GNOME).
 
 **Fase 3 (talvez)** — expor o hub por D-Bus para cascas nativas (plasmoid, extensão GNOME).
 

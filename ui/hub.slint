@@ -12,6 +12,8 @@ import { PortsView, PortsApp, PortRow } from "../miniapps/ports/view.slint";
 import { TodoView, TodoApp, TodoRow } from "../miniapps/todo/view.slint";
 import { AgentsView, AgentsApp, AgentRow, AgentSub } from "../miniapps/agents/view.slint";
 import { Chatter, SpeechBox } from "chatter.slint";
+import { PluginView, PluginApps, PluginCard } from "plugin.slint";
+import { StoreView, StoreApp, StoreRow } from "store.slint";
 
 import "fonts/ChakraPetch-Regular.ttf";
 import "fonts/ChakraPetch-Medium.ttf";
@@ -22,7 +24,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, Chatter }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 
 // Posição de um app na grade do painel (em células).
 export struct GridCell {
@@ -884,6 +886,21 @@ component Dashboard inherits ScrollView {
             width: parent.width - 28px;
             height: parent.height - 28px;
         }
+        // plugins da comunidade: todos na mesma tela genérica (ui/plugin.slint)
+        for p in PluginApps.cards: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            if p.id == c.id: PluginView {
+                card: p;
+                theme: c.theme;
+                x: 14px;
+                y: 14px;
+                width: parent.width - 28px;
+                height: parent.height - 28px;
+            }
+        }
         if c.id == "cyber.ai_usage": AiUsageView {
             span: c.w;
             x: 12px;
@@ -1261,6 +1278,8 @@ export component HubWindow inherits Window {
             if e.text == Key.Escape {
                 if current == "apps" {
                     root.select-tab("panel");
+                } else if current == "store" {
+                    root.select-tab("apps");
                 } else if editing {
                     root.edit-end();
                     root.editing = false;
@@ -1459,6 +1478,16 @@ export component HubWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         HeaderButton {
+                            text: "Loja de plugins";
+                            short: "loja";
+                            icon: Icons.plus;
+                            show-text: true;
+                            clicked => { root.select-tab("store"); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        HeaderButton {
                             text: "Encerrar " + app-name;
                             short: "sair";
                             px-icon: Icons.px-close;
@@ -1480,16 +1509,45 @@ export component HubWindow inherits Window {
                 }
             }
 
+            // cabeçalho da loja
+            if current == "store": Bar {
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    Text {
+                        text: "Loja de plugins";
+                        color: Skin.panel-ink;
+                        font-family: Skin.font-title;
+                        font-size: 20px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        HeaderButton {
+                            text: "Voltar";
+                            short: "voltar";
+                            icon: Icons.close;
+                            show-text: true;
+                            clicked => { root.select-tab("apps"); }
+                        }
+                    }
+                }
+            }
+
             // barra lateral (páginas) e, ao lado, o painel ou as configurações
             HorizontalLayout {
             vertical-stretch: 1;
             if !nav-top: Rail {
                 pages: pages;
                 current: page;
-                settings: current == "apps";
+                settings: current != "panel";
                 selected(i) => { root.page-selected(i); }
                 add => { root.page-added(); }
-                open-settings => { root.select-tab(current == "apps" ? "panel" : "apps"); }
+                open-settings => { root.select-tab(current == "panel" ? "apps" : "panel"); }
             }
 
             // painel, sobre o fundo do visual
@@ -1517,6 +1575,11 @@ export component HubWindow inherits Window {
                     edit-end => { root.edit-end(); }
                     edit-key(id, dx, dy, resize) => { root.edit-key(id, dx, dy, resize); }
                 }
+            }
+
+            if current == "store": StoreView {
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
             }
 
             if current == "apps": AppsView {

@@ -156,9 +156,10 @@ impl VitalsMini {
     fn refresh_mascot(&mut self, i: usize) -> bool {
         let key = self.mascot_of(i);
         let theme = self.host.theme_for(&self.manifest);
-        let look = self.anims[i].look(self.vitals[i].mood, Instant::now());
+        let sprite = sprites::get(&key);
+        let look = self.anims[i].look_with(sprite, self.vitals[i].mood, Instant::now());
         let reaction_changed = std::mem::replace(&mut self.reactions[i], look.reaction) != look.reaction;
-        self.mascots[i].update_look(sprites::get(&key), theme, &look) || reaction_changed
+        self.mascots[i].update_look(sprite, theme, &look) || reaction_changed
     }
 
     /// A mascote do cartão `i`, para a conversa entre mascotes.
@@ -370,6 +371,7 @@ impl VitalsMini {
         let show_temps = self.host.config.borrow().bool(&self.manifest, "show_temps");
         VitalCard {
             title: TITLES[i].into(),
+            voice: Voice::id_of(&self.manifest.id, TITLES[i]).into(),
             mascot: self.mascots[i].image(),
             mood: v.mood.as_str().into(),
             reaction: self.reactions[i].map_or("", Reaction::as_str).into(),

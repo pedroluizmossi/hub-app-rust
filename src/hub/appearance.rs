@@ -1,5 +1,7 @@
 //! Aparência: visual da janela, fundo, ícone da bandeja, movimento e relógio.
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, VecModel};
@@ -10,6 +12,16 @@ use crate::core::config::Config;
 use crate::mascot::{sprites, themes};
 use crate::skin;
 use crate::ui::Anim;
+
+/// O fundo da área do painel: pedidos em curso e o último desenhado. Compartilhado com a
+/// thread que desenha.
+#[derive(Default)]
+pub(super) struct BackdropState {
+    /// Sobe a cada pedido; resultado de um pedido velho é descartado.
+    generation: AtomicU32,
+    /// Visual, largura e altura em pixels físicos e escala do fundo que está na tela.
+    last: Mutex<Option<(String, u32, u32, u32)>>,
+}
 
 impl Hub {
     /// Aplica o visual da config: tokens da tela, lista do seletor e fundo.
@@ -86,6 +98,7 @@ impl Hub {
     /// reações (eles leem `reduce_motion` da config).
     pub(super) fn apply_motion(&self) {
         let calm = self.host.config.borrow().reduce_motion;
+        crate::mascot::anim::set_calm(calm);
         self.ui.set_reduce_motion(calm);
         self.ui.global::<Anim>().set_calm(calm);
     }
@@ -146,16 +159,17 @@ impl Hub {
         self.rebuild_lists();
     }
 
-    /// Pede um fundo novo daqui a pouco (um só, mesmo com vários pedidos seguidos).
+    /// Pede um fundo novo daqui a pouco (um só, mesmo com vários pedidos seguidos). O
+    /// desenho roda numa thread, e só quando o visual, o tamanho ou a escala mudaram:
+    /// reabrir a janela não redesenha nada.
     pub(super) fn schedule_backdrop(&self) {
-        let id = self.backdrop_gen.get().wrapping_add(1);
-        self.backdrop_gen.set(id);
-        let current = self.backdrop_gen.clone();
+        let state = self.backdrop.clone();
+        let id = state.generation.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         let weak = self.ui.as_weak();
         let size = self.backdrop_size.get();
         let key = self.host.config.borrow().skin.clone();
         Timer::single_shot(Duration::from_millis(60), move || {
-            if current.get() != id {
+            if state.generation.load(Ordering::Relaxed) != id {
                 return;
             }
             let Some(ui) = weak.upgrade() else { return };
@@ -171,8 +185,27 @@ impl Hub {
                 let chrome = 2.0 * s.border + s.header_h + s.header_line + s.panel_top_h + s.footer_h;
                 ((ww - 2.0 * s.border).max(1.0), (wh - chrome).max(1.0))
             };
-            let buf = skin::backdrop::render(s.backdrop, s.bg, w, h, scale);
-            ui.set_backdrop(slint::Image::from_rgb8(buf));
+            let drawn = (key, (w * scale).round() as u32, (h * scale).round() as u32, scale.to_bits());
+            if state.last.lock().is_ok_and(|last| last.as_ref() == Some(&drawn)) {
+                return;
+            }
+            let (backdrop, bg) = (s.backdrop, s.bg);
+            let spawned = std::thread::Builder::new().name("miniutils-backdrop".into()).spawn(move || {
+                let buf = skin::backdrop::render(backdrop, bg, w, h, scale);
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    // um pedido mais novo já está a caminho: este fundo ficou velho
+                    if state.generation.load(Ordering::Relaxed) != id {
+                        return;
+                    }
+                    ui.set_backdrop(slint::Image::from_rgb8(buf));
+                    if let Ok(mut last) = state.last.lock() {
+                        *last = Some(drawn);
+                    }
+                });
+            });
+            if let Err(e) = spawned {
+                eprintln!("miniutils: sem thread para o fundo ({e})");
+            }
         });
     }
 

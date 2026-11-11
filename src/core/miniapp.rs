@@ -10,8 +10,19 @@ use super::config::Config;
 use super::exec::Exec;
 use super::manifest::Manifest;
 use super::notify::Notifier;
+use super::wake::Waker;
 use crate::mascot::{Mood, themes::Theme};
 use crate::ui::HubWindow;
+
+/// O que tocando e quais controles de mídia o menu da bandeja mostra.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayMedia {
+    pub summary: String,
+    pub playing: bool,
+    pub can_play_pause: bool,
+    pub can_previous: bool,
+    pub can_next: bool,
+}
 
 /// O que uma ação em segundo plano tem a dizer ao app que a pediu.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +31,8 @@ pub enum Report {
     Done,
     /// Falhou; a mensagem já vem pronta para a tela.
     Error(String),
+    /// Terminou bem e devolveu um texto (a saída de um comando).
+    Output(String),
 }
 
 /// Alça que a thread de uma ação leva consigo para avisar o app do resultado.
@@ -31,15 +44,26 @@ pub enum Report {
 pub struct Reporter {
     app: String,
     tx: Sender<(String, Report)>,
+    waker: Waker,
 }
 
 impl Reporter {
     pub fn done(&self) {
-        let _ = self.tx.send((self.app.clone(), Report::Done));
+        self.send(Report::Done);
     }
 
     pub fn error(&self, msg: impl Into<String>) {
-        let _ = self.tx.send((self.app.clone(), Report::Error(msg.into())));
+        self.send(Report::Error(msg.into()));
+    }
+
+    pub fn output(&self, text: impl Into<String>) {
+        self.send(Report::Output(text.into()));
+    }
+
+    fn send(&self, report: Report) {
+        if self.tx.send((self.app.clone(), report)).is_ok() {
+            self.waker.wake();
+        }
     }
 
     /// Recado conforme o resultado: `Done`, ou `Error` com "`prefix`: primeira linha do erro".
@@ -75,7 +99,7 @@ impl Host {
 
     /// Alça para uma thread avisar o app `m` de como a ação terminou.
     pub fn reporter(&self, m: &Manifest) -> Reporter {
-        Reporter { app: m.id.clone(), tx: self.reports.0.clone() }
+        Reporter { app: m.id.clone(), tx: self.reports.0.clone(), waker: self.bus.waker().clone() }
     }
 
     /// Recados pendentes, com o id do app de cada um (chamado na thread da UI).
@@ -89,6 +113,24 @@ impl Host {
         let key = cfg.string(m, "theme");
         let key = if key == "auto" { crate::skin::get(&cfg.skin).app_theme.to_string() } else { key };
         crate::mascot::themes::get(&key)
+    }
+
+    /// Muda uma opção do app (ex.: um botão da própria tela), grava e avisa as
+    /// Configurações para redesenhar o formulário.
+    pub fn set_setting(&self, m: &Manifest, key: &str, value: toml::Value) {
+        {
+            let mut cfg = self.config.borrow_mut();
+            cfg.set(&m.id, key, value);
+            cfg.save();
+        }
+        self.settings_dirty.set(true);
+    }
+
+    /// Inverte uma opção `bool` do app; devolve o valor novo.
+    pub fn toggle_setting(&self, m: &Manifest, key: &str) -> bool {
+        let on = !self.config.borrow().bool(m, key);
+        self.set_setting(m, key, toml::Value::Boolean(on));
+        on
     }
 
     /// Executor restrito à allowlist do manifesto.
@@ -116,6 +158,9 @@ pub trait MiniApp {
     /// a página do app fechada.
     fn on_report(&mut self, _report: &Report, _ui: &HubWindow) {}
 
+    /// A janela do hub abriu (o app pode pedir uma leitura nova para não mostrar dado velho).
+    fn window_shown(&mut self, _ui: &HubWindow) {}
+
     /// Um quadro de animação (4 a 8/s), só com a janela aberta na página do app.
     fn tick(&mut self, _frame: u32, _ui: &HubWindow) {}
 
@@ -133,10 +178,14 @@ pub trait MiniApp {
     /// Uma linha para o tooltip da bandeja.
     fn summary(&self) -> String;
 
-    /// Informações e controles opcionais para o menu da bandeja.
-    fn tray_media(&self) -> Option<crate::tray::TrayMedia> {
+    /// Informações e controles opcionais de mídia para o menu da bandeja.
+    fn tray_media(&self) -> Option<TrayMedia> {
         None
     }
+
+    /// Escolheram um controle de mídia no menu da bandeja (só chega ao app cuja
+    /// `tray_media` está no menu). Verbos: `prev`, `play-pause`, `next`.
+    fn tray_command(&mut self, _verb: &str, _ui: &HubWindow) {}
 
     /// Fatos novos para a conversa entre mascotes (o hub recolhe depois de cada leitura).
     fn take_facts(&mut self) -> Vec<Fact> {

@@ -49,6 +49,16 @@ pub struct Voice {
 }
 
 impl Voice {
+    /// Id da mascote na tela ("cyber.vitals:CPU"): o Rust passa à view, que o põe no
+    /// `Mascot` para a caixa de diálogo achar quem fala e quem ouve.
+    pub fn id(&self) -> String {
+        Voice::id_of(&self.app, &self.name)
+    }
+
+    pub fn id_of(app: &str, name: &str) -> String {
+        format!("{app}:{name}")
+    }
+
     /// Mesma mascote (o diretor não põe uma mascote para responder a si mesma).
     pub fn same(&self, other: &Voice) -> bool {
         self.app == other.app && self.name == other.name

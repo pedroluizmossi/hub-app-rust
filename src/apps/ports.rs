@@ -11,7 +11,8 @@ use crate::core::bus::{Event, Topic};
 use crate::core::exec;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
-use crate::mascot::anim::{Animator, Reaction};
+use super::kit::{HeaderMascot, Speech, plural};
+use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
 use crate::providers::ports::{Listener, PortsSnapshot};
 use crate::ui::{HubWindow, PortRow, PortsApp};
@@ -34,12 +35,10 @@ pub struct PortsMini {
     /// Pid com o "encerrar" armado, esperando o segundo clique.
     armed: Option<(u32, Instant)>,
     search: String,
-    speech: Option<(String, Instant)>,
+    speech: Speech,
     mood: Mood,
     rows: Rc<VecModel<PortRow>>,
-    mascot: render::Cache,
-    anim: Animator,
-    reaction: Option<Reaction>,
+    face: HeaderMascot,
 }
 
 impl PortsMini {
@@ -57,12 +56,10 @@ impl PortsMini {
             fresh: Vec::new(),
             armed: None,
             search: String::new(),
-            speech: None,
+            speech: Speech::new(SPEECH_TTL),
             mood: Mood::Sleep,
             rows,
-            mascot: Default::default(),
-            anim: Animator::new(11),
-            reaction: None,
+            face: HeaderMascot::new(11),
         }));
         Self::bind(&app, ui);
         app
@@ -77,11 +74,8 @@ impl PortsMini {
         g.on_mascot_poked(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let mut a = a.borrow_mut();
-                if a.host.config.borrow().reduce_motion {
-                    return;
-                }
-                let mood = a.mood;
-                if a.anim.poke(mood, Instant::now()) {
+                let (mood, reduce) = (a.mood, a.host.config.borrow().reduce_motion);
+                if a.face.poke(mood, reduce) {
                     a.push_mascot(&ui);
                 }
             }
@@ -110,13 +104,7 @@ impl PortsMini {
         g.on_toggle_udp(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let a = a.borrow();
-                {
-                    let mut cfg = a.host.config.borrow_mut();
-                    let v = cfg.bool(&a.manifest, "show_udp");
-                    cfg.set(&a.manifest.id, "show_udp", toml::Value::Boolean(!v));
-                    cfg.save();
-                }
-                a.host.settings_dirty.set(true);
+                a.host.toggle_setting(&a.manifest, "show_udp");
                 a.refresh_rows(&ui);
             }
         });
@@ -131,27 +119,23 @@ impl PortsMini {
         });
     }
 
-    fn say(&mut self, text: String) {
-        self.speech = Some((text, Instant::now()));
-    }
-
     /// Primeiro clique arma; o segundo, dentro de `ARM_TTL`, manda SIGTERM.
     fn kill(&mut self, pid: u32, ui: &HubWindow) {
         // só pids que estão na leitura atual (nada de pid vindo de fora) e nunca o próprio hub
         let Some(l) = self.snap.listeners.iter().find(|l| l.pid == pid && pid > 1) else { return };
         let name = l.process.clone();
         if pid == std::process::id() {
-            self.say("Esse sou eu! Não vou me encerrar.".into());
+            self.speech.say("Esse sou eu! Não vou me encerrar.".into());
         } else if self.armed.is_some_and(|(p, at)| p == pid && at.elapsed() < ARM_TTL) {
             self.armed = None;
             // SAFETY: `kill` só envia um sinal a um processo; o kernel recusa se não for do usuário.
             let r = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
             if r == 0 {
-                self.say(format!("Pedi para {name} encerrar."));
-                self.anim.trigger(Reaction::Celebrate, Instant::now());
+                self.speech.say(format!("Pedi para {name} encerrar."));
+                self.face.react(Reaction::Celebrate);
             } else {
                 let e = std::io::Error::last_os_error();
-                self.say(if e.raw_os_error() == Some(libc::EPERM) {
+                self.speech.say(if e.raw_os_error() == Some(libc::EPERM) {
                     format!("Sem permissão para encerrar {name}.")
                 } else {
                     format!("Não consegui encerrar {name}: {e}")
@@ -160,7 +144,7 @@ impl PortsMini {
             self.host.bus.poke(Topic::Ports);
         } else {
             self.armed = Some((pid, Instant::now()));
-            self.say(format!("Clique de novo para encerrar {name} (pid {pid})."));
+            self.speech.say(format!("Clique de novo para encerrar {name} (pid {pid})."));
         }
         self.refresh_rows(ui);
         self.push_mascot(ui);
@@ -179,7 +163,7 @@ impl PortsMini {
                 }
                 self.fresh.push((key, now));
                 let who = if l.process.is_empty() { "Algum serviço".to_string() } else { l.process.clone() };
-                self.say(format!("{who} abriu a porta {}.", l.port));
+                self.speech.say(format!("{who} abriu a porta {}.", l.port));
                 if notify {
                     self.host.notifier.borrow_mut().send(
                         &format!("ports:{}:{}", l.proto, l.port),
@@ -271,8 +255,8 @@ impl PortsMini {
         });
         g.set_mood(self.mood.as_str().into());
         g.set_show_udp(self.host.config.borrow().bool(&self.manifest, "show_udp"));
-        let speech = match &self.speech {
-            Some((t, at)) if at.elapsed() < SPEECH_TTL => t.clone(),
+        let speech = match self.speech.current() {
+            Some(t) => t.to_string(),
             _ if tcp.is_empty() => "Nenhuma porta aberta… zzz".into(),
             _ if mine == 0 => format!("{} do sistema escutando.", plural(tcp.len(), "porta", "portas")),
             _ => format!("Vigiando {}, {mine} {}.", plural(tcp.len(), "porta", "portas"), if mine == 1 { "sua" } else { "suas" }),
@@ -280,25 +264,18 @@ impl PortsMini {
         g.set_speech(speech.into());
     }
 
+    /// Redesenha a mascote; `true` se mudou.
     fn refresh_mascot(&mut self) -> bool {
-        let key = self.mascot_key();
-        let theme = self.host.theme_for(&self.manifest);
-        let look = self.anim.look(self.mood, Instant::now());
-        let reaction_changed = std::mem::replace(&mut self.reaction, look.reaction) != look.reaction;
-        self.mascot.update_look(sprites::get(&key), theme, &look) || reaction_changed
+        let sprite = sprites::get(&self.mascot_key());
+        self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
     }
 
     fn push_mascot(&mut self, ui: &HubWindow) {
         self.refresh_mascot();
         let g = ui.global::<PortsApp>();
-        g.set_mascot(self.mascot.image());
-        g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+        g.set_mascot(self.face.image());
+        g.set_reaction(self.face.reaction());
     }
-}
-
-/// "1 porta", "3 portas".
-pub fn plural(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// Como o endereço aparece: "só local", "rede toda" ou o IP específico.
@@ -355,15 +332,16 @@ impl MiniApp for PortsMini {
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
-        // o "encerrar" armado desarma sozinho
-        if self.armed.is_some_and(|(_, at)| at.elapsed() >= ARM_TTL) {
+        // o "encerrar" armado desarma sozinho, e a fala vence no prazo
+        let disarmed = self.armed.is_some_and(|(_, at)| at.elapsed() >= ARM_TTL);
+        if disarmed {
             self.armed = None;
+        }
+        if self.speech.take_expired() || disarmed {
             self.refresh_rows(ui);
         }
         if self.refresh_mascot() {
-            let g = ui.global::<PortsApp>();
-            g.set_mascot(self.mascot.image());
-            g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+            self.push_mascot(ui);
         }
     }
 

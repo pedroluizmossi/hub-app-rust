@@ -24,6 +24,9 @@ Regras para agentes de código (Claude Code, Codex etc.). Arquitetura em
   `crate::ui::*`, que é só `pub use miniutils_ui::*`.
 - O crate raiz (`miniutils`) tem o Rust do app. Mudança só de Rust não recompila a
   interface; mudança de `.slint` recompila `miniutils-ui` e depois o app.
+- `ui/build.rs` liga `SLINT_ENABLE_EXPERIMENTAL_FEATURES` (o `ComponentContainer` que encaixa
+  a tela dos plugins). O crate raiz usa `slint-interpreter` e `rhai` para os plugins
+  (`src/apps/plugin.rs`); o interpretador tem de ser **exatamente** a mesma versão do `slint`.
 - Tipos gerados pelo Slint vivem em outro crate: não dá para escrever `impl Trait for
   HubWindow` (ou outro tipo gerado) com um trait de fora; use função livre ou newtype.
 

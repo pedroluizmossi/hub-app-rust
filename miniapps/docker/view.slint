@@ -51,6 +51,8 @@ export global DockerApp {
     in property <string> reaction;          // reação curta por cima do humor
     // o que a mascote está dizendo (último evento)
     in property <string> speech;
+    // id da mascote na conversa entre mascotes (vem do Rust)
+    in property <string> voice;
     in property <string> usage-text;
     in property <bool> hide-stopped;
     in property <string> sort: "estado";
@@ -371,8 +373,7 @@ export component DockerView inherits Rectangle {
                 frame: DockerApp.mascot;
                 mood: DockerApp.mood;
                 reaction: DockerApp.reaction;
-                // id na conversa entre mascotes (o mesmo do Rust: app + nome do manifesto)
-                voice: "cyber.docker:Docker";
+                voice: DockerApp.voice;
                 poked => { DockerApp.mascot-poked(); }
                 width: parent.width - 8px;
                 height: parent.height - 8px;

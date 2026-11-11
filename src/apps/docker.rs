@@ -12,7 +12,8 @@ use crate::core::chatter::{Fact, FactKind, Voice};
 use crate::core::exec::{self, Exec};
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp, Report};
-use crate::mascot::anim::{Animator, Reaction};
+use super::kit::{HeaderMascot, Speech, unix_now};
+use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
 use crate::providers::docker::{
     Container, DockerSnapshot, Stats, format_age, format_bytes, valid_container_name, valid_project_name,
@@ -45,7 +46,7 @@ pub struct DockerMini {
     prev: HashMap<String, Prev>,
     baseline: bool,
     crashes: HashMap<String, Instant>,
-    speech: Option<(String, Instant)>,
+    speech: Speech,
     /// Fala de uma ação em curso ("Parando web…"): sai quando a ação termina.
     working: Option<String>,
     search: String,
@@ -53,12 +54,8 @@ pub struct DockerMini {
     collapsed: HashSet<String>,
     mood: Mood,
     rows: Rc<VecModel<ContainerRow>>,
-    /// Último quadro da mascote: só troca a imagem quando os pixels mudam.
-    mascot: render::Cache,
-    /// Piscada e reações da mascote (comemora quando um container volta).
-    anim: Animator,
-    /// Reação mostrada agora.
-    reaction: Option<Reaction>,
+    /// A mascote do cabeçalho (comemora quando um container volta).
+    face: HeaderMascot,
     /// Fatos para a conversa entre mascotes, até o hub recolher.
     facts: Vec<Fact>,
 }
@@ -77,15 +74,13 @@ impl DockerMini {
             prev: HashMap::new(),
             baseline: false,
             crashes: HashMap::new(),
-            speech: None,
+            speech: Speech::new(SPEECH_TTL),
             working: None,
             search: String::new(),
             collapsed: HashSet::new(),
             mood: Mood::Sleep,
             rows,
-            mascot: Default::default(),
-            anim: Animator::new(7),
-            reaction: None,
+            face: HeaderMascot::new(7),
             facts: Vec::new(),
         }));
         Self::bind(&app, ui);
@@ -102,13 +97,10 @@ impl DockerMini {
         g.on_mascot_poked(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let mut a = a.borrow_mut();
-                if a.host.config.borrow().reduce_motion {
-                    return;
-                }
-                let mood = a.mood;
+                let (mood, reduce) = (a.mood, a.host.config.borrow().reduce_motion);
                 let voice = a.voice();
                 a.facts.push(Fact { kind: FactKind::Poked, voice, subject: String::new(), value: None });
-                if a.anim.poke(mood, Instant::now()) {
+                if a.face.poke(mood, reduce) {
                     a.push_mascot(&ui);
                 }
             }
@@ -158,13 +150,8 @@ impl DockerMini {
         g.on_cycle_sort(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let a = a.borrow_mut();
-                {
-                    let mut cfg = a.host.config.borrow_mut();
-                    let next = next_sort(&cfg.string(&a.manifest, "sort"));
-                    cfg.set(&a.manifest.id, "sort", toml::Value::String(next.into()));
-                    cfg.save();
-                }
-                a.host.settings_dirty.set(true);
+                let next = next_sort(&a.host.config.borrow().string(&a.manifest, "sort"));
+                a.host.set_setting(&a.manifest, "sort", toml::Value::String(next.into()));
                 a.refresh_rows(&ui);
             }
         });
@@ -174,13 +161,7 @@ impl DockerMini {
         g.on_toggle_hide_stopped(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let a = a.borrow_mut();
-                {
-                    let mut cfg = a.host.config.borrow_mut();
-                    let v = cfg.bool(&a.manifest, "hide_stopped");
-                    cfg.set(&a.manifest.id, "hide_stopped", toml::Value::Boolean(!v));
-                    cfg.save();
-                }
-                a.host.settings_dirty.set(true);
+                a.host.toggle_setting(&a.manifest, "hide_stopped");
                 a.refresh_rows(&ui);
             }
         });
@@ -195,14 +176,10 @@ impl DockerMini {
         });
     }
 
-    fn say(&mut self, text: String) {
-        self.speech = Some((text, Instant::now()));
-    }
-
     /// Fala enquanto uma ação roda em segundo plano; o resultado chega por `on_report`.
     fn say_working(&mut self, text: String) {
         self.working = Some(text.clone());
-        self.say(text);
+        self.speech.say(text);
     }
 
     fn action(&mut self, verb: &str, name: &str, ui: &HubWindow) {
@@ -236,7 +213,7 @@ impl DockerMini {
             _ => Ok(()),
         };
         if let Err(e) = result {
-            self.say(e.to_string());
+            self.speech.say(e.to_string());
         }
         self.push_header(ui);
     }
@@ -347,12 +324,12 @@ impl DockerMini {
             let voice = self.voice();
             self.facts.push(Fact { kind, voice, subject: subject.clone(), value: None });
             if !said && (urgent || events.len() == 1) {
-                self.say(title.clone());
+                self.speech.say(title.clone());
                 said = true;
             }
             // container de volta: a mascote comemora (reação curta, não um humor)
             if !urgent && !self.host.config.borrow().reduce_motion {
-                self.anim.trigger(Reaction::Celebrate, Instant::now());
+                self.face.react(Reaction::Celebrate);
             }
             if notify && (urgent || notify_recovery) {
                 self.host.notifier.borrow_mut().send(&key, &title, &body, urgent);
@@ -396,19 +373,16 @@ impl DockerMini {
 
     /// Redesenha a mascote agora; `true` se a imagem ou a reação mudou.
     fn refresh_mascot(&mut self) -> bool {
-        let key = self.mascot_key();
-        let theme = self.host.theme_for(&self.manifest);
-        let look = self.anim.look(self.mood, Instant::now());
-        let reaction_changed = std::mem::replace(&mut self.reaction, look.reaction) != look.reaction;
-        self.mascot.update_look(sprites::get(&key), theme, &look) || reaction_changed
+        let sprite = sprites::get(&self.mascot_key());
+        self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
     }
 
     /// Redesenha a mascote e entrega imagem e reação à tela.
     fn push_mascot(&mut self, ui: &HubWindow) {
         self.refresh_mascot();
         let g = ui.global::<DockerApp>();
-        g.set_mascot(self.mascot.image());
-        g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+        g.set_mascot(self.face.image());
+        g.set_reaction(self.face.reaction());
     }
 
     fn counts(&self) -> (i32, i32, i32) {
@@ -435,13 +409,14 @@ impl DockerMini {
         g.set_hide_stopped(self.host.config.borrow().bool(&self.manifest, "hide_stopped"));
         g.set_sort(self.host.config.borrow().string(&self.manifest, "sort").into());
 
-        let speech = match &self.speech {
-            Some((t, at)) if at.elapsed() < SPEECH_TTL => t.clone(),
+        let speech = match self.speech.current() {
+            Some(t) => t.to_string(),
             _ if errors > 0 => format!("{errors} container(s) com problema!"),
             _ if running == 0 => "Nenhum container rodando… zzz".into(),
             _ => format!("Tudo certo: {running} rodando."),
         };
         g.set_speech(speech.into());
+        g.set_voice(Voice::id_of(&self.manifest.id, &self.manifest.name).into());
 
         let cpu: f32 = self.snap.stats.values().map(|s| s.cpu).sum();
         let mem: u64 = self.snap.stats.values().map(|s| s.mem).sum();
@@ -638,12 +613,6 @@ fn header_row(g: &Group, collapsed: bool) -> ContainerRow {
     }
 }
 
-fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 /// Há quanto tempo está no estado atual: "há 3 d" (rodando desde / parado desde). "" se não sei.
 pub fn age_text(c: &Container, now: i64) -> String {
@@ -689,6 +658,12 @@ impl MiniApp for DockerMini {
         &self.manifest
     }
 
+    /// O Docker é o provedor que mais atrasa: ao abrir a janela, lê tudo de novo para a
+    /// tela não nascer velha.
+    fn window_shown(&mut self, _ui: &HubWindow) {
+        self.host.bus.poke(Topic::Docker);
+    }
+
     fn enable(&mut self, ui: &HubWindow) {
         self.baseline = false; // sem histórico: não acusa eventos antigos
         ui.global::<DockerApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
@@ -714,11 +689,11 @@ impl MiniApp for DockerMini {
         let working = self.working.take();
         match report {
             // a falha fica na fala (com o prazo normal), em vez de sumir na próxima leitura
-            Report::Error(msg) => self.say(msg.clone()),
+            Report::Error(msg) => self.speech.say(msg.clone()),
             // deu certo: tira o "Parando X…", a menos que outra fala já tenha entrado
-            Report::Done => {
-                if self.speech.as_ref().map(|(t, _)| t) == working.as_ref() {
-                    self.speech = None;
+            Report::Done | Report::Output(_) => {
+                if working.is_some_and(|w| self.speech.is(&w)) {
+                    self.speech.clear();
                 }
             }
         }
@@ -726,17 +701,15 @@ impl MiniApp for DockerMini {
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
-        // a fala expira sozinha
+        // a fala vence no prazo, e o humor muda quando um "caiu agora" envelhece
         let mood = self.compute_mood();
-        if mood != self.mood {
+        if self.speech.take_expired() || mood != self.mood {
             self.mood = mood;
             self.push_header(ui);
         }
         // o ritmo vem do relógio do `Animator`, não do quadro do hub
         if self.refresh_mascot() {
-            let g = ui.global::<DockerApp>();
-            g.set_mascot(self.mascot.image());
-            g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+            self.push_mascot(ui);
         }
     }
 

@@ -229,9 +229,9 @@ pub fn parse(
         app: text(root.get("Identity")),
         state: text(player.get("PlaybackStatus")),
         title: text(meta.get("xesam:title")),
-        artist: list(meta.get("xesam:artist")).join(", "),
+        artist: names(meta.get("xesam:artist")),
         album: text(meta.get("xesam:album")),
-        length: seconds(meta.get("mpris:length").and_then(|v| i64::try_from(v).ok()).unwrap_or(0)),
+        length: seconds(micros(meta.get("mpris:length"))),
         position: seconds(position_us.unwrap_or(0)),
         can_play: flag(player, "CanPlay"),
         can_pause: flag(player, "CanPause"),
@@ -295,8 +295,25 @@ fn text(v: Option<&OwnedValue>) -> String {
     v.and_then(|v| String::try_from(v.clone()).ok()).unwrap_or_default()
 }
 
-fn list(v: Option<&OwnedValue>) -> Vec<String> {
-    v.and_then(|v| Vec::<String>::try_from(v.clone()).ok()).unwrap_or_default()
+/// Lista de nomes (`as`, como manda a especificação) ou um texto só, que alguns players
+/// mandam no lugar.
+fn names(v: Option<&OwnedValue>) -> String {
+    let Some(v) = v else { return String::new() };
+    match Vec::<String>::try_from(v.clone()) {
+        Ok(list) => list.join(", "),
+        Err(_) => text(Some(v)),
+    }
+}
+
+/// Duração em microssegundos: `x` (i64) pela especificação, mas há players que mandam `t`
+/// (u64) ou `i` (i32).
+fn micros(v: Option<&OwnedValue>) -> i64 {
+    let Some(v) = v else { return 0 };
+    i64::try_from(v)
+        .ok()
+        .or_else(|| u64::try_from(v).ok().map(|n| n.min(i64::MAX as u64) as i64))
+        .or_else(|| i32::try_from(v).ok().map(i64::from))
+        .unwrap_or(0)
 }
 
 fn flag(props: &HashMap<String, OwnedValue>, key: &str) -> bool {
@@ -422,4 +439,16 @@ mod tests {
         assert!(!valid_service("org.example.Player"));
         assert!(!valid_service(""));
     }
+
+    #[test]
+    fn aceita_duracao_sem_sinal_e_artista_como_texto() {
+        let player = map(&[(
+            "Metadata",
+            metadata(&[("xesam:artist", Value::from("Tonico")), ("mpris:length", Value::from(187_000_000u64))]),
+        )]);
+        let snap = parse("org.mpris.MediaPlayer2.x", &HashMap::new(), &player, None);
+        assert_eq!(snap.artist, "Tonico");
+        assert_eq!(snap.length, 187);
+    }
+
 }

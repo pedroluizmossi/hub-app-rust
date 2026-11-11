@@ -15,7 +15,11 @@ impl Hub {
         let w = Rc::downgrade(hub);
         ui.on_select_tab(move |id| {
             if let Some(h) = w.upgrade() {
+                let store = id == "store";
                 h.ui.set_current(id);
+                if store {
+                    h.store_reload();
+                }
                 h.rebuild_pages(true);
                 h.anim_tick(); // desenha as mascotes já no primeiro quadro
                 h.schedule_backdrop();

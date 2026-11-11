@@ -25,9 +25,18 @@ toml = "1.2.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 chrono = "0.4"
+# prévia das animações em GIF (`miniutils --previa`); já vinha com as dependências do Slint
+gif = "0.14"
+# plugins com tela própria: o .slint do plugin é interpretado em tempo de execução e
+# encaixado na janela (ComponentContainer). Mesma versão exata do slint.
+slint-interpreter = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "internal"] }
+# lógica dos plugins, isolada: sem módulos (não lê arquivo) e com limites de operação
+rhai = { version = "1", features = ["no_module", "sync"] }
+# assinatura do índice da loja (ed25519); já vinha com o HTTPS (rustls)
+ring = "0.17"
 
 [workspace]
-members = ["ui"]
+members = ["ui", "tools/sprite-import"]
 
 [workspace.dependencies]
 # Só o renderizador por software: ~30 MB em uso, contra ~270 MB carregando o driver OpenGL

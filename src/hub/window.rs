@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Timer};
 
-use super::{FRAME_COLD, FRAME_HOT, Hub};
-use crate::core::bus::Topic;
+use super::Hub;
 use crate::instance;
 use crate::popup;
+use crate::tray::Tray;
 
 impl Hub {
     /// Mostra o popup junto de `anchor` (ponto clicado na bandeja).
@@ -63,29 +63,41 @@ impl Hub {
     pub fn serve_commands(&self, server: &instance::Server) {
         let weak = self.ui.as_weak();
         let served = server.serve(move |cmd| {
-            let instance::Command::Show(tab) = cmd;
-            let tab = tab.unwrap_or_default();
-            let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
+            match cmd {
+                instance::Command::Show(tab) => {
+                    let tab = tab.unwrap_or_default();
+                    let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
+                }
+                // a loja pela linha de comando instalou ou removeu um plugin
+                instance::Command::ReloadPlugins => super::request_plugin_reload(),
+            }
         });
         if let Err(e) = served {
             eprintln!("miniutils: não consegui atender outras instâncias ({e})");
         }
     }
 
-    /// A janela abriu ou se escondeu. Escondida, os provedores caros coletam mais devagar;
-    /// ao abrir, o Docker (o que mais atrasa) lê tudo de novo para a tela não nascer velha.
+    /// A janela abriu ou se escondeu. Escondida, os provedores caros coletam mais devagar
+    /// e a animação para; ao abrir, cada app pode se atualizar (ver `MiniApp::window_shown`).
     pub(super) fn set_shown(&self, on: bool) {
         if self.shown.replace(on) == on {
             return;
         }
         self.host.bus.set_visible(on);
         if on {
-            self.host.bus.poke(Topic::Docker);
+            self.update_clock();
+            self.anim.restart();
+            for app in self.registry.enabled() {
+                app.borrow_mut().window_shown(&self.ui);
+            }
+        } else {
+            self.anim.stop();
         }
     }
 
+    /// Há um ícone visível na bandeja agora (o painel pode subir depois do app).
     pub(super) fn has_tray(&self) -> bool {
-        self.tray.borrow().is_some()
+        self.tray.borrow().as_ref().is_some_and(Tray::online)
     }
 
     /// Guarda o tamanho atual da janela, se mudou. Em pixels lógicos, para não mudar de
@@ -108,7 +120,7 @@ impl Hub {
     /// Muda o intervalo do quadro conforme o mouse está (ou não) sobre a janela.
     pub(super) fn set_hovered(&self, on: bool) {
         if self.hovered.replace(on) != on {
-            self.anim.set_interval(if on { FRAME_HOT } else { FRAME_COLD });
+            self.pace_frames();
         }
     }
 

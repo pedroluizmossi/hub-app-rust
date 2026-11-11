@@ -1,5 +1,6 @@
 //! Registro dos mini-apps: liga, desliga e entrega leituras dos provedores.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::bus::Event;
@@ -10,30 +11,53 @@ use crate::ui::HubWindow;
 
 pub struct Registry {
     host: Rc<Host>,
-    apps: Vec<AppRef>,
+    /// Apps conhecidos. Plugins entram e saem com o hub rodando (ver `add`/`remove`).
+    apps: RefCell<Vec<AppRef>>,
 }
 
 impl Registry {
     pub fn new(host: Rc<Host>) -> Self {
-        Registry { host, apps: Vec::new() }
+        Registry { host, apps: RefCell::new(Vec::new()) }
     }
 
-    pub fn add(&mut self, app: AppRef) {
-        self.apps.push(app);
+    /// Acrescenta um app (ou troca o de mesmo id). Se ele já estava ligado na config
+    /// (um plugin reinstalado), é ligado agora.
+    pub fn add(&self, app: AppRef, ui: Option<&HubWindow>) {
+        let id = app.borrow().manifest().id.clone();
+        self.remove(&id, ui);
+        self.apps.borrow_mut().push(app.clone());
+        if let Some(ui) = ui {
+            if self.is_enabled(&id) {
+                self.activate(&app, ui);
+            }
+        }
     }
 
-    pub fn all(&self) -> &[AppRef] {
-        &self.apps
+    /// Tira um app (plugin removido ou atualizado): desliga antes, se estava ligado. A
+    /// config continua lembrando dele (posição, opções) para quando voltar.
+    pub fn remove(&self, id: &str, ui: Option<&HubWindow>) -> bool {
+        let Some(app) = self.find(id) else { return false };
+        if let Some(ui) = ui {
+            if self.is_enabled(id) {
+                self.deactivate(&app, ui);
+            }
+        }
+        self.apps.borrow_mut().retain(|a| !Rc::ptr_eq(a, &app));
+        true
     }
 
-    pub fn find(&self, id: &str) -> Option<&AppRef> {
-        self.apps.iter().find(|a| a.borrow().manifest().id == id)
+    pub fn all(&self) -> Vec<AppRef> {
+        self.apps.borrow().clone()
+    }
+
+    pub fn find(&self, id: &str) -> Option<AppRef> {
+        self.apps.borrow().iter().find(|a| a.borrow().manifest().id == id).cloned()
     }
 
     /// Apps ligados, na ordem das abas (a ordem da config).
     pub fn enabled(&self) -> Vec<AppRef> {
         let cfg = self.host.config.borrow();
-        cfg.enabled.iter().filter_map(|id| self.find(id).cloned()).collect()
+        cfg.enabled.iter().filter_map(|id| self.find(id)).collect()
     }
 
     fn is_enabled(&self, id: &str) -> bool {
@@ -64,7 +88,7 @@ impl Registry {
     }
 
     pub fn set_enabled(&self, id: &str, on: bool, ui: &HubWindow) {
-        let Some(app) = self.find(id).cloned() else { return };
+        let Some(app) = self.find(id) else { return };
         if self.is_enabled(id) == on {
             return;
         }
@@ -104,7 +128,7 @@ impl Registry {
 
     /// Falas próprias de cada app (id, conteúdo do `lines.toml`), ligado ou não.
     pub fn lines(&self) -> Vec<(String, &'static str)> {
-        self.apps.iter().map(|a| {
+        self.apps.borrow().iter().map(|a| {
             let a = a.borrow();
             (a.manifest().id.clone(), a.lines())
         }).collect()

@@ -3,7 +3,6 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
@@ -11,7 +10,8 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use crate::core::bus::Event;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
-use crate::mascot::anim::{Animator, Reaction};
+use super::kit::{HeaderMascot, unix_now};
+use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
 use crate::ui::{HubWindow, TodoApp, TodoRow};
 
@@ -105,9 +105,7 @@ pub struct TodoMini {
     error: String,
     mood: Mood,
     rows: Rc<VecModel<TodoRow>>,
-    mascot: render::Cache,
-    anim: Animator,
-    reaction: Option<Reaction>,
+    face: HeaderMascot,
 }
 
 impl TodoMini {
@@ -125,9 +123,7 @@ impl TodoMini {
             error: String::new(),
             mood: Mood::Sleep,
             rows,
-            mascot: Default::default(),
-            anim: Animator::new(13),
-            reaction: None,
+            face: HeaderMascot::new(13),
         }));
         Self::bind(&app, ui);
         app
@@ -142,11 +138,8 @@ impl TodoMini {
         g.on_mascot_poked(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let mut a = a.borrow_mut();
-                if a.host.config.borrow().reduce_motion {
-                    return;
-                }
-                let mood = a.mood;
-                if a.anim.poke(mood, Instant::now()) {
+                let (mood, reduce) = (a.mood, a.host.config.borrow().reduce_motion);
+                if a.face.poke(mood, reduce) {
                     a.push_mascot(&ui);
                 }
             }
@@ -171,7 +164,7 @@ impl TodoMini {
                 let mut a = a.borrow_mut();
                 if a.list.toggle(id as u64) == Some(true) && a.list.pending() == 0 {
                     // zerou a lista: comemora
-                    a.anim.trigger(Reaction::Celebrate, Instant::now());
+                    a.face.react(Reaction::Celebrate);
                 }
                 a.changed(&ui);
             }
@@ -261,24 +254,18 @@ impl TodoMini {
         );
     }
 
+    /// Redesenha a mascote; `true` se mudou.
     fn refresh_mascot(&mut self) -> bool {
-        let key = self.mascot_key();
-        let theme = self.host.theme_for(&self.manifest);
-        let look = self.anim.look(self.mood, Instant::now());
-        let reaction_changed = std::mem::replace(&mut self.reaction, look.reaction) != look.reaction;
-        self.mascot.update_look(sprites::get(&key), theme, &look) || reaction_changed
+        let sprite = sprites::get(&self.mascot_key());
+        self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
     }
 
     fn push_mascot(&mut self, ui: &HubWindow) {
         self.refresh_mascot();
         let g = ui.global::<TodoApp>();
-        g.set_mascot(self.mascot.image());
-        g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+        g.set_mascot(self.face.image());
+        g.set_reaction(self.face.reaction());
     }
-}
-
-fn unix_now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// Idade de uma tarefa: "agora", "há 5 min", "há 3 h", "há 2 d".
@@ -317,9 +304,7 @@ impl MiniApp for TodoMini {
             self.refresh(ui);
         }
         if self.refresh_mascot() {
-            let g = ui.global::<TodoApp>();
-            g.set_mascot(self.mascot.image());
-            g.set_reaction(self.reaction.map_or("", Reaction::as_str).into());
+            self.push_mascot(ui);
         }
     }
 

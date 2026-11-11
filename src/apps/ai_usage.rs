@@ -234,7 +234,7 @@ impl AiUsageMini {
     fn refresh_mascot(&mut self, i: usize) -> bool {
         let mood = self.card_mood(i);
         let Some(sprite) = ai_mascots::get(&self.snap.cards[i].name) else { return false };
-        let look = self.anims[i].look(mood, Instant::now());
+        let look = self.anims[i].look_with(sprite, mood, Instant::now());
         let changed = std::mem::replace(&mut self.reactions[i], look.reaction) != look.reaction;
         self.mascots[i].update_look(sprite, self.host.theme_for(&self.manifest), &look) || changed
     }
@@ -319,7 +319,7 @@ impl AiUsageMini {
                 None => card.status.clone(),
             };
             let tint = ai_mascots::get(&card.name).and_then(ai_mascots::button_colors).unwrap_or((0x9399a4, 0x26282e));
-            UsageCard { name: card.name.clone().into(), status: status.into(), plan: card.plan.clone().into(),
+            UsageCard { name: card.name.clone().into(), voice: Voice::id_of(&self.manifest.id, &card.name).into(), status: status.into(), plan: card.plan.clone().into(),
                 stale: card.stale, lines: ModelRc::new(VecModel::from(lines)),
                 mascot: self.mascots[i].image(), mood: self.card_mood(i).as_str().into(),
                 button: render::color(tint.0), button_edge: render::color(tint.1),

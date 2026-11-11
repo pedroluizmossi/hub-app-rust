@@ -53,6 +53,12 @@ pub struct Config {
     pub enabled: Vec<String>,
     /// Configurações de cada mini-app: `[apps."cyber.docker"]`.
     pub apps: BTreeMap<String, toml::Table>,
+    /// Índice da loja de plugins (`registry.json`: caminho ou https://). Vazio = a loja
+    /// oficial (`store::OFFICIAL_INDEX`).
+    pub store_index: String,
+    /// Chave pública (ed25519, hex) que assina o índice da loja. Vazia = a oficial, se o
+    /// índice for o oficial; para outro índice, sem conferência (só aceito se for local).
+    pub store_key: String,
     /// Como salvar, conforme o arquivo lido (não vai para o TOML).
     #[serde(skip)]
     estado: Estado,
@@ -110,6 +116,8 @@ impl Default for Config {
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
             apps: BTreeMap::new(),
+            store_index: String::new(),
+            store_key: String::new(),
             estado: Estado::Normal,
         }
     }
@@ -302,36 +310,45 @@ impl Config {
         Config { estado: Estado::Quebrado, ..Config::default() }
     }
 
+    /// Grava a configuração. O texto é montado aqui e o disco fica com uma thread de
+    /// gravação: o `fsync` não trava a interface (o modo de edição salva a cada tecla).
+    /// Antes de sair, chame `flush_saves`.
     pub fn save(&mut self) {
         let path = Self::path();
-        self.save_to(&path);
+        if let Some(text) = self.text_to_save(&path) {
+            writer::submit(path, text);
+        }
     }
 
     fn save_to(&mut self, path: &Path) {
+        if let Some(text) = self.text_to_save(path) {
+            write_logged(path, &text);
+        }
+    }
+
+    /// O TOML a gravar em `path`, ou `None` se não deve gravar (somente leitura, ou o
+    /// arquivo quebrado não pôde ser posto de lado).
+    fn text_to_save(&mut self, path: &Path) -> Option<String> {
         match self.estado {
-            Estado::SomenteLeitura => return,
+            Estado::SomenteLeitura => return None,
             Estado::Quebrado => {
                 if path.exists() {
                     let destino = nome_livre(&com_sufixo(path, ".quebrado"));
                     if let Err(e) = std::fs::rename(path, &destino) {
                         eprintln!("miniutils: não consegui mover {} para {}: {e}", path.display(), destino.display());
-                        return;
+                        return None;
                     }
                 }
                 self.estado = Estado::Normal;
             }
             Estado::Normal => {}
         }
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         match toml::to_string_pretty(self) {
-            Ok(text) => {
-                if let Err(e) = write_atomic(path, text.as_bytes()) {
-                    eprintln!("miniutils: não consegui salvar {}: {e}", path.display());
-                }
+            Ok(text) => Some(text),
+            Err(e) => {
+                eprintln!("miniutils: erro ao serializar config: {e}");
+                None
             }
-            Err(e) => eprintln!("miniutils: erro ao serializar config: {e}"),
         }
     }
 
@@ -363,6 +380,78 @@ impl Config {
 
     pub fn set(&mut self, app: &str, key: &str, value: toml::Value) {
         self.apps.entry(app.to_string()).or_default().insert(key.to_string(), value);
+    }
+}
+
+/// Espera a thread de gravação terminar o que tem pendente (chamar antes de sair).
+pub fn flush_saves() {
+    writer::flush();
+}
+
+fn write_logged(path: &Path, text: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = write_atomic(path, text.as_bytes()) {
+        eprintln!("miniutils: não consegui salvar {}: {e}", path.display());
+    }
+}
+
+/// Thread única que grava a configuração. Guarda só o pedido mais novo: várias gravações
+/// seguidas (setas no modo de edição) viram uma ida ao disco.
+mod writer {
+    use std::path::PathBuf;
+    use std::sync::{Condvar, Mutex, Once};
+
+    struct Queue {
+        job: Option<(PathBuf, String)>,
+        busy: bool,
+    }
+
+    static QUEUE: Mutex<Queue> = Mutex::new(Queue { job: None, busy: false });
+    static CHANGED: Condvar = Condvar::new();
+    static START: Once = Once::new();
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    pub fn submit(path: PathBuf, text: String) {
+        START.call_once(|| {
+            let ok = std::thread::Builder::new().name("miniutils-config".into()).spawn(run).is_ok();
+            STARTED.store(ok, std::sync::atomic::Ordering::Relaxed);
+        });
+        if !STARTED.load(std::sync::atomic::Ordering::Relaxed) {
+            // sem thread: grava aqui mesmo
+            super::write_logged(&path, &text);
+            return;
+        }
+        let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        q.job = Some((path, text));
+        CHANGED.notify_all();
+    }
+
+    pub fn flush() {
+        let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        while q.job.is_some() || q.busy {
+            q = CHANGED.wait(q).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    fn run() {
+        loop {
+            let (path, text) = {
+                let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+                loop {
+                    if let Some(job) = q.job.take() {
+                        q.busy = true;
+                        break job;
+                    }
+                    q = CHANGED.wait(q).unwrap_or_else(|e| e.into_inner());
+                }
+            };
+            super::write_logged(&path, &text);
+            let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+            q.busy = false;
+            CHANGED.notify_all();
+        }
     }
 }
 

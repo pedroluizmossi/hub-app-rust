@@ -125,7 +125,7 @@ impl Hub {
     }
 
     pub(super) fn change_setting(&self, app_id: &str, key: &str, input: Input) {
-        let Some(app) = self.registry.find(app_id).cloned() else { return };
+        let Some(app) = self.registry.find(app_id) else { return };
         {
             let a = app.borrow();
             let m = a.manifest();

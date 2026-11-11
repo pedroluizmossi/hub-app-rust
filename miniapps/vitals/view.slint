@@ -7,6 +7,7 @@ import { Mascot, SegBar, Sparkline } from "../../ui/widgets.slint";
 
 export struct VitalCard {
     title: string,
+    voice: string,       // id na conversa entre mascotes (vem do Rust)
     mascot: image,
     mood: string,
     reaction: string,    // reação curta por cima do humor (src/mascot/anim.rs)
@@ -53,7 +54,7 @@ component Card inherits Rectangle {
                 frame: v.mascot;
                 mood: v.mood;
                 reaction: v.reaction;
-                voice: "cyber.vitals:" + v.title;   // id na conversa entre mascotes
+                voice: v.voice;
                 poked => { VitalsApp.mascot-poked(index); }
                 // compacto (cartão baixo ou estreito): 2/3 da referência
                 width: compact || slim ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
