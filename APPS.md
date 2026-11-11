@@ -1,0 +1,231 @@
+# Criar apps para o MiniUtils
+
+O MiniUtils aceita quatro tipos de app. Todos aparecem do mesmo jeito para quem usa: uma
+célula na grade do painel, uma mascote que reage ao estado do app, opções em
+**Configurações** e lugar na conversa entre mascotes. O que muda é onde a lógica roda e
+o que ela pode fazer.
+
+| Tipo | Seção no manifesto | A lógica é | Pode | Distribuição | Exemplo |
+|---|---|---|---|---|---|
+| **Plugin simples** | `[run]` | um comando que o hub roda a cada N s | só os programas declarados | loja | [`examples/plugin-uptime`](examples/plugin-uptime) |
+| **Plugin com tela** | `[ui]` | um script Rhai isolado + `view.slint` | API do hub: programas declarados, HTTPS para domínios declarados, provedores | loja | [`examples/plugin-top`](examples/plugin-top) |
+| **App externo** | `[app]` | um executável seu (qualquer linguagem) + `view.slint` | **tudo** o que o usuário pode (acesso total) | loja, com binário conferido por SHA-256 | [`examples/app-hello`](examples/app-hello) |
+| **Mini-app embutido** | (nenhuma) | Rust compilado dentro do hub | tudo, inclusive a interface compilada e provedores novos | pull request neste repositório | [`miniapps/todo`](miniapps/todo) + [`src/apps/todo.rs`](src/apps/todo.rs) |
+
+## Qual escolher
+
+Comece pelo mais simples que resolve:
+
+1. **Mostrar a saída de um comando** (`uptime`, `df -h /`, `git -C ~/x status -s`)? Plugin
+   simples. Só manifesto, sem código.
+2. **Tela própria, botões, juntar dados dos provedores do hub, consultar uma API HTTPS**?
+   Plugin com tela. O script é isolado: não lê arquivo nem roda nada fora do que o
+   manifesto declara, e a loja mostra exatamente isso antes de instalar.
+3. **Ler ou gravar arquivos, vigiar pastas, sockets, `http://` ou rede local, bibliotecas
+   nativas, processo de vida longa**? App externo. Ele roda com as permissões do usuário, e
+   a loja o instala com um aviso de "ACESSO TOTAL" em destaque. Use só quando o script não
+   alcança.
+4. **Faz parte do produto** (todo mundo usaria), precisa de um provedor novo compartilhado
+   ou da interface compilada? Mini-app embutido, por pull request.
+
+## O que todos têm em comum
+
+**Manifesto** (`manifest.toml`):
+
+```toml
+id = "io.github.fulano.meu-app"   # único; cyber.* é reservado aos apps embutidos
+name = "Meu app"
+description = "Uma frase sobre o que ele faz."
+icon = "coruja"                   # mascote: lista em src/mascot/sprites.rs
+api = 1
+uses = ["sys"]                    # provedores do hub (abaixo); [ui] e [app]
+
+[[settings]]                      # vira formulário em Configurações
+key = "limite"
+label = "Mascote agitada a partir de (%)"   # " (%)" ou " (°C)" no fim viram a unidade
+type = "int"                      # bool, int ou choice
+default = 80
+min = 10
+max = 100
+step = 5
+```
+
+Plugins e apps externos ganham sozinhos as opções `theme` (tema de cores) e `mascot`.
+
+**Provedores** (`uses`): o hub coleta cada dado uma vez e entrega a quem pediu, só enquanto
+algum app ligado usa aquele provedor.
+
+| Nome | Dados |
+|---|---|
+| `sys` | CPU (uso, frequência, temperatura, carga), memória e swap, rede, discos |
+| `gpu` | NVIDIA (`nvidia-smi`) ou AMD (sysfs) |
+| `docker` | containers, stacks, uso de cada um |
+| `media` | o que está tocando (MPRIS no Linux, controles de mídia no Windows) |
+| `ai_usage` | uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go) |
+| `ports` | portas escutando e o processo de cada uma |
+| `agents` | sessões do Claude Code, Codex e OpenCode e o estado delas |
+| `procs` | processos mais pesados por CPU e por memória (igual no Linux e no Windows) |
+
+Os campos de cada um estão nos `struct …Snapshot` de `src/providers/`.
+
+**Humor da mascote**: `sleep` < `idle` < `happy` < `busy` < `alarm`. A bandeja mostra o app
+em pior humor, então use `busy` e `alarm` só quando o usuário deve olhar.
+
+**Conversa entre mascotes**: o app conta fatos sobre si (`trouble`, `strain`, `forecast`,
+`recovered`, `poked`) e o hub decide quem fala e quando. As mudanças de humor e as cutucadas
+na mascote o hub já conta sozinho.
+
+## 1. Plugin simples (`[run]`)
+
+O hub roda um comando a cada `every` segundos e mostra a saída numa tela genérica.
+
+```toml
+[permissions]
+exec = ["uptime"]            # só estes programas, chamados sem shell
+
+[run]
+command = ["uptime", "-p"]
+every = 30                   # 5 a 3600 s
+
+[display]
+title = "Ligado há"
+lines = 2                    # linhas da saída na tela (1 a 6)
+
+[[mood]]                     # humor pela saída: a primeira regra que casar vale
+contains = "week"
+mood = "busy"
+```
+
+Saída vazia é `sleep`; o comando falhar é `alarm`; sem regra que case, `idle`.
+
+Exemplo completo: [`examples/plugin-uptime`](examples/plugin-uptime).
+
+## 2. Plugin com tela (`[ui]`)
+
+Uma tela própria (`view.slint`, interpretada pelo hub) e a lógica num script
+[Rhai](https://rhai.rs) (`main.rhai`), que roda isolado numa thread só dele.
+
+```toml
+uses = ["procs"]
+[permissions]
+exec = ["git"]               # o que run() pode executar
+net = ["api.exemplo.com"]    # o que http_get() pode consultar (só https)
+[ui]
+view = "view.slint"
+script = "main.rhai"
+every = 10                   # fn tick() a cada N s (opcional; 1 a 3600)
+```
+
+O script responde a eventos e usa a API do hub:
+
+| Do hub para o script | Do script para o hub |
+|---|---|
+| `fn start()` ao ligar | `ui("prop", valor)` muda a tela |
+| `fn tick()` a cada `every` | `mood("happy")`, `summary("texto")` |
+| `fn action(name, arg)` clique na tela | `run([...])`, `run_async([...], "fn")` |
+| `fn on_event(topic, data)` provedores | `http_get(url)`, `http_get_async(url, "fn")` |
+| `fn settings()` opção mudou | `store_get("k")`, `store_set("k", v)` |
+| | `fact("strain", "CPU", 93)`, `notify("t", "texto")` |
+
+O estado entre chamadas fica em `this` (`this.settings` traz as opções). Limites: 5 milhões
+de operações por chamada, `run` com prazo de 30 s, respostas HTTP de até 1 MiB, até 4
+tarefas assíncronas e 1 MiB de dados guardados. A referência completa está no topo de
+[`src/apps/plugin.rs`](src/apps/plugin.rs).
+
+Exemplos: [`examples/plugin-top`](examples/plugin-top) (processos pelo provedor `procs`,
+sem executar nada) e os plugins da loja,
+[Top processos](https://github.com/pedroluizmossi/miniutils-plugin-top-processes) e
+[Pulso](https://github.com/pedroluizmossi/miniutils-plugin-pulso) (provedor `sys`, `ps` e
+uma consulta HTTPS).
+
+## 3. App externo (`[app]`, acesso total)
+
+A lógica é um executável seu, em qualquer linguagem. O hub o inicia ao ligar o app, o
+encerra ao desligar e conversa com ele por JSON, uma mensagem por linha, na entrada e na
+saída padrão. A tela é um `view.slint`, como no plugin com tela.
+
+```toml
+uses = ["sys"]
+[app]
+view = "view.slint"
+linux = "bin/meu-app"        # o executável de cada sistema, em bin/ (um basta)
+windows = "bin/meu-app.exe"
+every = 30                   # mensagem "tick" a cada N s (opcional; 1 a 3600)
+```
+
+Sem `[permissions]`: o app pode tudo o que o usuário pode.
+
+| Do hub para o app (entrada) | Do app para o hub (saída) |
+|---|---|
+| `start` (id, sistema, pasta de dados, opções) | `set` (propriedade da tela), `image` (PNG do disco) |
+| `tick`, `action`, `event`, `settings` | `mood`, `summary`, `notify` |
+| `shown` (a janela abriu) | `fact` (conversa entre mascotes) |
+| `stop` (ou entrada fechada): saia | `error` (célula em alarme; `""` limpa) |
+
+A saída de erro do app vai para o registro do hub (depuração é ali; a saída padrão é só do
+protocolo). Se o app sair sozinho, o cartão fica em alarme e o botão de atualizar o inicia
+de novo. Um app que trava ou cai não derruba o hub. O protocolo completo está no topo de
+[`src/apps/external.rs`](src/apps/external.rs).
+
+Exemplos:
+- [`examples/app-hello`](examples/app-hello): o mínimo, em Rust, sem biblioteca: lê a
+  pasta pessoal, guarda um contador na pasta de dados e reage à CPU.
+- [miniutils-apps](https://github.com/pedroluizmossi/miniutils-apps): o app
+  **Repositórios** (os seus repositórios Git e o que falta commitar e enviar) e o crate
+  `miniutils-app`, que implementa o protocolo para Rust (`listen`, `set`, `mood`, `fact`…),
+  além do workflow que compila e publica os executáveis por tag.
+
+## 4. Mini-app embutido
+
+Rust dentro do hub: implementa o trait `MiniApp`, tem a tela compilada junto
+(`miniapps/<app>/view.slint`) e pode trazer um provedor novo para o barramento. Entra por
+pull request neste repositório e sai em todas as instalações.
+
+O passo a passo está em [DESIGN.md › Mini-apps](DESIGN.md#5-mini-apps) e o contrato em
+[ARCHITECTURE.md › O mini-app](ARCHITECTURE.md#o-mini-app). Exemplos, do mais simples ao
+mais completo:
+- [`src/apps/todo.rs`](src/apps/todo.rs): sem provedor, com arquivo próprio;
+- [`src/apps/ports.rs`](src/apps/ports.rs): provedor, ações em segundo plano e programas
+  da allowlist;
+- [`src/apps/vitals.rs`](src/apps/vitals.rs): várias mascotes, avisos sustentados e
+  conversa entre mascotes.
+
+## A tela (`view.slint`) de plugins e apps externos
+
+- Exporta `component Main`. Pode importar `std-widgets.slint`, `miniutils.slint` (o tipo
+  `Theme`) e as telas de `ui/` do próprio plugin; imagens só de `assets/`.
+- O hub preenche, se a tela declarar: `in property <Theme> theme` (cores do tema do app e
+  fontes do visual: `theme.font-ui`, `font-mono`, `font-title`), `in property <image>
+  mascot` e `in property <string> mood`.
+- Cliques chegam à lógica por `callback action(string, string)`.
+- A célula vai de ~300 × 160 px (1×1 numa grade de 3 colunas) à janela inteira: esconda o
+  secundário quando não couber e use `overflow: elide` em texto. Ver
+  [DESIGN.md › Tamanhos](DESIGN.md#tamanhos).
+
+## Desenvolver
+
+```sh
+cargo run -- --plugin-dev <pasta do plugin ou app>
+```
+
+O app entra já ligado, na primeira página, e recarrega quando um arquivo muda (num app
+externo, também quando o executável é recompilado). Os erros da tela e do script, e o que
+um app externo escreve na saída de erro, saem no terminal. No modo dev, `bin/` de um app
+externo pode ser um link para o `target/` do projeto dele. Feche o MiniUtils aberto antes:
+o modo dev roda numa instância só dele.
+
+## Publicar
+
+- **Plugin** (simples ou com tela): repositório público com `manifest.toml`, `README.md` e
+  `LICENSE`, e um pull request na
+  [loja](https://github.com/pedroluizmossi/miniutils-store) acrescentando a entrada no
+  `registry.json`, com o commit revisado e as permissões iguais às do manifesto.
+- **App externo**: o código num repositório público e os executáveis num Release compilado
+  pelo CI a partir de uma tag. A entrada da loja traz `"full_access": true` e, por sistema,
+  o endereço e o SHA-256 do executável; o hub só instala se o hash bater. O workflow do
+  [miniutils-apps](https://github.com/pedroluizmossi/miniutils-apps) gera essa entrada
+  pronta. Precisa do MiniUtils 0.2.0 ou mais novo.
+- **Mini-app embutido**: pull request neste repositório.
+
+Como a loja revisa cada tipo: README da
+[loja](https://github.com/pedroluizmossi/miniutils-store#o-que-%C3%A9-revisado).

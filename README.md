@@ -70,6 +70,15 @@ conversa é lida ou salva.
 A arquitetura e o roteiro estão em [ARCHITECTURE.md](ARCHITECTURE.md). Como criar visuais,
 temas, telas, mini-apps e mascotes está em [DESIGN.md](DESIGN.md).
 
+## Criar apps
+
+Dá para estender o hub de quatro jeitos: **plugin simples** (a saída de um comando, só com
+manifesto), **plugin com tela** (tela própria e um script isolado), **app externo** (um
+executável seu, em qualquer linguagem, com acesso total) e **mini-app embutido** (Rust
+dentro do hub). Os três primeiros se instalam pela
+[loja](https://github.com/pedroluizmossi/miniutils-store), sem recompilar o hub. Qual
+escolher, o que cada um pode e os exemplos de cada: [APPS.md](APPS.md).
+
 ## Instalar
 
 Uma linha instala (ou atualiza) a última versão publicada em

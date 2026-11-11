@@ -1,7 +1,9 @@
 # Top processos (plugin de exemplo do MiniUtils)
 
-Os processos que mais usam CPU ou memória, lidos com `ps` a cada 5 segundos. Exemplo de
-plugin **com tela e script próprios**: `view.slint` (a tela) e `main.rhai` (a lógica).
+Os processos que mais usam CPU ou memória, iguais no Linux e no Windows. Exemplo de plugin
+**com tela e script próprios**: `view.slint` (a tela) e `main.rhai` (a lógica).
 
-- Permissões: executa só o programa `ps`.
-- O robô fica ocupado quando um processo passa de 80% de CPU.
+- Permissões: não executa nada. Os processos chegam do provedor `procs` do hub
+  (`uses = ["procs"]`), em `fn on_event`.
+- O robô fica ocupado quando um processo passa de 50% de CPU.
+- Os tipos de app e o que cada um pode: [APPS.md](../../APPS.md).

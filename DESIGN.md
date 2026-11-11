@@ -139,6 +139,9 @@ Regras gerais de interface:
 
 ## 5. Mini-apps
 
+Este é o passo a passo de um mini-app **embutido** (Rust dentro do hub). Plugins e apps
+externos, que se instalam pela loja sem recompilar o hub, estão em [APPS.md](APPS.md).
+
 Um app novo, do zero:
 
 1. **Manifesto** — `miniapps/<app>/manifest.toml`: `id` (`cyber.<nome>`), `name`,
