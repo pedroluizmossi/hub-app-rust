@@ -1,4 +1,4 @@
-// Tela genérica dos plugins da comunidade (src/apps/plugin.rs): mascote, título e a saída
+// Tela genérica dos plugins da comunidade (src/apps/plugin/mod.rs): mascote, título e a saída
 // do comando que o plugin declara. Um plugin não traz tela própria: todos usam esta.
 //   baixa (< 200 px): mascote menor e só a 1ª linha da saída
 import { Colors, Skin, Icons } from "theme.slint";
@@ -19,7 +19,7 @@ export struct PluginCard {
     reaction: string,
     // id da mascote na conversa entre mascotes ("app:nome")
     voice: string,
-    // plugin com tela própria: a tela interpretada (src/apps/plugin.rs)
+    // plugin com tela própria: a tela interpretada (src/apps/plugin/view.rs)
     has-view: bool,
     view: component-factory,
 }

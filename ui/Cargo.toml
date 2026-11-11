@@ -16,3 +16,10 @@ slint = { workspace = true }
 
 [build-dependencies]
 slint-build = { workspace = true }
+
+# Só desenvolvimento; ligados pelos recursos de mesmo nome do crate raiz (ver Cargo.toml).
+[features]
+# servidor MCP do Slint; o build.rs também grava os ids dos elementos para ele achá-los
+dev-mcp = ["slint/mcp"]
+# o código gerado passa a interpretar os .slint e os recarrega ao salvar (ver build.rs)
+live-preview = ["slint/live-preview"]

@@ -4,6 +4,7 @@
 //! - `update`: roda quando o barramento ou uma ação em segundo plano tocam o despertador
 //!   (`core::wake`). Sem nada chegando, nada roda.
 //! - `anim_tick`: o quadro de animação, só com a janela aberta.
+//!
 //! O resto do `impl Hub` está dividido por assunto nos módulos abaixo.
 
 mod appearance;

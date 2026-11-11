@@ -131,10 +131,19 @@ cargo build --release
 Opções:
 
 ```text
---hidden     inicia só na bandeja (para o autostart)
---tab <nome> abre numa página do painel (pelo nome, ex.: Geral) ou em apps (configurações)
---version    mostra a versão (também em Configurações › Sistema)
+--hidden              inicia só na bandeja (para o autostart)
+--tab <nome>          abre numa página do painel (pelo nome dela ou de um app nela,
+                      ex.: Geral, docker), em apps (configurações) ou em store (loja)
+--plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
+--previa <mascote> [animação] [--saida arquivo.gif]
+                      GIF de uma animação de mascote em todos os temas
+--version             mostra a versão (também em Configurações › Sistema)
 ```
+
+Com o MiniUtils já aberto, rodar `miniutils --tab <nome>` só traz a janela dele naquela
+aba. Para abrir com uma tecla, ligue esse comando a um atalho do sistema (no KDE:
+Configurações do Sistema › Atalhos; no GNOME: Teclado › Atalhos personalizados).
+`miniutils --help` mostra também os comandos da loja de plugins.
 
 Para abrir junto com o sistema, ligue **Configurações › Sistema › Iniciar com o sistema**
 (só na bandeja). No Linux isso grava `~/.config/autostart/miniutils.desktop`; no Windows,
@@ -217,7 +226,7 @@ cargo test
 ## CI e lançamentos
 
 - **CI** (`.github/workflows/ci.yml`): todo push em `master` e todo pull request roda
-  `cargo check` e `cargo test` em Ubuntu e Windows.
+  `cargo check`, `cargo clippy` (aviso reprova) e `cargo test` em Ubuntu e Windows.
 - **Lançamento** (`.github/workflows/release.yml`): uma tag `vX.Y.Z` igual à `version` do
   `Cargo.toml` compila a versão final nos dois sistemas e publica um Release com
   `miniutils-<versão>-linux-x86_64.tar.gz`, `miniutils-<versão>-windows-x86_64.zip` e as

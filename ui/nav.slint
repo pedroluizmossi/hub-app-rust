@@ -1,0 +1,191 @@
+// Navegação entre páginas do painel: barra lateral (Rail) ou abas no cabeçalho (TopTabs).
+import { ScrollView } from "std-widgets.slint";
+import { Skin, Icons, Moods } from "theme.slint";
+import { Icon } from "widgets.slint";
+import { PageInfo } from "models.slint";
+
+// Um item da barra lateral: ícone em pixel e nome embaixo; marca de alerta no canto.
+component RailItem inherits Rectangle {
+    in property <image> icon;
+    in property <string> icon-path;   // traço 24×24, quando não há imagem
+    in property <string> text;
+    in property <bool> selected;
+    in property <color> badge: transparent;
+    callback clicked;
+    height: 58px;
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-item-selected: selected;
+    accessible-action-default => { root.clicked(); }
+    background: selected ? Skin.panel-ink.with-alpha(0.16) : touch.has-hover ? Skin.panel-ink.with-alpha(0.08) : transparent;
+    animate background { duration: 120ms; }
+
+    if selected: Rectangle { x: 0; width: 3px; background: Skin.accent; }
+    VerticalLayout {
+        padding-top: 6px;
+        padding-bottom: 5px;
+        spacing: 3px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            if icon-path == "": Image {
+                source: icon;
+                image-rendering: pixelated;
+                width: 32px;
+                height: 28px;
+            }
+            if icon-path != "": Rectangle {
+                width: 32px;
+                height: 28px;
+                Icon { icon: icon-path; ink: selected ? Skin.panel-ink : Skin.panel-sub; size: 20px; }
+            }
+        }
+        Text {
+            text: root.text;
+            color: selected ? Skin.panel-ink : Skin.panel-sub;
+            font-size: 10px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+    if badge != transparent: Rectangle {
+        x: parent.width - 16px;
+        y: 6px;
+        width: 8px;
+        height: 8px;
+        background: badge;
+        border-width: 1px;
+        border-color: Skin.panel;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Barra lateral: as páginas do painel em cima; nova página e configurações embaixo.
+export component Rail inherits Rectangle {
+    in property <[PageInfo]> pages;
+    in property <int> current;          // página aberta
+    in property <bool> settings;        // as configurações estão abertas
+    callback selected(int);
+    callback add();
+    callback open-settings();
+    width: 68px;
+    background: Skin.panel;
+    // linha à direita, como a do cabeçalho
+    Rectangle { x: parent.width - 1px; width: 1px; background: Skin.line; }
+
+    VerticalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        padding-right: 1px;
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: start;
+                spacing: 2px;
+                for p[i] in pages: RailItem {
+                    icon: p.icon;
+                    text: p.name;
+                    selected: !settings && i == current;
+                    badge: p.mood == "alarm" ? Skin.bad : p.mood == "busy" ? Moods.color(p.theme, "busy") : transparent;
+                    clicked => { root.selected(i); }
+                }
+                RailItem {
+                    icon-path: Icons.plus;
+                    text: "nova";
+                    clicked => { root.add(); }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Skin.line; }
+        RailItem {
+            icon-path: Icons.gear;
+            text: "config";
+            selected: settings;
+            clicked => { root.open-settings(); }
+        }
+    }
+}
+
+// Uma aba de página no cabeçalho: mascote pequena e nome; sublinhada quando aberta.
+component TopTab inherits Rectangle {
+    in property <image> icon;
+    in property <string> icon-path;
+    in property <string> text;
+    in property <bool> selected;
+    in property <color> badge: transparent;
+    callback clicked;
+    height: 36px;
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-item-selected: selected;
+    accessible-action-default => { root.clicked(); }
+    background: selected ? Skin.panel-ink.with-alpha(0.16) : touch.has-hover ? Skin.panel-ink.with-alpha(0.08) : transparent;
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 6px;
+        VerticalLayout {
+            alignment: center;
+            if icon-path == "": Image { source: icon; image-rendering: pixelated; width: 24px; height: 21px; }
+            if icon-path != "": Icon { icon: icon-path; ink: Skin.panel-sub; size: 16px; }
+        }
+        if text != "": Text {
+            text: root.text;
+            color: selected ? Skin.panel-ink : Skin.panel-sub;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+    if selected: Rectangle { y: parent.height - 2px; height: 2px; background: Skin.accent; }
+    if badge != transparent: Rectangle {
+        x: 4px;
+        y: 4px;
+        width: 7px;
+        height: 7px;
+        background: badge;
+        border-width: 1px;
+        border-color: Skin.panel;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Abas das páginas no cabeçalho (navegação "top"); rolam de lado se não couberem.
+export component TopTabs inherits Flickable {
+    in property <[PageInfo]> pages;
+    in property <int> current;
+    callback selected(int);
+    callback add();
+    interactive: true;
+    content-width: max(self.width, row.preferred-width);
+    row := HorizontalLayout {
+        height: root.height;
+        spacing: 2px;
+        alignment: start;
+        for p[i] in pages: VerticalLayout {
+            alignment: center;
+            TopTab {
+                icon: p.icon;
+                text: p.name;
+                selected: i == current;
+                badge: p.mood == "alarm" ? Skin.bad : p.mood == "busy" ? Moods.color(p.theme, "busy") : transparent;
+                clicked => { root.selected(i); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            TopTab {
+                icon-path: Icons.plus;
+                accessible-label: "Nova página";
+                clicked => { root.add(); }
+            }
+        }
+    }
+}

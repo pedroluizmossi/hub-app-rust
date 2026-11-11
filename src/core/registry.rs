@@ -26,22 +26,20 @@ impl Registry {
         let id = app.borrow().manifest().id.clone();
         self.remove(&id, ui);
         self.apps.borrow_mut().push(app.clone());
-        if let Some(ui) = ui {
-            if self.is_enabled(&id) {
+        if let Some(ui) = ui
+            && self.is_enabled(&id) {
                 self.activate(&app, ui);
             }
-        }
     }
 
     /// Tira um app (plugin removido ou atualizado): desliga antes, se estava ligado. A
     /// config continua lembrando dele (posição, opções) para quando voltar.
     pub fn remove(&self, id: &str, ui: Option<&HubWindow>) -> bool {
         let Some(app) = self.find(id) else { return false };
-        if let Some(ui) = ui {
-            if self.is_enabled(id) {
+        if let Some(ui) = ui
+            && self.is_enabled(id) {
                 self.deactivate(&app, ui);
             }
-        }
         self.apps.borrow_mut().retain(|a| !Rc::ptr_eq(a, &app));
         true
     }

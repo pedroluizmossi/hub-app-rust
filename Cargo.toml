@@ -86,6 +86,20 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 3
 
+# A interface gerada pelo Slint (ui/hub.rs, ~10 MB de Rust) sem otimização: mudar um .slint
+# recompila em ~11 s, contra ~43 s com `opt-level = 1`. O desenho (renderizador do Slint,
+# fundos e mascotes) continua otimizado: está nas dependências e no crate do app.
+[profile.dev.package.miniutils-ui]
+opt-level = 0
+
+# Recursos só de desenvolvimento (nenhum entra no build normal nem no release):
+# `dev-mcp` liga o servidor MCP embutido do Slint (com `SLINT_MCP_PORT=<porta>`): um agente
+# vê a janela, tira captura e clica. `live-preview` recarrega os .slint ao salvar, sem
+# recompilar. Ver AGENTS.md › "Ver e mexer na interface".
+[features]
+dev-mcp = ["miniutils-ui/dev-mcp"]
+live-preview = ["miniutils-ui/live-preview"]
+
 [profile.release]
 lto = "thin"
 strip = true

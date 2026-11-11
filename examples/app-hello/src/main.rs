@@ -48,11 +48,10 @@ impl App {
     }
 
     fn save(&self) {
-        if let Some(f) = self.state_file() {
-            if let Err(e) = std::fs::write(&f, json!({ "count": self.count }).to_string()) {
+        if let Some(f) = self.state_file()
+            && let Err(e) = std::fs::write(&f, json!({ "count": self.count }).to_string()) {
                 send(json!({ "type": "error", "message": format!("não consegui gravar {}: {e}", f.display()) }));
             }
-        }
     }
 
     /// A pasta pessoal e quantos itens ela tem (o que um plugin sem acesso total não lê).

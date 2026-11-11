@@ -4,7 +4,7 @@
 //! - **simples**: o `manifest.toml` diz que comando rodar e como mostrar (abaixo); o host
 //!   roda e mostra numa tela genérica;
 //! - **com tela própria**: `[ui]` aponta um `view.slint` (interpretado em tempo de execução)
-//!   e um `main.rhai` (lógica, num interpretador isolado). Ver `apps/plugin.rs`.
+//!   e um `main.rhai` (lógica, num interpretador isolado). Ver `apps/plugin/`.
 //!
 //! O terceiro, **app externo** (`[app]`), tem **acesso total**: a lógica é um executável
 //! próprio (qualquer linguagem), que o host inicia ao ligar o app e com quem conversa por
@@ -246,11 +246,10 @@ impl Plugin {
                 return Err("[ui] every: use de 1 a 3600 segundos".into());
             }
         }
-        if let Some(n) = extra.display.lines {
-            if !(1..=6).contains(&n) {
+        if let Some(n) = extra.display.lines
+            && !(1..=6).contains(&n) {
                 return Err(format!("[display] lines = {n}: use de 1 a 6"));
             }
-        }
         for r in &extra.mood {
             if !["sleep", "idle", "happy", "busy", "alarm"].contains(&r.mood.as_str()) {
                 return Err(format!("[[mood]] humor desconhecido: {}", r.mood));

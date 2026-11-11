@@ -138,9 +138,9 @@ fn read_png(path: &Path) -> Result<Image, String> {
     let (w, h) = (info.width as usize, info.height as usize);
     let data = &buf[..info.buffer_size()];
     let px = match info.color_type {
-        png::ColorType::Rgba => data.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect(),
-        png::ColorType::Rgb => data.chunks_exact(3).map(|c| [c[0], c[1], c[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => data.chunks_exact(2).map(|c| [c[0], c[0], c[0], c[1]]).collect(),
+        png::ColorType::Rgba => data.as_chunks::<4>().0.iter().map(|c| [c[0], c[1], c[2], c[3]]).collect(),
+        png::ColorType::Rgb => data.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => data.as_chunks::<2>().0.iter().map(|c| [c[0], c[0], c[0], c[1]]).collect(),
         png::ColorType::Grayscale => data.iter().map(|&g| [g, g, g, 255]).collect(),
         png::ColorType::Indexed => return Err("PNG indexado não convertido (versão do png inesperada)".into()),
     };
@@ -152,7 +152,7 @@ type Frame = Vec<Option<String>>;
 
 /// Corta a folha em quadros de 16×14, linha por linha; descarta os vazios do fim.
 fn split(img: &Image) -> Result<Vec<Frame>, String> {
-    if img.w % W != 0 || img.h % H != 0 {
+    if !img.w.is_multiple_of(W) || !img.h.is_multiple_of(H) {
         return Err(format!(
             "a imagem tem {}×{}: precisa ser feita de quadros de {W}×{H} (largura múltipla de {W}, altura de {H})",
             img.w, img.h

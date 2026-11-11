@@ -1,7 +1,7 @@
 //! Apps externos (`[app]` no manifesto): um executável próprio, com acesso total, que o
 //! host inicia ao ligar o app e encerra ao desligar. Ver o formato do manifesto no topo de
 //! `core/plugins.rs`; a tela, o humor e a conversa são os mesmos dos plugins com tela
-//! (`apps/plugin.rs`).
+//! (`apps/plugin/`).
 //!
 //! ## Protocolo (versão 1)
 //!

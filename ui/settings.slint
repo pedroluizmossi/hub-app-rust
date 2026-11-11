@@ -1,0 +1,549 @@
+// Configurações do hub (`current == "apps"`): painel, aparência, sistema, páginas e a
+// lista de apps com as opções de cada um.
+import { ScrollView } from "std-widgets.slint";
+import { Skin, Icons } from "theme.slint";
+import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
+import { SettingRow, AppInfo, PageInfo } from "models.slint";
+
+component SettingLine inherits Rectangle {
+    in property <SettingRow> s;
+    in property <color> accent;
+    callback toggled;
+    callback int-edited(int);
+    callback chosen(int);
+    min-height: 44px;
+
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            text: s.label;
+            color: Skin.ink;
+            font-size: 14px;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        VerticalLayout {
+            alignment: center;
+            if s.kind == "bool": SqSwitch {
+                checked: s.bool-value;
+                accent: accent;
+                label: s.label;
+                toggled => { root.toggled(); }
+            }
+            if s.kind == "int": Stepper {
+                value: s.int-value;
+                minimum: s.minimum;
+                maximum: s.maximum;
+                step: s.step;
+                unit: s.unit;
+                accent: accent;
+                edited(v) => { root.int-edited(v); }
+            }
+            if s.kind == "choice" && s.images.length == 0: Select {
+                width: 220px;
+                options: s.options;
+                index: s.index;
+                accent: accent;
+                label: s.label;
+                chosen(i) => { root.chosen(i); }
+            }
+            // escolha de mascote: seletor com o desenho de cada uma
+            if s.kind == "choice" && s.images.length > 0: MascotSelect {
+                width: 220px;
+                options: s.options;
+                images: s.images;
+                index: s.index;
+                accent: accent;
+                label: s.label;
+                chosen(i) => { root.chosen(i); }
+            }
+        }
+    }
+}
+
+/// Uma preferência com título, explicação e um seletor à direita.
+component ChoiceRow inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> hint;
+    in property <[string]> options;
+    in property <[image]> images;   // com imagens, vira um seletor de mascote
+    in property <int> index;
+    callback chosen(int);
+    spacing: 16px;
+    min-height: 44px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text { text: root.title; color: Skin.ink; font-size: 14px; }
+        Text { text: root.hint; color: Skin.sub; font-size: 12px; wrap: word-wrap; }
+    }
+    VerticalLayout {
+        alignment: center;
+        if root.images.length == 0: Select {
+            width: 220px;
+            options: root.options;
+            index: root.index;
+            accent: Skin.accent;
+            label: root.title;
+            chosen(i) => { root.chosen(i); }
+        }
+        if root.images.length > 0: MascotSelect {
+            width: 220px;
+            options: root.options;
+            images: root.images;
+            index: root.index;
+            accent: Skin.accent;
+            label: root.title;
+            chosen(i) => { root.chosen(i); }
+        }
+    }
+}
+
+export component AppsView inherits ScrollView {
+    in property <[AppInfo]> apps;
+    in property <[string]> skins;          // visuais da janela (rótulos)
+    in property <int> skin-index;
+    callback skin-chosen(int);
+    // ícone da bandeja: mascote e tema (índice 0 = automático)
+    in property <[string]> tray-icons;
+    in property <[image]> tray-icon-images;
+    in property <int> tray-icon-index;
+    in property <[string]> tray-themes;
+    in property <int> tray-theme-index;
+    callback tray-icon-chosen(int);
+    callback tray-theme-chosen(int);
+    // onde ficam as páginas (0 = barra lateral, 1 = abas em cima)
+    in property <int> nav-index;
+    callback nav-chosen(int);
+    // reduzir movimento (mascotes paradas, sem reações)
+    in property <bool> reduce-motion;
+    callback reduce-motion-toggled();
+    // quanto as mascotes conversam (0 nunca, 1 às vezes, 2 bastante)
+    in property <int> chatter-index;
+    callback chatter-chosen(int);
+    // sistema: iniciar junto, versão e pasta dos registros
+    in property <bool> autostart;
+    callback autostart-toggled();
+    in property <string> version;
+    in property <string> log-dir;
+    callback open-logs();
+    // páginas: lista, nomes (para o seletor de cada app) e mascotes disponíveis
+    in property <[PageInfo]> pages;
+    in property <[string]> page-names;
+    in property <[string]> mascots;
+    in property <[image]> mascot-images;
+    callback page-added();
+    callback page-removed(int);
+    callback page-renamed(int, string);
+    callback page-icon-chosen(int, int);
+    callback page-moved(int, int /* -1 sobe, +1 desce */);
+    callback app-page-chosen(string, int);
+    callback edit-layout();
+    callback toggle-app(string);
+    // app com as opções abertas (um por vez; fica aqui porque a lista é refeita pelo Rust)
+    in-out property <string> open-app;
+    callback setting-toggled(string, string);
+    callback setting-int(string, string, int);
+    callback setting-chosen(string, string, int);
+
+    VerticalLayout {
+        alignment: start;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 16px;
+        spacing: 12px;
+
+        // como arrumar o painel
+        Rectangle {
+            background: Skin.edit-bg;
+            border-width: 1px;
+            border-color: Skin.edit-line;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 14px;
+                padding-bottom: 14px;
+                spacing: 14px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon { icon: Icons.grid; ink: Skin.accent; size: 28px; weight: 1.8; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text { text: "Painel"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                    Text {
+                        text: "A grade se arruma direto no painel: em Mudar layout, arraste os apps pelo topo e puxe as bordas para mudar o tamanho.";
+                        color: Skin.edit-sub;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: "Mudar layout";
+                        icon: Icons.grid;
+                        ink: Skin.accent;
+                        edge: Skin.edit-line;
+                        font-size: 13px;
+                        clicked => { root.edit-layout(); }
+                    }
+                }
+            }
+        }
+
+        // visual da janela
+        Rectangle {
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.surface-edge;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Text { text: "Aparência"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                ChoiceRow {
+                    title: "Visual da janela";
+                    hint: "Fundo, moldura, fontes e cores. Apps com o tema “Acompanha a janela” mudam junto.";
+                    options: skins;
+                    index: skin-index;
+                    chosen(i) => { root.skin-chosen(i); }
+                }
+                ChoiceRow {
+                    title: "Páginas";
+                    hint: "Onde as páginas aparecem: numa barra à esquerda ou como abas no cabeçalho.";
+                    options: ["Barra lateral", "Abas em cima"];
+                    index: nav-index;
+                    chosen(i) => { root.nav-chosen(i); }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Reduzir movimento"; color: Skin.ink; font-size: 14px; }
+                        Text {
+                            text: "Mascotes sem pulos nem tremores, e sem comemorações nem surpresas.";
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SqSwitch {
+                            checked: reduce-motion;
+                            label: "Reduzir movimento";
+                            toggled => { root.reduce-motion-toggled(); }
+                        }
+                    }
+                }
+                ChoiceRow {
+                    title: "Mascotes conversam";
+                    hint: "As mascotes comentam o que acontece nos apps e, com tudo calmo, puxam papo. Clique numa mascote para ela falar.";
+                    options: ["Nunca", "Às vezes", "Bastante"];
+                    index: chatter-index;
+                    chosen(i) => { root.chatter-chosen(i); }
+                }
+                ChoiceRow {
+                    title: "Ícone da bandeja";
+                    hint: "Mascote mostrada na bandeja. No automático, é a do app em pior estado.";
+                    options: tray-icons;
+                    images: tray-icon-images;
+                    index: tray-icon-index;
+                    chosen(i) => { root.tray-icon-chosen(i); }
+                }
+                ChoiceRow {
+                    title: "Cores do ícone";
+                    hint: "Tema da mascote na bandeja. No automático, segue o tema do app mostrado.";
+                    options: tray-themes;
+                    index: tray-theme-index;
+                    chosen(i) => { root.tray-theme-chosen(i); }
+                }
+            }
+        }
+
+        // sistema
+        Rectangle {
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.surface-edge;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Text { text: "Sistema"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                HorizontalLayout {
+                    spacing: 16px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Iniciar com o sistema"; color: Skin.ink; font-size: 14px; }
+                        Text {
+                            text: "Abre só na bandeja ao entrar na sessão.";
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SqSwitch {
+                            checked: autostart;
+                            label: "Iniciar com o sistema";
+                            toggled => { root.autostart-toggled(); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Versão " + version; color: Skin.ink; font-size: 14px; }
+                        Text {
+                            text: log-dir == "" ? "Sem pasta para os registros." : "Registros (avisos e erros): " + log-dir;
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        if log-dir != "": TextButton {
+                            text: "Abrir registros";
+                            font-size: 13px;
+                            clicked => { root.open-logs(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // páginas da barra lateral
+        Rectangle {
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.surface-edge;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Páginas"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                        Text {
+                            text: "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo.";
+                            color: Skin.sub;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Nova página";
+                            font-size: 13px;
+                            clicked => { root.page-added(); }
+                        }
+                    }
+                }
+                for p[i] in pages: HorizontalLayout {
+                    spacing: 10px;
+                    min-height: 44px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 40px;
+                            height: 35px;
+                            background: p.theme.bg1;
+                            Image { source: p.icon; image-rendering: pixelated; width: 32px; height: 28px; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Rectangle {
+                            height: 34px;
+                            border-width: 1px;
+                            border-color: name.has-focus ? Skin.accent : Skin.field-edge;
+                            background: Skin.field;
+                            name := TextInput {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                text: p.name;
+                                color: Skin.ink;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                single-line: true;
+                                accessible-label: "Nome da página " + (i + 1);
+                                accepted => { root.page-renamed(i, self.text); }
+                                changed has-focus => {
+                                    if !self.has-focus && self.text != p.name { root.page-renamed(i, self.text); }
+                                }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        MascotSelect {
+                            width: 150px;
+                            options: mascots;
+                            images: mascot-images;
+                            index: p.icon-index;
+                            accent: Skin.accent;
+                            label: "Ícone da página " + p.name;
+                            chosen(k) => { root.page-icon-chosen(i, k); }
+                        }
+                    }
+                    IconButton {
+                        width: 34px;
+                        height: 34px;
+                        icon: Icons.chevron-up;
+                        enabled: i > 0;
+                        label: "Subir " + p.name;
+                        clicked => { root.page-moved(i, -1); }
+                    }
+                    IconButton {
+                        width: 34px;
+                        height: 34px;
+                        icon: Icons.chevron;
+                        enabled: i < pages.length - 1;
+                        label: "Descer " + p.name;
+                        clicked => { root.page-moved(i, 1); }
+                    }
+                    IconButton {
+                        width: 34px;
+                        height: 34px;
+                        icon: Icons.close;
+                        ink: Skin.danger;
+                        enabled: pages.length > 1;
+                        label: "Apagar " + p.name + " (os apps vão para a página anterior)";
+                        clicked => { root.page-removed(i); }
+                    }
+                }
+            }
+        }
+
+        for app in apps: Rectangle {
+            property <color> accent: app.theme.fur;
+            background: accent.mix(Skin.surface, 0.06);
+            border-width: 1px;
+            border-color: accent.mix(Skin.surface-edge, 0.3);
+            opacity: app.enabled ? 1 : 0.55;
+            property <bool> open: root.open-app == app.id;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 14px;
+                // cabeçalho do app: clicar abre/fecha as opções (o interruptor tem o próprio clique)
+                head := Rectangle {
+                    min-height: head-row.preferred-height;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.open-app = open ? "" : app.id; }
+                    }
+                    head-row := HorizontalLayout {
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            icon: open ? Icons.chevron : Icons.chevron-right;
+                            ink: open ? accent : Skin.dim;
+                            size: 16px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 48px;
+                            height: 43px;
+                            background: app.theme.bg1;
+                            Image {
+                                source: app.icon;
+                                image-rendering: pixelated;
+                                width: 40px;
+                                height: 35px;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 4px;
+                        Text { text: app.name; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                        Text { text: app.description; color: Skin.sub; font-size: 13px; wrap: word-wrap; }
+                        if !open: Text {
+                            text: app.settings.length + (app.settings.length == 1 ? " opção" : " opções") + " · clique para abrir";
+                            color: Skin.dim;
+                            font-family: Skin.font-mono;
+                            font-size: 11px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SqSwitch {
+                            width: 48px;
+                            height: 26px;
+                            knob: 18px;
+                            accent: accent;
+                            checked: app.enabled;
+                            label: "Ativar " + app.name;
+                            toggled => { root.toggle-app(app.id); }
+                        }
+                    }
+                    }
+                }
+                if open: Rectangle { height: 1px; background: Skin.surface-edge; }
+                if open: VerticalLayout {
+                    if page-names.length > 1: HorizontalLayout {
+                        spacing: 16px;
+                        min-height: 44px;
+                        Text {
+                            text: "Página";
+                            color: Skin.ink;
+                            font-size: 14px;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Select {
+                                width: 220px;
+                                options: page-names;
+                                index: app.page;
+                                accent: accent;
+                                label: "Página de " + app.name;
+                                chosen(k) => { root.app-page-chosen(app.id, k); }
+                            }
+                        }
+                    }
+                    for s in app.settings: SettingLine {
+                        s: s;
+                        accent: accent;
+                        toggled => { root.setting-toggled(s.app, s.key); }
+                        int-edited(v) => { root.setting-int(s.app, s.key, v); }
+                        chosen(i) => { root.setting-chosen(s.app, s.key, i); }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: "Mascotes e temas do CyberDock · Interface feita com Slint (slint.dev)";
+            color: Skin.dim;
+            font-size: 11px;
+            horizontal-alignment: center;
+        }
+    }
+}

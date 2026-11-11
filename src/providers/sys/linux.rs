@@ -126,14 +126,13 @@ fn cpu_mhz() -> f32 {
         for e in dir.flatten() {
             let name = e.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with("cpu") && name[3..].chars().all(|c| c.is_ascii_digit()) && name.len() > 3 {
-                if let Some(v) = fs::read_to_string(e.path().join("cpufreq/scaling_cur_freq"))
+            if name.starts_with("cpu") && name[3..].chars().all(|c| c.is_ascii_digit()) && name.len() > 3
+                && let Some(v) = fs::read_to_string(e.path().join("cpufreq/scaling_cur_freq"))
                     .ok()
                     .and_then(|t| t.trim().parse::<f32>().ok())
                 {
                     khz.push(v);
                 }
-            }
         }
     }
     if !khz.is_empty() {

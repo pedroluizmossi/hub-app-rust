@@ -83,8 +83,11 @@ pub struct Host {
     /// Um app mudou a própria configuração: o hub redesenha o formulário da aba Apps.
     pub settings_dirty: Cell<bool>,
     /// Recados das ações em segundo plano (ver `Reporter`).
-    reports: (Sender<(String, Report)>, Receiver<(String, Report)>),
+    reports: (Sender<AppReport>, Receiver<AppReport>),
 }
+
+/// Recado de um app: id do app e o recado.
+type AppReport = (String, Report);
 
 impl Host {
     pub fn new(config: Config, bus: Bus) -> Self {

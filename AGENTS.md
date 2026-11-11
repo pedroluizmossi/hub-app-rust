@@ -10,10 +10,16 @@ Regras para agentes de código (Claude Code, Codex etc.). Arquitetura em
   compilador do Slint (erros de `.slint` aparecem nele) e leva segundos; o `build` só é
   preciso para rodar o app ou os testes.
 - **Testes:** `cargo test`. Rode antes de dizer que terminou.
+- **Clippy:** `cargo clippy --workspace --all-targets -- -D warnings` tem de passar (o CI
+  reprova aviso). Um `#[allow(clippy::...)]` só com comentário dizendo por quê.
 - **Uma compilação por vez.** Se o usuário estiver com `cargo run` aberto, um segundo
   cargo espera o lock ("Blocking waiting for file lock") — não é travamento.
 - **Mudar o perfil no `Cargo.toml` recompila todas as dependências** (minutos). Não mexa
-  em `[profile.*]` sem motivo.
+  em `[profile.*]` sem motivo. (Um `[profile.dev.package.<crate>]` recompila só aquele crate.)
+- **Onde vai o tempo:** mudar só Rust recompila em ~2 s; mudar um `.slint` em ~11 s, quase
+  tudo o rustc no `hub.rs` gerado (~10 MB), que por isso compila sem otimização
+  (`[profile.dev.package.miniutils-ui]`; não pesou ao rodar). Para ajustar visual em série,
+  use o live-preview (abaixo), que nem recompila.
 - **Medir tempo de build:** use uma mudança real de conteúdo. `touch` num `.slint` gera o
   mesmo código e a compilação incremental reaproveita tudo; o número sai falso.
 
@@ -26,7 +32,7 @@ Regras para agentes de código (Claude Code, Codex etc.). Arquitetura em
   interface; mudança de `.slint` recompila `miniutils-ui` e depois o app.
 - `ui/build.rs` liga `SLINT_ENABLE_EXPERIMENTAL_FEATURES` (o `ComponentContainer` que encaixa
   a tela dos plugins). O crate raiz usa `slint-interpreter` e `rhai` para os plugins
-  (`src/apps/plugin.rs`); o interpretador tem de ser **exatamente** a mesma versão do `slint`.
+  (`src/apps/plugin/`); o interpretador tem de ser **exatamente** a mesma versão do `slint`.
 - Tipos gerados pelo Slint vivem em outro crate: não dá para escrever `impl Trait for
   HubWindow` (ou outro tipo gerado) com um trait de fora; use função livre ou newtype.
 
@@ -63,10 +69,20 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
 
 ## Interface (Slint)
 
-- **Você não vê a janela.** Para qualquer mudança visual: diga ao usuário que não viu o
-  resultado e peça para ele conferir. Se ele relata um bug visual ou de clique, **pergunte
-  primeiro o sintoma exato** (o que abre, o que acontece ao clicar) antes de investigar.
-  Não capture a tela do usuário sem ele pedir: pode pegar outra janela.
+- **Ver e mexer na interface:** `tools/dev-ui.sh` (só Linux; ajuda no topo do arquivo)
+  abre um MiniUtils de desenvolvimento isolado (outra instância, config e registro em
+  `target/dev-ui`) com o servidor MCP do Slint (recurso `dev-mcp`), e daí tira captura
+  (`foto`, leia o PNG), acha elementos (`achar`), clica (`clicar`) e chama qualquer
+  ferramenta do MCP (`mcp`). Mudança visual: confira com `foto` antes de dizer que ficou
+  certo, e diga em que tamanho de janela/célula conferiu. Plugin: `abrir -- --plugin-dev
+  <pasta>`. Ajuste em série: `abrir --live` (recurso `live-preview`), edite o `.slint`,
+  `recarregar`, `foto`; os limites do live-preview estão no topo do script.
+- **Bug que o usuário relata** (visual ou de clique): pergunte o sintoma exato (o que
+  abre, o que acontece ao clicar) e reproduza com o `dev-ui.sh` antes de mexer. Não capture
+  a tela do usuário (do desktop) sem ele pedir: pode pegar outra janela; o `dev-ui.sh` só
+  captura a janela do app de desenvolvimento.
+- **Começar um app novo:** a skill `novo-app` (`.claude/skills/novo-app/`) diz qual exemplo
+  copiar para cada tipo e como conferir na tela.
 - **Testes de UI sem tela** (`i-slint-backend-testing`) precisam de
   `SLINT_EMIT_DEBUG_INFO=1` na compilação, e cliques simulados em `PopupWindow` não
   funcionaram (nem num caso normal). Não confie neles para listas suspensas.

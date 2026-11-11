@@ -16,7 +16,29 @@ mod store;
 mod tray;
 mod ui;
 
+/// Texto do `--help` (sem a parte da loja, que é `store::USAGE`). Cada opção daqui tem de
+/// aparecer no README (ver o teste `readme_cita_todas_as_opcoes`).
+const HELP: &str = "\
+Uso: miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]
+       miniutils --previa <mascote> [animação] [--saida arquivo.gif]
+       miniutils --version
+
+  --hidden              inicia só na bandeja (para o autostart)
+  --tab <nome>          abre numa página do painel (pelo nome dela ou de um app nela,
+                        ex.: Geral, docker), em apps (configurações) ou em store (loja)
+  --plugin-dev <pasta>  carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao
+                        salvar; erros da tela e do script saem no terminal
+  --previa              GIF de uma animação de mascote em todos os temas
+  --version             mostra a versão (também em Configurações › Sistema)";
+
 fn main() -> anyhow::Result<()> {
+    // live-preview (só desenvolvimento): a interface é interpretada ao rodar, e o
+    // ComponentContainer do hub.slint ainda é recurso experimental (ver ui/build.rs)
+    #[cfg(feature = "live-preview")]
+    // SAFETY: primeira linha do `main`, antes de qualquer outra thread existir
+    unsafe {
+        std::env::set_var("SLINT_ENABLE_EXPERIMENTAL_FEATURES", "1")
+    };
     #[cfg(windows)]
     console::attach();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -40,10 +62,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!(
-            "Uso: miniutils [--hidden] [--tab <id>] [--plugin-dev <pasta>]\n       miniutils --previa <mascote> [animação] [--saida arquivo.gif]\n       miniutils --version\n\n  --hidden              inicia só na bandeja (para o autostart)\n  --tab <id>            abre numa aba (ex.: cyber.vitals, apps)\n  --plugin-dev <pasta>  carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao\n                        salvar; erros da tela e do script saem no terminal\n  --previa              GIF de uma animação de mascote em todos os temas\n\n{}",
-            store::USAGE
-        );
+        println!("{HELP}\n\n{}", store::USAGE);
         return Ok(());
     }
     let tab = args.iter().position(|a| a == "--tab").and_then(|i| args.get(i + 1)).cloned();
@@ -153,5 +172,24 @@ mod console {
     unsafe fn usable(which: STD_HANDLE) -> bool {
         // SAFETY: só consulta o identificador; não o usa.
         unsafe { GetStdHandle(which) }.is_ok_and(|h: HANDLE| !h.is_invalid() && !h.0.is_null())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HELP;
+
+    /// O `--help` e a lista de opções do README já divergiram: toda opção do `--help` tem
+    /// de aparecer no README.
+    #[test]
+    fn readme_cita_todas_as_opcoes() {
+        let readme = include_str!("../README.md");
+        let flags: Vec<&str> = HELP
+            .split(|c: char| c.is_whitespace() || c == '[' || c == ']')
+            .filter(|w| w.starts_with("--"))
+            .collect();
+        assert!(flags.len() >= 5, "não achou as opções no HELP: {flags:?}");
+        let faltam: Vec<&&str> = flags.iter().filter(|f| !readme.contains(**f)).collect();
+        assert!(faltam.is_empty(), "opções do --help que faltam no README: {faltam:?}");
     }
 }

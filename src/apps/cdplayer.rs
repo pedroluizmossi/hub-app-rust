@@ -73,7 +73,7 @@ impl CdPlayerMini {
         if !media::valid_service(&self.snap.player) {
             return;
         }
-        let step = self.host.config.borrow().int(&self.manifest, "seek").clamp(1, 300) as i64 * 1_000_000;
+        let step = self.host.config.borrow().int(&self.manifest, "seek").clamp(1, 300) * 1_000_000;
         let (player, poker, reporter) =
             (self.snap.player.clone(), self.host.bus.poker(Topic::Media), self.host.reporter(&self.manifest));
         let verb = verb.to_string();
