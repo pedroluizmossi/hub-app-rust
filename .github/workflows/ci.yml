@@ -1,5 +1,5 @@
-# Compila e testa nos dois sistemas suportados. O app é nativo em Linux e Windows: uma
-# mudança só entra se passar nos dois (ver "Plataformas" no AGENTS.md).
+# Integração contínua: compila e testa nos dois sistemas suportados. O app é nativo em
+# Linux e Windows: uma mudança só entra se passar nos dois (ver "Plataformas" no AGENTS.md).
 name: CI
 
 on:
@@ -7,9 +7,16 @@ on:
     branches: [master]
   pull_request:
 
+# um push novo no mesmo branch cancela a rodada anterior
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   test:
@@ -29,7 +36,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+      # `--locked`: falha se o Cargo.lock estiver desatualizado, em vez de resolver de novo
       - name: cargo check
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --locked
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked

@@ -149,6 +149,22 @@ Compilar: `cargo build --release` num Windows com o Rust instalado gera
 cargo test
 ```
 
+## CI e lançamentos
+
+- **CI** (`.github/workflows/ci.yml`): todo push em `master` e todo pull request roda
+  `cargo check` e `cargo test` em Ubuntu e Windows.
+- **Lançamento** (`.github/workflows/release.yml`): uma tag `vX.Y.Z` igual à `version` do
+  `Cargo.toml` compila a versão final nos dois sistemas e publica um Release com
+  `miniutils-<versão>-linux-x86_64.tar.gz`, `miniutils-<versão>-windows-x86_64.zip` e as
+  somas SHA-256.
+
+  ```bash
+  git tag v0.2.0 && git push origin v0.2.0
+  ```
+
+  Tag com hífen (`v0.2.0-rc1`) sai como pré-lançamento. Rodar o workflow à mão (aba
+  Actions) só gera os pacotes como artefatos, sem publicar.
+
 ## Licença
 
 MIT. A interface usa o [Slint](https://slint.dev) sob a Royalty-free Desktop License.
