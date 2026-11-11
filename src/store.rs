@@ -624,9 +624,10 @@ mod tests {
 
         fn index(&self, commit: &str, version: &str, permissions: &str) -> Source {
             let path = self.dir.join("registry.json");
+            // O caminho vai como string JSON escapada: no Windows ele tem `\`.
+            let repo = serde_json::to_string(&self.dir.join("repo").to_string_lossy()).unwrap();
             let json = format!(
-                r#"{{"schema":1,"plugins":[{{"id":"io.github.exemplo.uptime","name":"Tempo ligado","license":"MIT","version":"{version}","repo":"{}","commit":"{commit}","permissions":[{permissions}]}}]}}"#,
-                self.dir.join("repo").display()
+                r#"{{"schema":1,"plugins":[{{"id":"io.github.exemplo.uptime","name":"Tempo ligado","license":"MIT","version":"{version}","repo":{repo},"commit":"{commit}","permissions":[{permissions}]}}]}}"#
             );
             std::fs::write(&path, json).unwrap();
             Source { index: path.to_string_lossy().to_string(), key: String::new() }

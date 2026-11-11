@@ -1,0 +1,125 @@
+# Entrega: uma tag `vX.Y.Z` compila a versão final para Linux e Windows, empacota e publica
+# um Release no GitHub com os arquivos e as somas SHA-256.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# A tag tem de bater com a `version` do Cargo.toml. Tag com hífen (`v0.2.0-rc1`) sai como
+# pré-lançamento. Rodar à mão (aba Actions › Release › Run workflow) só gera os pacotes,
+# como artefatos da execução, sem publicar nada: serve para testar um `.exe`.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Pacote ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu mais antigo ainda suportado: o binário roda em distros com glibc mais velha
+          - os: ubuntu-22.04
+            name: linux-x86_64
+            binary: miniutils
+          - os: windows-latest
+            name: windows-x86_64
+            binary: miniutils.exe
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Versão
+        id: version
+        run: |
+          # `cargo pkgid` devolve "…#miniutils@0.2.0" (ou "…#0.2.0"): fica o que vem depois
+          id=$(cargo pkgid -p miniutils --locked)
+          version="${id##*[#@]}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # numa tag, ela tem de ser a versão do Cargo.toml
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::a tag $GITHUB_REF_NAME não bate com a versão $version do Cargo.toml"
+            exit 1
+          fi
+
+      - name: Dependências do sistema (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+
+      - name: Testes
+        run: cargo test --workspace --locked
+
+      - name: Compilar (release)
+        run: cargo build --release --locked
+
+      - name: Empacotar
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NAME: ${{ matrix.name }}
+          BINARY: ${{ matrix.binary }}
+        run: |
+          dir="miniutils-$VERSION-$NAME"
+          mkdir -p "dist/$dir"
+          cp "target/release/$BINARY" README.md THIRD_PARTY_NOTICES.md "dist/$dir/"
+          cd dist
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            archive="$dir.zip"
+            7z a -tzip "$archive" "$dir" > /dev/null
+          else
+            archive="$dir.tar.gz"
+            tar -czf "$archive" "$dir"
+          fi
+          sha256sum "$archive" > "$archive.sha256"
+          cat "$archive.sha256"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: miniutils-${{ matrix.name }}
+          path: |
+            dist/${{ steps.package.outputs.archive }}
+            dist/${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publicar o Release
+    needs: build
+    # só numa tag; rodando à mão os pacotes ficam como artefatos
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Criar o Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          flags=(--generate-notes --verify-tag)
+          # v0.2.0-rc1, v0.2.0-beta…: pré-lançamento
+          if [[ "$TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$TAG" "${flags[@]}" dist/*
