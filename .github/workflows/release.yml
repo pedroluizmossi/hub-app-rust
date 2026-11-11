@@ -4,8 +4,10 @@
 #   git tag v0.2.0 && git push origin v0.2.0
 #
 # A tag tem de bater com a `version` do Cargo.toml. Tag com hífen (`v0.2.0-rc1`) sai como
-# pré-lançamento. Rodar à mão (aba Actions › Release › Run workflow) só gera os pacotes,
-# como artefatos da execução, sem publicar nada: serve para testar um `.exe`.
+# pré-lançamento. Os testes não rodam aqui, e sim no CI (ci.yml) a cada push no master:
+# crie a tag num commit que passou nele. Rodar à mão (aba Actions › Release › Run workflow)
+# só gera os pacotes, como artefatos da execução, sem publicar nada: serve para testar um
+# `.exe`.
 name: Release
 
 on:
@@ -60,9 +62,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
-
-      - name: Testes
-        run: cargo test --workspace --locked
 
       - name: Compilar (release)
         run: cargo build --release --locked
