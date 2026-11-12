@@ -204,6 +204,26 @@ Para criar uma tela (ex.: "Sobre"):
 5. Conteúdo longo vai num `ScrollView` com `VerticalLayout { alignment: start; … }`.
    Blocos com muitas opções começam **recolhidos** (veja o acordeão das configurações).
 
+### Janela separada (detalhe de um app)
+
+Quando um app precisa mostrar mais do que cabe na célula, ele abre uma janela própria,
+fora do popup (aparece na barra de tarefas). Exemplo: o detalhe de uma sessão em
+`miniapps/agents/detail.slint`, aberto pelo botão "Detalhes" do cartão.
+
+1. Um `export component <X>Window inherits Window` com um global próprio de dados e
+   callbacks; importe e exporte os dois em `ui/hub.slint`. Como o hub, sem a moldura do
+   sistema (`no-frame`, fundo transparente): `Frame` do visual, `Bar` com uma `TouchArea`
+   que move a janela (`popup::drag_move`), um `HeaderButton` de fechar, Esc e
+   `ResizeHandles` (`popup::drag_resize`). Conteúdo num cartão afastado 12 px da borda,
+   para não invadir o canto cortado.
+2. **Cada janela tem os próprios globais**: `Skin`, `Anim` e o global do app do hub não
+   valem nela. Aplique o visual com `skin::apply_current(&janela)` ao criar e em
+   `settings_changed` (que roda quando o visual muda).
+3. O app guarda a janela: cria no primeiro uso, `show()` e `popup::focus` para trazê-la
+   para frente; fechar só esconde (`CloseRequestResponse::HideWindow`). Em `disable`,
+   esconda. Não segure o `RefCell` do app ao chamar `show()`: o hub perde o foco na hora.
+4. Dado caro só enquanto a janela está aberta (ex.: `providers::agents::watch`).
+
 Regras gerais de interface:
 
 - Alvos de clique com ≥ 36 px de altura (44 px quando for o botão principal).

@@ -134,6 +134,16 @@ pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
     });
 }
 
+/// Começa a mover a janela (sem moldura) com o mouse pressionado, como na barra de título
+/// do sistema.
+pub fn drag_move(window: &slint::Window) {
+    window.with_winit_window(|w| {
+        if let Err(e) = w.drag_window() {
+            log::warn!("não deu para mover a janela: {e}");
+        }
+    });
+}
+
 /// Começa a redimensionar pela borda/canto `dir` ("n", "se", …), com o mouse pressionado.
 pub fn drag_resize(window: &slint::Window, dir: &str) {
     use winit::window::ResizeDirection as D;

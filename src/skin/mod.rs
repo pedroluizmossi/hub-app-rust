@@ -364,9 +364,36 @@ fn rgb(c: u32) -> Color {
     Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
 
-/// Passa o visual para a tela; `name` é o nome exibido do app e `text_scale` o tamanho do
-/// texto (1,0 = o do design).
+thread_local! {
+    /// O último visual aplicado ao hub (já com destaque e tamanho do texto): as outras
+    /// janelas (ex.: o detalhe de um agente) recebem o mesmo com `apply_current`.
+    static CURRENT: std::cell::RefCell<Option<(Skin, String, f32)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Passa o visual para o hub e o guarda para as outras janelas; `name` é o nome exibido do
+/// app e `text_scale` o tamanho do texto (1,0 = o do design).
 pub fn apply(ui: &HubWindow, s: &Skin, name: &str, text_scale: f32) {
+    CURRENT.with(|c| *c.borrow_mut() = Some((s.clone(), name.to_string(), text_scale)));
+    apply_to(ui, s, name, text_scale);
+}
+
+/// Passa o último visual aplicado ao hub para outra janela (cada janela do Slint tem os
+/// próprios globais). Antes do hub, não faz nada.
+pub fn apply_current<W>(ui: &W)
+where
+    W: ComponentHandle,
+    for<'a> SkinGlobal<'a>: slint::Global<'a, W>,
+{
+    if let Some((s, name, scale)) = CURRENT.with(|c| c.borrow().clone()) {
+        apply_to(ui, &s, &name, scale);
+    }
+}
+
+fn apply_to<W>(ui: &W, s: &Skin, name: &str, text_scale: f32)
+where
+    W: ComponentHandle,
+    for<'a> SkinGlobal<'a>: slint::Global<'a, W>,
+{
     let g = ui.global::<SkinGlobal>();
     g.set_text_scale(text_scale);
     g.set_bg(rgb(s.bg));

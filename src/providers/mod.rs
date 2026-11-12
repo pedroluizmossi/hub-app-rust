@@ -42,12 +42,13 @@ pub fn spawn_all(bus: &mut Bus) {
         last_ports = Some(std::time::Instant::now());
         Some(Event::Ports(ports::collect()))
     });
-    // arquivos pequenos e duas consultas: a cada 2 s com a janela aberta, 10 s escondida
+    // arquivos pequenos e duas consultas: a cada 2 s com a janela (ou a de detalhe de uma
+    // sessão) aberta, 10 s escondida
     let mut agents = agents::AgentsProvider::default();
     let mut last_agents: Option<std::time::Instant> = None;
     bus.spawn_polled(Topic::Agents, Duration::from_secs(2), move |poker, poked| {
         let due = last_agents.is_none_or(|t| t.elapsed() >= Duration::from_secs(10));
-        if !(poked || poker.visible() || due) {
+        if !(poked || poker.visible() || agents::watching() || due) {
             return None;
         }
         last_agents = Some(std::time::Instant::now());

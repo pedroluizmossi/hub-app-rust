@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::{
-    Agent, Details, LIMIT, RECENT, STALE, Source, State, Tool, base_name, describe, home_dir, mtime_ms, one_line, open,
-    read_tail, short_cmd,
+    Agent, Details, LIMIT, RECENT, STALE, Source, State, Step, StepKind, Tool, base_name, describe, home_dir, iso_ms,
+    last_steps, mtime_ms, one_line, open, push_step, read_tail, short_cmd,
 };
 
 /// Último turno marcado no log.
@@ -73,7 +73,7 @@ impl Source for Codex {
         for (id, cwd, title, rollout, updated, parent) in rows {
             let path = PathBuf::from(rollout);
             let (mtime, tail) = self.tail(&path);
-            used.push(path);
+            used.push(path.clone());
             let quiet = now - mtime.max(updated);
             let (state, since) = match tail.turn {
                 // começou um turno e ainda escreve (ou escreveu há pouco): trabalhando
@@ -97,6 +97,7 @@ impl Source for Codex {
                 action: if state == State::Working { tail.action } else { String::new() },
                 parent,
                 details: Details::default(),
+                log: Some(path),
             });
         }
         self.tails.retain(|p, _| used.contains(p));
@@ -164,6 +165,59 @@ fn parse_tail(tail: &str) -> Tail {
     Tail::default()
 }
 
+/// Linha do tempo de um trecho do log: os itens concluídos (`item_completed`) de pedido,
+/// resposta e comando; logs antigos têm `user_message`/`agent_message` no lugar.
+pub(super) fn timeline(text: &str) -> Vec<Step> {
+    const ITEM: &str = r#""type":"event_msg","payload":{"type":"item_completed""#;
+    const OLD: [&str; 2] =
+        [r#""type":"event_msg","payload":{"type":"user_message""#, r#""type":"event_msg","payload":{"type":"agent_message""#];
+    let mut steps = Vec::new();
+    for line in text.lines() {
+        if !line.contains(ITEM) && !OLD.iter().any(|m| line.contains(m)) {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let at = iso_ms(&v["timestamp"]);
+        let p = &v["payload"];
+        if p["type"] != "item_completed" {
+            let kind = if p["type"] == "user_message" { StepKind::User } else { StepKind::Reply };
+            push_step(&mut steps, at, kind, p["message"].as_str().unwrap_or_default());
+            continue;
+        }
+        let item = &p["item"];
+        let text_of = |item: &Value| -> String {
+            let parts = item["content"].as_array().map(Vec::as_slice).unwrap_or_default();
+            parts.iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join(" ")
+        };
+        match item["type"].as_str() {
+            Some("UserMessage") => push_step(&mut steps, at, StepKind::User, &text_of(item)),
+            Some("AgentMessage") => push_step(&mut steps, at, StepKind::Reply, &text_of(item)),
+            Some("CommandExecution") => {
+                // leitura de arquivo: o nome dele; o resto, só o programa do script
+                // (`command` é texto ou lista: `["zsh", "-lc", "…"]`)
+                let parsed = &item["parsed_cmd"][0];
+                let summary = match (parsed["type"].as_str(), parsed["name"].as_str()) {
+                    (Some("read"), Some(name)) => format!("read: {}", base_name(name)),
+                    _ => {
+                        let cmd = match &item["command"] {
+                            Value::String(s) => short_cmd(s),
+                            Value::Array(a) => a.last().and_then(Value::as_str).map(short_cmd).unwrap_or_default(),
+                            _ => String::new(),
+                        };
+                        if cmd.is_empty() { "exec".into() } else { format!("exec: {cmd}") }
+                    }
+                };
+                push_step(&mut steps, at, StepKind::Tool, &summary);
+                if let Some(code) = item["exit_code"].as_i64().filter(|c| *c != 0) {
+                    push_step(&mut steps, at, StepKind::Error, &format!("o comando saiu com código {code}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    last_steps(steps)
+}
+
 /// Resumo de uma chamada de ferramenta. No formato atual a ferramenta é `exec` e a
 /// entrada é código (`tools.exec_command({cmd:"…"})`); no antigo, uma função com os
 /// argumentos em JSON.
@@ -213,5 +267,33 @@ mod tests {
         // turno fechado não tem ação, e chamada do turno anterior não vaza para o novo
         assert_eq!(parse_tail(&[started, new.as_str(), done].join("\n")).action, "");
         assert_eq!(parse_tail(&[started, new.as_str(), done, started].join("\n")).action, "");
+    }
+
+    #[test]
+    fn linha_do_tempo() {
+        let lines = [
+            r#"{"timestamp":"2026-11-11T13:57:13.069Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"crie a imagem"}]}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:14.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","content":[]}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:15.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","content":[{"type":"Text","text":"Vou verificar."}]}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:16.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":"TOKEN=x cargo build --release","exit_code":101,"aggregated_output":"segredo"}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:17.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["bash","-lc","ls -la"],"exit_code":0}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:17.500Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["zsh","-lc","cat /a/SKILL.md"],"parsed_cmd":[{"type":"read","cmd":"cat /a/SKILL.md","name":"SKILL.md"}],"exit_code":0}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:18.000Z","type":"event_msg","payload":{"type":"agent_message","message":"formato antigo"}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:19.000Z","type":"event_msg","payload":{"type":"token_count"}}"#,
+        ]
+        .join("\n");
+        let got: Vec<(StepKind, String)> = timeline(&lines).into_iter().map(|s| (s.kind, s.text)).collect();
+        assert_eq!(
+            got,
+            [
+                (StepKind::User, "crie a imagem".to_string()),
+                (StepKind::Reply, "Vou verificar.".into()),
+                (StepKind::Tool, "exec: cargo build".into()),
+                (StepKind::Error, "o comando saiu com código 101".into()),
+                (StepKind::Tool, "exec: ls".into()),
+                (StepKind::Tool, "read: SKILL.md".into()),
+                (StepKind::Reply, "formato antigo".into()),
+            ]
+        );
     }
 }

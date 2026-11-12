@@ -18,7 +18,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde_json::Value;
 
 use super::{
-    Agent, Details, LIMIT, RECENT, Source, State, Tokens, Tool, base_name, clip, describe, home_dir, mtime_ms, one_line, read_tail,
+    Agent, Details, LIMIT, RECENT, Source, State, Step, StepKind, Tokens, Tool, base_name, clip, describe, home_dir, iso_ms,
+    last_steps, mtime_ms, one_line, push_step, read_tail,
 };
 
 /// Máximo de subagentes lidos por sessão.
@@ -74,6 +75,7 @@ impl Source for Claude {
             let log = self.logs.entry(transcript.clone()).or_default();
             log.read(&transcript);
             log.fill(a);
+            a.log = Some(transcript.clone());
             subs.extend(subagents(&transcript.with_extension("").join("subagents"), a, now));
             used.push(transcript);
         }
@@ -138,6 +140,7 @@ fn parse_session(text: &str) -> Option<(u32, String, Agent)> {
         action: String::new(),
         parent: None,
         details: Details::default(),
+        log: None,
     };
     Some((pid, text_of("procStart"), agent))
 }
@@ -349,11 +352,63 @@ fn subagents(dir: &Path, parent: &Agent, now: i64) -> Vec<Agent> {
             action: String::new(),
             parent: Some(parent.id.clone()),
             details: Details { kind: sub.kind, model: sub.model, depth: sub.depth, ..Details::default() },
+            log: Some(log.clone()),
         });
     }
     subs.sort_by_key(|a| std::cmp::Reverse(a.since_ms));
     subs.truncate(SUBS);
     subs
+}
+
+/// Linha do tempo de um trecho do transcript: pedidos, respostas, ferramentas e erros.
+/// `sub`: transcript de subagente, em que todas as linhas são `isSidechain` (no da sessão
+/// principal, essas linhas são de subagentes e ficam de fora).
+pub(super) fn timeline(text: &str, sub: bool) -> Vec<Step> {
+    let mut steps = Vec::new();
+    for line in text.lines() {
+        // só as que interessam passam pelo parse: anexos e resultados podem ser enormes
+        if !line.contains(r#""type":"user""#) && !line.contains(r#""type":"assistant""#) {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        // `isMeta`: texto que o próprio Claude Code injeta (lembretes, saída de comando)
+        if (!sub && v["isSidechain"] == Value::Bool(true)) || v["isMeta"] == Value::Bool(true) {
+            continue;
+        }
+        let at = iso_ms(&v["timestamp"]);
+        let content = &v["message"]["content"];
+        let parts = content.as_array().map(Vec::as_slice).unwrap_or_default();
+        match v["type"].as_str() {
+            Some("user") => {
+                let texts = content.as_str().into_iter().chain(parts.iter().filter(|p| p["type"] == "text").filter_map(|p| p["text"].as_str()));
+                for t in texts {
+                    if t.starts_with("[Request interrupted") {
+                        push_step(&mut steps, at, StepKind::Error, "interrompido pelo usuário");
+                    } else if !t.trim_start().starts_with('<') {
+                        // `<command-name>`, `<local-command-stdout>`…: marcação, não pedido
+                        push_step(&mut steps, at, StepKind::User, t);
+                    }
+                }
+                // o resultado da ferramenta pode ter segredos: só se falhou
+                if parts.iter().any(|p| p["type"] == "tool_result" && p["is_error"] == Value::Bool(true)) {
+                    push_step(&mut steps, at, StepKind::Error, "a ferramenta falhou");
+                }
+            }
+            Some("assistant") => {
+                for p in parts {
+                    match p["type"].as_str() {
+                        Some("text") => push_step(&mut steps, at, StepKind::Reply, p["text"].as_str().unwrap_or_default()),
+                        Some("tool_use") => {
+                            push_step(&mut steps, at, StepKind::Tool, &describe(p["name"].as_str().unwrap_or("?"), &p["input"]))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    last_steps(steps)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -537,5 +592,37 @@ mod tests {
         assert!(!ends_interrupted(&[stop, result].join("\n")));
         assert!(!ends_interrupted(&[result, quoted].join("\n")));
         assert!(!ends_interrupted(""));
+    }
+
+    #[test]
+    fn linha_do_tempo() {
+        let lines = [
+            r#"{"type":"user","isSidechain":false,"timestamp":"2026-11-11T10:00:00.000Z","message":{"role":"user","content":"rode os\ntestes"}}"#,
+            r#"{"type":"user","isMeta":true,"timestamp":"2026-11-11T10:00:00.000Z","message":{"role":"user","content":"lembrete"}}"#,
+            r#"{"type":"user","timestamp":"2026-11-11T10:00:00.000Z","message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-11T10:00:01.000Z","message":{"content":[{"type":"thinking","thinking":"..."},{"type":"text","text":"Vou rodar."},{"type":"tool_use","name":"Bash","input":{"command":"cargo test --all"}}]}}"#,
+            r#"{"type":"user","timestamp":"2026-11-11T10:00:02.000Z","message":{"role":"user","content":[{"type":"tool_result","content":"segredo","is_error":true}]}}"#,
+            r#"{"type":"user","timestamp":"2026-11-11T10:00:02.000Z","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-11-11T10:00:03.000Z","message":{"content":[{"type":"text","text":"de subagente"}]}}"#,
+            r#"{"type":"user","timestamp":"2026-11-11T10:00:04.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#,
+            r#"{"type":"ai-title","aiTitle":"x"}"#,
+        ]
+        .join("\n");
+        let got: Vec<(StepKind, String)> = timeline(&lines, false).into_iter().map(|s| (s.kind, s.text)).collect();
+        assert_eq!(
+            got,
+            [
+                (StepKind::User, "rode os testes".to_string()),
+                (StepKind::Reply, "Vou rodar.".into()),
+                (StepKind::Tool, "Bash: cargo test".into()),
+                (StepKind::Error, "a ferramenta falhou".into()),
+                (StepKind::Error, "interrompido pelo usuário".into()),
+            ]
+        );
+        // o resultado da ferramenta não aparece, nem com erro
+        assert!(!lines.is_empty() && got.iter().all(|(_, t)| !t.contains("segredo")));
+        // no transcript de subagente, as linhas `isSidechain` são dele
+        assert!(timeline(&lines, true).iter().any(|s| s.text == "de subagente"));
+        assert_eq!(timeline(&lines, false)[0].at_ms, 1_794_391_200_000);
     }
 }

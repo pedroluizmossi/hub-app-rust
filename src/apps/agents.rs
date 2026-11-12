@@ -14,8 +14,9 @@ use crate::core::miniapp::{Host, MiniApp};
 use super::kit::{HeaderMascot, Speech, plural};
 use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
-use crate::providers::agents::{Agent, AgentsSnapshot, State, Tool, clip};
-use crate::ui::{AgentRow, AgentSub, AgentsApp, HubWindow};
+use crate::core::bus::Topic;
+use crate::providers::agents::{self, Agent, AgentsSnapshot, State, Step, StepKind, Tool, clip};
+use crate::ui::{AgentDetail, AgentDetailWindow, AgentRow, AgentStep, AgentSub, AgentsApp, Anim, HubWindow};
 
 const SPEECH_TTL: Duration = Duration::from_secs(30);
 /// Subagentes desenhados andando na faixa de uma sessão (o contador mostra todos).
@@ -45,6 +46,24 @@ pub struct AgentsMini {
     /// Mascote de cada ferramenta em cada estado (parada: desenhada uma vez por tema).
     faces: HashMap<(Tool, State), slint::Image>,
     face: HeaderMascot,
+    /// Janela de detalhe (uma só: abrir outra sessão troca o que ela mostra). Criada no
+    /// primeiro uso e só escondida ao fechar.
+    detail: Option<Detail>,
+}
+
+/// A janela de detalhe e a sessão que ela mostra.
+struct Detail {
+    win: AgentDetailWindow,
+    /// Sessão mostrada.
+    key: (Tool, String),
+    /// Aberta (fechar só esconde a janela e para de ler a conversa).
+    open: bool,
+    /// Passos na tela, do mais novo ao mais antigo.
+    steps: Rc<VecModel<AgentStep>>,
+    /// Os passos lidos por último (só troca a lista quando mudam).
+    shown: Vec<Step>,
+    /// Já chegou a linha do tempo desta sessão.
+    loaded: bool,
 }
 
 impl AgentsMini {
@@ -67,6 +86,7 @@ impl AgentsMini {
             cards: Vec::new(),
             faces: HashMap::new(),
             face: HeaderMascot::new(13),
+            detail: None,
         }));
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
@@ -108,6 +128,13 @@ impl AgentsMini {
         ui.global::<AgentsApp>().on_resume(move |key| {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 a.borrow_mut().resume(&key, &ui);
+            }
+        });
+        let a = Rc::downgrade(&app);
+        let w = ui.as_weak();
+        ui.global::<AgentsApp>().on_details(move |key| {
+            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
+                AgentsMini::open_detail(&a, &key, &ui);
             }
         });
         app
@@ -585,6 +612,179 @@ fn short_dir(cwd: &str, home: &str) -> String {
     }
 }
 
+impl AgentsMini {
+    /// Abre a sessão `key` na janela de detalhe (cria a janela no primeiro uso).
+    fn open_detail(app: &Rc<RefCell<Self>>, key: &str, ui: &HubWindow) {
+        let mut me = app.borrow_mut();
+        let Some(id) = me.find(key).map(|a| (a.tool, a.id.clone())) else { return };
+        if me.detail.is_none() {
+            match AgentDetailWindow::new() {
+                Ok(win) => {
+                    me.detail = Some(Detail::new(win, app, ui, &id));
+                    me.style_detail();
+                }
+                Err(e) => {
+                    log::warn!("não deu para criar a janela de detalhe: {e}");
+                    return;
+                }
+            }
+        }
+        let Some(d) = me.detail.as_mut() else { return };
+        if d.key != id {
+            d.key = id.clone();
+            d.shown.clear();
+            d.loaded = false;
+            d.steps.set_vec(Vec::new());
+        }
+        d.open = true;
+        // o provedor passa a ler a conversa desta sessão; a leitura sai já
+        agents::watch(Some(id));
+        me.host.bus.poke(Topic::Agents);
+        me.selected = None;
+        me.refresh(ui);
+        me.push_detail();
+        // mostrar tira o foco do hub, que pode reagir na hora: o app já não está emprestado
+        let win = me.detail.as_ref().map(|d| d.win.clone_strong());
+        drop(me);
+        if let Some(win) = win {
+            if let Err(e) = win.show() {
+                log::warn!("não deu para mostrar a janela de detalhe: {e}");
+            }
+            crate::popup::focus(win.window());
+        }
+    }
+
+    /// Visual e tema na janela de detalhe (os globais dela são outros que os do hub).
+    fn style_detail(&mut self) {
+        let theme = render::colors(self.host.theme_for(&self.manifest));
+        let Some(d) = &self.detail else { return };
+        crate::skin::apply_current(&d.win);
+        // a janela não anima nada; "calm" deixa qualquer mascote parada
+        d.win.global::<Anim>().set_calm(true);
+        d.win.global::<AgentDetail>().set_theme(theme);
+    }
+
+    /// Fechou a janela (pelo sistema): para de ler a conversa.
+    fn detail_closed(&mut self) {
+        if let Some(d) = &mut self.detail {
+            d.open = false;
+        }
+        agents::watch(None);
+    }
+
+    /// Chave de tela (`session_key`) da sessão aberta no detalhe.
+    fn detail_key(&self) -> Option<String> {
+        self.detail.as_ref().map(|d| format!("{}:{}", d.key.0.name(), d.key.1))
+    }
+
+    /// Passa para a janela de detalhe o que se sabe da sessão e a linha do tempo.
+    fn push_detail(&mut self) {
+        let Some(key) = self.detail.as_ref().filter(|d| d.open).map(|d| d.key.clone()) else { return };
+        let now = now_ms();
+        let found = self.snap.agents.iter().find(|a| a.tool == key.0 && a.id == key.1).cloned();
+        let face = found.as_ref().map(|a| self.face(a.tool, a.state));
+        let timeline = self.snap.timeline.as_ref().filter(|t| t.tool == key.0 && t.id == key.1).map(|t| t.steps.clone());
+        let Some(d) = self.detail.as_mut() else { return };
+        let g = d.win.global::<AgentDetail>();
+        g.set_gone(found.is_none());
+        if let (Some(a), Some(face)) = (&found, face) {
+            let home = dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
+            let det = &a.details;
+            g.set_title(a.title.as_str().into());
+            g.set_info(format!("{} · {}", a.tool.name(), short_dir(&a.cwd, &home)).into());
+            g.set_state(state_key(a.state).into());
+            g.set_state_text(state_text(a, now).into());
+            g.set_mascot(face);
+            g.set_model(det.model.strip_prefix("claude-").unwrap_or(&det.model).into());
+            g.set_effort(det.effort.as_str().into());
+            g.set_branch(det.branch.as_str().into());
+            g.set_tokens(det.tokens.map_or(String::new(), |t| {
+                format!("entrada {} · saída {} · cache {}", compact(t.input), compact(t.output), compact(t.cache_read + t.cache_write))
+            })
+            .into());
+            g.set_can_resume(resume_argv(a).is_some());
+        }
+        if let Some(steps) = timeline {
+            if steps != d.shown {
+                d.steps.set_vec(steps.iter().rev().map(step_row).collect::<Vec<_>>());
+                d.shown = steps;
+            }
+            d.loaded = true;
+        }
+        g.set_loading(!d.loaded && found.is_some());
+    }
+}
+
+impl Detail {
+    /// Liga os botões da janela às mesmas ações do cartão.
+    fn new(win: AgentDetailWindow, app: &Rc<RefCell<AgentsMini>>, ui: &HubWindow, key: &(Tool, String)) -> Self {
+        let steps = Rc::new(VecModel::default());
+        let g = win.global::<AgentDetail>();
+        g.set_steps(ModelRc::from(steps.clone()));
+        // cada botão: a sessão que a janela mostra agora, pela chave da tela
+        let action = |run: fn(&mut AgentsMini, &str, &HubWindow)| {
+            let a = Rc::downgrade(app);
+            let w = ui.as_weak();
+            move || {
+                if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
+                    let mut a = a.borrow_mut();
+                    if let Some(key) = a.detail_key() {
+                        run(&mut a, &key, &ui);
+                    }
+                }
+            }
+        };
+        g.on_open_dir(action(AgentsMini::open_dir));
+        g.on_open_terminal(action(AgentsMini::open_terminal));
+        g.on_resume(action(AgentsMini::resume));
+        let (a, w) = (Rc::downgrade(app), win.as_weak());
+        g.on_close(move || {
+            if let (Some(a), Some(win)) = (a.upgrade(), w.upgrade()) {
+                let _ = win.hide();
+                a.borrow_mut().detail_closed();
+            }
+        });
+        let w = win.as_weak();
+        g.on_start_move(move || {
+            if let Some(win) = w.upgrade() {
+                crate::popup::drag_move(win.window());
+            }
+        });
+        let w = win.as_weak();
+        g.on_start_resize(move |dir| {
+            if let Some(win) = w.upgrade() {
+                crate::popup::drag_resize(win.window(), &dir);
+            }
+        });
+        let a = Rc::downgrade(app);
+        win.window().on_close_requested(move || {
+            // só esconde: a janela é reaproveitada na próxima vez
+            if let Some(a) = a.upgrade() {
+                a.borrow_mut().detail_closed();
+            }
+            slint::CloseRequestResponse::HideWindow
+        });
+        Detail { win, key: key.clone(), open: false, steps, shown: Vec::new(), loaded: false }
+    }
+}
+
+/// Um passo no formato da tela.
+fn step_row(s: &Step) -> AgentStep {
+    use chrono::TimeZone;
+    let time = (s.at_ms > 0)
+        .then(|| chrono::Local.timestamp_millis_opt(s.at_ms).single())
+        .flatten()
+        .map(|t| t.format("%H:%M").to_string())
+        .unwrap_or_default();
+    let kind = match s.kind {
+        StepKind::User => "user",
+        StepKind::Reply => "reply",
+        StepKind::Tool => "tool",
+        StepKind::Error => "error",
+    };
+    AgentStep { time: time.into(), kind: kind.into(), text: s.text.as_str().into() }
+}
+
 impl MiniApp for AgentsMini {
     fn manifest(&self) -> &Manifest {
         &self.manifest
@@ -598,6 +798,10 @@ impl MiniApp for AgentsMini {
     }
 
     fn disable(&mut self, _ui: &HubWindow) {
+        if let Some(d) = self.detail.take() {
+            let _ = d.win.hide();
+        }
+        agents::watch(None);
         self.snap = AgentsSnapshot::default();
         self.prev.clear();
         self.speech.clear();
@@ -613,6 +817,7 @@ impl MiniApp for AgentsMini {
         self.ingest(snap.clone());
         // também atualiza os "há N min", que mudam sem o estado mudar
         self.refresh(ui);
+        self.push_detail();
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
@@ -632,6 +837,9 @@ impl MiniApp for AgentsMini {
         self.cards.clear();
         self.refresh(ui);
         self.push_mascot(ui);
+        // visual ou tema novo: a janela de detalhe também
+        self.style_detail();
+        self.push_detail();
     }
 
     fn mood(&self) -> Mood {
@@ -670,6 +878,7 @@ mod tests {
             action: String::new(),
             parent: None,
             details: Default::default(),
+            log: None,
         }
     }
 

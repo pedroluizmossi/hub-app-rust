@@ -5,6 +5,7 @@
 // ferramenta informar (etiquetas de modelo/esforço/branch, tokens, último turno, último
 // pedido, subagentes). O que vier vazio some, então o cartão de uma ferramenta que informa
 // menos é só mais baixo. Clicar no cartão abre os botões de ação; outro clique fecha.
+// "Detalhes" abre a sessão numa janela própria (detail.slint).
 // Sessão com subagentes trabalhando ganha uma faixa em que eles andam de um lado para o outro.
 import { ListView } from "std-widgets.slint";
 import { Colors, Skin, Icons, Anim } from "../../ui/theme.slint";
@@ -84,6 +85,7 @@ export global AgentsApp {
     callback open-dir(string);        // pasta no gerenciador de arquivos
     callback open-terminal(string);   // terminal na pasta
     callback resume(string);          // retoma a sessão num terminal
+    callback details(string);         // abre a janela de detalhe da sessão
 }
 
 // Etiqueta pequena: modelo, esforço, branch.
@@ -388,7 +390,14 @@ component Row inherits Rectangle {
         spacing: 8px;
         alignment: start;
         TextButton {
-            text: "Abrir pasta";
+            text: "Detalhes";
+            icon: Icons.logs;
+            ink: t.visor;
+            font-size: 13px * Skin.text-scale;
+            clicked => { AgentsApp.details(root.a.key); }
+        }
+        TextButton {
+            text: narrow ? "Pasta" : "Abrir pasta";
             icon: Icons.grid;
             ink: t.visor;
             font-size: 13px * Skin.text-scale;

@@ -45,7 +45,8 @@ export global AiUsageApp {
 component Meter inherits VerticalLayout {
     in property <UsageLine> entry;
     in property <Colors> t;
-    in property <bool> dense;   // uma linha só: rótulo · barra · valor, sem renovação
+    in property <bool> dense;   // uma linha só: rótulo · barra · valor
+    in property <bool> reset;   // no denso, a renovação embaixo da linha (quando cabe)
     property <bool> hot: entry.level == "alarm" || entry.level == "busy";
     property <color> tint: entry.level == "alarm" ? t.alarm : t.warn;
     property <float> fill: min(max(entry.value, 0), 100) / 100;
@@ -68,27 +69,31 @@ component Meter inherits VerticalLayout {
         }
         if !AiUsageApp.compact: Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; overflow: elide; }
     }
-    if dense: HorizontalLayout {
-        spacing: 6px;
-        Text {
-            width: 30%;
-            text: entry.label;
-            color: t.sub;
-            font-family: Skin.font-mono;
-            font-size: 12px * Skin.text-scale;
-            overflow: elide;
-            vertical-alignment: center;
-        }
-        VerticalLayout {
-            horizontal-stretch: 1;
-            alignment: center;
-            Rectangle {
-                height: 5px;
-                background: t.muted.with-alpha(0.25);
-                Rectangle { x: 0; height: parent.height; width: parent.width * fill; background: hot ? tint : t.visor; }
+    if dense: VerticalLayout {
+        spacing: 1px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                width: 30%;
+                text: entry.label;
+                color: t.sub;
+                font-family: Skin.font-mono;
+                font-size: 12px * Skin.text-scale;
+                overflow: elide;
+                vertical-alignment: center;
             }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Rectangle {
+                    height: 5px;
+                    background: t.muted.with-alpha(0.25);
+                    Rectangle { x: 0; height: parent.height; width: parent.width * fill; background: hot ? tint : t.visor; }
+                }
+            }
+            Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
         }
-        Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
+        if reset && !AiUsageApp.compact && entry.reset != "": Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; overflow: elide; }
     }
 }
 
@@ -98,6 +103,8 @@ component AccountCard inherits Rectangle {
     in property <int> index;
     // lista (app com uma célula de largura): cartão baixo, para os quatro caberem num 1x2
     in property <bool> dense;
+    // no denso, mostra a renovação embaixo de cada linha (o meio-termo, quando cabe)
+    in property <bool> reset;
     property <length> mascot-w: dense ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
     border-width: 1px;
     border-color: t.muted.with-alpha(0.35);
@@ -147,7 +154,7 @@ component AccountCard inherits Rectangle {
                 wrap: dense ? no-wrap : word-wrap;
                 overflow: elide;
             }
-            for entry in account.lines: Meter { entry: entry; t: root.t; dense: root.dense; }
+            for entry in account.lines: Meter { entry: entry; t: root.t; dense: root.dense; reset: root.reset; }
         }
     }
 }
@@ -169,6 +176,14 @@ export component AiUsageView inherits Rectangle {
                 for card[i] in AiUsageApp.cards: AccountCard { account: card; index: i; t: root.t; }
             }
         }
+        // altura do cartão mais alto em cada forma, na largura de verdade (um HorizontalLayout
+        // tem a altura do filho mais alto): é o que decide qual forma cabe sem rolar
+        tall-full := HorizontalLayout {
+            for card[i] in AiUsageApp.cards: AccountCard { account: card; index: i; t: root.t; width: scroll.cw; }
+        }
+        tall-mid := HorizontalLayout {
+            for card[i] in AiUsageApp.cards: AccountCard { account: card; index: i; t: root.t; width: scroll.cw; dense: true; reset: true; }
+        }
     }
     VerticalLayout {
         spacing: 8px;
@@ -186,12 +201,12 @@ export component AiUsageView inherits Rectangle {
             property <int> fit: floor((area + gap) / (probe.min-width + gap));
             property <int> cols: max(1, min(n, min(root.span, fit)));
             property <length> cw: (area - (cols - 1) * gap) / cols;
-            // altura que cada linha de cartões teria sem rolar; abaixo de `full-h` os
-            // cartões ficam densos (1x2 com os quatro em lista, 2x1 com duas linhas)
+            // altura que cada linha de cartões teria sem rolar. Forma cheia se ela cabe; senão
+            // densa com a renovação embaixo (2x2 com quatro cartões); senão densa só com a barra
             property <int> rows: max(1, ceil(n / cols));
             property <length> row-h: (self.visible-height - (rows - 1) * gap) / rows;
-            property <length> full-h: 170px;
-            property <bool> dense: row-h < full-h;
+            property <bool> dense: row-h < tall-full.preferred-height;
+            property <bool> reset: dense && row-h >= tall-mid.preferred-height;
             VerticalLayout {
                 alignment: start;
                 spacing: scroll.gap;
@@ -203,7 +218,7 @@ export component AiUsageView inherits Rectangle {
                         width: scroll.cw;
                         // o layout passa a altura do cartão para a linha; cartões da linha ficam iguais
                         VerticalLayout {
-                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; dense: scroll.dense; }
+                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; dense: scroll.dense; reset: scroll.reset; }
                         }
                     }
                 }

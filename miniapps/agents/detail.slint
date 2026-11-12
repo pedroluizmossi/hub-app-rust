@@ -1,0 +1,355 @@
+// Janela de detalhe de uma sessão de agente: o que ela está fazendo, passo a passo (o mais
+// novo em cima). Abre pelo botão "Detalhes" do cartão (src/apps/agents.rs), numa janela
+// fora do popup do hub (aparece na barra de tarefas). Como o hub, ela não tem a moldura do
+// sistema: desenha a do visual (`Frame`), arrasta pelo cabeçalho, redimensiona pelas bordas
+// e fecha pelo botão do cabeçalho ou Esc. Os globais são da janela: o Rust aplica o visual
+// (`Skin`) a ela também. O cabeçalho segue o visual; o conteúdo, o tema do app
+// (`AgentDetail.theme`), num cartão como os do painel.
+import { ScrollView } from "std-widgets.slint";
+import { Colors, Skin, Icons } from "../../ui/theme.slint";
+import { TextButton, Icon, HeaderButton } from "../../ui/widgets.slint";
+import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
+
+// Um passo da conversa.
+export struct AgentStep {
+    // "14:32" ("" = não sei)
+    time: string,
+    // "user" | "reply" | "tool" | "error"
+    kind: string,
+    text: string,
+}
+
+// Estado da janela, preenchido pelo Rust (src/apps/agents.rs).
+export global AgentDetail {
+    in property <Colors> theme;
+    in property <string> title;
+    // "Claude · ~/Projetos/x"
+    in property <string> info;
+    // "working" | "waiting" | "idle"
+    in property <string> state;
+    in property <string> state-text;
+    in property <image> mascot;
+    // "" = a ferramenta não informa (a etiqueta some)
+    in property <string> model;
+    in property <string> effort;
+    in property <string> branch;
+    // "entrada 950 · saída 45,3 mil · cache 1,2 mi"
+    in property <string> tokens;
+    // do mais novo ao mais antigo
+    in property <[AgentStep]> steps;
+    // ainda sem a primeira leitura da conversa
+    in property <bool> loading;
+    // a sessão saiu da lista (fechou ou ficou antiga)
+    in property <bool> gone;
+    in property <bool> can-resume;
+
+    callback open-dir();
+    callback open-terminal();
+    callback resume();
+    // moldura própria: fechar, arrastar pelo cabeçalho, redimensionar pela borda `dir`
+    callback close();
+    callback start-move();
+    callback start-resize(string);
+}
+
+// Etiqueta: modelo, esforço, branch.
+component DetailChip inherits Rectangle {
+    in property <string> label;
+    in property <string> text;
+    in property <color> ink;
+    property <Colors> t: AgentDetail.theme;
+    height: 22px;
+    width: row.preferred-width + 14px;
+    horizontal-stretch: 0;
+    border-width: 1px;
+    border-color: ink.with-alpha(0.45);
+    background: ink.with-alpha(0.12);
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 5px;
+        Text {
+            text: root.label;
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.text;
+            color: ink.mix(t.text, 0.55);
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Uma linha da linha do tempo: hora, marca do tipo e o texto (que quebra).
+component StepLine inherits Rectangle {
+    in property <AgentStep> step;
+    property <Colors> t: AgentDetail.theme;
+    property <color> ink: step.kind == "user" ? t.visor : step.kind == "tool" ? t.sub : step.kind == "error" ? t.alarm : t.text;
+    property <bool> mono: step.kind == "tool";
+    accessible-role: text;
+    accessible-label: step.time + " " + step.text;
+
+    HorizontalLayout {
+        padding-top: 7px;
+        padding-bottom: 7px;
+        spacing: 10px;
+        Text {
+            width: 44px;
+            text: step.time;
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            vertical-alignment: top;
+        }
+        // marca do tipo: ">" pedido, ícone de terminal na ferramenta, "!" erro, quadrado na resposta
+        Rectangle {
+            width: 14px;
+            if step.kind == "user": Text {
+                y: 0;
+                text: ">";
+                color: t.visor;
+                font-family: Skin.font-mono;
+                font-size: 13px * Skin.text-scale;
+                font-weight: 700;
+            }
+            if step.kind == "tool": Icon {
+                y: 2px;
+                icon: Icons.terminal;
+                ink: t.sub;
+                size: 13px;
+            }
+            if step.kind == "error": Text {
+                y: 0;
+                text: "!";
+                color: t.alarm;
+                font-family: Skin.font-mono;
+                font-size: 13px * Skin.text-scale;
+                font-weight: 700;
+            }
+            if step.kind == "reply": Rectangle {
+                y: 5px;
+                width: 6px;
+                height: 6px;
+                background: t.text;
+            }
+        }
+        Text {
+            text: step.text;
+            color: ink;
+            font-family: mono ? Skin.font-mono : Skin.font-ui;
+            font-size: (mono ? 12px : 13px) * Skin.text-scale;
+            font-weight: step.kind == "user" ? 600 : 400;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: t.muted.with-alpha(0.3);
+    }
+}
+
+export component AgentDetailWindow inherits Window {
+    property <Colors> t: AgentDetail.theme;
+    property <color> state-ink: AgentDetail.gone ? t.sub
+        : AgentDetail.state == "waiting" ? t.warn
+        : AgentDetail.state == "working" ? t.ok : t.sub;
+    title: AgentDetail.title == "" ? "Agente" : AgentDetail.title;
+    preferred-width: 560px;
+    preferred-height: 680px;
+    // cabem os três botões lado a lado (sem trocar o texto pela largura: isso realimentaria
+    // a largura mínima do layout)
+    min-width: 460px;
+    min-height: 320px;
+    no-frame: true;
+    // transparente: os cantos cortados (chamfer) mostram o que há atrás
+    background: transparent;
+    default-font-family: Skin.font-ui;
+    default-font-size: 13px * Skin.text-scale;
+
+  FocusScope {
+    init => { self.focus(); }
+    key-pressed(e) => {
+        if e.text == Key.Escape {
+            AgentDetail.close();
+            return accept;
+        }
+        reject
+    }
+
+    Frame { }
+
+    VerticalLayout {
+        padding: Skin.border;
+
+        // cabeçalho: mascote da ferramenta, título e de onde é; arrasta a janela
+        Bar {
+            TouchArea {
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        AgentDetail.start-move();
+                    }
+                }
+            }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: center;
+                    Image {
+                        source: AgentDetail.mascot;
+                        image-rendering: pixelated;
+                        width: 36px;
+                        height: 36px * 14 / 16;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 1px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: AgentDetail.title;
+                        color: Skin.panel-ink;
+                        font-family: Skin.font-title;
+                        font-size: 16px * Skin.text-scale;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: AgentDetail.info;
+                        color: Skin.panel-sub;
+                        font-size: 12px * Skin.text-scale;
+                        overflow: elide;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HeaderButton {
+                        text: "Fechar";
+                        short: "fechar";
+                        icon: Icons.close;
+                        px-icon: Icons.px-close;
+                        clicked => { AgentDetail.close(); }
+                    }
+                }
+            }
+        }
+
+        // conteúdo no tema do app, num cartão afastado da borda (não invade o canto cortado)
+        Rectangle {
+            vertical-stretch: 1;
+          Rectangle {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+            background: t.bg0.mix(t.bg1, 0.75).with-alpha(Skin.card-alpha);
+            border-width: 1px;
+            border-color: t.muted.mix(t.bg0, 0.55);
+            VerticalLayout {
+                padding: 16px;
+                padding-bottom: 12px;
+                spacing: 10px;
+
+                // estado
+                HorizontalLayout {
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle { width: 10px; height: 10px; background: state-ink; }
+                    }
+                    Text {
+                        text: AgentDetail.gone ? "A sessão fechou ou ficou antiga demais para a lista." : AgentDetail.state-text;
+                        color: state-ink;
+                        font-size: 14px * Skin.text-scale;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                // etiquetas e tokens (o que a ferramenta informar)
+                if AgentDetail.model != "" || AgentDetail.effort != "" || AgentDetail.branch != "": HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    if AgentDetail.model != "": DetailChip { label: "modelo"; text: AgentDetail.model; ink: t.visor; }
+                    if AgentDetail.effort != "": DetailChip { label: "esforço"; text: AgentDetail.effort; ink: t.fur; }
+                    if AgentDetail.branch != "": DetailChip { label: "branch"; text: AgentDetail.branch; ink: t.sub; }
+                }
+                if AgentDetail.tokens != "": Text {
+                    text: AgentDetail.tokens;
+                    color: t.sub;
+                    font-family: Skin.font-mono;
+                    font-size: 12px * Skin.text-scale;
+                    overflow: elide;
+                }
+
+                Rectangle { height: 1px; background: t.muted.with-alpha(0.5); }
+                Text {
+                    text: "O QUE ESTÁ FAZENDO";
+                    color: t.sub;
+                    font-family: Skin.font-mono;
+                    font-size: 11px * Skin.text-scale;
+                    letter-spacing: 1.5px;
+                }
+
+                // passos, o mais novo em cima
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-right: 8px;
+                        for s in AgentDetail.steps: StepLine { step: s; }
+                        if AgentDetail.steps.length == 0: Text {
+                            text: AgentDetail.loading ? "Lendo a conversa…" : "Nada para mostrar desta sessão.";
+                            color: t.sub;
+                            font-size: 13px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // ações (as mesmas do cartão)
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    TextButton {
+                        text: "Abrir pasta";
+                        icon: Icons.grid;
+                        ink: t.visor;
+                        font-size: 13px * Skin.text-scale;
+                        clicked => { AgentDetail.open-dir(); }
+                    }
+                    TextButton {
+                        text: "Terminal na pasta";
+                        icon: Icons.terminal;
+                        ink: t.visor;
+                        font-size: 13px * Skin.text-scale;
+                        clicked => { AgentDetail.open-terminal(); }
+                    }
+                    if AgentDetail.can-resume: TextButton {
+                        text: "Retomar sessão";
+                        icon: Icons.play;
+                        ink: t.ok;
+                        font-size: 13px * Skin.text-scale;
+                        clicked => { AgentDetail.resume(); }
+                    }
+                }
+            }
+          }
+        }
+    }
+
+    ResizeHandles {
+        start(dir) => { AgentDetail.start-resize(dir); }
+    }
+  }
+}

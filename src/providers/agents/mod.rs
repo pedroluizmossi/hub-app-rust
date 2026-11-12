@@ -12,6 +12,10 @@
 //!
 //! Da ação em curso só sai um resumo curto (nome da ferramenta, arquivo, programa): nunca
 //! o comando inteiro nem o conteúdo, que podem ter segredos.
+//!
+//! A linha do tempo de uma sessão (`Timeline`) só é lida para a sessão que a pessoa abriu
+//! na janela de detalhe (`watch`): pedidos e respostas, cortados, e as chamadas de
+//! ferramenta no mesmo resumo curto. Ela não vai para os plugins (`serde(skip)`).
 
 mod claude;
 mod codex;
@@ -19,6 +23,7 @@ mod opencode;
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OpenFlags};
@@ -32,6 +37,13 @@ const STALE: Duration = Duration::from_secs(30 * 60);
 const TAIL: u64 = 256 * 1024;
 /// Máximo de sessões por ferramenta (subagentes entram na conta no Codex e no OpenCode).
 const LIMIT: usize = 40;
+/// Quanto do fim do log a linha do tempo lê: mais que `TAIL`, porque resultados de
+/// ferramenta e imagens ocupam a maior parte (só uma sessão é lida, e só quando muda).
+const TIMELINE_TAIL: u64 = 2 * 1024 * 1024;
+/// Passos guardados na linha do tempo (os mais recentes).
+const STEPS: usize = 80;
+/// Pedidos e respostas na linha do tempo: só o começo.
+const STEP_TEXT: usize = 400;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -112,6 +124,39 @@ pub struct Agent {
     /// Subagente: o id da sessão que o disparou (da mesma ferramenta).
     pub parent: Option<String>,
     pub details: Details,
+    /// Onde a ferramenta grava a conversa (transcript, log ou banco): a linha do tempo lê
+    /// dali. Caminho local, não vai para os plugins.
+    #[serde(skip)]
+    pub log: Option<PathBuf>,
+}
+
+/// O que é um passo da linha do tempo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepKind {
+    /// Pedido do usuário.
+    User,
+    /// Texto da resposta do agente.
+    Reply,
+    /// Chamada de ferramenta (só o resumo, como em `Agent::action`).
+    Tool,
+    /// Ferramenta que falhou ou turno interrompido.
+    Error,
+}
+
+/// Um passo da conversa: quando (ms desde 1970; 0 = não sei), o que e o texto já cortado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    pub at_ms: i64,
+    pub kind: StepKind,
+    pub text: String,
+}
+
+/// Os últimos passos da sessão aberta na janela de detalhe, do mais antigo ao mais novo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Timeline {
+    pub tool: Tool,
+    pub id: String,
+    pub steps: Vec<Step>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -121,6 +166,28 @@ pub struct AgentsSnapshot {
     pub found: Vec<Tool>,
     /// Fontes que não deu para ler.
     pub errors: Vec<(Tool, String)>,
+    /// Linha do tempo da sessão observada (`watch`), se ela está na lista.
+    #[serde(skip)]
+    pub timeline: Option<Timeline>,
+}
+
+/// Sessão aberta na janela de detalhe: o provedor lê a linha do tempo só dela.
+static WATCH: Mutex<Option<(Tool, String)>> = Mutex::new(None);
+
+/// Passa a observar a sessão (ou nenhuma, com `None`).
+pub fn watch(key: Option<(Tool, String)>) {
+    if let Ok(mut w) = WATCH.lock() {
+        *w = key;
+    }
+}
+
+/// Alguma sessão está aberta na janela de detalhe (o provedor lê no ritmo da janela aberta).
+pub fn watching() -> bool {
+    WATCH.lock().is_ok_and(|w| w.is_some())
+}
+
+fn watched() -> Option<(Tool, String)> {
+    WATCH.lock().ok().and_then(|w| w.clone())
 }
 
 /// A fonte de uma ferramenta: onde ela guarda o estado e como ler as sessões de lá.
@@ -138,6 +205,9 @@ trait Source: Send {
 
 pub struct AgentsProvider {
     sources: Vec<Box<dyn Source>>,
+    /// Última linha do tempo lida: de que arquivo, (tamanho, mtime) dele e os passos. Só
+    /// relê quando o arquivo muda.
+    timeline: Option<(PathBuf, (u64, i64), Vec<Step>)>,
 }
 
 impl Default for AgentsProvider {
@@ -148,6 +218,7 @@ impl Default for AgentsProvider {
                 Box::new(codex::Codex::default()),
                 Box::new(opencode::OpenCode),
             ],
+            timeline: None,
         }
     }
 }
@@ -164,8 +235,66 @@ impl AgentsProvider {
                 Err(e) => snap.errors.push((source.tool(), e)),
             }
         }
+        snap.timeline = self.timeline_of(&snap.agents);
         snap
     }
+
+    /// Linha do tempo da sessão observada, se ela está em `agents`.
+    fn timeline_of(&mut self, agents: &[Agent]) -> Option<Timeline> {
+        let Some((tool, id)) = watched() else {
+            self.timeline = None;
+            return None;
+        };
+        let a = agents.iter().find(|a| a.tool == tool && a.id == id)?;
+        let path = a.log.clone()?;
+        let steps = match tool {
+            // banco: a consulta é pequena e o arquivo principal nem muda a cada escrita (WAL)
+            Tool::OpenCode => opencode::timeline(&path, &id),
+            Tool::Claude | Tool::Codex => {
+                let meta = std::fs::metadata(&path).ok()?;
+                let stamp = (meta.len(), mtime_ms(&meta));
+                match &self.timeline {
+                    Some((p, s, steps)) if *p == path && *s == stamp => steps.clone(),
+                    _ => {
+                        let text = read_last(&path, meta.len(), TIMELINE_TAIL)?;
+                        // começo cortado no meio de uma linha: ela fica de fora
+                        let text =
+                            if meta.len() > TIMELINE_TAIL { text.split_once('\n').map_or("", |(_, r)| r) } else { &text };
+                        let steps = if tool == Tool::Claude {
+                            claude::timeline(text, a.parent.is_some())
+                        } else {
+                            codex::timeline(text)
+                        };
+                        self.timeline = Some((path.clone(), stamp, steps.clone()));
+                        steps
+                    }
+                }
+            }
+        };
+        Some(Timeline { tool, id, steps })
+    }
+}
+
+/// Acrescenta um passo com o texto numa linha só e cortado; texto vazio não entra.
+fn push_step(steps: &mut Vec<Step>, at_ms: i64, kind: StepKind, text: &str) {
+    let text = clip(text, STEP_TEXT);
+    if text.is_empty() {
+        return;
+    }
+    steps.push(Step { at_ms, kind, text });
+}
+
+/// Só os `STEPS` passos mais recentes.
+fn last_steps(mut steps: Vec<Step>) -> Vec<Step> {
+    if steps.len() > STEPS {
+        steps.drain(..steps.len() - STEPS);
+    }
+    steps
+}
+
+/// Hora ISO 8601 (`2026-11-11T13:57:13.069Z`) em ms desde 1970; 0 se não der para ler.
+fn iso_ms(v: &Value) -> i64 {
+    v.as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map_or(0, |t| t.timestamp_millis())
 }
 
 /// Pasta de estado: a variável de ambiente da ferramenta, ou `rel` na pasta pessoal.
@@ -206,10 +335,15 @@ fn open(path: &Path) -> Result<Connection, String> {
 
 /// Os últimos `TAIL` bytes de um arquivo de `len` bytes.
 fn read_tail(path: &Path, len: u64) -> Option<String> {
+    read_last(path, len, TAIL)
+}
+
+/// Os últimos `n` bytes de um arquivo de `len` bytes.
+fn read_last(path: &Path, len: u64, n: u64) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
-    file.seek(SeekFrom::Start(len.saturating_sub(TAIL))).ok()?;
+    file.seek(SeekFrom::Start(len.saturating_sub(n))).ok()?;
     let mut buf = Vec::new();
-    file.take(TAIL).read_to_end(&mut buf).ok()?;
+    file.take(n).read_to_end(&mut buf).ok()?;
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
@@ -269,5 +403,19 @@ mod tests {
         assert_eq!(describe("bash", &serde_json::json!({"command":"npm run build"})), "bash: npm run");
         assert_eq!(describe("Edit", &serde_json::json!({"file_path":"/home/u/p/src/bus.rs","old_string":"segredo"})), "Edit: bus.rs");
         assert_eq!(clip("um  texto\ncomprido", 9), "um texto…");
+    }
+
+    #[test]
+    fn passos_cortados_e_so_os_ultimos() {
+        let mut steps = Vec::new();
+        push_step(&mut steps, 1, StepKind::User, "  \n ");
+        assert!(steps.is_empty(), "texto vazio não vira passo");
+        for i in 0..STEPS + 5 {
+            push_step(&mut steps, i as i64, StepKind::Reply, "oi");
+        }
+        let steps = last_steps(steps);
+        assert_eq!(steps.len(), STEPS);
+        assert_eq!(steps[0].at_ms, 5);
+        assert_eq!(iso_ms(&Value::from("2026-11-11T13:57:13.069Z")), 1_794_405_433_069);
     }
 }
