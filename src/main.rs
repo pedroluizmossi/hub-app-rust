@@ -21,6 +21,7 @@ mod ui;
 const HELP: &str = "\
 Uso: miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]
        miniutils --previa <mascote> [animação] [--saida arquivo.gif]
+       miniutils --importar-mascote <pasta>
        miniutils --pastas
        miniutils --version
 
@@ -30,15 +31,17 @@ Uso: miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]
   --plugin-dev <pasta>  carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao
                         salvar; erros da tela e do script saem no terminal
   --previa              GIF de uma animação de mascote em todos os temas
-  --pastas              onde ficam os apps locais, os temas/visuais/fundos, a
-                        configuração e os registros
+  --importar-mascote    copia as folhas PNG (Nome_Animação_N.png) da pasta e das
+                        subpastas para a pasta de mascotes, uma mascote por personagem
+  --pastas              onde ficam os apps locais, os temas/visuais/fundos/mascotes,
+                        a configuração e os registros
   --version             mostra a versão (também em Configurações › Sistema)";
 
 /// Resposta do `--pastas`: os caminhos reais neste sistema.
 fn dirs_text() -> String {
     let logs = core::os::log_dir().map_or_else(|| "(sem pasta)".into(), |d| d.display().to_string());
     format!(
-        "apps locais:   {}\n               (um app por pasta, com o nome do id do manifest.toml)\ndados dos apps: {}\n               (uma pasta por app: o que ele guarda; ver [data] no APPS.md)\naparência:     {}\n               (temas/, visuais/ e fundos/, um .toml cada; exemplos em examples/aparencia)\nconfiguração:  {}\nregistros:     {logs}",
+        "apps locais:   {}\n               (um app por pasta, com o nome do id do manifest.toml)\ndados dos apps: {}\n               (uma pasta por app: o que ele guarda; ver [data] no APPS.md)\naparência:     {}\n               (temas/, visuais/ e fundos/, um .toml cada, exemplos em examples/aparencia;\n               mascotes/, uma pasta de folhas PNG por mascote: --importar-mascote)\nconfiguração:  {}\nregistros:     {logs}",
         core::plugins::dir().display(),
         core::appdata::root().display(),
         skin::user::dir().display(),
@@ -70,6 +73,27 @@ fn main() -> anyhow::Result<()> {
     if args.first().is_some_and(|a| a == "--previa") {
         match mascot::preview::run(&args[1..]) {
             Ok(path) => println!("{}", path.display()),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        }
+        return Ok(());
+    }
+    // mascote importada (folhas PNG): copia para a pasta de mascotes; não abre janela
+    if args.first().is_some_and(|a| a == "--importar-mascote") {
+        let Some(src) = args.get(1) else {
+            eprintln!("--importar-mascote <pasta>: falta a pasta com as folhas PNG");
+            std::process::exit(2);
+        };
+        let root = skin::user::dir().join(mascot::pack::DIR);
+        match mascot::pack::import(std::path::Path::new(src), &root) {
+            Ok(lines) => {
+                for l in lines {
+                    println!("{l}");
+                }
+                println!("em {}; com o MiniUtils aberto: miniutils --recarregar", root.display());
+            }
             Err(e) => {
                 eprintln!("{e}");
                 std::process::exit(2);

@@ -103,6 +103,10 @@ pub struct Details {
     pub kind: String,
     /// Subagente: a quantos disparos está da sessão do usuário (1 = direto dela).
     pub depth: Option<u32>,
+    /// Última escrita no registro da conversa (ms desde 1970; 0 = não sei). O Claude
+    /// grava a cada chamada de ferramenta e a cada resultado: escrevendo seguido, está
+    /// chamando ferramentas; calado, pensando (ou numa ferramenta demorada).
+    pub wrote_ms: i64,
 }
 
 /// Uma sessão de agente.

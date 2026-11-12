@@ -84,6 +84,13 @@ impl SettingDef {
             v.extend(crate::mascot::themes::all().iter().map(|t| t.key.to_string()));
             return v;
         }
+        // escolha de mascote: as do manifesto e, depois, as importadas que ainda não estão
+        // (a pasta de mascotes muda sem reler os manifestos)
+        if self.kind == SettingKind::Choice && sprites::is_choice(&self.options) {
+            let mut v = self.options.clone();
+            v.extend(sprites::all().iter().map(|s| s.key.to_string()).filter(|k| !self.options.contains(k)));
+            return v;
+        }
         self.options.clone()
     }
 }

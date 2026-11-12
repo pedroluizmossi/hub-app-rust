@@ -282,7 +282,7 @@ impl Plugin {
                 return Err(format!("[[mood]] humor desconhecido: {}", r.mood));
             }
         }
-        if !sprites::SPRITES.iter().any(|s| s.key == manifest.icon) {
+        if sprites::find(&manifest.icon).is_none() {
             return Err(format!("icon = \"{}\": não há essa mascote", manifest.icon));
         }
         add_standard_settings(&mut manifest);
@@ -552,7 +552,7 @@ fn add_standard_settings(m: &mut Manifest) {
     }
     if m.setting("mascot").is_none() {
         let mut options = vec![m.icon.clone()];
-        options.extend(sprites::SPRITES.iter().map(|s| s.key.to_string()).filter(|k| *k != m.icon));
+        options.extend(sprites::all().iter().map(|s| s.key.to_string()).filter(|k| *k != m.icon));
         m.settings.push(SettingDef {
             key: "mascot".into(),
             label: "Mascote".into(),

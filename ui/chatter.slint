@@ -81,6 +81,8 @@ export component SpeechBox inherits Rectangle {
                     Image {
                         source: Chatter.portrait;
                         image-rendering: pixelated;
+                        // mascote importada pode não ser 16×14: cabe sem deformar
+                        image-fit: contain;
                         width: parent.width - 4px;
                         height: self.width * 14 / 16;
                         x: 2px;

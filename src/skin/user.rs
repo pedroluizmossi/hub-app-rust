@@ -4,7 +4,8 @@
 //! <dados>/miniutils/            Linux: ~/.local/share/miniutils   Windows: %APPDATA%\miniutils
 //! ├── temas/<chave>.toml        cores de um tema de app (e da mascote)
 //! ├── visuais/<chave>.toml      visual da janela
-//! └── fundos/<chave>.toml       fundo do painel, em camadas
+//! ├── fundos/<chave>.toml       fundo do painel, em camadas
+//! └── mascotes/<chave>/         mascote importada: folhas PNG (ver `mascot/pack.rs`)
 //! ```
 //!
 //! A chave é o nome do arquivo. Tema e visual podem partir de um existente (`base`) e
@@ -21,6 +22,7 @@ use serde::Deserialize;
 use super::backdrop::{self, Fundo, Layer};
 use super::color::parse_hex;
 use super::{Buttons, FONTS, NUM_FIELDS, Skin, Tag, TitleStyle};
+use crate::mascot::pack;
 use crate::mascot::themes::{self, Theme};
 
 pub const TEMAS: &str = "temas";
@@ -49,26 +51,33 @@ pub struct Loaded {
     pub themes: Vec<Theme>,
     pub skins: Vec<Skin>,
     pub fundos: Vec<Fundo>,
+    /// Mascotes importadas que entraram (as próprias ficam em `mascot::pack`).
+    pub mascots: usize,
     pub skipped: Vec<Skipped>,
 }
 
 impl Loaded {
-    /// "2 temas · 1 visual · 0 fundos"
+    /// "2 temas · 1 visual · 0 fundos · 3 mascotes"
     pub fn summary(&self) -> String {
         let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
         format!(
-            "{} · {} · {}",
+            "{} · {} · {} · {}",
             n(self.themes.len(), "tema", "temas"),
             n(self.skins.len(), "visual", "visuais"),
-            n(self.fundos.len(), "fundo", "fundos")
+            n(self.fundos.len(), "fundo", "fundos"),
+            n(self.mascots, "mascote", "mascotes")
         )
     }
 }
 
-/// Lê a pasta e troca os temas, visuais e fundos de arquivo do programa.
+/// Lê a pasta e troca os temas, visuais, fundos e mascotes de arquivo do programa.
 pub fn reload() -> Loaded {
     let root = dir();
-    let loaded = load(&root);
+    let mut loaded = load(&root);
+    let (arts, skipped) = pack::load(&root.join(pack::DIR));
+    loaded.mascots = arts.len();
+    loaded.skipped.extend(skipped.into_iter().map(|s| Skipped { file: s.dir, reason: s.reason }));
+    pack::set(arts);
     for s in &loaded.skipped {
         log::warn!("{} ignorado: {}", root.join(&s.file).display(), s.reason);
     }
@@ -317,7 +326,7 @@ mod tests {
         // o visual de exemplo usa o tema e o fundo de exemplo
         let s = &l.skins[0];
         assert_eq!((s.app_theme, s.backdrop), (l.themes[0].key, l.fundos[0].key));
-        assert_eq!(l.summary(), "1 tema · 1 visual · 1 fundo");
+        assert_eq!(l.summary(), "1 tema · 1 visual · 1 fundo · 0 mascotes");
     }
 
     #[test]

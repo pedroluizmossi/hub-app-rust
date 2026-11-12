@@ -28,11 +28,13 @@ export component Mascot inherits Rectangle {
     preferred-width: Skin.mascot-size;
     preferred-height: Skin.mascot-size * 14 / 16;
     property <float> glow: mood == "alarm" && mod(f, 4) < 2 ? 1.6 : 1;
+    // largura / altura do quadro: 16×14 nas desenhadas; nas importadas (PNG), a do desenho
+    property <float> ratio: frame.height > 0 ? frame.width / frame.height : 16 / 14;
 
-    // o quadro 16×14 ocupa o maior tamanho que cabe na caixa, sem deformar (escala automática)
+    // o quadro ocupa o maior tamanho que cabe na caixa, sem deformar (escala automática)
     stage := Rectangle {
-        width: min(root.width, root.height * 16 / 14);
-        height: self.width * 14 / 16;
+        width: min(root.width, root.height * ratio);
+        height: self.width / ratio;
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
 
@@ -460,8 +462,9 @@ component MascotThumb inherits Rectangle {
     if source.width > 0: Image {
         source: root.source;
         image-rendering: pixelated;
-        width: min(root.width, root.height * 16 / 14);
-        height: self.width * 14 / 16;
+        // 16×14 nas desenhadas; nas importadas, a proporção do PNG
+        width: min(root.width, root.height * source.width / max(1, source.height));
+        height: self.width * source.height / max(1, source.width);
     }
     if source.width == 0: Path {
         width: min(root.width, root.height) * 0.6;

@@ -54,26 +54,28 @@ impl Hub {
             (pages, cfg.skin.clone())
         };
         let moods: Vec<Mood> = (0..pages.len()).map(|i| self.page_mood(i)).collect();
-        let fingerprint = format!("{pages:?}|{moods:?}|{skin_key}|{current}");
+        // a geração das importadas: a pasta de mascotes mudou, a lista do seletor também
+        let fingerprint = format!("{pages:?}|{moods:?}|{skin_key}|{current}|{}", sprites::generation());
         if !force && *self.pages_fingerprint.borrow() == fingerprint {
             return;
         }
         *self.pages_fingerprint.borrow_mut() = fingerprint;
         let theme = themes::get(skin::get(&skin_key).app_theme);
+        let all = sprites::all();
         let infos: Vec<PageInfo> = pages
             .iter()
             .zip(&moods)
             .map(|((name, icon, n), mood)| PageInfo {
                 name: name.as_str().into(),
                 icon: render::image(sprites::get(icon), theme, *mood, 1),
-                icon_index: sprites::SPRITES.iter().position(|s| s.key == icon).unwrap_or(0) as i32,
+                icon_index: all.iter().position(|s| s.key == icon).unwrap_or(0) as i32,
                 mood: mood.as_str().into(),
                 theme: render::colors(theme),
                 apps: *n as i32,
             })
             .collect();
         let names: Vec<SharedString> = pages.iter().map(|(n, _, _)| SharedString::from(n.as_str())).collect();
-        let mascots: Vec<SharedString> = sprites::SPRITES.iter().map(|s| s.label.into()).collect();
+        let mascots: Vec<SharedString> = all.iter().map(|s| s.label.into()).collect();
         self.ui.set_pages(ModelRc::new(VecModel::from(infos)));
         self.ui.set_page_names(ModelRc::new(VecModel::from(names)));
         self.ui.set_mascots(ModelRc::new(VecModel::from(mascots)));
@@ -145,7 +147,7 @@ impl Hub {
     }
 
     pub(super) fn page_icon(&self, i: usize, k: usize) {
-        let Some(s) = sprites::SPRITES.get(k) else { return };
+        let Some(s) = sprites::all().get(k).copied() else { return };
         self.edit_pages(|cfg| match cfg.pages.get_mut(i) {
             Some(p) if p.icon != s.key => {
                 p.icon = s.key.into();

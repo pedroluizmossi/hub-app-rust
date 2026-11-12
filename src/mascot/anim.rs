@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use super::Mood;
 use super::clips::{self, Clips, Grid};
+use super::pack;
 use super::sprites::Sprite;
 
 /// "Reduzir movimento" (config global): as animações desenhadas ficam na pose base.
@@ -25,12 +26,17 @@ pub fn set_calm(on: bool) {
     CALM.store(on, Ordering::Relaxed);
 }
 
+/// "Reduzir movimento" está ligado.
+pub fn calm() -> bool {
+    CALM.load(Ordering::Relaxed)
+}
+
 thread_local! {
     /// Menor quadro (ms) pedido pelas mascotes desenhadas desde a última leitura do hub.
     static WANT_MS: Cell<u32> = const { Cell::new(0) };
 }
 
-fn request_frame_ms(ms: u32) {
+pub(crate) fn request_frame_ms(ms: u32) {
     WANT_MS.with(|w| {
         if w.get() == 0 || ms < w.get() {
             w.set(ms);
@@ -108,12 +114,15 @@ pub struct Look {
     pub frame: u32,
     /// Quadro de uma animação desenhada (`clips.rs`); `None` = o desenho base.
     pub pose: Option<Grid>,
+    /// Tempo desta mascote em ms: escolhe o quadro das mascotes importadas, que têm o
+    /// próprio ritmo (`pack.rs`).
+    pub ms: u64,
 }
 
 impl Look {
     /// Sem `Animator`: piscada e quadro vêm do contador global (bandeja, ícones das listas).
     pub fn from_frame(mood: Mood, frame: u32) -> Self {
-        Look { mood, reaction: None, blink: frame.is_multiple_of(25), frame, pose: None }
+        Look { mood, reaction: None, blink: frame.is_multiple_of(25), frame, pose: None, ms: frame as u64 * FRAME.as_millis() as u64 }
     }
 }
 
@@ -191,7 +200,7 @@ impl Animator {
         let frame = (t.as_millis() / FRAME.as_millis()) as u32;
         let in_cycle = t.as_millis() % self.blink_every.as_millis();
         let blink = reaction.is_none() && matches!(mood, Mood::Idle | Mood::Happy) && in_cycle < BLINK.as_millis();
-        Look { mood, reaction, blink, frame, pose: None }
+        Look { mood, reaction, blink, frame, pose: None, ms: t.as_millis() as u64 }
     }
 
     /// Como `look`, com o quadro da animação desenhada de `sprite`, se ela tiver (ver
@@ -199,6 +208,13 @@ impl Animator {
     /// variações. Com "reduzir movimento", fica na pose base.
     pub fn look_with(&mut self, sprite: &Sprite, mood: Mood, now: Instant) -> Look {
         let mut look = self.look(mood, now);
+        // importada: o quadro sai do tempo (`pack::Art::pick`); só pede o ritmo dela
+        if let Some(art) = pack::art(sprite) {
+            if !calm() && let Some(ms) = art.frame_ms(&look) {
+                request_frame_ms(ms);
+            }
+            return look;
+        }
         if CALM.load(Ordering::Relaxed) {
             return look;
         }

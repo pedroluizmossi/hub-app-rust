@@ -9,6 +9,9 @@
 //! papéis: cada letra minúscula tem a própria cor (`Pixel::pal`) e `e` é o olho, que segue
 //! o humor (fecha dormindo, fica laranja agitado, vermelho no alarme).
 
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 pub struct Sprite {
     pub key: &'static str,
     pub label: &'static str,
@@ -226,6 +229,33 @@ pub static SPRITES: &[Sprite] = &[
             "KPPFFFFTTFFFFPPK",
             ".KPPFFFFFFFFPPK.",
             "..KKKKKKKKKKKK..",
+        ],
+    },
+    Sprite {
+        key: "security",
+        label: "Security",
+        eye_bg: b'F',
+        shade_from: 99,
+        fur: None,
+        ear: None,
+        pixel: None,
+        // segurança: quepe com distintivo e aba (D, visível em fundo escuro), sobrancelhas
+        // de rosto sério, colarinho com gravata e o distintivo do peito no LED (segue o humor)
+        grid: [
+            "...KKKKKKKKKK...",
+            ".KKPPPPPPPPPPKK.",
+            "KPPPPPPMMPPPPPPK",
+            "KHPPPPPMMPPPPPPK",
+            ".KSSSSSSSSSSSSK.",
+            "..DDDDDDDDDDDD..",
+            "..KFKKFFFFKKFK..",
+            "..KFEWFFFFEWFK..",
+            "..KFEEFFFFEEFK..",
+            "..KFFFFFFFFFFK..",
+            "..KFFFTTTTFFFK..",
+            "...KKFFFFFFKK...",
+            ".KPPPPMKKMPPPPK.",
+            "KPAPPPPKKPPPPPPK",
         ],
     },
     Sprite {
@@ -901,13 +931,45 @@ pub static SPRITES: &[Sprite] = &[
     },
 ];
 
-pub fn get(key: &str) -> &'static Sprite {
-    SPRITES.iter().find(|s| s.key == key).unwrap_or(&SPRITES[0])
+/// Mascotes importadas (`pack.rs`), depois das embutidas. Quem troca é `pack::set`.
+static EXTRA: RwLock<Vec<&'static Sprite>> = RwLock::new(Vec::new());
+/// Muda a cada troca das importadas: os caches de desenhos (seletores) se refazem.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Troca as mascotes importadas.
+pub fn set_extra(list: Vec<&'static Sprite>) {
+    if let Ok(mut extra) = EXTRA.write() {
+        *extra = list;
+    }
+    GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
-/// As alternativas de uma opção são mascotes: todas são chaves de `SPRITES` (ou "auto"), e
-/// há pelo menos uma mascote. É como o hub reconhece uma opção de mascote num manifesto.
+/// Número da lista atual (ver `GENERATION`).
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
+}
+
+/// Todas as mascotes: as embutidas e, depois, as importadas. É a ordem dos seletores.
+pub fn all() -> Vec<&'static Sprite> {
+    let extra = EXTRA.read().map(|e| e.clone()).unwrap_or_default();
+    SPRITES.iter().chain(extra).collect()
+}
+
+pub fn find(key: &str) -> Option<&'static Sprite> {
+    if let Some(s) = SPRITES.iter().find(|s| s.key == key) {
+        return Some(s);
+    }
+    EXTRA.read().ok()?.iter().copied().find(|s| s.key == key)
+}
+
+/// A mascote `key`, ou a primeira se não existir (uma importada que saiu da pasta).
+pub fn get(key: &str) -> &'static Sprite {
+    find(key).unwrap_or(&SPRITES[0])
+}
+
+/// As alternativas de uma opção são mascotes: todas são chaves de mascote (ou "auto"), e
+/// há pelo menos uma. É como o hub reconhece uma opção de mascote num manifesto.
 pub fn is_choice(options: &[String]) -> bool {
-    let sprite = |o: &String| SPRITES.iter().any(|s| s.key == *o);
+    let sprite = |o: &String| find(o).is_some();
     options.iter().any(sprite) && options.iter().all(|o| o == "auto" || sprite(o))
 }

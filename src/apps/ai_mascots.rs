@@ -139,7 +139,7 @@ mod tests {
         for sprite in MASCOTS {
             assert!(sprite.grid.iter().all(|row| row.len() == 16));
             assert!(sprite.grid.iter().any(|row| row.contains('e')));
-            let look = Look { mood: Mood::Idle, reaction: None, blink: false, frame: 3, pose: None };
+            let look = Look { mood: Mood::Idle, reaction: None, blink: false, frame: 3, pose: None, ms: 375 };
             let awake = render::render_look(sprite, theme, &look);
             let blink = render::render_look(sprite, theme, &Look { blink: true, ..look });
             let alarm = render::render_look(sprite, theme, &Look { mood: Mood::Alarm, ..look });

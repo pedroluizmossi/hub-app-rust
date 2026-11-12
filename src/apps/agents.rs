@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
@@ -13,10 +13,11 @@ use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
 use super::kit::{HeaderMascot, Speech, plural};
 use crate::mascot::anim::Reaction;
-use crate::mascot::{Mood, render, sprites};
+use crate::mascot::stroll::{Pose, Script, Stage};
+use crate::mascot::{Mood, anim, pack, render, sprites};
 use crate::core::bus::Topic;
 use crate::providers::agents::{self, Agent, AgentsSnapshot, State, Step, StepKind, Tool, clip};
-use crate::ui::{AgentDetail, AgentDetailWindow, AgentRow, AgentStep, AgentSub, AgentsApp, Anim, HubWindow};
+use crate::ui::{AgentDetail, AgentDetailWindow, AgentRow, AgentStep, AgentSub, AgentWalker, AgentsApp, Anim, HubWindow};
 
 const SPEECH_TTL: Duration = Duration::from_secs(30);
 /// Subagentes desenhados andando na faixa de uma sessão (o contador mostra todos).
@@ -45,6 +46,8 @@ pub struct AgentsMini {
     cards: Vec<Card>,
     /// Mascote de cada ferramenta em cada estado (parada: desenhada uma vez por tema).
     faces: HashMap<(Tool, State), slint::Image>,
+    /// Subagentes andando com as mascotes importadas.
+    heroes: Heroes,
     face: HeaderMascot,
     /// Janela de detalhe (uma só: abrir outra sessão troca o que ela mostra). Criada no
     /// primeiro uso e só escondida ao fechar.
@@ -85,6 +88,7 @@ impl AgentsMini {
             selected: None,
             cards: Vec::new(),
             faces: HashMap::new(),
+            heroes: Heroes::default(),
             face: HeaderMascot::new(13),
             detail: None,
         }));
@@ -279,6 +283,16 @@ impl AgentsMini {
                 }
             }
         }
+        // subagentes andando: quem chegou, quem saiu (pula) e quem está chamando ferramentas
+        let on = self.host.config.borrow().bool(&self.manifest, "heroes");
+        let walking: Vec<(String, Vec<(String, bool)>)> = list
+            .iter()
+            .map(|(a, subs)| {
+                let working = subs.iter().filter(|s| s.state == State::Working).take(MAX_WALKERS);
+                (session_key(a), working.map(|s| (s.id.clone(), self.heroes.calling_tools(s, now))).collect())
+            })
+            .collect();
+        self.heroes.sync(on, &walking);
         self.cards = cards;
         let list: Vec<Agent> = list.into_iter().map(|(a, _)| a.clone()).collect();
         self.shown = list.clone();
@@ -327,6 +341,7 @@ impl AgentsMini {
             open: c.open,
             walkers: c.walkers as i32,
             walker: self.face(c.tool, State::Working),
+            heroes: self.heroes.model(&c.key),
             model: c.model.as_str().into(),
             effort: c.effort.as_str().into(),
             branch: c.branch.as_str().into(),
@@ -437,6 +452,8 @@ struct SubLine {
 struct Card {
     /// Identifica a sessão nos cliques (ver `session_key`).
     key: String,
+    /// Subagentes trabalhando que aparecem andando (até `MAX_WALKERS`), pelo id.
+    walking: Vec<String>,
     tool: Tool,
     state: State,
     title: String,
@@ -462,6 +479,186 @@ struct Card {
     more_subs: usize,
 }
 
+/// Os subagentes andando com as mascotes importadas: uma faixa (`Stage`) por cartão, cada
+/// subagente com a mascote que o rodízio deu a ele.
+#[derive(Default)]
+struct Heroes {
+    /// Mascotes que andam e os quadros delas, da geração da lista de mascotes em que foram
+    /// lidas (recarregar a pasta troca tudo).
+    cast: Option<(u64, Vec<Hero>)>,
+    roster: Roster,
+    /// Faixa de cada cartão, pela chave da sessão.
+    stages: HashMap<String, Stage>,
+    /// O que a tela mostra de cada cartão (o mesmo modelo enquanto o cartão existir: a
+    /// linha não é recriada a cada quadro).
+    models: HashMap<String, Rc<VecModel<AgentWalker>>>,
+    /// Última ação de cada subagente e até quando (ms) ele conta como chamando ferramentas.
+    busy: HashMap<String, (String, i64)>,
+    clock: Option<Instant>,
+}
+
+/// Uma mascote que anda: o roteiro e os quadros (direita, esquerda) de cada animação.
+struct Hero {
+    script: &'static Script,
+    frames: Vec<(Vec<slint::Image>, Vec<slint::Image>)>,
+}
+
+/// Escrevendo no registro há menos disto (ou com ação nova há menos de `BUSY_MS`): está
+/// chamando ferramentas, e a mascote corre.
+const WROTE_MS: i64 = 4000;
+const BUSY_MS: i64 = 5000;
+
+impl Heroes {
+    /// Relógio das faixas (ms desde o primeiro uso; só anda para a frente).
+    fn now(&mut self) -> u64 {
+        self.clock.get_or_insert_with(Instant::now).elapsed().as_millis() as u64
+    }
+
+    /// As mascotes que andam (lidas de novo quando a pasta de mascotes é recarregada).
+    fn load(&mut self) -> usize {
+        let generation = sprites::generation();
+        if self.cast.as_ref().is_none_or(|(g, _)| *g != generation) {
+            let list = pack::walkers()
+                .into_iter()
+                .filter_map(|art| {
+                    let t = art.troupe()?;
+                    let imgs = |v: &[pack::Buf]| v.iter().map(|b| slint::Image::from_rgba8(b.clone())).collect();
+                    let frames = (0..t.script.names.len())
+                        .map(|c| {
+                            let (right, left) = t.frames(c);
+                            (imgs(right), imgs(left))
+                        })
+                        .collect();
+                    Some(Hero { script: &t.script, frames })
+                })
+                .collect();
+            self.cast = Some((generation, list));
+            self.stages.clear();
+        }
+        self.cast.as_ref().map_or(0, |(_, l)| l.len())
+    }
+
+    /// O subagente está chamando ferramentas: gravou no registro há pouco, ou a ação
+    /// dele mudou há pouco (as ferramentas que não dizem quando gravaram).
+    fn calling_tools(&mut self, sub: &Agent, now: i64) -> bool {
+        let wrote = sub.details.wrote_ms;
+        let until = match self.busy.get(&sub.id) {
+            Some((action, until)) if *action == sub.action => *until,
+            _ if sub.action.is_empty() => 0,
+            _ => now + BUSY_MS,
+        };
+        self.busy.insert(sub.id.clone(), (sub.action.clone(), until));
+        (wrote > 0 && now - wrote < WROTE_MS) || now < until
+    }
+
+    /// O modelo que a tela mostra para o cartão `key`.
+    fn model(&mut self, key: &str) -> ModelRc<AgentWalker> {
+        ModelRc::from(self.models.entry(key.to_string()).or_default().clone())
+    }
+
+    /// Quem anda em cada cartão agora: (cartão, [(subagente, chamando ferramentas)]).
+    /// Desligado (ou sem mascote que ande), as faixas esvaziam e a tela usa a mascote da
+    /// ferramenta.
+    fn sync(&mut self, on: bool, walking: &[(String, Vec<(String, bool)>)]) {
+        let n = if on { self.load() } else { 0 };
+        self.models.retain(|key, _| walking.iter().any(|(k, _)| k == key));
+        self.busy.retain(|id, _| walking.iter().any(|(_, subs)| subs.iter().any(|(s, _)| s == id)));
+        // subagente que parou de andar libera o lugar (o próximo novo segue o rodízio)
+        self.roster.keep(walking.iter().flat_map(|(_, subs)| subs.iter().map(|(id, _)| id)));
+        if n == 0 {
+            self.stages.clear();
+            for m in self.models.values() {
+                if m.row_count() > 0 {
+                    m.set_vec(Vec::new());
+                }
+            }
+            return;
+        }
+        let now = self.now();
+        let Some((_, heroes)) = &self.cast else { return };
+        let scripts: Vec<&Script> = heroes.iter().map(|h| h.script).collect();
+        self.stages.retain(|key, _| walking.iter().any(|(k, _)| k == key));
+        for (key, subs) in walking {
+            let here: Vec<(String, usize, bool)> =
+                subs.iter().map(|(id, busy)| (id.clone(), self.roster.pick(id, n), *busy)).collect();
+            let stage = self.stages.entry(key.clone()).or_default();
+            stage.cast(now, &here, &scripts);
+            stage.step(now, &scripts);
+        }
+        self.draw(now);
+    }
+
+    /// Um quadro: anda o tempo e redesenha as faixas que têm alguém.
+    fn tick(&mut self) {
+        if self.stages.values().all(Stage::is_empty) {
+            return;
+        }
+        let now = self.now();
+        if let Some((_, heroes)) = &self.cast {
+            let scripts: Vec<&Script> = heroes.iter().map(|h| h.script).collect();
+            for stage in self.stages.values_mut() {
+                stage.step(now, &scripts);
+            }
+        }
+        self.draw(now);
+    }
+
+    /// Passa as poses de cada faixa para a tela e pede ao hub o ritmo das animações.
+    fn draw(&mut self, now: u64) {
+        let Some((_, heroes)) = &self.cast else { return };
+        let scripts: Vec<&Script> = heroes.iter().map(|h| h.script).collect();
+        let calm = anim::calm();
+        for (key, stage) in &self.stages {
+            let Some(model) = self.models.get(key) else { continue };
+            let rows: Vec<AgentWalker> = stage
+                .poses(now, &scripts, calm)
+                .into_iter()
+                .map(|Pose { hero, clip, frame, right, x }| {
+                    let (r, l) = &heroes[hero].frames[clip];
+                    AgentWalker { frame: if right { &r[frame] } else { &l[frame] }.clone(), x }
+                })
+                .collect();
+            if model.row_count() == rows.len() {
+                for (i, row) in rows.into_iter().enumerate() {
+                    model.set_row_data(i, row);
+                }
+            } else {
+                model.set_vec(rows);
+            }
+            if !calm && let Some(ms) = stage.frame_ms(&scripts) {
+                anim::request_frame_ms(ms);
+            }
+        }
+    }
+}
+
+/// Qual mascote importada anda por cada subagente: cada subagente novo pega a próxima, em
+/// rodízio, e fica com ela enquanto estiver andando.
+#[derive(Default)]
+struct Roster {
+    of: HashMap<String, usize>,
+    next: usize,
+}
+
+impl Roster {
+    /// A mascote (0..`n`) do subagente `id`.
+    fn pick(&mut self, id: &str, n: usize) -> usize {
+        if let Some(i) = self.of.get(id) {
+            return i % n;
+        }
+        let i = self.next % n;
+        self.next = self.next.wrapping_add(1);
+        self.of.insert(id.to_string(), i);
+        i
+    }
+
+    /// Esquece quem não está mais andando.
+    fn keep<'a>(&mut self, walking: impl Iterator<Item = &'a String>) {
+        let alive: std::collections::HashSet<&String> = walking.collect();
+        self.of.retain(|id, _| alive.contains(id));
+    }
+}
+
 /// Chave estável de uma sessão para a tela: os cliques chegam com ela, não com a posição
 /// da linha, que muda quando a lista se reordena entre uma leitura e outra.
 fn session_key(a: &Agent) -> String {
@@ -480,6 +677,7 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool) -> Card {
     }
     Card {
         key: session_key(a),
+        walking: subs.iter().filter(|s| s.state == State::Working).take(MAX_WALKERS).map(|s| s.id.clone()).collect(),
         tool: a.tool,
         state: a.state,
         title: a.title.clone(),
@@ -828,6 +1026,7 @@ impl MiniApp for AgentsMini {
         if self.refresh_mascot() {
             self.push_mascot(ui);
         }
+        self.heroes.tick();
     }
 
     fn settings_changed(&mut self, ui: &HubWindow) {
@@ -926,6 +1125,7 @@ mod tests {
         let c = card(&full, &many, "~/p", now, false);
         assert_eq!((c.subs.len(), c.more_subs, c.subs[0].kind.as_str()), (MAX_SUB_LINES, 2, ""));
         assert_eq!(c.walkers, MAX_WALKERS.min(MAX_SUB_LINES + 2));
+        assert_eq!(c.walking.len(), c.walkers);
 
         assert_eq!((compact(1_500).as_str(), duration(8_400).as_str()), ("1,5 k", "8 s"));
         assert_eq!(stop_text("novo_motivo"), "parou por novo_motivo");
@@ -1012,5 +1212,19 @@ mod tests {
         assert_eq!(short_dir("/home/eu", "/home/eu"), "~");
         assert_eq!(short_dir("/home/eunice/x", "/home/eu"), "/home/eunice/x");
         assert_eq!(short_dir("/srv/x", ""), "/srv/x");
+    }
+
+    #[test]
+    fn cada_subagente_novo_pega_o_proximo_heroi() {
+        let mut r = Roster::default();
+        assert_eq!((r.pick("a", 3), r.pick("b", 3), r.pick("c", 3), r.pick("d", 3)), (0, 1, 2, 0));
+        // o mesmo subagente fica com o seu
+        assert_eq!(r.pick("b", 3), 1);
+        // quem parou de andar sai; o próximo novo segue o rodízio
+        let andando = ["b".to_string()];
+        r.keep(andando.iter());
+        assert_eq!((r.pick("b", 3), r.pick("e", 3)), (1, 1));
+        // menos heróis do que antes (a pasta mudou): continua dentro da lista
+        assert!(r.pick("e", 1) == 0);
     }
 }

@@ -3352,6 +3352,7 @@ dependencies = [
  "log",
  "miniutils-ui",
  "notify-rust",
+ "png",
  "raw-window-handle",
  "reqwest",
  "rhai",

@@ -25,6 +25,8 @@ rusqlite = { version = "0.37", features = ["bundled", "hooks", "limits"] }
 chrono = "0.4"
 # prévia das animações em GIF (`miniutils --previa`); já vinha com as dependências do Slint
 gif = "0.14"
+# mascotes importadas (PNG da pessoa, ver mascot/pack.rs); a mesma versão do sprite-import
+png = "0.18"
 # plugins com tela própria: o .slint do plugin é interpretado em tempo de execução e
 # encaixado na janela (ComponentContainer). Mesma versão exata do slint.
 slint-interpreter = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "internal"] }

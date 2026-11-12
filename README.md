@@ -80,6 +80,13 @@ fala e quando. Clique numa mascote para ela falar.
 São mais de trinta mascotes, de neko e capivara a chaleira e cogumelo, e cada app escolhe a
 sua em Configurações. Para ver uma animação: `miniutils --previa <mascote>`.
 
+Dá para trazer as suas, em pixel art de qualquer tamanho (16×16, 32×32, 64×64…): folhas
+PNG com os quadros lado a lado, uma por animação, em `mascotes/<nome>/` na pasta de dados.
+`miniutils --importar-mascote <pasta>` copia um pacote (um personagem por subpasta) e escreve
+a configuração; elas entram em todo seletor de mascote e andam como subagentes no app de
+agentes. Ficam só na sua máquina: confira a licença do pacote antes de publicar o desenho em
+outro lugar. O formato está no [DESIGN.md](DESIGN.md#mascotes-importadas-png).
+
 <br clear="right">
 
 ## Um visual para cada humor
@@ -213,6 +220,8 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
 --previa <mascote> [animação] [--saida arquivo.gif]
                       GIF de uma animação de mascote em todos os temas
+--importar-mascote <pasta>
+                      copia folhas PNG (Nome_Animação_N.png) para a pasta de mascotes
 --pastas              onde ficam os apps locais, os dados dos apps, a configuração e os registros
 --version             mostra a versão (também em Configurações › Sistema)
 ```

@@ -9,7 +9,7 @@ import { CdPlayerApp } from "../miniapps/cdplayer/view.slint";
 import { AiUsageApp, UsageCard, UsageLine } from "../miniapps/ai_usage/view.slint";
 import { PortsApp, PortRow } from "../miniapps/ports/view.slint";
 import { TodoApp, TodoRow } from "../miniapps/todo/view.slint";
-import { AgentsApp, AgentRow, AgentSub } from "../miniapps/agents/view.slint";
+import { AgentsApp, AgentRow, AgentSub, AgentWalker } from "../miniapps/agents/view.slint";
 import { AgentDetailWindow, AgentDetail, AgentStep } from "../miniapps/agents/detail.slint";
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
@@ -30,7 +30,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, AgentDetail, AgentStep, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 // janelas além do hub: cada uma tem os próprios globais (o Rust aplica o visual a elas)
 export { AgentDetailWindow }
 // structs que o Rust preenche (definidas em models.slint)

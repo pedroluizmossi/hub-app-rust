@@ -38,6 +38,12 @@ type = "bool"
 default = false
 
 [[settings]]
+key = "heroes"
+label = "Subagentes andando com as mascotes importadas (um diferente a cada novo)"
+type = "bool"
+default = true
+
+[[settings]]
 key = "mascot"
 label = "Mascote"
 type = "choice"

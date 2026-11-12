@@ -92,19 +92,19 @@ impl Hub {
         self.ui.set_tray_icon_images(ModelRc::new(VecModel::from(images)));
         let auto = |label: &str| std::iter::once(SharedString::from(label));
         let icons: Vec<SharedString> =
-            auto("Automático").chain(sprites::SPRITES.iter().map(|s| s.label.into())).collect();
+            auto("Automático").chain(sprites::all().iter().map(|s| s.label.into())).collect();
         let themes_: Vec<SharedString> =
             auto("Automático").chain(themes::all().iter().map(|t| t.label.into())).collect();
         let pos = |found: Option<usize>| found.map_or(0, |i| i as i32 + 1);
         self.ui.set_tray_icons(ModelRc::new(VecModel::from(icons)));
-        self.ui.set_tray_icon_index(pos(sprites::SPRITES.iter().position(|s| s.key == icon)));
+        self.ui.set_tray_icon_index(pos(sprites::all().iter().position(|s| s.key == icon)));
         self.ui.set_tray_themes(ModelRc::new(VecModel::from(themes_)));
         self.ui.set_tray_theme_index(pos(themes::all().iter().position(|t| t.key == theme)));
     }
 
     /// Troca a mascote do ícone da bandeja. 0 = automático (o app em pior estado).
     pub(super) fn choose_tray_icon(&self, i: usize) {
-        let key = if i == 0 { Some("auto") } else { sprites::SPRITES.get(i - 1).map(|s| s.key) };
+        let key = if i == 0 { Some("auto") } else { sprites::all().get(i - 1).map(|s| s.key) };
         self.set_tray_choice(key, |cfg| &mut cfg.tray_icon);
     }
 
@@ -299,10 +299,10 @@ impl Hub {
         self.rebuild_lists();
     }
 
-    /// Abre a pasta de temas, visuais e fundos (cria as três subpastas antes).
+    /// Abre a pasta de temas, visuais, fundos e mascotes (cria as subpastas antes).
     pub(super) fn open_looks_dir(&self) {
         let root = skin::user::dir();
-        for sub in [skin::user::TEMAS, skin::user::VISUAIS, skin::user::FUNDOS] {
+        for sub in [skin::user::TEMAS, skin::user::VISUAIS, skin::user::FUNDOS, crate::mascot::pack::DIR] {
             if let Err(e) = std::fs::create_dir_all(root.join(sub)) {
                 log::warn!("não consegui criar {}: {e}", root.join(sub).display());
                 return;

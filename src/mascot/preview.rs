@@ -136,7 +136,7 @@ fn look_for(name: &str, all: &clips::Clips) -> Look {
         "surprised" => Some(Reaction::Surprised),
         _ => None,
     };
-    Look { mood, reaction, blink: false, frame: 0, pose: None }
+    Look { mood, reaction, blink: false, frame: 0, pose: None, ms: 0 }
 }
 
 /// Quadros e durações; uma animação que repete toca voltas até somar `MIN_LOOP_MS`.

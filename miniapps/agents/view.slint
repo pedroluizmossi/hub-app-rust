@@ -21,6 +21,14 @@ export struct AgentSub {
     state-text: string,
 }
 
+// Um subagente andando com uma mascote importada (PNG; ver mascot/stroll.rs).
+export struct AgentWalker {
+    // o quadro de agora (o Rust troca a cada quadro: anda, para, ataca, corre, pula)
+    frame: image,
+    // posição na faixa: 0 = ponta esquerda, 1 = direita
+    x: float,
+}
+
 export struct AgentRow {
     // identifica a sessão nos cliques (a posição muda quando a lista se reordena)
     key: string,
@@ -43,6 +51,9 @@ export struct AgentRow {
     walkers: int,
     // mascote de um subagente trabalhando
     walker: image,
+    // os que andam com mascote importada, mais os que acabaram e estão pulando para sair
+    // (vazio = todos com `walker`)
+    heroes: [AgentWalker],
     // detalhes: "" (ou false) = a ferramenta não informa, e a parte some do cartão
     model: string,
     effort: string,
@@ -173,8 +184,8 @@ component Row inherits Rectangle {
     property <length> subs-h: sub-lines * sub-h + (sub-lines > 0 ? 4px : 0);
     property <length> details-h: chips-h + stats-h + prompt-h + subs-h
         + (has-chips || has-stats || has-prompt || sub-lines > 0 ? 8px : 0);
-    // faixa dos subagentes trabalhando
-    property <length> walk-h: a.walkers > 0 ? 30px : 0;
+    // faixa dos subagentes trabalhando (mais alta com as mascotes importadas, de até 32 px)
+    property <length> walk-h: a.heroes.length > 0 ? 42px : a.walkers > 0 ? 30px : 0;
     property <length> options-h: a.open ? 46px : 0;
 
     height: base + details-h + walk-h + options-h;
@@ -356,22 +367,34 @@ component Row inherits Rectangle {
 
     // subagentes trabalhando: cada um anda de um lado para o outro, fora de compasso.
     // Com "reduzir movimento", ficam parados, espalhados pela faixa.
-    if a.walkers > 0: Rectangle {
+    if a.walkers > 0 || a.heroes.length > 0: Rectangle {
         x: inset;
         y: base + details-h - 2px;
         width: root.width - inset - 12px;
         height: walk-h;
         // o chão
         Rectangle { y: parent.height - 7px; height: 1px; background: t.ok.with-alpha(0.35); }
-        for k in a.walkers: Image {
-            // passos de uma ponta à outra; cada subagente começa num ponto diferente
+        // mascotes importadas: o Rust escolhe o quadro e o lugar (src/mascot/stroll.rs)
+        for h in a.heroes: Image {
+            source: h.frame;
+            image-rendering: pixelated;
+            // no tamanho do desenho (nítido), até 32 px de altura
+            property <length> hero-h: min(32px, h.frame.height * 1px);
+            height: hero-h;
+            width: hero-h * h.frame.width / max(1, h.frame.height);
+            x: h.x * (parent.width - self.width);
+            y: parent.height - 8px - self.height;
+            animate x { duration: 250ms; easing: linear; }
+        }
+        // mascote da ferramenta: passos de uma ponta à outra; cada uma começa num ponto diferente
+        for k in (a.heroes.length > 0 ? 0 : a.walkers): Image {
             property <int> span: 14 + k * 3;
             property <int> step: mod(Anim.frame + k * 7, span * 2);
             property <float> pos: Anim.calm ? (k + 0.5) / a.walkers : (step < span ? step : span * 2 - step) / span;
             source: a.walker;
             image-rendering: pixelated;
+            height: 22px * 14 / 16;
             width: 22px;
-            height: self.width * 14 / 16;
             x: pos * (parent.width - self.width);
             // passinho: sobe e desce a cada quadro
             y: parent.height - 8px - self.height - (!Anim.calm && mod(Anim.frame + k, 2) == 0 ? 2px : 0);

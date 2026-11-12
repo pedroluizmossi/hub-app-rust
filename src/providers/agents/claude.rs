@@ -297,6 +297,7 @@ impl Log {
             stop_reason: self.stop_reason.clone(),
             kind: String::new(),
             depth: None,
+            wrote_ms: 0,
         };
     }
 }
@@ -351,7 +352,7 @@ fn subagents(dir: &Path, parent: &Agent, now: i64) -> Vec<Agent> {
             .into(),
             action: String::new(),
             parent: Some(parent.id.clone()),
-            details: Details { kind: sub.kind, model: sub.model, depth: sub.depth, ..Details::default() },
+            details: Details { kind: sub.kind, model: sub.model, depth: sub.depth, wrote_ms: mtime, ..Details::default() },
             log: Some(log.clone()),
         });
     }

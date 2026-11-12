@@ -14,16 +14,17 @@ use crate::ui::{AppInfo, SettingRow};
 
 thread_local! {
     /// Mascotes já desenhadas para os seletores, por tema (a UI só existe nesta thread).
-    static GALLERY: RefCell<HashMap<&'static str, Vec<Image>>> = RefCell::new(HashMap::new());
+    /// A chave leva a geração das importadas: a pasta mudou, desenha de novo.
+    static GALLERY: RefCell<HashMap<(&'static str, u64), Vec<Image>>> = RefCell::new(HashMap::new());
 }
 
-/// Todas as mascotes desenhadas no tema `theme`, na ordem de `sprites::SPRITES`: é o que
+/// Todas as mascotes desenhadas no tema `theme`, na ordem de `sprites::all`: é o que
 /// os seletores de mascote mostram. Desenha uma vez por tema e reaproveita.
 pub(super) fn mascot_images(theme: &'static Theme) -> Vec<Image> {
     GALLERY.with(|g| {
         g.borrow_mut()
-            .entry(theme.key)
-            .or_insert_with(|| sprites::SPRITES.iter().map(|s| render::image(s, theme, Mood::Idle, 1)).collect())
+            .entry((theme.key, sprites::generation()))
+            .or_insert_with(|| sprites::all().iter().map(|s| render::image(s, theme, Mood::Idle, 1)).collect())
             .clone()
     })
 }
@@ -35,9 +36,10 @@ fn option_images(options: &[String], theme: &'static Theme) -> Vec<Image> {
         return Vec::new();
     }
     let all = mascot_images(theme);
+    let keys = sprites::all();
     options
         .iter()
-        .map(|o| sprites::SPRITES.iter().position(|s| s.key == *o).map_or_else(Image::default, |i| all[i].clone()))
+        .map(|o| keys.iter().position(|s| s.key == *o).map_or_else(Image::default, |i| all[i].clone()))
         .collect()
 }
 
@@ -168,7 +170,7 @@ fn option_label(key: &str) -> String {
         "Acompanha a janela".into()
     } else if let Some(t) = themes::find(key) {
         t.label.into()
-    } else if let Some(s) = sprites::SPRITES.iter().find(|s| s.key == key) {
+    } else if let Some(s) = sprites::find(key) {
         s.label.into()
     } else {
         key.into()

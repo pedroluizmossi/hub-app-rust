@@ -321,7 +321,7 @@ impl Hub {
         };
         {
             let cfg = self.host.config.borrow();
-            if sprites::SPRITES.iter().any(|s| s.key == cfg.tray_icon) {
+            if sprites::find(&cfg.tray_icon).is_some() {
                 sprite = cfg.tray_icon.clone();
             }
             if let Some(t) = themes::find(&cfg.tray_theme) {

@@ -3,6 +3,7 @@
 //! Mesmas regras de cor do `Mascot.qml` do CyberDock. A animação de piscar, LED e glitch
 //! vem do número do quadro; flutuar/pular é feito no Slint (sem redesenhar).
 
+use super::pack;
 use super::sprites::{Pixel, Sprite};
 use super::themes::Theme;
 use super::anim::{Look, Reaction};
@@ -285,8 +286,12 @@ pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W *
     out
 }
 
-/// Quadro como imagem do Slint (o Slint amplia com `image-rendering: pixelated`).
+/// Quadro como imagem do Slint (o Slint amplia com `image-rendering: pixelated`). Uma
+/// mascote importada (`pack.rs`) sai no tamanho do PNG dela.
 pub fn image(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> slint::Image {
+    if let Some(art) = pack::art(sprite) {
+        return art.image(art.pick(&Look::from_frame(mood, frame)));
+    }
     to_image(&render(sprite, theme, mood, frame))
 }
 
@@ -303,6 +308,8 @@ fn to_image(px: &[[u8; 4]; W * H]) -> slint::Image {
 #[derive(Default)]
 pub struct Cache {
     px: Option<Box<[[u8; 4]; W * H]>>,
+    /// O quadro de mascote importada da última vez (no lugar de `px`).
+    art: Option<(usize, pack::FrameKey)>,
     img: slint::Image,
 }
 
@@ -310,6 +317,17 @@ impl Cache {
     /// Atualiza para o que o `Animator` mandou desenhar. Devolve `true` se mudou; aí
     /// `image()` tem a imagem nova.
     pub fn update_look(&mut self, sprite: &Sprite, theme: &Theme, look: &Look) -> bool {
+        if let Some(art) = pack::art(sprite) {
+            let key = (art as *const pack::Art as usize, art.pick(look));
+            if self.art == Some(key) {
+                return false;
+            }
+            self.img = art.image(key.1);
+            self.art = Some(key);
+            self.px = None;
+            return true;
+        }
+        self.art = None;
         let px = render_look(sprite, theme, look);
         if self.px.as_deref() == Some(&px) {
             return false;
@@ -327,6 +345,9 @@ impl Cache {
 
 /// Quadro quadrado ampliado `scale`× em RGBA: o lado e os pixels. Base dos ícones de bandeja.
 pub fn rgba_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
+    if let Some(art) = pack::art(sprite) {
+        return art.square(art.pick(&Look::from_frame(mood, frame)), W * scale);
+    }
     let px = render(sprite, theme, mood, frame);
     let side = W * scale;
     let top = (W - H) / 2 * scale; // centraliza as 14 linhas num quadrado de 16
