@@ -282,18 +282,28 @@ mod x11 {
         let root = conn.setup().roots[screen].root;
         let atom = |name: &str| -> anyhow::Result<u32> { Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom) };
         let net_wm_state = atom("_NET_WM_STATE")?;
+        let net_wm_desktop = atom("_NET_WM_DESKTOP")?;
         let states = [
             atom("_NET_WM_STATE_SKIP_TASKBAR")?,
             atom("_NET_WM_STATE_SKIP_PAGER")?,
             atom("_NET_WM_STATE_ABOVE")?,
+            // em todas as áreas de trabalho: sem isso o popup fica preso na primeira em que abriu
+            atom("_NET_WM_STATE_STICKY")?,
         ];
+        // 0xFFFFFFFF em _NET_WM_DESKTOP = todas as áreas de trabalho (EWMH)
+        const ALL_DESKTOPS: u32 = 0xFFFF_FFFF;
         // janela ainda não gerenciada (propriedade vazia): o gerenciador lê ao mapear.
         // Depois disso a propriedade é do gerenciador e não pode ser sobrescrita.
         let current = conn.get_property(false, window, net_wm_state, AtomEnum::ATOM, 0, 32)?.reply()?;
         if current.value_len == 0 {
             conn.change_property32(PropMode::REPLACE, window, net_wm_state, AtomEnum::ATOM, &states)?;
+            conn.change_property32(PropMode::REPLACE, window, net_wm_desktop, AtomEnum::CARDINAL, &[ALL_DESKTOPS])?;
         }
-        // janela já mapeada: o pedido vai por mensagem à raiz (1 = adicionar)
+        // janela já mapeada: a área de trabalho também vai por mensagem à raiz
+        // (dados: área, 1 = pedido de app comum)
+        let ev = ClientMessageEvent::new(32, window, net_wm_desktop, [ALL_DESKTOPS, 1, 0, 0, 0]);
+        conn.send_event(false, root, EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY, ev)?;
+        // e os estados, um pedido por estado (1 = adicionar)
         for s in states {
             let ev = ClientMessageEvent::new(32, window, net_wm_state, [1, s, 0, 1, 0]);
             conn.send_event(
