@@ -98,9 +98,17 @@ O visual da janela muda tudo de uma vez: moldura, fundo, fontes e as cores dos a
   </tr>
 </table>
 
-Cada visual é uma tabela de valores em `src/skin/mod.rs`, com um fundo desenhado em
-`src/skin/backdrop.rs`. Apps com o tema "Acompanha a janela" mudam junto; quem quiser fixa um
-tema por app. Como criar um visual novo: [DESIGN.md](DESIGN.md).
+Além desses, vêm **Synthwave**, **Gelo**, **Vaporwave** e **Akira**, que reaproveitam os
+mesmos fundos com outras cores. Apps com o tema "Acompanha a janela" mudam junto; quem quiser
+fixa um tema por app. Na mesma tela dá para trocar a **cor de destaque** (ajustada ao visual
+para continuar legível), o **tamanho do texto** (90 a 125%) e desligar o **fundo animado**
+(chuva, estrelas que piscam, varredura do tubo).
+
+Temas, visuais e fundos também podem ser seus, sem recompilar: arquivos `.toml` em
+`temas/`, `visuais/` e `fundos/` na pasta de dados (`miniutils --pastas` mostra onde) e
+**Configurações › Aparência › Recarregar**. Há um exemplo de cada em
+[examples/aparencia](examples/aparencia), e o formato está no
+[DESIGN.md](DESIGN.md#temas-visuais-e-fundos-por-arquivo).
 
 ## Instalar
 
@@ -184,7 +192,7 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 - **Arrumar a grade:** o botão de layout (ícone de grade) liga o modo de edição. Arraste cada
   app pelo topo e puxe as bordas para mudar o tamanho; as setas movem e Shift + setas
   redimensiona.
-- **Páginas:** separe os apps em páginas (Geral, Dev…), na barra lateral ou em abas.
+- **Páginas:** separe os apps em páginas (Geral, Dev…), numa barra à esquerda, à direita ou embaixo, ou em abas no cabeçalho.
 - **Configurar:** a engrenagem abre as Configurações: aparência, sistema, páginas e as opções de
   cada app.
 - **Iniciar com o sistema:** **Configurações › Sistema › Iniciar com o sistema** abre só na
@@ -205,10 +213,12 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
 --previa <mascote> [animação] [--saida arquivo.gif]
                       GIF de uma animação de mascote em todos os temas
+--pastas              onde ficam os apps locais, a configuração e os registros
 --version             mostra a versão (também em Configurações › Sistema)
 ```
 
-`miniutils --help` mostra também os comandos da loja de plugins.
+`miniutils --help` mostra também os comandos da loja de plugins (e `--recarregar`, que faz o
+MiniUtils aberto reler a pasta dos apps).
 
 ```text
 MINIUTILS_NATIVE_WAYLAND=1   usa Wayland nativo em vez de XWayland (o popup perde a posição)
@@ -289,6 +299,11 @@ Há quatro jeitos de estender o hub; comece pelo mais simples que resolve:
 | **Plugin com tela** | uma tela própria e um script Rhai isolado | loja |
 | **App externo** | um executável seu, em qualquer linguagem, com acesso total | loja, com SHA-256 conferido |
 | **Mini-app embutido** | Rust compilado dentro do hub | pull request |
+
+Um app também pode ser local, sem loja: uma pasta com o nome do `id` dentro de
+`~/.local/share/miniutils/plugins/` (Windows: `%APPDATA%\miniutils\plugins\`), e depois
+**Configurações › Sistema › Recarregar**. Ver
+[APPS.md › Apps locais](APPS.md#apps-locais-sem-a-loja).
 
 O guia completo, com o que cada tipo pode fazer e um exemplo de cada, está em
 [APPS.md](APPS.md). Apps externos e o SDK `miniutils-app` ficam no

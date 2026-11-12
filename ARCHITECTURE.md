@@ -71,7 +71,7 @@ hub-app-rust/
     models.slint              structs que o Rust preenche (GridCell, AppInfo, PageInfo…)
     dashboard.slint           painel: grade dos mini-apps e modo de edição
     settings.slint            configurações (painel, aparência, sistema, páginas, apps)
-    nav.slint                 navegação entre páginas: barra lateral ou abas no cabeçalho
+    nav.slint                 navegação entre páginas: barra (esquerda, direita, embaixo) ou abas
     frame.slint               moldura da janela sem borda: alças, fundo, barras, título
     theme.slint               tokens: Skin (visual da janela), Colors (tema de app), Icons, Anim
     widgets.slint             componentes: Mascot, Icon, IconButton, TextButton, HeaderButton,
@@ -328,13 +328,17 @@ app ──Fact──► hub (update/quadro) ──► Director ──► global 
 
 - **Telas:** `current` = `"panel"` (painel) ou `"apps"` (configurações). O modo de edição é
   um estado do painel (`editing`). Esc volta das configurações, conclui a edição ou fecha o popup.
-- **Páginas:** a barra lateral (`Rail`) lista as páginas do painel; cada uma tem nome,
+- **Páginas:** a barra de páginas lista as páginas do painel; cada uma tem nome,
   mascote (no humor do pior app dela, com marca de alerta), a própria grade e os seus apps.
-  Um app fica numa página só. Embaixo da barra: nova página e configurações. Nas
+  Um app fica numa página só. Depois das páginas, o botão de nova página; na outra ponta,
+  as configurações. Nas
   Configurações, o cartão Páginas renomeia, troca o ícone, reordena e apaga (os apps vão
   para a página anterior); cada app tem um seletor "Página". Só os apps da página aberta animam.
-  Com `nav = "top"` (Aparência › Páginas), as páginas viram abas no cabeçalho (`TopTabs`) no
-  lugar da barra lateral, e a engrenagem volta para o cabeçalho.
+  Onde a barra fica é o `nav` da config (Aparência › Páginas, ordem em
+  `hub::appearance::NAVS`): `"side"` à esquerda e `"right"` à direita (`Rail`, em pé),
+  `"bottom"` embaixo, acima do rodapé do visual (`PageBar`, deitada), ou `"top"`: abas no
+  cabeçalho (`TopTabs`), com a engrenagem de volta no cabeçalho. Nas barras, a página aberta
+  ganha o quadro e uma marca na cor de destaque, do lado colado à borda da janela.
 - **Grade:** colunas × linhas (até 6 × 6) por página; cada app guarda `x`, `y`, `w`, `h` na config.
   `layout::settle` resolve um arrasto (o app arrastado fica; os outros ficam onde estão ou vão
   para a primeira vaga; se não couber, o arrasto é recusado). `Config::arrange` garante lugar

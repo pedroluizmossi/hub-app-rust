@@ -60,9 +60,15 @@ pub fn ui_handle() -> Option<HubWindow> {
     CURRENT.with(|c| c.borrow().upgrade()).map(|h| h.ui.clone_strong())
 }
 
-/// Os plugins instalados mudaram (de outra thread ou instância): relê na thread da UI.
+/// Os plugins instalados mudaram, ou `miniutils --recarregar` (de outra thread ou
+/// instância): relê apps e aparência na thread da UI.
 pub fn request_plugin_reload() {
-    let _ = slint::invoke_from_event_loop(|| with_hub(Hub::reload_plugins));
+    let _ = slint::invoke_from_event_loop(|| {
+        with_hub(|h| {
+            h.reload_plugins();
+            h.reload_looks();
+        })
+    });
 }
 
 /// Comando de mídia escolhido no menu da bandeja (chamado na thread do ksni): vai para o
@@ -198,6 +204,8 @@ impl Hub {
         });
         hub.ui.set_max_columns(layout::MAX_COLS as i32);
         hub.ui.set_max_rows(layout::MAX_ROWS as i32);
+        // temas, visuais e fundos de arquivo antes do primeiro desenho
+        hub.load_looks();
         hub.apply_skin();
         hub.apply_system();
         hub.registry.start(&hub.ui);
@@ -277,7 +285,8 @@ impl Hub {
         self.chat_tick();
     }
 
-    /// Relê a pasta dos plugins (instalou, atualizou ou removeu) e redesenha o que mostra apps.
+    /// Relê a pasta dos plugins (instalou, atualizou, removeu, ou o botão Recarregar das
+    /// configurações): apps novos entram, mudados recarregam, removidos saem.
     fn reload_plugins(&self) {
         if crate::apps::plugin::sync(&self.host, &self.ui, &self.registry, false) {
             self.rebuild_lists();
@@ -285,6 +294,8 @@ impl Hub {
             self.rebuild_pages(true);
             self.refresh_derived();
         }
+        // contagem e pastas recusadas, mesmo sem app novo (ex.: renomeou a pasta errada)
+        self.apply_apps_dir();
     }
 
     /// Comando de mídia do menu da bandeja: vai ao app que deu as informações de mídia.
@@ -312,7 +323,7 @@ impl Hub {
             if sprites::SPRITES.iter().any(|s| s.key == cfg.tray_icon) {
                 sprite = cfg.tray_icon.clone();
             }
-            if let Some(t) = themes::THEMES.iter().find(|t| t.key == cfg.tray_theme) {
+            if let Some(t) = themes::find(&cfg.tray_theme) {
                 theme = t;
             }
         }
@@ -369,6 +380,10 @@ impl Hub {
         let f = self.frame.get().wrapping_add(1) % 600;
         self.frame.set(f);
         self.ui.global::<Anim>().set_frame(f as i32);
+        // relógio do fundo animado (ms; volta a zero a cada hora, um salto que mal se vê)
+        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        let ms = START.get_or_init(Instant::now).elapsed().as_millis() % 3_600_000;
+        self.ui.global::<Anim>().set_time(ms as i32);
         // no painel, só os apps da página aberta estão visíveis e animam
         if self.ui.get_current() == "panel" {
             let ids = self.host.config.borrow().page_apps(self.current_page());

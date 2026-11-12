@@ -21,6 +21,8 @@ export struct Theme {
     bg0: color, bg1: color, text: color, sub: color, muted: color,
     // fontes do visual da janela (o texto da tela já usa a font-ui por padrão)
     font-ui: string, font-mono: string, font-title: string,
+    // tamanho do texto escolhido nas Configurações (1 = normal): font-size: 13px * theme.text-scale
+    text-scale: float,
 }
 "#;
 
@@ -170,7 +172,7 @@ pub fn check_view(dir: &Path) -> Result<(), String> {
 }
 
 /// O `Theme` da tela do plugin: cores do tema do app e fontes do visual da janela.
-pub(super) fn theme_value(t: &Theme, skin: &crate::skin::Skin) -> Value {
+pub(super) fn theme_value(t: &Theme, skin: &crate::skin::Skin, text_scale: f32) -> Value {
     let c = |v: u32| Value::Brush(slint::Brush::SolidColor(render::color(v)));
     let fields = [
         ("fur", t.fur),
@@ -194,6 +196,7 @@ pub(super) fn theme_value(t: &Theme, skin: &crate::skin::Skin) -> Value {
             .into_iter()
             .map(|(k, v)| (k.to_string(), c(v)))
             .chain(fonts.into_iter().map(|(k, f)| (k.to_string(), Value::String(f.into()))))
+            .chain(std::iter::once(("text-scale".to_string(), Value::Number(text_scale as f64))))
             .collect(),
     )
 }
@@ -286,7 +289,7 @@ mod tests {
         let inst = def.create().unwrap();
         inst.show().unwrap();
         let skin = crate::skin::get("aconchego");
-        inst.set_property("theme", theme_value(crate::mascot::themes::get("aconchego"), skin)).unwrap();
+        inst.set_property("theme", theme_value(crate::mascot::themes::get("aconchego"), skin, 1.0)).unwrap();
         inst.set_property(FONT_PROP, Value::String(skin.font_ui.into())).unwrap();
         // as fontes chegam no Theme (o plugin pode usar theme.font-mono)
         let font = match inst.get_property("theme").unwrap() {

@@ -61,8 +61,11 @@
 //! (`store_set`) ficam fora da pasta do plugin (`data_file`; o app externo ganha a pasta
 //! `data_dir`), para sobreviver a uma atualização.
 //!
-//! Instalados ficam em `~/.local/share/miniutils/plugins/<id>/` (ver `store.rs`). Com
-//! `miniutils --plugin-dev <pasta>`, um plugin em desenvolvimento entra junto (`set_dev`).
+//! Instalados ficam em `dir()`: `~/.local/share/miniutils/plugins/<id>/` no Linux,
+//! `%APPDATA%\miniutils\plugins\<id>\` no Windows. A loja instala ali (ver `store.rs`) e
+//! quem quiser põe um app à mão (app local, sem `installed.json`); `scan` diz quais pastas
+//! não viraram app e por quê. Com `miniutils --plugin-dev <pasta>`, um plugin em
+//! desenvolvimento entra junto (`set_dev`).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -70,7 +73,7 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 
 use super::manifest::{Manifest, SettingDef, SettingKind};
-use crate::mascot::{sprites, themes};
+use crate::mascot::sprites;
 
 /// Arquivos da raiz de um plugin.
 const TOP_FILES: &[&str] =
@@ -503,8 +506,7 @@ pub fn load_all(root: &Path) -> Vec<Plugin> {
 /// Todo app tem tema e mascote; o plugin que não declarar ganha os padrões.
 fn add_standard_settings(m: &mut Manifest) {
     if m.setting("theme").is_none() {
-        let mut options = vec!["auto".to_string()];
-        options.extend(themes::THEMES.iter().map(|t| t.key.to_string()));
+        // as opções (os temas) a tela preenche na hora: `SettingDef::live_options`
         m.settings.push(SettingDef {
             key: "theme".into(),
             label: "Tema".into(),
@@ -513,7 +515,7 @@ fn add_standard_settings(m: &mut Manifest) {
             min: None,
             max: None,
             step: None,
-            options,
+            options: vec!["auto".into()],
         });
     }
     if m.setting("mascot").is_none() {
@@ -541,28 +543,51 @@ pub fn dir() -> PathBuf {
 }
 
 /// Plugins instalados em `dir`, válidos, em ordem de id. Os inválidos ficam de fora (com
-/// o motivo no terminal): um plugin quebrado não impede o hub de abrir.
+/// o motivo no registro): um plugin quebrado não impede o hub de abrir.
 pub fn load_installed(dir: &Path) -> Vec<Plugin> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let (list, skipped) = scan(dir);
+    for s in skipped {
+        log::warn!("plugin em {} ignorado: {}", dir.join(&s.folder).display(), s.reason);
+    }
+    list
+}
+
+/// Pasta de `dir` que não virou app, e por quê (mostrado em Configurações › Sistema e em
+/// `--plugins`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Skipped {
+    pub folder: String,
+    pub reason: String,
+}
+
+/// Lê `dir`: os plugins válidos (em ordem de pasta) e as pastas recusadas. Não registra
+/// nada; quem chama decide onde mostrar.
+pub fn scan(dir: &Path) -> (Vec<Plugin>, Vec<Skipped>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return (Vec::new(), Vec::new()) };
     let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
     dirs.sort();
-    let mut out: Vec<Plugin> = Vec::new();
+    let (mut out, mut skipped) = (Vec::new(), Vec::new());
     for d in dirs {
-        // pastas temporárias de uma instalação em curso
-        if d.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+        let folder = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        // pastas temporárias de uma instalação em curso, e `.data` (dados dos plugins)
+        if folder.starts_with('.') {
+            continue;
+        }
+        if !d.join("manifest.toml").is_file() {
+            skipped.push(Skipped { folder, reason: "não tem manifest.toml".into() });
             continue;
         }
         match Plugin::load(&d) {
-            Ok(p) if d.file_name().is_some_and(|n| n == p.manifest.id.as_str()) => {
-                if out.iter().all(|o| o.manifest.id != p.manifest.id) {
-                    out.push(p);
-                }
-            }
-            Ok(p) => log::warn!("plugin em {} tem o id {}, diferente da pasta", d.display(), p.manifest.id),
-            Err(e) => log::warn!("plugin em {} ignorado: {e}", d.display()),
+            // a pasta é o id, então não há dois plugins com o mesmo id
+            Ok(p) if folder == p.manifest.id => out.push(p),
+            Ok(p) => skipped.push(Skipped {
+                reason: format!("o id do manifest.toml é \"{}\": a pasta tem de se chamar assim", p.manifest.id),
+                folder,
+            }),
+            Err(e) => skipped.push(Skipped { folder, reason: e }),
         }
     }
-    out
+    (out, skipped)
 }
 
 #[cfg(test)]
@@ -665,6 +690,32 @@ pub(crate) mod tests {
             std::os::unix::fs::symlink("/bin/sh", dir.join("bin/sh")).unwrap();
             assert!(files(&dir).unwrap_err().contains("bin/sh"));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_explica_as_pastas_recusadas() {
+        let dir = std::env::temp_dir().join(format!("miniutils-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pasta = |nome: &str, manifesto: Option<&str>| {
+            std::fs::create_dir_all(dir.join(nome)).unwrap();
+            if let Some(m) = manifesto {
+                std::fs::write(dir.join(nome).join("manifest.toml"), m).unwrap();
+            }
+        };
+        pasta("io.github.exemplo.uptime", Some(EXEMPLO));
+        pasta("uptime", Some(EXEMPLO));
+        pasta("vazia", None);
+        pasta("torto", Some("id='a.b'\nname='x'\napi=1\n"));
+        pasta(".data", None);
+        let (ok, recusadas) = scan(&dir);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].manifest.id, "io.github.exemplo.uptime");
+        let motivo = |p: &str| recusadas.iter().find(|s| s.folder == p).map(|s| s.reason.clone()).unwrap();
+        assert!(motivo("uptime").contains("a pasta tem de se chamar"));
+        assert_eq!(motivo("vazia"), "não tem manifest.toml");
+        assert!(!motivo("torto").is_empty());
+        assert_eq!(recusadas.len(), 3, "a .data fica de fora: {recusadas:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

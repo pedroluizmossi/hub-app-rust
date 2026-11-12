@@ -688,8 +688,11 @@ impl PluginMini {
                 self.set_view(name, v);
             }
         };
-        let skin = crate::skin::get(&self.host.config.borrow().skin);
-        put("theme", theme_value(self.host.theme_for(&self.plugin.manifest), skin));
+        let (skin, scale) = {
+            let cfg = self.host.config.borrow();
+            (crate::skin::get(&cfg.skin), cfg.text_scale as f32 / 100.0)
+        };
+        put("theme", theme_value(self.host.theme_for(&self.plugin.manifest), skin, scale));
         put(FONT_PROP, Value::String(skin.font_ui.into()));
         put("mascot", Value::Image(self.face.image()));
         put("mood", Value::String(self.mood.as_str().into()));

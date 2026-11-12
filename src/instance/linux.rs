@@ -8,12 +8,11 @@ use std::time::Duration;
 
 use super::{Command, Role, parse, stem};
 
-/// Avisa a instância rodando (se houver) que os plugins mudaram. Sem instância, nada.
-pub fn notify_plugins_changed() {
-    if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-        let _ = stream.write_all(b"plugins\n");
-    }
+/// Avisa a instância rodando (se houver) que os plugins mudaram. `false` = nenhuma ouviu.
+pub fn notify_plugins_changed() -> bool {
+    let Ok(mut stream) = UnixStream::connect(socket_path()) else { return false };
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    stream.write_all(b"plugins\n").is_ok()
 }
 
 /// `$XDG_RUNTIME_DIR/miniutils.sock` (ou `miniutils-<nome>.sock` com `MINIUTILS_INSTANCE`).

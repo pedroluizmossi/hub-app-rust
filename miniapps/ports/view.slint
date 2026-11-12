@@ -79,7 +79,7 @@ component Row inherits Rectangle {
                 text: ":" + p.port;
                 color: link.has-hover && p.url != "" ? t.text : p.pid > 0 ? t.visor : t.sub;
                 font-family: Skin.font-mono;
-                font-size: narrow ? 15px : 17px;
+                font-size: (narrow ? 15px : 17px) * Skin.text-scale;
                 font-weight: 700;
                 vertical-alignment: center;
                 height: parent.height;
@@ -100,7 +100,7 @@ component Row inherits Rectangle {
                 Text {
                     text: p.process;
                     color: p.pid > 0 ? t.text : t.sub;
-                    font-size: 14px;
+                    font-size: 14px * Skin.text-scale;
                     font-weight: p.pid > 0 ? 700 : 400;
                     overflow: elide;
                 }
@@ -109,9 +109,9 @@ component Row inherits Rectangle {
                     border-color: t.fur.with-alpha(0.5);
                     background: t.fur.with-alpha(0.14);
                     width: udp.preferred-width + 10px;
-                    udp := Text { text: "udp"; color: t.fur.mix(t.text, 0.7); font-family: Skin.font-mono; font-size: 11px; }
+                    udp := Text { text: "udp"; color: t.fur.mix(t.text, 0.7); font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; }
                 }
-                if p.fresh: Text { text: "nova"; color: t.visor; font-family: Skin.font-mono; font-size: 11px; vertical-alignment: center; }
+                if p.fresh: Text { text: "nova"; color: t.visor; font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
             }
             HorizontalLayout {
@@ -119,14 +119,14 @@ component Row inherits Rectangle {
                     text: p.addr-text;
                     color: addr-color;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     horizontal-stretch: 0;
                 }
                 Text {
                     text: narrow || p.cmd == "" ? (p.pid > 0 ? " · pid " + p.pid : "") : " · " + p.cmd;
                     color: t.sub;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
@@ -199,7 +199,7 @@ export component PortsView inherits Rectangle {
             Text {
                 text: PortsApp.missing ? "ss não instalado" : !PortsApp.ok ? "Não consegui ler as portas" : PortsApp.speech;
                 color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
-                font-size: short ? 15px : 19px;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
                 wrap: word-wrap;
             }
@@ -208,7 +208,7 @@ export component PortsView inherits Rectangle {
                     : PortsApp.total + " TCP · " + PortsApp.mine + (PortsApp.mine == 1 ? " sua · " : " suas · ") + PortsApp.exposed + " na rede toda";
                 color: t.sub;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 wrap: word-wrap;
             }
         }
@@ -248,7 +248,7 @@ export component PortsView inherits Rectangle {
                 checked: PortsApp.show-udp;
                 toggled => { PortsApp.toggle-udp(); }
             }
-            Text { text: "udp"; color: t.sub; font-size: 14px; vertical-alignment: center; }
+            Text { text: "udp"; color: t.sub; font-size: 14px * Skin.text-scale; vertical-alignment: center; }
         }
         TextButton {
             text: "atualizar";
@@ -273,7 +273,7 @@ export component PortsView inherits Rectangle {
             text: PortsApp.missing ? "Instale o iproute2 para ver as portas." : PortsApp.search != "" ? "Nenhuma porta bate com esse filtro." : "Nenhuma porta escutando.";
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

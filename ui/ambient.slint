@@ -1,0 +1,29 @@
+// Fundo animado: elementos leves (gotas, estrelas, faixa de varredura) por cima da imagem
+// do fundo, posicionados a cada quadro pelo relógio `Anim.time`. Quem os gera é
+// `src/skin/backdrop.rs › ambient`. Cada elemento é um retângulo pequeno: o renderizador
+// por software repinta só a região que mexeu (redesenhar a imagem inteira custaria de 20 a
+// 100 ms por quadro). Cores com alfa no `background`, nunca `opacity` (que pinta numa
+// camada à parte).
+import { Anim } from "theme.slint";
+import { AmbientItem } from "models.slint";
+
+export component Ambient inherits Rectangle {
+    in property <[AmbientItem]> items;
+    // ligado na config e sem "Reduzir movimento"
+    in property <bool> live;
+    property <float> t: Anim.time;
+    clip: true;
+
+    if root.live: Rectangle {
+        for a in root.items: Rectangle {
+            // fall/scan: quanto já desceu, voltando ao topo depois de sair embaixo
+            property <float> fall: mod(a.y + (root.t + a.phase) / 1000 * a.speed, root.height / 1px + a.h);
+            property <bool> lit: mod(root.t + a.phase, a.period) < a.on;
+            x: (a.kind == "fall" ? a.x - fall * a.slant : a.x) * 1px;
+            y: (a.kind == "blink" ? a.y : fall - a.h) * 1px;
+            width: a.w * 1px;
+            height: a.h * 1px;
+            background: a.kind != "blink" || lit ? a.color.with-alpha(a.alpha) : transparent;
+        }
+    }
+}

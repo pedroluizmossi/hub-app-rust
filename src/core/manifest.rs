@@ -69,6 +69,20 @@ pub struct SettingDef {
     pub options: Vec<String>,
 }
 
+impl SettingDef {
+    /// As opções que a tela mostra. A do tema (`theme`) é sempre "auto" mais todos os
+    /// temas, inclusive os de arquivo: um tema novo aparece em todos os apps sem editar
+    /// manifestos. As demais são as do manifesto.
+    pub fn live_options(&self) -> Vec<String> {
+        if self.key == "theme" && self.kind == SettingKind::Choice {
+            let mut v = vec!["auto".to_string()];
+            v.extend(crate::mascot::themes::all().iter().map(|t| t.key.to_string()));
+            return v;
+        }
+        self.options.clone()
+    }
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> anyhow::Result<Self> {
         let mut m: Manifest = toml::from_str(text)?;
@@ -115,7 +129,9 @@ mod tests {
                 match s.kind {
                     SettingKind::Bool => assert!(s.default.is_bool(), "{}", s.key),
                     SettingKind::Int => assert!(s.default.is_integer(), "{}", s.key),
-                    SettingKind::Choice => assert!(s.options.contains(&s.default.as_str().unwrap().to_string())),
+                    SettingKind::Choice => {
+                        assert!(s.live_options().contains(&s.default.as_str().unwrap().to_string()), "{}", s.key)
+                    }
                 }
             }
         }
@@ -133,9 +149,11 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), gpu.len(), "sem repetição");
         // opção que não é de mascote fica como está no manifesto
-        let theme = &vitals.setting("theme").unwrap().options;
+        let theme = vitals.setting("theme").unwrap().live_options();
         assert!(theme.contains(&"auto".to_string()) && !theme.contains(&"neko".to_string()));
-        assert!(theme.len() < sprites::SPRITES.len());
+        // a do tema é gerada: "auto" mais todos os temas, sem lista no manifesto
+        assert_eq!(theme.len(), crate::mascot::themes::all().len() + 1);
+        assert!(vitals.setting("theme").unwrap().options.is_empty());
     }
 
     #[test]

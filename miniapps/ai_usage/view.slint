@@ -52,21 +52,21 @@ component Meter inherits VerticalLayout {
     if !dense: VerticalLayout {
         spacing: 4px;
         HorizontalLayout {
-            Text { text: entry.label; color: t.sub; font-family: Skin.font-mono; font-size: 13px; overflow: elide; }
+            Text { text: entry.label; color: t.sub; font-family: Skin.font-mono; font-size: 13px * Skin.text-scale; overflow: elide; }
             Rectangle { horizontal-stretch: 1; }
             if entry.spark != "" && !AiUsageApp.compact: VerticalLayout {
                 alignment: center;
                 Sparkline { commands: entry.spark; tint: (hot ? tint : t.visor).with-alpha(0.7); width: 48px; height: 12px; }
             }
             Rectangle { width: 6px; }
-            Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 13px; }
+            Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 13px * Skin.text-scale; }
         }
         Rectangle {
             height: 6px;
             background: t.muted.with-alpha(0.25);
             Rectangle { x: 0; height: parent.height; width: parent.width * fill; background: hot ? tint : t.visor; }
         }
-        if !AiUsageApp.compact: Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 12px; overflow: elide; }
+        if !AiUsageApp.compact: Text { text: entry.reset; color: t.muted; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; overflow: elide; }
     }
     if dense: HorizontalLayout {
         spacing: 6px;
@@ -75,7 +75,7 @@ component Meter inherits VerticalLayout {
             text: entry.label;
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 12px;
+            font-size: 12px * Skin.text-scale;
             overflow: elide;
             vertical-alignment: center;
         }
@@ -88,7 +88,7 @@ component Meter inherits VerticalLayout {
                 Rectangle { x: 0; height: parent.height; width: parent.width * fill; background: hot ? tint : t.visor; }
             }
         }
-        Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 12px; vertical-alignment: center; }
+        Text { text: entry.detail; color: hot ? tint : t.text; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
     }
 }
 
@@ -135,15 +135,15 @@ component AccountCard inherits Rectangle {
             spacing: dense ? 3px : 7px;
             HorizontalLayout {
                 spacing: 9px;
-                Text { text: account.name; color: t.text; font-size: dense ? 15px : 17px; font-weight: 700; vertical-alignment: center; }
+                Text { text: account.name; color: t.text; font-size: (dense ? 15px : 17px) * Skin.text-scale; font-weight: 700; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 12px; overflow: elide; vertical-alignment: center; }
+                Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; overflow: elide; vertical-alignment: center; }
             }
             // no denso, o status só aparece quando não há leitura (é o que explica o vazio)
             if account.lines.length == 0 || (!dense && !AiUsageApp.compact): Text {
                 text: account.status;
                 color: account.stale ? t.warn : t.muted;
-                font-size: dense ? 12px : 13px;
+                font-size: (dense ? 12px : 13px) * Skin.text-scale;
                 wrap: dense ? no-wrap : word-wrap;
                 overflow: elide;
             }
@@ -173,9 +173,9 @@ export component AiUsageView inherits Rectangle {
     VerticalLayout {
         spacing: 8px;
         HorizontalLayout {
-            Text { text: "ASSINATURAS DE IA"; color: t.text; font-family: Skin.font-mono; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+            Text { text: "ASSINATURAS DE IA"; color: t.text; font-family: Skin.font-mono; font-size: 14px * Skin.text-scale; font-weight: 700; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
-            TextButton { text: "Atualizar"; ink: t.visor; height: 30px; font-size: 13px; clicked => { AiUsageApp.refresh(); } }
+            TextButton { text: "Atualizar"; ink: t.visor; height: 30px; font-size: 13px * Skin.text-scale; clicked => { AiUsageApp.refresh(); } }
         }
         scroll := ScrollView {
             vertical-stretch: 1;
@@ -210,7 +210,7 @@ export component AiUsageView inherits Rectangle {
                 if scroll.n == 0: Text {
                     text: "Nenhuma fonte para mostrar. Ligue alguma nas configurações do app.";
                     color: t.muted;
-                    font-size: 13px;
+                    font-size: 13px * Skin.text-scale;
                     wrap: word-wrap;
                 }
             }

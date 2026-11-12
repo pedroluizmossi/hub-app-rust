@@ -25,16 +25,25 @@ Regras que mantêm as camadas separadas:
 
 ## 2. Visuais da janela (skins)
 
-Um visual é uma entrada na tabela `SKINS` (`src/skin/mod.rs`). Nada de layout muda.
+Um visual é uma entrada na tabela `BUILTIN` (`src/skin/mod.rs`) ou um arquivo
+`visuais/<chave>.toml` da pessoa (ver [Temas, visuais e fundos por arquivo](#temas-visuais-e-fundos-por-arquivo)).
+Nada de layout muda. Por cima do visual, a pessoa escolhe em Configurações › Aparência:
+
+- **Cor de destaque** (`skin::ACCENTS`): troca `accent` e `accent_ink`. `skin::effective`
+  clareia ou escurece a cor até 3:1 sobre `bg` e `surface`, então qualquer destaque fica
+  legível em qualquer visual. O fundo do painel acompanha (as camadas usam `accent`).
+- **Tamanho do texto** (90 a 125%): `Skin.text-scale`. Ver [Tamanho do texto](#tamanho-do-texto).
+- **Fundo animado** (liga/desliga; "Reduzir movimento" também desliga).
 
 ### Criar um visual
 
-1. Copie a entrada mais parecida em `SKINS` e troque `key` (sem espaços, vai para a config),
+1. Copie a entrada mais parecida em `BUILTIN` e troque `key` (sem espaços, vai para a config),
    `label` (aparece no seletor) e `app_theme` (tema dos apps em "auto"; precisa existir em
    `themes.rs`, um teste confere).
 2. Preencha os campos (tabela abaixo). As cores do modo de edição (`edit-*`) e a borda do
    botão de perigo são derivadas do acento por `apply`; não precisa defini-las.
-3. Escolha um **fundo** (`backdrop`). Para um fundo novo, veja abaixo.
+3. Escolha um **fundo** (`backdrop`, pelo nome: `neon`, `terminal`, `papel`, `cidade`). Os
+   fundos pintam com as cores do visual, então o mesmo fundo serve a visuais diferentes.
 4. Se usar fonte nova, veja [Fontes](#fontes).
 5. Confira as **regras de contraste** e rode o app com o visual (veja [Testar](#7-testar-na-tela)).
 
@@ -49,29 +58,81 @@ Um visual é uma entrada na tabela `SKINS` (`src/skin/mod.rs`). Nada de layout m
 | Letras | `font_ui` `font_mono` `font_title` | texto geral, números/código, título |
 | Cabeçalho | `title` (`Upper`/`Plain`/`Prompt`) `title_size` `title_weight` `title_spacing` `title_cursor` `title_icon` `title_icon_cut` `tag` (`Grid`/`Greeting`/`None`) `buttons` (`Icon`/`Bracket`/`Chunky`) | como o nome aparece (`MINIUTILS`, `MiniUtils`, `miniutils@bandeja:~$`), cursor piscando, ícone em pixel 8×8, o que vai ao lado do título, estilo dos botões |
 
-Os 4 visuais atuais servem de referência:
+Os 8 visuais embutidos servem de referência:
 
-| Visual | Ideia | Traços |
-|---|---|---|
-| Neon | cyberpunk | cantos cortados, grade de pontos, Chakra Petch, botões com ícone |
-| Terminal | fósforo verde | tudo mono, prompt com cursor, `[ fixar ]`, barra de status, linhas de varredura |
-| Aconchego | casinha de madeira | tema **claro**, borda de 6 px, papel pontilhado, Pixelify, botões "chunky" com sombra |
-| Noite chuvosa | cidade à noite | lua, prédios, chuva, saudação com hora, cartões translúcidos |
+| Visual | Fundo | Ideia | Traços |
+|---|---|---|---|
+| Neon | `neon` | cyberpunk | cantos cortados, grade de pontos com estrelas que piscam, Chakra Petch, botões com ícone |
+| Terminal | `terminal` | fósforo verde | tudo mono, prompt com cursor, `[ fixar ]`, barra de status, linhas e faixa de varredura |
+| Aconchego | `papel` | casinha de madeira | tema **claro**, borda de 6 px, papel pontilhado, Pixelify, botões "chunky" com sombra |
+| Noite chuvosa | `cidade` | cidade à noite | lua, prédios com janelas que apagam, chuva caindo, saudação com hora, cartões translúcidos |
+| Synthwave | `neon` | anos 80 | laranja e rosa sobre roxo, cantos cortados menores |
+| Gelo | `terminal` | terminal azul | o Terminal em azul gelo, com o tema Ghost |
+| Vaporwave | `papel` | pastel | pontilhado lilás, borda grossa, título em Pixelify, botões "chunky" |
+| Akira | `cidade` | Neo-Tóquio | a cidade em vermelho, cartões translúcidos |
 
 ### Fundos
 
-Os fundos são desenhados em Rust (`src/skin/backdrop.rs`) numa imagem do tamanho da área do
-painel, refeita quando ela muda. O `Canvas` tem `rect`, `glow` (brilho elíptico), `dots`
-(grade de pontos) e `stripes` (linhas repetidas num ângulo), todos em **pixels lógicos**
-(o `scale` converte).
+Um fundo (`src/skin/backdrop.rs`) é uma lista de **camadas** pintadas em ordem sobre `bg`,
+numa imagem do tamanho da área do painel, refeita quando o visual, o tamanho ou a escala
+mudam. As cores das camadas são cores do visual pelo nome (`accent`, `accent2`, `sub`,
+`surface_edge`…) ou fixas (`#RRGGBB`): por isso um fundo serve a vários visuais e segue a
+cor de destaque.
 
-Para um fundo novo: acrescente um caso em `enum Backdrop`, desenhe-o em `render` e use-o no
-visual. Regras:
+| Camada | Desenha | Campos |
+|---|---|---|
+| `dots` | grade de pontos | `step`, `offset`, `radius`, `color`, `alpha` |
+| `glow` | brilho elíptico | `x`, `y` (frações da área), `dx`, `dy` (px), `rx`, `ry`, `fade`, `color`, `alpha` |
+| `vignette` | brilho que alcança os cantos | `x`, `y`, `fade`, `color`, `alpha` |
+| `stripes` | linhas repetidas num ângulo | `deg`, `step`, `color`, `alpha` |
+| `rect` | retângulo | `x`, `y` (frações), `dx`, `dy`, `w`, `h` (px), `color`, `alpha` |
+| `rain` | **animada**: gotas caindo | `count` (numa área de 1000×600; escala com a área), `color`, `alpha`, `speed` (px/s), `length` |
+| `twinkle` | **animada**: pontos que acendem | `count`, `color`, `alpha`, `size`, `grid` (prende à grade de um `dots`) |
+| `scan` | **animada**: faixa de varredura | `color`, `alpha`, `height`, `speed` |
+
+A cidade (`city`) é uma camada só embutida (prédios do design, lua, janelas que apagam).
+
+**Animação.** As camadas animadas não entram na imagem: viram elementos pequenos
+(`Ambient`) que `ui/ambient.slint` move a cada quadro pelo relógio `Anim.time`. O
+renderizador por software repinta só a região de cada elemento; redesenhar a imagem
+inteira custaria de 20 a 100 ms por quadro (medido em 900×560, 1× e 2×). Por isso:
+
+- nada de animar camadas grandes; uma faixa (`scan`) ou dezenas de gotas, não centenas
+  (`count` vai até 200);
+- cor com alfa no `background`, nunca `opacity` (que pinta numa camada à parte);
+- o fundo animado para com a janela escondida (o quadro não roda), com "Reduzir movimento"
+  e com o interruptor "Fundo animado".
+
+Regras:
 
 - Desenhe por cima de `bg`; o fundo não pode brigar com o texto dos apps (alfa baixo: 0,05–0,15).
 - Elementos presos a um canto (lua, prédios) devem funcionar de 400 px a 2000 px de largura.
-- Animação não: o fundo é uma imagem estática (redesenhar a cada quadro custaria CPU).
-- O teste `todos_desenham_algo_alem_do_fundo` pega um fundo que saiu liso por engano.
+- O teste `todos_desenham_algo_alem_do_fundo` pega um fundo que saiu liso por engano, e
+  `limites_das_camadas` confere os limites de cada camada embutida.
+
+### Temas, visuais e fundos por arquivo
+
+Quem usa pode criar os três sem recompilar, em `<dados>/miniutils/` (`miniutils --pastas`
+mostra o caminho; `MINIUTILS_APARENCIA` troca a pasta):
+
+| Pasta | Arquivo | Começa de |
+|---|---|---|
+| `temas/` | `<chave>.toml` com `label`, `base` (um tema; padrão `neon`) e as cores de `COLOR_FIELDS` (`fur`, `visor`… ver [Tema de um app](#tema-de-um-app-colors)) em `"#RRGGBB"` | o tema `base` |
+| `visuais/` | `<chave>.toml` com `label`, `base` (um visual; padrão `neon`), `app_theme`, `backdrop` e qualquer campo da tabela de [Criar um visual](#criar-um-visual) | o visual `base` |
+| `fundos/` | `<chave>.toml` com `label` e `[[layer]]` (de 1 a 32), cada uma com `kind` e os campos da tabela de [Fundos](#fundos) | — |
+
+- A chave é o nome do arquivo: `a-z`, `0-9`, `-`, `_`, até 32. Não pode repetir um embutido.
+- Num visual: cores em `"#RRGGBB"` (`panel_top` e `edge_inner` aceitam `"none"`); medidas
+  dentro dos limites de `NUM_FIELDS`; fontes só as do binário (`skin::FONTS`); `title`
+  `upper`/`plain`/`prompt`; `tag` `grid`/`greeting`/`none`; `buttons`
+  `icon`/`bracket`/`chunky`.
+- Um visual pode citar um tema e um fundo de arquivo; um tema pode partir de outro de arquivo.
+- Arquivo com erro fica de fora, com o motivo em Configurações › Aparência (e no
+  registro). Depois de mudar, **Recarregar** (ou `miniutils --recarregar`).
+- O contraste não é conferido: siga as [regras de contraste](#regras-de-contraste).
+
+Exemplos comentados (um de cada) em [`examples/aparencia/`](examples/aparencia); o teste
+`exemplos_carregam_sem_erro` os lê.
 
 ### Fontes
 
@@ -98,7 +159,8 @@ Um tema é uma entrada em `THEMES` (`src/mascot/themes.rs`). Os campos:
 | `sleep` | dormindo | "z" do sono |
 | `ear`, `blush` | — | orelha/detalhe claro (`M`), bochecha (`B`) |
 
-Para que o tema apareça, acrescente a `key` nas `options` do `theme` de cada manifesto.
+Um tema novo aparece sozinho na opção "Tema" de todos os apps: a lista é gerada
+(`SettingDef::live_options`), e os manifestos não repetem as opções do `theme`.
 
 ### Regras de contraste
 
@@ -111,6 +173,20 @@ Para que o tema apareça, acrescente a `key` nas `options` do `theme` de cada ma
 - **Tema claro** (ex.: `aconchego`): `text` escuro, `bg0`/`bg1` claros, e `visor`/`ok`
   escuros o bastante para aparecer em papel. Um `visor` claro some no fundo claro.
 - Ao terminar, veja o visual e cada tema com o app em calma **e** em alarme.
+
+### Tamanho do texto
+
+Todo `font-size` com valor em px, na moldura (`ui/`) e nos apps embutidos
+(`miniapps/*/view.slint`), é multiplicado por `Skin.text-scale` (0,9 a 1,25, de
+Configurações › Aparência): `font-size: 13px * Skin.text-scale;`, ou
+`(short ? 15px : 19px) * Skin.text-scale` numa escolha. Ficam de fora o título do cabeçalho
+(`Skin.title-size`, que tem de caber no `header_h`) e tamanhos tirados da altura do pai. Os
+plugins recebem a escala em `theme.text-scale` e decidem se a usam.
+
+Com texto maior, uma linha pode quebrar e ficar mais alta. Por isso, altura mínima de
+linha é `min-height: max(44px, self.preferred-height)` num layout (ou `min-height: 44px` no
+`Text` do rótulo), **nunca** `min-height: 44px` no layout: fixo, ele vira a altura da
+linha e o texto que quebra invade a de baixo. Confira as telas em 125% com o `dev-ui.sh`.
 
 ## 4. Telas da janela
 
@@ -346,6 +422,8 @@ O que isso impõe:
 | Gradiente com 3+ cores só desenha o primeiro trecho | vários retângulos, cada um com gradiente de 2 cores |
 | `Path` não gira (`rotation-angle`) | um segundo ícone (`chevron` / `chevron-right`) |
 | Padrões repetidos e gradientes radiais são caros | desenhe em Rust numa imagem (`backdrop.rs`) |
+| Trocar uma imagem grande repinta tudo o que está por cima dela | animação do fundo com elementos pequenos sobre a imagem fixa (`ui/ambient.slint`), nunca uma imagem nova por quadro |
+| `opacity` pinta o elemento numa camada à parte | cor com alfa (`cor.with-alpha(a)`) no `background` |
 | `PopupWindow` sem altura explícita tem área clicável menor que o desenho | sempre dê `height` ao popup (`Select`) |
 | `PopupWindow` é desenhado dentro da janela e não rola sozinho | lista longa precisa de altura máxima e `Flickable` (o `Select` mostra 8 opções e meia e rola o resto) |
 | Recriar um modelo destrói os componentes dentro dele (um popup aberto fecha) | só refaça listas quando o conteúdo mudar (`rebuild_settings`) |

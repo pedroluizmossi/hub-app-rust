@@ -13,9 +13,10 @@ import { AgentsApp, AgentRow, AgentSub } from "../miniapps/agents/view.slint";
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
 import { StoreView, StoreApp, StoreRow } from "store.slint";
-import { GridCell, Ghost, SettingRow, AppInfo, PageInfo } from "models.slint";
+import { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem } from "models.slint";
+import { Ambient } from "ambient.slint";
 import { AppsView } from "settings.slint";
-import { Rail, TopTabs } from "nav.slint";
+import { Rail, PageBar, TopTabs } from "nav.slint";
 import { Dashboard } from "dashboard.slint";
 import { ResizeHandles, Frame, Bar, Title } from "frame.slint";
 
@@ -30,7 +31,7 @@ import "fonts/PixelifySans-Bold.ttf";
 
 export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 // structs que o Rust preenche (definidas em models.slint)
-export { GridCell, Ghost, SettingRow, AppInfo, PageInfo }
+export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem }
 
 export component HubWindow inherits Window {
     title: app-name;
@@ -44,7 +45,7 @@ export component HubWindow inherits Window {
     // transparente: os cantos cortados mostram o que há atrás
     background: transparent;
     default-font-family: Skin.font-ui;
-    default-font-size: 13px;
+    default-font-size: 13px * Skin.text-scale;
 
     in property <[AppInfo]> apps;          // todos os apps (configurações)
     in property <[GridCell]> cells;        // apps ligados, posicionados na grade
@@ -79,15 +80,32 @@ export component HubWindow inherits Window {
     in property <[string]> page-names;
     in property <[string]> mascots;          // rótulos das mascotes (ícone das páginas)
     in property <[image]> mascot-images;     // o desenho de cada uma, na mesma ordem
-    // páginas como abas no cabeçalho em vez da barra lateral (`nav = "top"`)
-    in property <bool> nav-top: false;
+    // onde ficam as páginas (`nav` da config): "side" (barra à esquerda), "right",
+    // "bottom" ou "top" (abas no cabeçalho); `nav-index` é a mesma escolha na Aparência
+    in property <string> nav: "side";
+    in property <int> nav-index: 0;
+    property <bool> nav-top: nav == "top";
     in property <bool> reduce-motion: false;
     in property <int> chatter-index: 1;
     in property <bool> autostart: false;
     in property <string> version;
     in property <string> log-dir;
-    // fundo desenhado pelo Rust para o tamanho da área do painel
+    // apps locais: a pasta, o resumo ("2 apps locais · 1 da loja") e as pastas recusadas
+    in property <string> apps-dir;
+    in property <string> apps-summary;
+    in property <string> apps-skipped;
+    // fundo desenhado pelo Rust para o tamanho da área do painel, e o que anima por cima
     in property <image> backdrop;
+    in property <[AmbientItem]> ambient;
+    in property <bool> ambient-on: true;
+    // aparência: cor de destaque, tamanho do texto e a pasta de temas/visuais/fundos
+    in property <[string]> accents;
+    in property <int> accent-index;
+    in property <[string]> text-sizes;
+    in property <int> text-size-index: 1;
+    in property <string> looks-dir;
+    in property <string> looks-summary;
+    in property <string> looks-skipped;
     // relógio e saudação ("boa noite · 21:57"), para os visuais que mostram
     in property <string> clock;
     in property <string> greeting;
@@ -122,6 +140,13 @@ export component HubWindow inherits Window {
     callback chatter-chosen(int);
     callback autostart-toggled();
     callback open-logs();
+    callback open-apps-dir();
+    callback reload-apps();
+    callback accent-chosen(int);
+    callback text-size-chosen(int);
+    callback ambient-toggled();
+    callback open-looks-dir();
+    callback reload-looks();
     callback page-selected(int);
     callback page-added();
     callback page-removed(int);
@@ -174,7 +199,7 @@ export component HubWindow inherits Window {
                         text: Skin.tag == "grid" ? grid-tag : Skin.tag == "greeting" ? greeting : "";
                         color: Skin.tag-ink;
                         font-family: Skin.tag == "grid" ? Skin.font-mono : Skin.font-ui;
-                        font-size: Skin.tag == "grid" ? 11px : 13px;
+                        font-size: (Skin.tag == "grid" ? 11px : 13px) * Skin.text-scale;
                         letter-spacing: Skin.tag == "grid" ? 1.5px : 0;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
@@ -232,7 +257,7 @@ export component HubWindow inherits Window {
                         text: "MODO DE EDIÇÃO";
                         color: Skin.accent;
                         font-family: Skin.font-title;
-                        font-size: 16px;
+                        font-size: 16px * Skin.text-scale;
                         font-weight: 700;
                         letter-spacing: 2.5px;
                         vertical-alignment: center;
@@ -241,7 +266,7 @@ export component HubWindow inherits Window {
                         text: "arraste pelo topo · puxe as bordas";
                         color: Skin.edit-sub;
                         font-family: Skin.font-mono;
-                        font-size: 11px;
+                        font-size: 11px * Skin.text-scale;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                         overflow: elide;
@@ -249,7 +274,7 @@ export component HubWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: center;
-                        Text { text: "Colunas"; color: Skin.edit-ink; font-size: 13px; vertical-alignment: center; }
+                        Text { text: "Colunas"; color: Skin.edit-ink; font-size: 13px * Skin.text-scale; vertical-alignment: center; }
                         VerticalLayout {
                             alignment: center;
                             Stepper {
@@ -258,7 +283,7 @@ export component HubWindow inherits Window {
                                 minimum: 1;
                                 maximum: max-columns;
                                 value-width: 24px;
-                                font-size: 14px;
+                                font-size: 14px * Skin.text-scale;
                                 accent: Skin.accent;
                                 edge: Skin.edit-line;
                                 down-enabled: cols-down-ok;
@@ -270,7 +295,7 @@ export component HubWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: center;
-                        Text { text: "Linhas"; color: Skin.edit-ink; font-size: 13px; vertical-alignment: center; }
+                        Text { text: "Linhas"; color: Skin.edit-ink; font-size: 13px * Skin.text-scale; vertical-alignment: center; }
                         VerticalLayout {
                             alignment: center;
                             Stepper {
@@ -279,7 +304,7 @@ export component HubWindow inherits Window {
                                 minimum: 1;
                                 maximum: max-rows;
                                 value-width: 24px;
-                                font-size: 14px;
+                                font-size: 14px * Skin.text-scale;
                                 accent: Skin.accent;
                                 edge: Skin.edit-line;
                                 down-enabled: rows-down-ok;
@@ -296,7 +321,7 @@ export component HubWindow inherits Window {
                             icon: Icons.gear;
                             ink: Skin.edit-ink;
                             edge: Skin.edit-line;
-                            font-size: 13px;
+                            font-size: 13px * Skin.text-scale;
                             font-weight: 400;
                             clicked => { root.select-tab("apps"); }
                         }
@@ -329,7 +354,7 @@ export component HubWindow inherits Window {
                         text: "Configurações";
                         color: Skin.panel-ink;
                         font-family: Skin.font-title;
-                        font-size: 20px;
+                        font-size: 20px * Skin.text-scale;
                         font-weight: 700;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
@@ -379,7 +404,7 @@ export component HubWindow inherits Window {
                         text: "Loja de plugins";
                         color: Skin.panel-ink;
                         font-family: Skin.font-title;
-                        font-size: 20px;
+                        font-size: 20px * Skin.text-scale;
                         font-weight: 700;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
@@ -398,10 +423,11 @@ export component HubWindow inherits Window {
                 }
             }
 
-            // barra lateral (páginas) e, ao lado, o painel ou as configurações
+            // barra de páginas (à esquerda ou à direita) e, ao lado, o painel ou as configurações
             HorizontalLayout {
             vertical-stretch: 1;
-            if !nav-top: Rail {
+            if nav == "side": Rail {
+                edge: "left";
                 pages: pages;
                 current: page;
                 settings: current != "panel";
@@ -421,6 +447,12 @@ export component HubWindow inherits Window {
                     height: 100%;
                     source: backdrop;
                     image-fit: fill;
+                }
+                Ambient {
+                    width: 100%;
+                    height: 100%;
+                    items: ambient;
+                    live: ambient-on && !Anim.calm;
                 }
                 Dashboard {
                     width: 100%;
@@ -450,7 +482,7 @@ export component HubWindow inherits Window {
                 page-names: page-names;
                 mascots: mascots;
                 mascot-images: mascot-images;
-                nav-index: nav-top ? 1 : 0;
+                nav-index: nav-index;
                 nav-chosen(i) => { root.nav-chosen(i); }
                 reduce-motion: reduce-motion;
                 reduce-motion-toggled => { root.reduce-motion-toggled(); }
@@ -461,6 +493,24 @@ export component HubWindow inherits Window {
                 version: version;
                 log-dir: log-dir;
                 open-logs => { root.open-logs(); }
+                apps-dir: apps-dir;
+                apps-summary: apps-summary;
+                apps-skipped: apps-skipped;
+                open-apps-dir => { root.open-apps-dir(); }
+                reload-apps => { root.reload-apps(); }
+                accents: accents;
+                accent-index: accent-index;
+                accent-chosen(i) => { root.accent-chosen(i); }
+                text-sizes: text-sizes;
+                text-size-index: text-size-index;
+                text-size-chosen(i) => { root.text-size-chosen(i); }
+                ambient-on: ambient-on;
+                ambient-toggled => { root.ambient-toggled(); }
+                looks-dir: looks-dir;
+                looks-summary: looks-summary;
+                looks-skipped: looks-skipped;
+                open-looks-dir => { root.open-looks-dir(); }
+                reload-looks => { root.reload-looks(); }
                 page-added => { root.page-added(); }
                 page-removed(i) => { root.page-removed(i); }
                 page-renamed(i, n) => { root.page-renamed(i, n); }
@@ -486,6 +536,26 @@ export component HubWindow inherits Window {
                 setting-int(a, k, v) => { root.setting-int(a, k, v); }
                 setting-chosen(a, k, i) => { root.setting-chosen(a, k, i); }
             }
+
+            if nav == "right": Rail {
+                edge: "right";
+                pages: pages;
+                current: page;
+                settings: current != "panel";
+                selected(i) => { root.page-selected(i); }
+                add => { root.page-added(); }
+                open-settings => { root.select-tab(current == "panel" ? "apps" : "panel"); }
+            }
+            }
+
+            // barra de páginas embaixo (acima do rodapé do visual, se houver)
+            if nav == "bottom": PageBar {
+                pages: pages;
+                current: page;
+                settings: current != "panel";
+                selected(i) => { root.page-selected(i); }
+                add => { root.page-added(); }
+                open-settings => { root.select-tab(current == "panel" ? "apps" : "panel"); }
             }
 
             // rodapé: barra de status (Terminal) ou faixa de madeira (Aconchego)
@@ -501,7 +571,7 @@ export component HubWindow inherits Window {
                             + cells.length + (cells.length == 1 ? " app" : " apps") + " · grade " + columns + "×" + rows;
                         color: Skin.sub;
                         font-family: Skin.font-mono;
-                        font-size: 12px;
+                        font-size: 12px * Skin.text-scale;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                         overflow: elide;
@@ -510,7 +580,7 @@ export component HubWindow inherits Window {
                         text: clock;
                         color: Skin.sub;
                         font-family: Skin.font-mono;
-                        font-size: 12px;
+                        font-size: 12px * Skin.text-scale;
                         vertical-alignment: center;
                     }
                 }

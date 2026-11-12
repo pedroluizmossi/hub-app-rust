@@ -88,6 +88,9 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
   funcionaram (nem num caso normal). Não confie neles para listas suspensas.
 - **Tokens, não valores soltos:** cores e medidas vêm de `Skin` (visual da janela) e
   `Colors` (tema do app), em `ui/theme.slint`.
+- **Texto escala:** `font-size: 13px * Skin.text-scale;` (tamanho do texto da
+  Aparência). Altura mínima de linha é `max(44px, self.preferred-height)`, nunca `44px`
+  fixo num layout (corta o texto que quebra). Ver `DESIGN.md › Tamanho do texto`.
 - **Mascotes:** o componente `Mascot` (`ui/widgets.slint`) usa `Skin.mascot-size` como
   tamanho padrão e escala o quadro 16×14 para caber na caixa que recebe, sem deformar.
   Um app só dá `width`/`height` quando quer outra caixa, e deriva do token

@@ -50,6 +50,41 @@ impl Hub {
         });
 
         let w = Rc::downgrade(hub);
+        ui.on_accent_chosen(move |i| {
+            if let Some(h) = w.upgrade() {
+                h.choose_accent(i.max(0) as usize);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_text_size_chosen(move |i| {
+            if let Some(h) = w.upgrade() {
+                h.choose_text_size(i.max(0) as usize);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_ambient_toggled(move || {
+            if let Some(h) = w.upgrade() {
+                h.toggle_ambient();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_open_looks_dir(move || {
+            if let Some(h) = w.upgrade() {
+                h.open_looks_dir();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_reload_looks(move || {
+            if let Some(h) = w.upgrade() {
+                h.reload_looks();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
         ui.on_tray_icon_chosen(move |i| {
             if let Some(h) = w.upgrade() {
                 h.choose_tray_icon(i.max(0) as usize);
@@ -95,6 +130,20 @@ impl Hub {
         ui.on_open_logs(move || {
             if let Some(h) = w.upgrade() {
                 h.open_logs();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_open_apps_dir(move || {
+            if let Some(h) = w.upgrade() {
+                h.open_apps_dir();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_reload_apps(move || {
+            if let Some(h) = w.upgrade() {
+                h.reload_plugins();
             }
         });
 

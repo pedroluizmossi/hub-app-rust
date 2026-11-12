@@ -105,14 +105,14 @@ component Chip inherits Rectangle {
             text: root.label;
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 11px;
+            font-size: 11px * Skin.text-scale;
             vertical-alignment: center;
         }
         Text {
             text: root.text;
             color: ink.mix(t.text, 0.55);
             font-family: Skin.font-mono;
-            font-size: 11px;
+            font-size: 11px * Skin.text-scale;
             font-weight: 700;
             vertical-alignment: center;
         }
@@ -131,7 +131,7 @@ component Stat inherits HorizontalLayout {
         text: root.value;
         color: ink;
         font-family: Skin.font-mono;
-        font-size: 13px;
+        font-size: 13px * Skin.text-scale;
         font-weight: 700;
         vertical-alignment: center;
     }
@@ -139,7 +139,7 @@ component Stat inherits HorizontalLayout {
         text: root.label;
         color: t.sub;
         font-family: Skin.font-mono;
-        font-size: 11px;
+        font-size: 11px * Skin.text-scale;
         vertical-alignment: center;
     }
 }
@@ -214,7 +214,7 @@ component Row inherits Rectangle {
             Text {
                 text: a.title;
                 color: dim ? t.sub.mix(t.text, 0.5) : t.text;
-                font-size: 14px;
+                font-size: 14px * Skin.text-scale;
                 font-weight: dim ? 400 : 700;
                 overflow: elide;
             }
@@ -222,7 +222,7 @@ component Row inherits Rectangle {
                 text: a.info;
                 color: t.sub;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 overflow: elide;
             }
         }
@@ -233,7 +233,7 @@ component Row inherits Rectangle {
             text: a.state-text;
             color: ink;
             font-family: Skin.font-mono;
-            font-size: 12px;
+            font-size: 12px * Skin.text-scale;
             font-weight: dim ? 400 : 700;
             horizontal-alignment: right;
             vertical-alignment: center;
@@ -295,7 +295,7 @@ component Row inherits Rectangle {
                 horizontal-stretch: 1;
                 text: a.prompt;
                 color: t.sub.mix(t.text, 0.45);
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 font-italic: true;
                 vertical-alignment: center;
                 overflow: elide;
@@ -319,7 +319,7 @@ component Row inherits Rectangle {
                 text: s.kind;
                 color: t.fur.mix(t.text, 0.6);
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 font-weight: 700;
                 vertical-alignment: center;
             }
@@ -327,7 +327,7 @@ component Row inherits Rectangle {
                 horizontal-stretch: 1;
                 text: s.title;
                 color: s.state == "working" ? t.text : t.sub;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -336,7 +336,7 @@ component Row inherits Rectangle {
                 text: s.state-text;
                 color: s.state == "working" ? t.ok : t.sub;
                 font-family: Skin.font-mono;
-                font-size: 11px;
+                font-size: 11px * Skin.text-scale;
                 vertical-alignment: center;
             }
         }
@@ -347,7 +347,7 @@ component Row inherits Rectangle {
             text: "e mais " + a.more-subs + (a.more-subs == 1 ? " subagente" : " subagentes");
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 11px;
+            font-size: 11px * Skin.text-scale;
             vertical-alignment: center;
         }
     }
@@ -391,21 +391,21 @@ component Row inherits Rectangle {
             text: "Abrir pasta";
             icon: Icons.grid;
             ink: t.visor;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             clicked => { AgentsApp.open-dir(root.a.key); }
         }
         TextButton {
             text: narrow ? "Terminal" : "Terminal na pasta";
             icon: Icons.terminal;
             ink: t.visor;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             clicked => { AgentsApp.open-terminal(root.a.key); }
         }
         if a.can-resume: TextButton {
             text: narrow ? "Retomar" : "Retomar sessão";
             icon: Icons.play;
             ink: t.ok;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             clicked => { AgentsApp.resume(root.a.key); }
         }
     }
@@ -445,7 +445,7 @@ export component AgentsView inherits Rectangle {
             Text {
                 text: AgentsApp.speech;
                 color: t.text;
-                font-size: short ? 15px : 19px;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
                 wrap: word-wrap;
             }
@@ -454,7 +454,7 @@ export component AgentsView inherits Rectangle {
                     : AgentsApp.working + " trabalhando · " + AgentsApp.waiting + " esperando você · " + AgentsApp.idle + (AgentsApp.idle == 1 ? " parado" : " parados");
                 color: AgentsApp.error-text != "" ? t.warn.mix(t.text, 0.6) : t.sub;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 wrap: word-wrap;
             }
         }
@@ -479,7 +479,7 @@ export component AgentsView inherits Rectangle {
             text: AgentsApp.missing ? "Não achei Claude Code, Codex nem OpenCode nesta máquina." : "Nenhuma sessão aberta ou recente.";
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;
             vertical-alignment: center;
             wrap: word-wrap;

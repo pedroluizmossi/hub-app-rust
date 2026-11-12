@@ -185,7 +185,7 @@ export component TextButton inherits Rectangle {
     in property <color> ink: Skin.accent;
     in property <color> edge: ink;
     in property <color> fill: transparent;   // fundo cheio (botão principal)
-    in property <length> font-size: 14px;
+    in property <length> font-size: 14px * Skin.text-scale;
     in property <int> font-weight: 600;
     in property <length> letter-spacing: 0;
     in property <bool> compact: false;        // só o ícone
@@ -277,7 +277,7 @@ component StepKey inherits Rectangle {
         text: root.text;
         color: root.ink;
         font-family: Skin.font-mono;
-        font-size: 16px;
+        font-size: 16px * Skin.text-scale;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -298,7 +298,7 @@ export component Stepper inherits Rectangle {
     in property <color> accent: Skin.accent;
     in property <color> edge: Skin.field-edge;
     in property <length> value-width: 52px;
-    in property <length> font-size: 15px;
+    in property <length> font-size: 15px * Skin.text-scale;
     // − e + desligados por fora (ex.: a grade não comporta)
     in property <bool> down-enabled: value > minimum;
     in property <bool> up-enabled: value < maximum;
@@ -357,7 +357,7 @@ export component Select inherits Rectangle {
         Text {
             text: options[index];
             color: Skin.ink;
-            font-size: 14px;
+            font-size: 14px * Skin.text-scale;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -425,7 +425,7 @@ export component Select inherits Rectangle {
                         Text {
                             text: o;
                             color: i == index ? accent : Skin.ink;
-                            font-size: 14px;
+                            font-size: 14px * Skin.text-scale;
                             vertical-alignment: center;
                             overflow: elide;
                         }
@@ -506,7 +506,7 @@ export component MascotSelect inherits Rectangle {
         Text {
             text: options[index];
             color: Skin.ink;
-            font-size: 14px;
+            font-size: 14px * Skin.text-scale;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -590,7 +590,7 @@ export component MascotSelect inherits Rectangle {
                         width: parent.width - 6px;
                         text: o;
                         color: i == index ? accent : Skin.ink;
-                        font-size: 11px;
+                        font-size: 11px * Skin.text-scale;
                         horizontal-alignment: center;
                         overflow: elide;
                     }
@@ -676,7 +676,7 @@ export component Counter inherits Rectangle {
             text: value;
             color: value > 0 ? tint : idle-ink;
             font-family: Skin.font-mono;
-            font-size: 22px;
+            font-size: 22px * Skin.text-scale;
             font-weight: 700;
             horizontal-alignment: center;
         }
@@ -684,7 +684,7 @@ export component Counter inherits Rectangle {
             text: label;
             color: theme.sub;
             font-family: Skin.font-mono;
-            font-size: 10px;
+            font-size: 10px * Skin.text-scale;
             letter-spacing: 1.4px;
             horizontal-alignment: center;
         }
@@ -715,7 +715,7 @@ export component SearchBox inherits Rectangle {
                 text: placeholder;
                 color: theme.sub.with-alpha(0.8);
                 font-family: Skin.font-mono;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 vertical-alignment: center;
                 overflow: elide;
                 width: 100%;
@@ -725,7 +725,7 @@ export component SearchBox inherits Rectangle {
                 text <=> root.text;
                 color: theme.text;
                 font-family: Skin.font-mono;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 vertical-alignment: center;
                 single-line: true;
                 accessible-label: placeholder;
@@ -789,7 +789,7 @@ export component HeaderButton inherits Rectangle {
             text: "[ " + short + " ]";
             color: touch.has-hover ? Skin.panel-ink : active ? Skin.accent : tone;
             font-family: Skin.font-mono;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             vertical-alignment: center;
         }
         if style == "icon" && icon != "": VerticalLayout {
@@ -811,7 +811,7 @@ export component HeaderButton inherits Rectangle {
         if style != "bracket" && show-text: Text {
             text: root.text;
             color: style == "chunky" ? (danger ? Skin.danger : Skin.ink) : tone;
-            font-size: 14px;
+            font-size: 14px * Skin.text-scale;
             vertical-alignment: center;
         }
     }

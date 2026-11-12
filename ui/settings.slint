@@ -5,20 +5,25 @@ import { Skin, Icons } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
 import { SettingRow, AppInfo, PageInfo } from "models.slint";
 
+// Linhas com altura mínima de 44 px: `max(44px, self.preferred-height)`, nunca só `44px`.
+// Um min-height fixo vira a altura da linha, e um texto que quebra (ou o texto em 125%)
+// invade a linha de baixo.
 component SettingLine inherits Rectangle {
     in property <SettingRow> s;
     in property <color> accent;
     callback toggled;
     callback int-edited(int);
     callback chosen(int);
-    min-height: 44px;
 
     HorizontalLayout {
         spacing: 16px;
+        // a altura mínima vai no rótulo: no Rectangle, ler a altura preferida dele faz um
+        // laço; no layout de dentro, não tem efeito
         Text {
+            min-height: 44px;
             text: s.label;
             color: Skin.ink;
-            font-size: 14px;
+            font-size: 14px * Skin.text-scale;
             horizontal-stretch: 1;
             vertical-alignment: center;
             wrap: word-wrap;
@@ -71,13 +76,13 @@ component ChoiceRow inherits HorizontalLayout {
     in property <int> index;
     callback chosen(int);
     spacing: 16px;
-    min-height: 44px;
+    min-height: max(44px, self.preferred-height);
     VerticalLayout {
         alignment: center;
         horizontal-stretch: 1;
         spacing: 2px;
-        Text { text: root.title; color: Skin.ink; font-size: 14px; }
-        Text { text: root.hint; color: Skin.sub; font-size: 12px; wrap: word-wrap; }
+        Text { text: root.title; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+        Text { text: root.hint; color: Skin.sub; font-size: 12px * Skin.text-scale; wrap: word-wrap; }
     }
     VerticalLayout {
         alignment: center;
@@ -114,7 +119,7 @@ export component AppsView inherits ScrollView {
     in property <int> tray-theme-index;
     callback tray-icon-chosen(int);
     callback tray-theme-chosen(int);
-    // onde ficam as páginas (0 = barra lateral, 1 = abas em cima)
+    // onde ficam as páginas (índice em `appearance::NAVS`: esquerda, direita, embaixo, em cima)
     in property <int> nav-index;
     callback nav-chosen(int);
     // reduzir movimento (mascotes paradas, sem reações)
@@ -129,6 +134,26 @@ export component AppsView inherits ScrollView {
     in property <string> version;
     in property <string> log-dir;
     callback open-logs();
+    // apps locais (ver as propriedades em hub.slint)
+    in property <string> apps-dir;
+    in property <string> apps-summary;
+    in property <string> apps-skipped;
+    callback open-apps-dir();
+    callback reload-apps();
+    // aparência: destaque, tamanho do texto, fundo animado e a pasta de temas/visuais/fundos
+    in property <[string]> accents;
+    in property <int> accent-index;
+    callback accent-chosen(int);
+    in property <[string]> text-sizes;
+    in property <int> text-size-index;
+    callback text-size-chosen(int);
+    in property <bool> ambient-on;
+    callback ambient-toggled();
+    in property <string> looks-dir;
+    in property <string> looks-summary;
+    in property <string> looks-skipped;
+    callback open-looks-dir();
+    callback reload-looks();
     // páginas: lista, nomes (para o seletor de cada app) e mascotes disponíveis
     in property <[PageInfo]> pages;
     in property <[string]> page-names;
@@ -174,11 +199,11 @@ export component AppsView inherits ScrollView {
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
-                    Text { text: "Painel"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                    Text { text: "Painel"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                     Text {
                         text: "A grade se arruma direto no painel: em Mudar layout, arraste os apps pelo topo e puxe as bordas para mudar o tamanho.";
                         color: Skin.edit-sub;
-                        font-size: 13px;
+                        font-size: 13px * Skin.text-scale;
                         wrap: word-wrap;
                     }
                 }
@@ -189,7 +214,7 @@ export component AppsView inherits ScrollView {
                         icon: Icons.grid;
                         ink: Skin.accent;
                         edge: Skin.edit-line;
-                        font-size: 13px;
+                        font-size: 13px * Skin.text-scale;
                         clicked => { root.edit-layout(); }
                     }
                 }
@@ -204,7 +229,7 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                Text { text: "Aparência"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                Text { text: "Aparência"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                 ChoiceRow {
                     title: "Visual da janela";
                     hint: "Fundo, moldura, fontes e cores. Apps com o tema “Acompanha a janela” mudam junto.";
@@ -213,24 +238,63 @@ export component AppsView inherits ScrollView {
                     chosen(i) => { root.skin-chosen(i); }
                 }
                 ChoiceRow {
+                    title: "Cor de destaque";
+                    hint: "Botões, foco e o fundo do painel. Ajustada ao visual para continuar legível.";
+                    options: accents;
+                    index: accent-index;
+                    chosen(i) => { root.accent-chosen(i); }
+                }
+                ChoiceRow {
+                    title: "Tamanho do texto";
+                    hint: "Letras da janela e dos apps embutidos (plugins seguem se usarem theme.text-scale).";
+                    options: text-sizes;
+                    index: text-size-index;
+                    chosen(i) => { root.text-size-chosen(i); }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    min-height: max(44px, self.preferred-height);
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Fundo animado"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text {
+                            text: "Chuva, estrelas e varredura no fundo do painel. Desligado também com Reduzir movimento.";
+                            color: Skin.sub;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SqSwitch {
+                            checked: ambient-on;
+                            label: "Fundo animado";
+                            toggled => { root.ambient-toggled(); }
+                        }
+                    }
+                }
+                ChoiceRow {
                     title: "Páginas";
-                    hint: "Onde as páginas aparecem: numa barra à esquerda ou como abas no cabeçalho.";
-                    options: ["Barra lateral", "Abas em cima"];
+                    hint: "Onde as páginas aparecem: numa barra à esquerda, à direita ou embaixo, ou como abas no cabeçalho.";
+                    // mesma ordem de `appearance::NAVS`
+                    options: ["Barra à esquerda", "Barra à direita", "Barra embaixo", "Abas em cima"];
                     index: nav-index;
                     chosen(i) => { root.nav-chosen(i); }
                 }
                 HorizontalLayout {
                     spacing: 16px;
-                    min-height: 44px;
+                    min-height: max(44px, self.preferred-height);
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Reduzir movimento"; color: Skin.ink; font-size: 14px; }
+                        Text { text: "Reduzir movimento"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
                             text: "Mascotes sem pulos nem tremores, e sem comemorações nem surpresas.";
                             color: Skin.sub;
-                            font-size: 12px;
+                            font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
                         }
                     }
@@ -265,6 +329,59 @@ export component AppsView inherits ScrollView {
                     index: tray-theme-index;
                     chosen(i) => { root.tray-theme-chosen(i); }
                 }
+                // temas, visuais e fundos por arquivo (src/skin/user.rs). Sem min-height:
+                // um valor fixo vira a altura da linha, e o texto mais alto vaza
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Temas, visuais e fundos seus"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text {
+                            text: "Arquivos .toml em temas/, visuais/ e fundos/ desta pasta (exemplos em examples/aparencia). Depois de mudar, clique em Recarregar.";
+                            color: Skin.sub;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: looks-dir;
+                            color: Skin.sub;
+                            font-family: Skin.font-mono;
+                            font-size: 11px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: looks-summary;
+                            color: Skin.dim;
+                            font-family: Skin.font-mono;
+                            font-size: 11px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        if looks-skipped != "": Text {
+                            text: looks-skipped;
+                            color: Skin.danger;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        TextButton {
+                            text: "Abrir pasta";
+                            font-size: 13px * Skin.text-scale;
+                            clicked => { root.open-looks-dir(); }
+                        }
+                        TextButton {
+                            text: "Recarregar";
+                            icon: Icons.refresh;
+                            ink: Skin.accent;
+                            font-size: 13px * Skin.text-scale;
+                            clicked => { root.reload-looks(); }
+                        }
+                    }
+                }
             }
         }
 
@@ -276,19 +393,19 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                Text { text: "Sistema"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                Text { text: "Sistema"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                 HorizontalLayout {
                     spacing: 16px;
-                    min-height: 44px;
+                    min-height: max(44px, self.preferred-height);
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Iniciar com o sistema"; color: Skin.ink; font-size: 14px; }
+                        Text { text: "Iniciar com o sistema"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
                             text: "Abre só na bandeja ao entrar na sessão.";
                             color: Skin.sub;
-                            font-size: 12px;
+                            font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
                         }
                     }
@@ -303,16 +420,16 @@ export component AppsView inherits ScrollView {
                 }
                 HorizontalLayout {
                     spacing: 16px;
-                    min-height: 44px;
+                    min-height: max(44px, self.preferred-height);
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Versão " + version; color: Skin.ink; font-size: 14px; }
+                        Text { text: "Versão " + version; color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
                             text: log-dir == "" ? "Sem pasta para os registros." : "Registros (avisos e erros): " + log-dir;
                             color: Skin.sub;
-                            font-size: 12px;
+                            font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
                         }
                     }
@@ -320,8 +437,61 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         if log-dir != "": TextButton {
                             text: "Abrir registros";
-                            font-size: 13px;
+                            font-size: 13px * Skin.text-scale;
                             clicked => { root.open-logs(); }
+                        }
+                    }
+                }
+                // apps locais: o que estiver nesta pasta entra na lista abaixo. Sem
+                // min-height: um valor fixo vira a altura da linha, e o texto mais alto vaza
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: "Apps locais"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text {
+                            text: "Um app por pasta, com o nome do id do manifest.toml. Depois de pôr ou mudar um app, clique em Recarregar.";
+                            color: Skin.sub;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: apps-dir;
+                            color: Skin.sub;
+                            font-family: Skin.font-mono;
+                            font-size: 11px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: apps-summary;
+                            color: Skin.dim;
+                            font-family: Skin.font-mono;
+                            font-size: 11px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        if apps-skipped != "": Text {
+                            text: apps-skipped;
+                            color: Skin.danger;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        TextButton {
+                            text: "Abrir pasta";
+                            font-size: 13px * Skin.text-scale;
+                            clicked => { root.open-apps-dir(); }
+                        }
+                        TextButton {
+                            text: "Recarregar";
+                            icon: Icons.refresh;
+                            ink: Skin.accent;
+                            font-size: 13px * Skin.text-scale;
+                            clicked => { root.reload-apps(); }
                         }
                     }
                 }
@@ -341,11 +511,11 @@ export component AppsView inherits ScrollView {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Páginas"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                        Text { text: "Páginas"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                         Text {
                             text: "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo.";
                             color: Skin.sub;
-                            font-size: 12px;
+                            font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
                         }
                     }
@@ -353,14 +523,14 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         TextButton {
                             text: "Nova página";
-                            font-size: 13px;
+                            font-size: 13px * Skin.text-scale;
                             clicked => { root.page-added(); }
                         }
                     }
                 }
                 for p[i] in pages: HorizontalLayout {
                     spacing: 10px;
-                    min-height: 44px;
+                    min-height: max(44px, self.preferred-height);
                     VerticalLayout {
                         alignment: center;
                         Rectangle {
@@ -383,7 +553,7 @@ export component AppsView inherits ScrollView {
                                 width: parent.width - 20px;
                                 text: p.name;
                                 color: Skin.ink;
-                                font-size: 14px;
+                                font-size: 14px * Skin.text-scale;
                                 vertical-alignment: center;
                                 single-line: true;
                                 accessible-label: "Nome da página " + (i + 1);
@@ -451,6 +621,9 @@ export component AppsView inherits ScrollView {
                     min-height: head-row.preferred-height;
                     TouchArea {
                         mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: (open ? "Fechar opções de " : "Abrir opções de ") + app.name;
+                        accessible-action-default => { root.open-app = open ? "" : app.id; }
                         clicked => { root.open-app = open ? "" : app.id; }
                     }
                     head-row := HorizontalLayout {
@@ -481,13 +654,35 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 4px;
-                        Text { text: app.name; color: Skin.ink; font-size: 17px; font-weight: 700; }
-                        Text { text: app.description; color: Skin.sub; font-size: 13px; wrap: word-wrap; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: app.name; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; overflow: elide; }
+                            // de onde veio: "loja", "local" ou "dev" (vazio nos embutidos)
+                            if app.origin != "": VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    border-width: 1px;
+                                    border-color: app.origin == "loja" ? Skin.surface-edge : Skin.accent;
+                                    HorizontalLayout {
+                                        padding-left: 6px;
+                                        padding-right: 6px;
+                                        Text {
+                                            text: app.origin;
+                                            color: app.origin == "loja" ? Skin.dim : Skin.accent;
+                                            font-family: Skin.font-mono;
+                                            font-size: 11px * Skin.text-scale;
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        Text { text: app.description; color: Skin.sub; font-size: 13px * Skin.text-scale; wrap: word-wrap; }
                         if !open: Text {
                             text: app.settings.length + (app.settings.length == 1 ? " opção" : " opções") + " · clique para abrir";
                             color: Skin.dim;
                             font-family: Skin.font-mono;
-                            font-size: 11px;
+                            font-size: 11px * Skin.text-scale;
                         }
                     }
                     VerticalLayout {
@@ -508,11 +703,11 @@ export component AppsView inherits ScrollView {
                 if open: VerticalLayout {
                     if page-names.length > 1: HorizontalLayout {
                         spacing: 16px;
-                        min-height: 44px;
+                        min-height: max(44px, self.preferred-height);
                         Text {
                             text: "Página";
                             color: Skin.ink;
-                            font-size: 14px;
+                            font-size: 14px * Skin.text-scale;
                             horizontal-stretch: 1;
                             vertical-alignment: center;
                         }
@@ -542,7 +737,7 @@ export component AppsView inherits ScrollView {
         Text {
             text: "Mascotes e temas do CyberDock · Interface feita com Slint (slint.dev)";
             color: Skin.dim;
-            font-size: 11px;
+            font-size: 11px * Skin.text-scale;
             horizontal-alignment: center;
         }
     }

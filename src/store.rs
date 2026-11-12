@@ -38,7 +38,8 @@ loja de plugins:
   miniutils --instalar <id> [índice] [--sim]    instala (pergunta antes, sem --sim)
   miniutils --atualizar <id> [índice] [--sim]   atualiza para o commit do índice
   miniutils --remover <id>                      remove um plugin instalado
-  miniutils --plugins                           lista os instalados
+  miniutils --plugins                           lista os instalados (da loja e locais)
+  miniutils --recarregar                        o MiniUtils aberto relê os apps e os temas
   --chave <hex>     chave pública que assina o índice (padrão: store_key da config)
 Sem índice, usa o store_index da config ou, se ele estiver vazio, a loja oficial
 (github.com/pedroluizmossi/miniutils-store). O índice é um registry.json (caminho ou
@@ -48,7 +49,9 @@ quem mantém um índice:
   miniutils --loja-chave <arquivo>              gera um par de chaves (imprime a pública)
   miniutils --loja-assinar <registry.json> <arquivo>   grava registry.json.sig
 
-O miniutils aberto relê os plugins sozinho depois de instalar, atualizar ou remover.";
+O miniutils aberto relê os plugins sozinho depois de instalar, atualizar ou remover.
+App local (sem loja): crie a pasta <id>/ dentro da pasta dos apps (miniutils --pastas)
+e rode miniutils --recarregar, ou use Configurações › Sistema › Recarregar.";
 
 /// Prazo do `git clone`/`checkout`.
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -211,7 +214,14 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     let cmd = args.first()?.as_str();
     if !matches!(
         cmd,
-        "--loja" | "--instalar" | "--atualizar" | "--remover" | "--plugins" | "--loja-chave" | "--loja-assinar"
+        "--loja"
+            | "--instalar"
+            | "--atualizar"
+            | "--remover"
+            | "--plugins"
+            | "--recarregar"
+            | "--loja-chave"
+            | "--loja-assinar"
     ) {
         return None;
     }
@@ -254,8 +264,20 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
                 format!("instalado em {}", dir.display())
             })
         }
-        ("--remover", Some(id)) => remove(id, &root).inspect(|_| crate::instance::notify_plugins_changed()),
+        ("--remover", Some(id)) => remove(id, &root).inspect(|_| {
+            crate::instance::notify_plugins_changed();
+        }),
         ("--plugins", _) => Ok(installed_list(&root)),
+        ("--recarregar", _) => Ok(if crate::instance::notify_plugins_changed() {
+            format!(
+                "o MiniUtils aberto releu os apps ({}) e os temas, visuais e fundos ({})\n{}",
+                root.display(),
+                crate::skin::user::dir().display(),
+                installed_list(&root)
+            )
+        } else {
+            format!("nenhum MiniUtils aberto: os apps de {} entram quando ele abrir", root.display())
+        }),
         ("--loja-chave", Some(path)) => keygen(Path::new(path)),
         ("--loja-assinar", Some(index)) => match pos.get(1) {
             Some(k) => sign(Path::new(index), Path::new(k)),
@@ -719,15 +741,20 @@ pub fn remove(id: &str, root: &Path) -> Result<String, String> {
 }
 
 fn installed_list(root: &Path) -> String {
-    let list = plugins::load_installed(root);
-    if list.is_empty() {
+    let (list, skipped) = plugins::scan(root);
+    if list.is_empty() && skipped.is_empty() {
         return format!("nenhum plugin instalado em {}", root.display());
     }
     let mut out = format!("instalados em {}:\n", root.display());
     for p in list {
-        let (version, commit) = installed(root, &p.manifest.id)
-            .map_or(("?".into(), "?".into()), |m| (m.version, m.commit.chars().take(12).collect::<String>()));
-        out.push_str(&format!("  {}  {} {}  (commit {commit})\n", p.manifest.id, p.manifest.name, version));
+        let origin = match installed(root, &p.manifest.id) {
+            Some(m) => format!("{}  (loja, commit {})", m.version, m.commit.chars().take(12).collect::<String>()),
+            None => "(local)".into(),
+        };
+        out.push_str(&format!("  {}  {} {origin}\n", p.manifest.id, p.manifest.name));
+    }
+    for s in skipped {
+        out.push_str(&format!("  ignorado: {}/  {}\n", s.folder, s.reason));
     }
     out
 }

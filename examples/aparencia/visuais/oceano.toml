@@ -1,0 +1,30 @@
+# Visual da janela de exemplo do MiniUtils. A chave é o nome do arquivo ("oceano").
+# Copie para <dados>/miniutils/visuais/ e clique em Configurações › Aparência › Recarregar.
+label = "Oceano"
+base = "noite"           # parte da Noite chuvosa e troca só o que vem abaixo
+app_theme = "oceano"     # tema dos apps em "Acompanha a janela" (temas/oceano.toml)
+backdrop = "bolhas"      # fundo: neon, terminal, papel, cidade ou um de fundos/
+
+bg = "#03121f"
+panel = "#062033"
+edge = "#1d4a66"
+line = "#123a52"
+surface = "#072638"
+surface_edge = "#1d4a66"
+field = "#03121f"
+field_edge = "#1d4a66"
+slot = "#1d4a66"
+ink = "#e6f7ff"
+sub = "#a9cfe3"
+dim = "#7fa8bf"
+panel_ink = "#e6f7ff"
+panel_sub = "#a9cfe3"
+tag_ink = "#ff9f7f"
+accent = "#7fdbff"
+accent_ink = "#03121f"
+accent2 = "#ff7f50"
+hover = "#0b3350"
+
+card_alpha = 0.9         # cartões um pouco transparentes sobre o fundo
+title = "plain"
+font_title = "Pixelify Sans"

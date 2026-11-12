@@ -30,6 +30,8 @@ export global Moods {
 // Quadro de animação (~8/s), avançado pelo Rust só com a janela visível.
 export global Anim {
     in property <int> frame;
+    // relógio em ms (volta a zero a cada hora), para o fundo animado
+    in property <int> time;
     // "reduzir movimento" (config `reduce_motion`): mascotes paradas, sem pulos nem tremores
     in property <bool> calm: false;
 }
@@ -80,6 +82,8 @@ export global Skin {
     // mascotes: largura de referência (a altura segue o quadro 16×14); cada app pode dar outra caixa
     in property <length> mascot-size: 72px;
     in property <float> card-alpha: 1;        // opacidade do fundo dos apps sobre o fundo da janela
+    // tamanho do texto (Configurações › Aparência): todo `font-size` é multiplicado por ele
+    in property <float> text-scale: 1;
     // letras
     in property <string> font-ui: "Chakra Petch";
     in property <string> font-mono: "JetBrains Mono";
@@ -118,6 +122,7 @@ export global Icons {
     // em pixel (quadro 7×7, preenchidos), para os botões "chunky"
     out property <string> px-pin: "M2 0h3v1H2zM2 1h1v2H2zM4 1h1v2H4zM1 3h5v1H1zM3 4h1v3H3z";
     out property <string> px-gear: "M3 0h1v1H3zM0 3h1v1H0zM6 3h1v1H6zM3 6h1v1H3zM1 1h1v1H1zM5 1h1v1H5zM1 5h1v1H1zM5 5h1v1H5zM2 2h3v1H2zM2 3h1v1H2zM4 3h1v1H4zM2 4h3v1H2z";
+    out property <string> px-plus: "M3 0h1v7H3zM0 3h7v1H0z";
     out property <string> px-grid: "M0 0h3v3H0zM4 0h3v3H4zM0 4h3v3H0zM4 4h3v3H4z";
     // prompt ">" e cursor "_" separados, para o cursor piscar sozinho
     out property <string> px-prompt: "M0 1h2v1H0zM1 2h2v1H1zM2 3h2v1H2zM1 4h2v1H1zM0 5h2v1H0z";

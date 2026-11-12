@@ -63,7 +63,7 @@ export component CdPlayerView inherits Rectangle {
                 text: CdPlayerApp.state-text;
                 color: accent;
                 font-family: Skin.font-mono;
-                font-size: 11px;
+                font-size: 11px * Skin.text-scale;
                 font-weight: 700;
                 letter-spacing: 2px;
                 vertical-alignment: center;
@@ -73,7 +73,7 @@ export component CdPlayerView inherits Rectangle {
                 text: CdPlayerApp.error-text;
                 color: t.alarm;
                 font-family: Skin.font-mono;
-                font-size: 10px;
+                font-size: 10px * Skin.text-scale;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -81,7 +81,7 @@ export component CdPlayerView inherits Rectangle {
                 text: CdPlayerApp.source;
                 color: t.muted;
                 font-family: Skin.font-mono;
-                font-size: 10px;
+                font-size: 10px * Skin.text-scale;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -128,21 +128,21 @@ export component CdPlayerView inherits Rectangle {
                     Text {
                         text: CdPlayerApp.title != "" ? CdPlayerApp.title : CdPlayerApp.has-player ? "faixa sem título" : "sem disco";
                         color: CdPlayerApp.has-player ? t.text : t.muted;
-                        font-size: short ? 14px : narrow ? 16px : 19px;
+                        font-size: (short ? 14px : narrow ? 16px : 19px) * Skin.text-scale;
                         font-weight: 700;
                         overflow: elide;
                     }
                     if !short && CdPlayerApp.artist != "": Text {
                         text: CdPlayerApp.artist;
                         color: t.sub;
-                        font-size: 13px;
+                        font-size: 13px * Skin.text-scale;
                         overflow: elide;
                     }
                     if !short && !narrow: Text {
                         text: CdPlayerApp.album;
                         color: t.muted;
                         font-family: Skin.font-mono;
-                        font-size: 11px;
+                        font-size: 11px * Skin.text-scale;
                         overflow: elide;
                     }
 
@@ -163,7 +163,7 @@ export component CdPlayerView inherits Rectangle {
                             text: CdPlayerApp.has-player ? CdPlayerApp.time-text : "--:--";
                             color: CdPlayerApp.has-player ? t.sub : t.muted;
                             font-family: Skin.font-mono;
-                            font-size: 11px;
+                            font-size: 11px * Skin.text-scale;
                             vertical-alignment: center;
                         }
                         Rectangle { horizontal-stretch: 1; }
@@ -171,7 +171,7 @@ export component CdPlayerView inherits Rectangle {
                             text: "MPRIS";
                             color: t.muted;
                             font-family: Skin.font-mono;
-                            font-size: 10px;
+                            font-size: 10px * Skin.text-scale;
                             letter-spacing: 1.5px;
                             vertical-alignment: center;
                         }
@@ -187,7 +187,7 @@ export component CdPlayerView inherits Rectangle {
                 text: "−" + CdPlayerApp.seek-label + "s";
                 ink: CdPlayerApp.can-seek ? t.sub : t.muted;
                 height: btn;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 0;
                 clicked => { if CdPlayerApp.can-seek { CdPlayerApp.command("back"); } }
             }
@@ -230,7 +230,7 @@ export component CdPlayerView inherits Rectangle {
                 text: "+" + CdPlayerApp.seek-label + "s";
                 ink: CdPlayerApp.can-seek ? t.sub : t.muted;
                 height: btn;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 0;
                 clicked => { if CdPlayerApp.can-seek { CdPlayerApp.command("fwd"); } }
             }
@@ -240,7 +240,7 @@ export component CdPlayerView inherits Rectangle {
                 ink: CdPlayerApp.has-player ? t.visor : t.muted;
                 edge: t.visor;
                 height: btn;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 0;
                 clicked => { if CdPlayerApp.has-player { CdPlayerApp.command("raise"); } }
             }

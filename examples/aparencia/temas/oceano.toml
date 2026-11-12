@@ -1,0 +1,16 @@
+# Tema de app de exemplo do MiniUtils. A chave é o nome do arquivo ("oceano").
+# Copie para <dados>/miniutils/temas/ (miniutils --pastas mostra onde) e clique em
+# Configurações › Aparência › Recarregar. Formato: DESIGN.md › Temas, visuais e fundos por arquivo.
+label = "Oceano (azul / coral)"
+base = "ghost"        # o que não estiver aqui vem deste tema
+
+# mascote
+fur = "#ff7f50"       # pelo, e acento do app (chips, botões)
+visor = "#7fdbff"     # visor, e acento secundário
+outline = "#03141f"
+# cartão do app
+bg0 = "#08243a"
+bg1 = "#03121f"
+text = "#e6f7ff"
+sub = "#9cc3d9"
+muted = "#3d6680"

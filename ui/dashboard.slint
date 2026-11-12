@@ -210,7 +210,7 @@ export component Dashboard inherits ScrollView {
                         Text {
                             text: c.name.to-uppercase();
                             color: c.theme.outline;
-                            font-size: 14px;
+                            font-size: 14px * Skin.text-scale;
                             font-weight: 700;
                             letter-spacing: 1.7px;
                             vertical-alignment: center;
@@ -221,7 +221,7 @@ export component Dashboard inherits ScrollView {
                             text: c.w + "×" + c.h;
                             color: c.theme.outline;
                             font-family: Skin.font-mono;
-                            font-size: 13px;
+                            font-size: 13px * Skin.text-scale;
                             vertical-alignment: center;
                         }
                     }
@@ -296,7 +296,7 @@ export component Dashboard inherits ScrollView {
             text: ghost.ok ? ghost.w + "×" + ghost.h : "sem espaço";
             color: ghost.ok ? Skin.accent : Skin.bad;
             font-family: Skin.font-mono;
-            font-size: 16px;
+            font-size: 16px * Skin.text-scale;
             font-weight: 700;
         }
     }

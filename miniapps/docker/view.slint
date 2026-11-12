@@ -118,7 +118,7 @@ component Row inherits Rectangle {
                 Text {
                     text: c.name;
                     color: t.text;
-                    font-size: 15px;
+                    font-size: 15px * Skin.text-scale;
                     font-weight: 700;
                     overflow: elide;
                 }
@@ -131,7 +131,7 @@ component Row inherits Rectangle {
                         text: c.project;
                         color: t.fur.mix(t.text, 0.7);
                         font-family: Skin.font-mono;
-                        font-size: 11px;
+                        font-size: 11px * Skin.text-scale;
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
@@ -142,7 +142,7 @@ component Row inherits Rectangle {
                     text: c.age-text != "" ? c.state-text + " " + c.age-text : c.state-text;
                     color: c.problem ? t.alarm.mix(t.text, 0.6) : t.sub;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     overflow: elide;
                     horizontal-stretch: narrow ? 1 : 0;
                 }
@@ -150,14 +150,14 @@ component Row inherits Rectangle {
                     text: " · " + c.restarts-text;
                     color: t.warn;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     horizontal-stretch: 0;
                 }
                 Text {
                     text: narrow ? "" : " · " + c.image;
                     color: c.problem ? t.alarm.mix(t.text, 0.6) : t.sub;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
@@ -173,14 +173,14 @@ component Row inherits Rectangle {
                 text: c.usage-text;
                 color: c.busy ? t.warn : t.sub;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 horizontal-alignment: right;
             }
             if c.url != "": Text {
                 text: c.port-text;
                 color: link.has-hover ? t.text : t.visor;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 horizontal-alignment: right;
                 link := TouchArea {
                     mouse-cursor: pointer;
@@ -288,7 +288,7 @@ component GroupHeader inherits Rectangle {
             text: g.name;
             color: g.project == "" ? t.sub : t.text;
             font-family: Skin.font-mono;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             font-weight: 700;
             vertical-alignment: center;
             overflow: elide;
@@ -298,7 +298,7 @@ component GroupHeader inherits Rectangle {
             text: g.state-text;
             color: g.problem ? t.alarm.mix(t.text, 0.6) : g.running ? t.ok.mix(t.sub, 0.5) : t.muted;
             font-family: Skin.font-mono;
-            font-size: 12px;
+            font-size: 12px * Skin.text-scale;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -386,7 +386,7 @@ export component DockerView inherits Rectangle {
             Text {
                 text: DockerApp.missing ? "Docker não instalado" : !DockerApp.ok ? "Docker fora do ar" : DockerApp.speech;
                 color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
-                font-size: short ? 15px : 19px;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
                 wrap: word-wrap;
             }
@@ -396,7 +396,7 @@ export component DockerView inherits Rectangle {
                     : DockerApp.usage-text;
                 color: DockerApp.errors > 0 && narrow ? t.alarm : t.sub;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 wrap: word-wrap;
             }
         }
@@ -436,7 +436,7 @@ export component DockerView inherits Rectangle {
                 checked: DockerApp.hide-stopped;
                 toggled => { DockerApp.toggle-hide-stopped(); }
             }
-            if !tiny: Text { text: "só ativos"; color: t.sub; font-size: 14px; vertical-alignment: center; }
+            if !tiny: Text { text: "só ativos"; color: t.sub; font-size: 14px * Skin.text-scale; vertical-alignment: center; }
         }
         TextButton {
             text: "ordem: " + DockerApp.sort;
@@ -470,7 +470,7 @@ export component DockerView inherits Rectangle {
             text: DockerApp.missing ? "Instale o Docker para ver os containers aqui." : !DockerApp.ok ? "Sem conexão com o Docker." : DockerApp.search != "" ? "Nenhum container bate com esse filtro." : "Nenhum container.";
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

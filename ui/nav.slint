@@ -1,61 +1,117 @@
-// Navegação entre páginas do painel: barra lateral (Rail) ou abas no cabeçalho (TopTabs).
+// Navegação entre páginas do painel: barra em pé à esquerda ou à direita (Rail), barra
+// embaixo (PageBar) ou abas no cabeçalho (TopTabs). Escolha em Aparência › Páginas.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons, Moods } from "theme.slint";
 import { Icon } from "widgets.slint";
 import { PageInfo } from "models.slint";
 
-// Um item da barra lateral: ícone em pixel e nome embaixo; marca de alerta no canto.
+// Um item da barra de páginas: a mascote (ou um ícone) num quadro e o nome embaixo.
+// `edge` é o lado da janela em que a barra encosta ("left", "right" ou "bottom"): a marca
+// da página aberta fica desse lado, colada na borda.
 component RailItem inherits Rectangle {
     in property <image> icon;
     in property <string> icon-path;   // traço 24×24, quando não há imagem
+    in property <string> px-icon;     // pixel 7×7, para os botões "chunky"
     in property <string> text;
+    in property <bool> show-text: true;
     in property <bool> selected;
+    in property <bool> ghost;         // "nova página": só o contorno do quadro
+    in property <string> edge: "left";
     in property <color> badge: transparent;
     callback clicked;
-    height: 58px;
+    // não estica: o espaço que sobra na barra fica entre as páginas e as configurações
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
     accessible-role: tab;
     accessible-label: text;
     accessible-item-selected: selected;
     accessible-action-default => { root.clicked(); }
-    background: selected ? Skin.panel-ink.with-alpha(0.16) : touch.has-hover ? Skin.panel-ink.with-alpha(0.08) : transparent;
-    animate background { duration: 120ms; }
 
-    if selected: Rectangle { x: 0; width: 3px; background: Skin.accent; }
+    property <bool> hover: touch.has-hover;
+    property <color> ink: selected ? Skin.panel-ink : hover ? Skin.panel-ink : Skin.panel-sub;
+    property <length> tile-w: 40px;
+    property <length> tile-h: 34px;
+    property <length> pad: 5px;
+    property <length> mark: 3px;      // espessura da marca da página aberta
+
     VerticalLayout {
-        padding-top: 6px;
-        padding-bottom: 5px;
+        padding-top: pad;
+        padding-bottom: pad;
+        padding-left: 4px;
+        padding-right: 4px;
         spacing: 3px;
         alignment: center;
         HorizontalLayout {
             alignment: center;
-            if icon-path == "": Image {
-                source: icon;
-                image-rendering: pixelated;
-                width: 32px;
-                height: 28px;
-            }
-            if icon-path != "": Rectangle {
-                width: 32px;
-                height: 28px;
-                Icon { icon: icon-path; ink: selected ? Skin.panel-ink : Skin.panel-sub; size: 20px; }
+            tile := Rectangle {
+                width: tile-w;
+                height: tile-h;
+                background: selected ? Skin.accent.with-alpha(touch.pressed ? 0.24 : 0.16)
+                    : touch.pressed ? Skin.panel-ink.with-alpha(0.14)
+                    : hover ? Skin.panel-ink.with-alpha(0.08) : transparent;
+                border-width: 1px;
+                border-color: selected ? Skin.accent
+                    : ghost ? Skin.panel-sub.with-alpha(hover ? 0.55 : 0.28) : transparent;
+                animate background, border-color { duration: 120ms; }
+
+                if icon-path == "" && px-icon == "": Image {
+                    source: icon;
+                    image-rendering: pixelated;
+                    width: 32px;
+                    height: 28px;
+                }
+                if icon-path != "" && (Skin.buttons != "chunky" || px-icon == ""): Icon {
+                    icon: icon-path;
+                    ink: root.ink;
+                    size: ghost ? 18px : 20px;
+                    weight: 2;
+                }
+                if px-icon != "" && Skin.buttons == "chunky": Path {
+                    width: 14px;
+                    height: 14px;
+                    commands: px-icon;
+                    viewbox-width: 7;
+                    viewbox-height: 7;
+                    fill: root.ink;
+                    anti-alias: false;
+                }
+                // alerta da página: no canto do quadro, por cima da borda
+                if badge != transparent: Rectangle {
+                    x: parent.width - 6px;
+                    y: -2px;
+                    width: 8px;
+                    height: 8px;
+                    background: badge;
+                    border-width: 1px;
+                    border-color: Skin.panel;
+                }
             }
         }
-        Text {
+        if show-text: Text {
             text: root.text;
-            color: selected ? Skin.panel-ink : Skin.panel-sub;
-            font-size: 10px;
+            color: root.ink;
+            font-family: Skin.buttons == "bracket" ? Skin.font-mono : Skin.font-ui;
+            font-size: 10px * Skin.text-scale;
+            font-weight: selected ? 700 : 400;
             horizontal-alignment: center;
             overflow: elide;
         }
     }
-    if badge != transparent: Rectangle {
-        x: parent.width - 16px;
-        y: 6px;
-        width: 8px;
-        height: 8px;
-        background: badge;
-        border-width: 1px;
-        border-color: Skin.panel;
+
+    // marca da página aberta, colada na borda da janela
+    if selected && edge != "bottom": Rectangle {
+        x: edge == "left" ? 0 : parent.width - mark;
+        y: pad;
+        width: mark;
+        height: tile-h;
+        background: Skin.accent;
+    }
+    if selected && edge == "bottom": Rectangle {
+        x: (parent.width - tile-w) / 2;
+        y: parent.height - mark;
+        width: tile-w;
+        height: mark;
+        background: Skin.accent;
     }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -63,29 +119,37 @@ component RailItem inherits Rectangle {
     }
 }
 
-// Barra lateral: as páginas do painel em cima; nova página e configurações embaixo.
+// Barra de páginas em pé, à esquerda (`edge: "left"`) ou à direita da janela: as páginas
+// em cima, rolando se não couberem; configurações embaixo.
 export component Rail inherits Rectangle {
     in property <[PageInfo]> pages;
     in property <int> current;          // página aberta
     in property <bool> settings;        // as configurações estão abertas
+    in property <string> edge: "left";  // "left" | "right"
     callback selected(int);
     callback add();
     callback open-settings();
     width: 68px;
     background: Skin.panel;
-    // linha à direita, como a do cabeçalho
-    Rectangle { x: parent.width - 1px; width: 1px; background: Skin.line; }
+    // linha do lado do conteúdo, como a do cabeçalho
+    Rectangle { x: edge == "left" ? parent.width - 1px : 0; width: 1px; background: Skin.line; }
 
     VerticalLayout {
         padding-top: 6px;
-        padding-bottom: 6px;
-        padding-right: 1px;
-        ScrollView {
+        padding-bottom: 4px;
+        padding-left: edge == "right" ? 1px : 0;
+        padding-right: edge == "left" ? 1px : 0;
+        spacing: 4px;
+        list := Flickable {
             vertical-stretch: 1;
-            VerticalLayout {
+            interactive: true;
+            content-height: max(self.height, col.preferred-height);
+            col := VerticalLayout {
+                width: list.width;
                 alignment: start;
                 spacing: 2px;
                 for p[i] in pages: RailItem {
+                    edge: root.edge;
                     icon: p.icon;
                     text: p.name;
                     selected: !settings && i == current;
@@ -93,15 +157,88 @@ export component Rail inherits Rectangle {
                     clicked => { root.selected(i); }
                 }
                 RailItem {
+                    edge: root.edge;
                     icon-path: Icons.plus;
-                    text: "nova";
+                    px-icon: Icons.px-plus;
+                    text: "Nova página";
+                    show-text: false;
+                    ghost: true;
                     clicked => { root.add(); }
                 }
             }
         }
-        Rectangle { height: 1px; background: Skin.line; }
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            Rectangle { height: 1px; background: Skin.line; }
+        }
         RailItem {
+            edge: root.edge;
             icon-path: Icons.gear;
+            px-icon: Icons.px-gear;
+            text: "config";
+            selected: settings;
+            clicked => { root.open-settings(); }
+        }
+    }
+}
+
+// Barra de páginas deitada, embaixo da janela: as páginas da esquerda para a direita,
+// rolando de lado se não couberem; configurações na ponta direita.
+export component PageBar inherits Rectangle {
+    in property <[PageInfo]> pages;
+    in property <int> current;
+    in property <bool> settings;
+    callback selected(int);
+    callback add();
+    callback open-settings();
+    background: Skin.panel;
+    Rectangle { y: 0; height: 1px; background: Skin.line; }
+
+    HorizontalLayout {
+        padding-top: 1px;
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 4px;
+        list := Flickable {
+            horizontal-stretch: 1;
+            interactive: true;
+            content-width: max(self.width, row.preferred-width);
+            row := HorizontalLayout {
+                height: list.height;
+                alignment: start;
+                spacing: 2px;
+                for p[i] in pages: RailItem {
+                    width: 64px;
+                    edge: "bottom";
+                    icon: p.icon;
+                    text: p.name;
+                    selected: !settings && i == current;
+                    badge: p.mood == "alarm" ? Skin.bad : p.mood == "busy" ? Moods.color(p.theme, "busy") : transparent;
+                    clicked => { root.selected(i); }
+                }
+                RailItem {
+                    width: 52px;
+                    edge: "bottom";
+                    icon-path: Icons.plus;
+                    px-icon: Icons.px-plus;
+                    text: "Nova página";
+                    show-text: false;
+                    ghost: true;
+                    clicked => { root.add(); }
+                }
+            }
+        }
+        VerticalLayout {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            Rectangle { width: 1px; background: Skin.line; }
+        }
+        RailItem {
+            width: 64px;
+            edge: "bottom";
+            icon-path: Icons.gear;
+            px-icon: Icons.px-gear;
             text: "config";
             selected: settings;
             clicked => { root.open-settings(); }
@@ -137,7 +274,7 @@ component TopTab inherits Rectangle {
         if text != "": Text {
             text: root.text;
             color: selected ? Skin.panel-ink : Skin.panel-sub;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             vertical-alignment: center;
         }
     }

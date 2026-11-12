@@ -64,6 +64,7 @@ impl Hub {
             theme: render::colors(theme),
             settings: ModelRc::new(VecModel::from(settings)),
             page: self.host.config.borrow().page_of(&m.id).unwrap_or(0) as i32,
+            origin: origin(&m.id).into(),
         }
     }
 
@@ -81,7 +82,9 @@ impl Hub {
     pub(super) fn rebuild_settings(&self) {
         let fingerprint = {
             let cfg = self.host.config.borrow();
-            format!("{:?}|{:?}|{}|{:?}", cfg.enabled, cfg.apps, cfg.skin, cfg.pages)
+            // os ids carregados também: um app local entra desligado (sem mudar a config)
+            let ids: Vec<String> = self.registry.all().iter().map(|a| a.borrow().manifest().id.clone()).collect();
+            format!("{ids:?}|{:?}|{:?}|{}|{:?}", cfg.enabled, cfg.apps, cfg.skin, cfg.pages)
         };
         if self.settings_fingerprint.replace(fingerprint.clone()) == fingerprint {
             return;
@@ -98,6 +101,7 @@ impl Hub {
             .map(|s| {
                 let v = cfg.value(m, &s.key);
                 let (label, unit) = split_unit(&s.label);
+                let options = s.live_options();
                 SettingRow {
                     app: m.id.clone().into(),
                     key: s.key.clone().into(),
@@ -115,10 +119,10 @@ impl Hub {
                     maximum: s.max.unwrap_or(i32::MAX as i64) as i32,
                     step: s.step.unwrap_or(1) as i32,
                     options: ModelRc::new(VecModel::from(
-                        s.options.iter().map(|o| SharedString::from(option_label(o))).collect::<Vec<_>>(),
+                        options.iter().map(|o| SharedString::from(option_label(o))).collect::<Vec<_>>(),
                     )),
-                    index: s.options.iter().position(|o| Some(o.as_str()) == v.as_str()).unwrap_or(0) as i32,
-                    images: ModelRc::new(VecModel::from(option_images(&s.options, theme))),
+                    index: options.iter().position(|o| Some(o.as_str()) == v.as_str()).unwrap_or(0) as i32,
+                    images: ModelRc::new(VecModel::from(option_images(&options, theme))),
                 }
             })
             .collect()
@@ -137,7 +141,7 @@ impl Hub {
                 (SettingKind::Int, Input::Int(v)) => {
                     toml::Value::Integer(v.clamp(def.min.unwrap_or(i64::MIN), def.max.unwrap_or(i64::MAX)))
                 }
-                (SettingKind::Choice, Input::Choice(i)) => match def.options.get(i) {
+                (SettingKind::Choice, Input::Choice(i)) => match def.live_options().get(i) {
                     Some(o) => toml::Value::String(o.clone()),
                     None => return,
                 },
@@ -159,7 +163,7 @@ impl Hub {
 fn option_label(key: &str) -> String {
     if key == "auto" {
         "Acompanha a janela".into()
-    } else if let Some(t) = themes::THEMES.iter().find(|t| t.key == key) {
+    } else if let Some(t) = themes::find(key) {
         t.label.into()
     } else if let Some(s) = sprites::SPRITES.iter().find(|s| s.key == key) {
         s.label.into()
@@ -178,6 +182,20 @@ fn split_unit(label: &str) -> (String, String) {
     (label.to_string(), String::new())
 }
 
+/// De onde veio o app, para o selo da lista: "" (embutido), "dev" (`--plugin-dev`), "loja"
+/// (tem o `installed.json` que a loja grava) ou "local" (posto à mão na pasta dos apps).
+fn origin(id: &str) -> &'static str {
+    use crate::core::plugins::{self, Plugin};
+    if id.starts_with("cyber.") {
+        return "";
+    }
+    // o plugin em desenvolvimento vale no lugar de um instalado de mesmo id
+    if plugins::dev_dir().and_then(|d| Plugin::load(d).ok()).is_some_and(|p| p.manifest.id == id) {
+        return "dev";
+    }
+    if crate::store::installed(&plugins::dir(), id).is_some() { "loja" } else { "local" }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,7 +205,7 @@ mod tests {
         let docker = Manifest::parse(include_str!("../../miniapps/docker/manifest.toml")).unwrap();
         let vitals = Manifest::parse(include_str!("../../miniapps/vitals/manifest.toml")).unwrap();
         assert!(sprites::is_choice(&docker.setting("mascot").unwrap().options));
-        assert!(!sprites::is_choice(&docker.setting("theme").unwrap().options), "tema não é mascote");
+        assert!(!sprites::is_choice(&docker.setting("theme").unwrap().live_options()), "tema não é mascote");
         // "auto" entre as alternativas continua sendo escolha de mascote, e fica sem desenho
         let gpu = &vitals.setting("gpu_mascot").unwrap().options;
         assert!(gpu.iter().any(|o| o == "auto") && sprites::is_choice(gpu));
@@ -196,8 +214,9 @@ mod tests {
         for (o, img) in gpu.iter().zip(&images) {
             assert_eq!(img.size().width == 0, o == "auto", "{o}");
         }
-        assert!(option_images(&docker.setting("theme").unwrap().options, themes::get("neon")).is_empty());
+        assert!(option_images(&docker.setting("theme").unwrap().live_options(), themes::get("neon")).is_empty());
         // só "auto" (sem nenhuma mascote) não é escolha de mascote
         assert!(!sprites::is_choice(&["auto".to_string()]));
     }
 }
+

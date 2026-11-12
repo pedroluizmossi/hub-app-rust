@@ -11,7 +11,7 @@ use super::anim::{Look, Reaction};
 use super::clips::{self, Clip};
 use super::render::{self, H, W};
 use super::sprites::SPRITES;
-use super::themes::THEMES;
+use super::themes::BUILTIN as THEMES;
 use super::Mood;
 
 /// Ampliação de cada pixel da mascote.

@@ -35,11 +35,18 @@ pub struct Config {
     pub pages: Vec<Page>,
     /// Visual da janela (ver `src/skin`).
     pub skin: String,
+    /// Cor de destaque por cima do visual: `""` (a do visual) ou uma de `skin::ACCENTS`.
+    pub accent: String,
+    /// Tamanho do texto da interface, em % do design (90 a 125).
+    pub text_scale: u32,
+    /// Fundo animado (chuva, estrelas, varredura); "Reduzir movimento" também o desliga.
+    pub ambient: bool,
     /// Reduzir movimento: mascotes sem pulos nem tremores, e sem reações nem easter eggs.
     pub reduce_motion: bool,
     /// Quanto as mascotes conversam entre si: `"off"`, `"some"` ou `"lots"`.
     pub chatter: String,
-    /// Onde ficam as páginas: `"side"` (barra lateral) ou `"top"` (abas no cabeçalho).
+    /// Onde ficam as páginas: `"side"` (barra à esquerda), `"right"`, `"bottom"` ou `"top"`
+    /// (abas no cabeçalho). Valor desconhecido vale `"side"` (`hub::appearance::NAVS`).
     pub nav: String,
     /// Mascote do ícone da bandeja: `"auto"` (a do app em pior estado) ou uma mascote.
     pub tray_icon: String,
@@ -107,6 +114,9 @@ impl Default for Config {
                 ..Page::default()
             }],
             skin: "neon".into(),
+            accent: String::new(),
+            text_scale: 100,
+            ambient: true,
             reduce_motion: false,
             chatter: "some".into(),
             nav: "side".into(),

@@ -21,6 +21,7 @@ mod ui;
 const HELP: &str = "\
 Uso: miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]
        miniutils --previa <mascote> [animação] [--saida arquivo.gif]
+       miniutils --pastas
        miniutils --version
 
   --hidden              inicia só na bandeja (para o autostart)
@@ -29,7 +30,20 @@ Uso: miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]
   --plugin-dev <pasta>  carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao
                         salvar; erros da tela e do script saem no terminal
   --previa              GIF de uma animação de mascote em todos os temas
+  --pastas              onde ficam os apps locais, os temas/visuais/fundos, a
+                        configuração e os registros
   --version             mostra a versão (também em Configurações › Sistema)";
+
+/// Resposta do `--pastas`: os caminhos reais neste sistema.
+fn dirs_text() -> String {
+    let logs = core::os::log_dir().map_or_else(|| "(sem pasta)".into(), |d| d.display().to_string());
+    format!(
+        "apps locais:   {}\n               (um app por pasta, com o nome do id do manifest.toml)\naparência:     {}\n               (temas/, visuais/ e fundos/, um .toml cada; exemplos em examples/aparencia)\nconfiguração:  {}\nregistros:     {logs}",
+        core::plugins::dir().display(),
+        skin::user::dir().display(),
+        core::config::Config::path().display(),
+    )
+}
 
 fn main() -> anyhow::Result<()> {
     // live-preview (só desenvolvimento): a interface é interpretada ao rodar, e o
@@ -45,6 +59,11 @@ fn main() -> anyhow::Result<()> {
     // loja de plugins (linha de comando): não abre janela nem bandeja
     if let Some(code) = store::run_cli(&args) {
         std::process::exit(code);
+    }
+    // onde ficam as coisas (para quem vai pôr um app à mão, ou um agente que vai criá-lo)
+    if args.first().is_some_and(|a| a == "--pastas") {
+        println!("{}", dirs_text());
+        return Ok(());
     }
     // prévia de animação em GIF: não abre janela nem bandeja
     if args.first().is_some_and(|a| a == "--previa") {

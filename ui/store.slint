@@ -59,7 +59,7 @@ component Field inherits Rectangle {
                 text: placeholder;
                 color: Skin.dim;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 vertical-alignment: center;
                 overflow: elide;
                 width: 100%;
@@ -69,7 +69,7 @@ component Field inherits Rectangle {
                 text <=> root.text;
                 color: Skin.ink;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 vertical-alignment: center;
                 single-line: true;
                 accessible-label: label;
@@ -93,7 +93,7 @@ component PluginRow inherits Rectangle {
             Text {
                 text: item.name + "  " + item.version;
                 color: Skin.ink;
-                font-size: 16px;
+                font-size: 16px * Skin.text-scale;
                 font-weight: 700;
                 horizontal-stretch: 1;
                 overflow: elide;
@@ -102,39 +102,39 @@ component PluginRow inherits Rectangle {
                 text: item.state;
                 color: item.update ? Skin.accent2 : item.installed ? Skin.accent : Skin.dim;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 vertical-alignment: center;
             }
         }
-        Text { text: item.byline + " · " + item.id; color: Skin.dim; font-family: Skin.font-mono; font-size: 11px; overflow: elide; }
-        if item.description != "": Text { text: item.description; color: Skin.sub; font-size: 13px; wrap: word-wrap; }
-        Text { text: item.permissions; color: Skin.sub; font-family: Skin.font-mono; font-size: 12px; wrap: word-wrap; }
-        if item.warning != "": Text { text: item.warning; color: Skin.danger; font-size: 13px; font-weight: 700; wrap: word-wrap; }
-        if item.armed != "": Text { text: item.confirm; color: Skin.accent; font-size: 13px; wrap: word-wrap; }
+        Text { text: item.byline + " · " + item.id; color: Skin.dim; font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; overflow: elide; }
+        if item.description != "": Text { text: item.description; color: Skin.sub; font-size: 13px * Skin.text-scale; wrap: word-wrap; }
+        Text { text: item.permissions; color: Skin.sub; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; wrap: word-wrap; }
+        if item.warning != "": Text { text: item.warning; color: Skin.danger; font-size: 13px * Skin.text-scale; font-weight: 700; wrap: word-wrap; }
+        if item.armed != "": Text { text: item.confirm; color: Skin.accent; font-size: 13px * Skin.text-scale; wrap: word-wrap; }
         HorizontalLayout {
             alignment: end;
             spacing: 8px;
-            if item.busy: Text { text: "trabalhando…"; color: Skin.dim; font-size: 12px; vertical-alignment: center; }
+            if item.busy: Text { text: "trabalhando…"; color: Skin.dim; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
             if !item.busy && item.installed: TextButton {
                 text: item.armed == "remove" ? "Confirmar remoção" : "Remover";
                 icon: Icons.close;
                 ink: Skin.danger;
                 edge: Skin.danger-edge;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 clicked => { StoreApp.act(item.id, "remove"); }
             }
             if !item.busy && item.update: TextButton {
                 text: item.armed == "update" ? "Confirmar atualização" : "Atualizar";
                 icon: Icons.refresh;
                 ink: Skin.accent;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 clicked => { StoreApp.act(item.id, "update"); }
             }
             if !item.busy && !item.installed: TextButton {
                 text: item.armed == "install" ? "Confirmar instalação" : "Instalar";
                 icon: Icons.plus;
                 ink: Skin.accent;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 clicked => { StoreApp.act(item.id, "install"); }
             }
         }
@@ -158,11 +158,11 @@ export component StoreView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 8px;
-                Text { text: "Índice da loja"; color: Skin.ink; font-size: 17px; font-weight: 700; }
+                Text { text: "Índice da loja"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                 Text {
                     text: "Um registry.json (endereço https:// ou caminho) e a chave pública de quem o assina. Apague os dois campos e salve para voltar à loja oficial do MiniUtils.";
                     color: Skin.sub;
-                    font-size: 13px;
+                    font-size: 13px * Skin.text-scale;
                     wrap: word-wrap;
                 }
                 index := Field {
@@ -183,7 +183,7 @@ export component StoreView inherits ScrollView {
                         text: StoreApp.loading ? "carregando…" : StoreApp.status;
                         color: StoreApp.failed ? Skin.danger : Skin.sub;
                         font-family: Skin.font-mono;
-                        font-size: 12px;
+                        font-size: 12px * Skin.text-scale;
                         wrap: word-wrap;
                         horizontal-stretch: 1;
                         vertical-alignment: center;
@@ -192,7 +192,7 @@ export component StoreView inherits ScrollView {
                         text: "Salvar e carregar";
                         icon: Icons.refresh;
                         ink: Skin.accent;
-                        font-size: 13px;
+                        font-size: 13px * Skin.text-scale;
                         clicked => { StoreApp.save-source(index.text, key.text); }
                     }
                 }
@@ -204,7 +204,7 @@ export component StoreView inherits ScrollView {
         if StoreApp.rows.length == 0 && !StoreApp.loading: Text {
             text: "Nenhum plugin para mostrar.";
             color: Skin.dim;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;
         }
     }

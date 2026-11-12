@@ -56,7 +56,7 @@ component NewTask inherits Rectangle {
                 text: "nova tarefa… (Enter)";
                 color: theme.sub.with-alpha(0.8);
                 font-family: Skin.font-mono;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 vertical-alignment: center;
                 overflow: elide;
                 width: 100%;
@@ -66,7 +66,7 @@ component NewTask inherits Rectangle {
                 text <=> TodoApp.draft;
                 color: theme.text;
                 font-family: Skin.font-mono;
-                font-size: 13px;
+                font-size: 13px * Skin.text-scale;
                 vertical-alignment: center;
                 single-line: true;
                 accessible-label: "Nova tarefa";
@@ -107,7 +107,7 @@ component Row inherits Rectangle {
         Text {
             text: r.text;
             color: r.done ? t.sub : t.text;
-            font-size: 14px;
+            font-size: 14px * Skin.text-scale;
             overflow: elide;
             vertical-alignment: center;
             horizontal-stretch: 1;
@@ -116,7 +116,7 @@ component Row inherits Rectangle {
             text: r.age-text;
             color: t.muted.mix(t.sub, 0.4);
             font-family: Skin.font-mono;
-            font-size: 11px;
+            font-size: 11px * Skin.text-scale;
             vertical-alignment: center;
             horizontal-stretch: 0;
         }
@@ -181,7 +181,7 @@ export component TodoView inherits Rectangle {
             Text {
                 text: TodoApp.speech;
                 color: t.text;
-                font-size: short ? 15px : 19px;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
                 wrap: word-wrap;
             }
@@ -189,7 +189,7 @@ export component TodoView inherits Rectangle {
                 text: TodoApp.error-text != "" ? TodoApp.error-text : TodoApp.pending + (TodoApp.pending == 1 ? " pendente · " : " pendentes · ") + TodoApp.done + (TodoApp.done == 1 ? " feita" : " feitas");
                 color: TodoApp.error-text != "" ? t.alarm : t.sub;
                 font-family: Skin.font-mono;
-                font-size: 12px;
+                font-size: 12px * Skin.text-scale;
                 wrap: word-wrap;
             }
         }
@@ -221,7 +221,7 @@ export component TodoView inherits Rectangle {
             text: TodoApp.done > 0 ? "Tudo feito (as feitas estão escondidas)." : "Nenhuma tarefa. Escreva uma acima.";
             color: t.sub;
             font-family: Skin.font-mono;
-            font-size: 13px;
+            font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

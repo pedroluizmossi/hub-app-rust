@@ -10,7 +10,7 @@ key = "theme"
 label = "Tema"
 type = "choice"
 default = "auto"
-options = ["auto", "neon", "matrix", "synthwave", "vaporwave", "akira", "ghost", "aconchego", "noite"]
+# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
 
 [[settings]]
 key = "show_udp"

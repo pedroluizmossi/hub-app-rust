@@ -50,6 +50,7 @@ export struct AppInfo {
     theme: Colors,
     settings: [SettingRow],
     page: int,           // página onde o app está
+    origin: string,      // "" (embutido), "loja", "local" ou "dev" (--plugin-dev)
 }
 
 // Uma página do painel (item da barra lateral).
@@ -60,4 +61,20 @@ export struct PageInfo {
     mood: string,        // pior humor dos apps ligados da página
     theme: Colors,       // tema usado no ícone (o do visual)
     apps: int,           // apps ligados na página
+}
+
+// Um elemento do fundo animado (src/skin/backdrop.rs › Ambient), em pixels lógicos.
+export struct AmbientItem {
+    kind: string,        // "fall" (desce e volta), "blink" (aparece `on` ms a cada `period`) ou "scan"
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    color: color,
+    alpha: float,
+    phase: int,          // ms de atraso, para não andarem juntos
+    period: int,         // ms
+    on: int,             // ms
+    speed: float,        // px por segundo
+    slant: float,        // px para a esquerda por px de queda (chuva inclinada)
 }

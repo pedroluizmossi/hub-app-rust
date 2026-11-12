@@ -75,7 +75,7 @@ export component PluginView inherits Rectangle {
                     text: card.title;
                     color: t.sub;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     vertical-alignment: center;
                 }
                 IconButton {
@@ -90,7 +90,7 @@ export component PluginView inherits Rectangle {
             Text {
                 text: card.text;
                 color: card.failed ? t.alarm : t.text;
-                font-size: short ? 15px : 19px;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
                 wrap: word-wrap;
             }
@@ -98,7 +98,7 @@ export component PluginView inherits Rectangle {
                 text: card.detail;
                 color: card.failed ? t.alarm : t.sub;
                 font-family: Skin.font-mono;
-                font-size: 11px;
+                font-size: 11px * Skin.text-scale;
                 wrap: word-wrap;
             }
             // o resto da célula fica livre embaixo (o texto não se espalha até o rodapé)

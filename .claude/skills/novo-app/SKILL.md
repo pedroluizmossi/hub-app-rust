@@ -25,6 +25,11 @@ Se o pedido couber em dois tipos, ou se faltar onde criar a pasta, faça **uma**
 `../miniutils-plugin-<nome>` (ou `../miniutils-app-<nome>`), fora deste repositório.
 Embutido fica aqui.
 
+**Só para uso próprio, sem publicar** (ex.: quem instalou o MiniUtils pelo `install.sh` e
+não tem este repositório): crie o plugin direto na pasta dos apps, que o MiniUtils lê
+sozinho. O caminho sai de `miniutils --pastas` (linha "apps locais"); a pasta do app tem
+de se chamar exatamente o `id`. Ver `APPS.md › Apps locais`.
+
 ## 2. Criar
 
 **Plugin ou app externo**
@@ -37,13 +42,16 @@ Embutido fica aqui.
 3. `icon`: uma mascote existente (`key:` em `src/mascot/sprites.rs`). Leia a lista; não
    invente nome.
 4. `uses` e `[permissions]` só com o que o app usa de fato (a loja mostra isso ao instalar).
-5. Tela: `component Main`, cores de `theme`, `overflow: elide` em texto, e esconda o
-   secundário em célula pequena (~300 × 160 px). Ver "A tela" no `APPS.md`.
+5. Tela: `component Main`, cores de `theme`, `font-size: 13px * theme.text-scale`,
+   `overflow: elide` em texto, e esconda o secundário em célula pequena (~300 × 160 px).
+   Ver "A tela" no `APPS.md`.
 
 **Mini-app embutido**: siga `DESIGN.md › 5. Mini-apps`, com o To-do de modelo. Os pontos
 que um app novo toca (confira com `grep -rn todo` se algo mudou de lugar):
-- `miniapps/<app>/manifest.toml` (`id = "cyber.<nome>"`, opção `theme` com `"auto"`) e
-  `miniapps/<app>/view.slint` (`export global <App>App` + `export component <App>View`);
+- `miniapps/<app>/manifest.toml` (`id = "cyber.<nome>"`, opção `theme` com `default =
+  "auto"` e sem `options`: o hub preenche os temas) e `miniapps/<app>/view.slint`
+  (`export global <App>App` + `export component <App>View`; `font-size` sempre
+  `× Skin.text-scale`);
 - `src/apps/<app>.rs` (struct com `create(host, ui)` + trait `MiniApp`) e `pub mod` em
   `src/apps/mod.rs`;
 - `src/hub/mod.rs`: `registry.add(crate::apps::<app>::<App>Mini::create(host.clone(), &ui) as AppRef, None);`
@@ -65,6 +73,10 @@ tools/dev-ui.sh log                             # erros da tela, do script, stde
 ```
 O modo dev recarrega ao salvar: edite, espere ~1 s e tire outra `foto`. Clique nos botões
 da tela (`tools/dev-ui.sh achar <texto>`, `clicar <texto>`) e confira a reação.
+
+Sem este repositório (sem `tools/dev-ui.sh`), com o app na pasta dos apps: rode
+`miniutils --recarregar` e confira em `miniutils --plugins` que ele não está entre os
+ignorados; peça ao usuário para ligá-lo em Configurações e olhar a tela.
 
 **Mini-app embutido**
 1. `cargo check`, depois `cargo test` e `cargo clippy --workspace --all-targets -- -D warnings`.

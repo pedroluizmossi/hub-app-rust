@@ -1,6 +1,11 @@
 //! Temas de cor (portados do CyberDock). Cada tema pinta a mascote e o HUD.
+//!
+//! Os embutidos ficam em `BUILTIN`; os da pessoa vêm de `temas/<chave>.toml` (ver
+//! `skin::user`) e entram por `set_extra`. Quem lista ou procura usa `all`/`get`/`find`.
 
-#[derive(Clone, Copy)]
+use std::sync::RwLock;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     pub key: &'static str,
     pub label: &'static str,
@@ -23,7 +28,7 @@ pub struct Theme {
     pub muted: u32,
 }
 
-pub static THEMES: &[Theme] = &[
+pub static BUILTIN: &[Theme] = &[
     Theme {
         key: "neon",
         label: "Neon (magenta / ciano)",
@@ -83,7 +88,60 @@ pub static THEMES: &[Theme] = &[
     },
 ];
 
+/// Temas lidos de arquivo (depois dos embutidos). Cada recarga vaza os anteriores: são
+/// poucos e pequenos (~100 bytes), e as telas guardam `&'static Theme`.
+static EXTRA: RwLock<Vec<&'static Theme>> = RwLock::new(Vec::new());
+
+/// Troca os temas de arquivo.
+pub fn set_extra(list: Vec<Theme>) {
+    let leaked = list.into_iter().map(|t| &*Box::leak(Box::new(t))).collect();
+    if let Ok(mut extra) = EXTRA.write() {
+        *extra = leaked;
+    }
+}
+
+/// Todos os temas: os embutidos e, depois, os de arquivo.
+pub fn all() -> Vec<&'static Theme> {
+    let extra = EXTRA.read().map(|e| e.clone()).unwrap_or_default();
+    BUILTIN.iter().chain(extra).collect()
+}
+
+pub fn find(key: &str) -> Option<&'static Theme> {
+    if let Some(t) = BUILTIN.iter().find(|t| t.key == key) {
+        return Some(t);
+    }
+    EXTRA.read().ok()?.iter().copied().find(|t| t.key == key)
+}
+
+/// O tema `key`, ou o primeiro se não existir (um tema de arquivo que sumiu).
 pub fn get(key: &str) -> &'static Theme {
-    THEMES.iter().find(|t| t.key == key).unwrap_or(&THEMES[0])
+    find(key).unwrap_or(&BUILTIN[0])
+}
+
+/// Nomes das cores, como no arquivo `temas/<chave>.toml` e na tabela do DESIGN.md.
+pub const COLOR_FIELDS: &[&str] =
+    &["fur", "visor", "outline", "ear", "blush", "ok", "warn", "alarm", "sleep", "bg0", "bg1", "text", "sub", "muted"];
+
+impl Theme {
+    /// A cor de nome `name` (um de `COLOR_FIELDS`), para o leitor dos arquivos.
+    pub fn color_mut(&mut self, name: &str) -> Option<&mut u32> {
+        Some(match name {
+            "fur" => &mut self.fur,
+            "visor" => &mut self.visor,
+            "outline" => &mut self.outline,
+            "ear" => &mut self.ear,
+            "blush" => &mut self.blush,
+            "ok" => &mut self.ok,
+            "warn" => &mut self.warn,
+            "alarm" => &mut self.alarm,
+            "sleep" => &mut self.sleep,
+            "bg0" => &mut self.bg0,
+            "bg1" => &mut self.bg1,
+            "text" => &mut self.text,
+            "sub" => &mut self.sub,
+            "muted" => &mut self.muted,
+            _ => return None,
+        })
+    }
 }
 

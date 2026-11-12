@@ -1,0 +1,30 @@
+# Fundo de exemplo do MiniUtils: camadas pintadas em ordem sobre a cor "bg" do visual.
+# Cores: "#RRGGBB" ou uma cor do visual pelo nome (accent, accent2, ink, sub, surface…),
+# que assim acompanha o visual e a cor de destaque escolhida.
+label = "Bolhas"
+
+[[layer]]                # brilho do alto, como luz na água
+kind = "glow"
+x = 0.5                  # frações da área: 0 = esquerda/topo, 1 = direita/base
+y = 0.0
+rx = 700                 # raios em pixels
+ry = 320
+fade = 0.8
+color = "accent"
+alpha = 0.10
+
+[[layer]]                # grade de pontos bem apagada
+kind = "dots"
+step = 28
+offset = 14
+radius = 1.2
+color = "surface_edge"
+alpha = 0.8
+
+[[layer]]                # animada: pontos que acendem de vez em quando
+kind = "twinkle"
+count = 18
+color = "accent2"
+alpha = 0.6
+size = 3
+grid = 28

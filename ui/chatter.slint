@@ -100,7 +100,7 @@ export component SpeechBox inherits Rectangle {
                     text: Chatter.name;
                     color: t.visor;
                     font-family: Skin.font-mono;
-                    font-size: 12px;
+                    font-size: 12px * Skin.text-scale;
                     font-weight: 700;
                     overflow: elide;
                 }
@@ -108,7 +108,7 @@ export component SpeechBox inherits Rectangle {
                     vertical-stretch: 1;
                     text: Chatter.text;
                     color: t.text;
-                    font-size: 13px;
+                    font-size: 13px * Skin.text-scale;
                     wrap: word-wrap;
                     overflow: elide;
                 }

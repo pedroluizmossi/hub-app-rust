@@ -194,13 +194,39 @@ mais completo:
 
 - Exporta `component Main`. Pode importar `std-widgets.slint`, `miniutils.slint` (o tipo
   `Theme`) e as telas de `ui/` do próprio plugin; imagens só de `assets/`.
-- O hub preenche, se a tela declarar: `in property <Theme> theme` (cores do tema do app e
-  fontes do visual: `theme.font-ui`, `font-mono`, `font-title`), `in property <image>
+- O hub preenche, se a tela declarar: `in property <Theme> theme` (cores do tema do app,
+  fontes do visual: `theme.font-ui`, `font-mono`, `font-title`, e o tamanho do texto
+  escolhido pela pessoa: `font-size: 13px * theme.text-scale`), `in property <image>
   mascot` e `in property <string> mood`.
 - Cliques chegam à lógica por `callback action(string, string)`.
 - A célula vai de ~300 × 160 px (1×1 numa grade de 3 colunas) à janela inteira: esconda o
   secundário quando não couber e use `overflow: elide` em texto. Ver
   [DESIGN.md › Tamanhos](DESIGN.md#tamanhos).
+
+## Apps locais (sem a loja)
+
+Um app não precisa vir da loja: o MiniUtils lê toda pasta de app que estiver na pasta dos
+apps, a mesma em que a loja instala.
+
+| Sistema | Pasta dos apps |
+|---|---|
+| Linux | `~/.local/share/miniutils/plugins/` (segue `XDG_DATA_HOME`) |
+| Windows | `%APPDATA%\miniutils\plugins\` |
+
+`miniutils --pastas` mostra o caminho certo no sistema em uso (`MINIUTILS_PLUGINS` troca a
+pasta). As regras:
+
+- **um app por pasta, e a pasta tem o nome do `id`** do manifesto:
+  `plugins/io.github.fulano.meu-app/manifest.toml`. Com outro nome, o app é ignorado;
+- depois de pôr, mudar ou apagar um app, rode `miniutils --recarregar` ou clique em
+  **Configurações › Sistema › Recarregar** (o MiniUtils aberto relê a pasta);
+- o app entra **desligado**: ligue-o na lista de apps das Configurações, onde ele aparece
+  com o selo `local`;
+- pastas recusadas aparecem em **Configurações › Sistema** e em `miniutils --plugins`, com
+  o motivo (sem `manifest.toml`, pasta com nome diferente do `id`, erro no manifesto).
+
+Um app local não passa pela revisão da loja: num app externo, o executável em `bin/` roda
+com as suas permissões sem conferência de hash. Ponha só o que você escreveu ou conhece.
 
 ## Desenvolver
 

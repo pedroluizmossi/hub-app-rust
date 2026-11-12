@@ -31,9 +31,9 @@ pub fn socket_path() -> PathBuf {
     PathBuf::from(format!(r"\\.\pipe\{}-{}", stem(instance.as_deref()), clean(&user)))
 }
 
-/// Avisa a instância rodando (se houver) que os plugins mudaram. Sem instância, nada.
-pub fn notify_plugins_changed() {
-    let _ = send(&socket_path(), "plugins");
+/// Avisa a instância rodando (se houver) que os plugins mudaram. `false` = nenhuma ouviu.
+pub fn notify_plugins_changed() -> bool {
+    matches!(send(&socket_path(), "plugins"), Ok(true))
 }
 
 /// Entrega uma linha à instância principal. `Ok(false)` = não há instância escutando.
