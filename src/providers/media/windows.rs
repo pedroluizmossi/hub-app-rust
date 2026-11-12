@@ -165,7 +165,7 @@ pub fn send(service: &str, verb: &str, seek_us: i64) -> anyhow::Result<()> {
     }
     let mut sessions = manager()?.GetSessions()?.into_iter();
     let session = sessions
-        .find(|s| s.SourceAppUserModelId().is_ok_and(|id| id.to_string() == service))
+        .find(|s| s.SourceAppUserModelId().is_ok_and(|id| id == service))
         .ok_or_else(|| anyhow::anyhow!("o player fechou"))?;
     let accepted = match verb {
         "play-pause" => session.TryTogglePlayPauseAsync()?.join()?,

@@ -74,10 +74,10 @@ impl Tray {
     /// Atualiza dica e menu; o ícone só é redesenhado quando `icon` vem (a mascote, o
     /// tema ou o humor mudaram).
     pub fn update(&self, new_icon: Option<(&Sprite, &Theme, Mood)>, tooltip: String, media: Option<TrayMedia>) {
-        if let Some((sprite, theme, mood)) = new_icon {
-            if let Ok(image) = icon(sprite, theme, mood) {
-                let _ = self.icon.set_icon(Some(image));
-            }
+        if let Some((sprite, theme, mood)) = new_icon
+            && let Ok(image) = icon(sprite, theme, mood)
+        {
+            let _ = self.icon.set_icon(Some(image));
         }
         let name = crate::core::config::display_name();
         let text = if tooltip.is_empty() { name } else { format!("{name}\n{tooltip}") };

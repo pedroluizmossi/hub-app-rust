@@ -106,7 +106,7 @@ impl Server {
         F: Fn(Command) + Send + 'static,
     {
         let pipe = self.pipe.lock().ok().and_then(|mut p| p.take());
-        let pipe = pipe.ok_or_else(|| io::Error::new(ErrorKind::Other, "o pipe já está sendo atendido"))?;
+        let pipe = pipe.ok_or_else(|| io::Error::other("o pipe já está sendo atendido"))?;
         std::thread::spawn(move || {
             let mut failures = 0;
             // desiste só se o pipe quebrou de vez (várias falhas seguidas)
@@ -124,10 +124,10 @@ impl Server {
                 failures = 0;
                 let mut line = String::new();
                 // limite de 256 bytes: uma linha de comando nunca passa disso
-                if BufReader::new((&pipe).take(256)).read_line(&mut line).is_ok() {
-                    if let Some(cmd) = parse(&line) {
-                        on_command(cmd);
-                    }
+                if BufReader::new((&pipe).take(256)).read_line(&mut line).is_ok()
+                    && let Some(cmd) = parse(&line)
+                {
+                    on_command(cmd);
                 }
                 // SAFETY: como acima; solta este cliente para o próximo poder entrar.
                 unsafe {

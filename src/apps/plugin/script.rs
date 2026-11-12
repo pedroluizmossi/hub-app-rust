@@ -551,6 +551,7 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
+    #[cfg(unix)] // só o teste do `run_async` (que é só Unix) usa
     use std::time::Instant;
 
     fn env(exec: &[&str], data: Option<PathBuf>) -> ScriptEnv {
