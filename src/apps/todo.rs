@@ -1,4 +1,5 @@
-//! Mini-app To-do rápido: lista curta de tarefas, salva em `~/.config/miniutils/todo.json`.
+//! Mini-app To-do rápido: lista curta de tarefas, salva em `todo.json` na pasta de dados do
+//! app (`core/appdata.rs`: `~/.local/share/miniutils/app-data/cyber.todo/`).
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,7 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
+use crate::core::appdata;
 use crate::core::bus::Event;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
@@ -112,7 +114,8 @@ impl TodoMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest =
             Manifest::parse(include_str!("../../miniapps/todo/manifest.toml")).expect("manifesto do To-do inválido");
-        let path = dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("miniutils/todo.json");
+        // pasta de dados do app (`core/appdata.rs`; a de antes, na config, vem em `migrate_legacy`)
+        let path = appdata::dir(&manifest.id).join("todo.json");
         let rows = Rc::new(VecModel::default());
         ui.global::<TodoApp>().set_rows(ModelRc::from(rows.clone()));
         let app = Rc::new(RefCell::new(TodoMini {
@@ -281,6 +284,13 @@ pub fn age_text(secs: i64) -> String {
 impl MiniApp for TodoMini {
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    fn reload_data(&mut self, ui: &HubWindow) {
+        self.list = List::load(&self.path);
+        self.mood = self.compute_mood();
+        self.refresh(ui);
+        self.push_mascot(ui);
     }
 
     fn enable(&mut self, ui: &HubWindow) {

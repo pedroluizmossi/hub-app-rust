@@ -213,7 +213,7 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
 --previa <mascote> [animação] [--saida arquivo.gif]
                       GIF de uma animação de mascote em todos os temas
---pastas              onde ficam os apps locais, a configuração e os registros
+--pastas              onde ficam os apps locais, os dados dos apps, a configuração e os registros
 --version             mostra a versão (também em Configurações › Sistema)
 ```
 
@@ -299,6 +299,11 @@ Há quatro jeitos de estender o hub; comece pelo mais simples que resolve:
 | **Plugin com tela** | uma tela própria e um script Rhai isolado | loja |
 | **App externo** | um executável seu, em qualquer linguagem, com acesso total | loja, com SHA-256 conferido |
 | **Mini-app embutido** | Rust compilado dentro do hub | pull request |
+
+Cada app guarda o que precisa numa pasta de dados só dele, que o hub cuida: chave-valor ou
+um banco SQLite (plugins com tela) e arquivos (apps externos). Sobrevive a atualizar; nas
+Configurações dá para ver quanto cada app guarda, exportar e apagar, e remover um app
+pergunta se os dados ficam. Ver [APPS.md › Dados que duram](APPS.md#dados-que-duram-data).
 
 Um app também pode ser local, sem loja: uma pasta com o nome do `id` dentro de
 `~/.local/share/miniutils/plugins/` (Windows: `%APPDATA%\miniutils\plugins\`), e depois

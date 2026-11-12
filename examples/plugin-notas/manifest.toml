@@ -1,0 +1,20 @@
+# Plugin de exemplo com banco de dados: notas rápidas guardadas num SQLite do app.
+# Formato: topo de src/core/plugins.rs; API do script e do banco: topo de
+# src/apps/plugin/mod.rs e src/apps/plugin/db.rs (no repositório do MiniUtils).
+id = "io.github.pedroluizmossi.notas"
+name = "Notas"
+description = "Notas rápidas que sobrevivem a desligar e a atualizar, guardadas num banco SQLite só do app. Plugin de exemplo do MiniUtils."
+icon = "coruja"
+api = 1
+
+[ui]
+view = "view.slint"
+script = "main.rhai"
+
+# o que o app guarda: um banco (data.sqlite na pasta de dados do app), até 5 MB.
+# version: o formato dos dados. A versão 2 ganhou a coluna "feita"; quem tinha a 1 passa
+# por fn migrate(de, para) no main.rhai (o hub copia os dados antes e devolve se falhar).
+[data]
+kinds = ["sqlite"]
+version = 2
+max_mb = 5

@@ -29,3 +29,7 @@ label = "Mascote"
 type = "choice"
 default = "capivara"
 options = ["capivara", "coruja", "neko", "sapo", "coelho", "chaleira", "cogumelo", "gatopao", "pato"]
+
+# a lista fica em todo.json, na pasta de dados do app (core/appdata.rs)
+[data]
+kinds = ["files"]

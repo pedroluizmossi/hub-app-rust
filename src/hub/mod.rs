@@ -10,6 +10,7 @@
 mod appearance;
 mod bind;
 mod chatter;
+mod data;
 mod grid;
 mod pages;
 mod settings;

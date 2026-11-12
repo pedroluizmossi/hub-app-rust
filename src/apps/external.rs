@@ -11,8 +11,9 @@
 //!
 //! Do host para o app (entrada padrão):
 //! ```text
-//! {"type":"start","api":1,"id":"io.x.app","os":"linux","data_dir":"…","settings":{…}}
-//!                                  a primeira mensagem, sempre
+//! {"type":"start","api":1,"id":"io.x.app","os":"linux","data_dir":"…","data_version":1,"settings":{…}}
+//!                                  a primeira mensagem, sempre; data_version é a versão
+//!                                  dos dados na pasta (ver "Dados", abaixo)
 //! {"type":"tick"}                  a cada [app] every segundos
 //! {"type":"action","name":"…","arg":"…"}   a tela chamou `callback action(string, string)`
 //! {"type":"event","topic":"sys","data":{…}}   leitura de um provedor de `uses`
@@ -32,12 +33,22 @@
 //! {"type":"notify","title":"…","body":"…"}
 //! {"type":"fact","kind":"strain","subject":"CPU","value":93}   conversa entre mascotes
 //! {"type":"error","message":"…"}   erro na célula e mascote em alarme ("" limpa)
+//! {"type":"migrated","version":2}  terminou de migrar os dados para a versão 2
 //! ```
 //! Linha que não é JSON do protocolo vai para o registro e é ignorada.
 //!
 //! O processo roda na pasta do app, com as variáveis `MINIUTILS_APP_ID`,
-//! `MINIUTILS_APP_DATA` (pasta para os dados do app, que sobrevive a atualizações e sai ao
-//! remover) e `MINIUTILS_APP_API` (versão do protocolo). Se ele sair sozinho, o app vai
+//! `MINIUTILS_APP_DATA` (pasta para os dados do app, que sobrevive a atualizações; ao
+//! remover, o usuário escolhe se apaga) e `MINIUTILS_APP_API` (versão do protocolo).
+//!
+//! ## Dados
+//!
+//! A pasta `data_dir` é do app (`core/appdata.rs`; o hub só guarda nela o
+//! `.miniutils.json`, com a versão). O `version` do `[data]` do manifesto diz em que formato
+//! o app grava. Se `data_version` (do `start`) for menor que o seu, os dados são de uma
+//! versão antiga: migre e responda `migrated` com a sua versão. O hub copia a pasta antes
+//! de iniciar o app; se o app sair antes do `migrated`, a cópia volta e o cartão mostra o
+//! erro. Se os dados forem de uma versão mais nova que a do app, ele nem é iniciado. Se ele sair sozinho, o app vai
 //! para alarme com o código de saída; o botão de atualizar do cartão o inicia de novo.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -63,7 +74,7 @@ const MAX_LINE: usize = 4 << 20;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToApp {
-    Start { api: u32, id: String, os: &'static str, data_dir: String, settings: serde_json::Value },
+    Start { api: u32, id: String, os: &'static str, data_dir: String, data_version: u32, settings: serde_json::Value },
     Tick,
     Action { name: String, arg: String },
     Event { topic: String, data: serde_json::Value },
@@ -114,6 +125,9 @@ pub enum FromApp {
     Error {
         message: String,
     },
+    Migrated {
+        version: u32,
+    },
 }
 
 /// Uma linha da saída do app: a mensagem, ou por que não é uma.
@@ -136,6 +150,8 @@ pub struct Process {
     child: Arc<Mutex<Option<Child>>>,
     /// O host pediu para parar: a saída do processo não é falha.
     stopping: Arc<AtomicBool>,
+    /// Vira `true` quando o processo terminou de vez (saiu ou foi encerrado).
+    ended: Arc<AtomicBool>,
 }
 
 /// Como iniciar o processo.
@@ -169,6 +185,7 @@ impl Process {
         let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
         let child = Arc::new(Mutex::new(Some(child)));
         let stopping = Arc::new(AtomicBool::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
         let name = |what: &str| format!("app-{what}-{}", l.id);
 
         // escrita: o host nunca espera um pipe cheio na thread da UI
@@ -195,11 +212,12 @@ impl Process {
         }
         // saída: as mensagens
         if let Some(stdout) = stdout {
-            let (id, child, stopping) = (l.id.to_string(), child.clone(), stopping.clone());
+            let (id, child, stopping, ended) = (l.id.to_string(), child.clone(), stopping.clone(), ended.clone());
             let _ = std::thread::Builder::new().name(name("out")).spawn(move || {
                 let end = read_messages(stdout, &id, &on);
                 if !stopping.load(Ordering::SeqCst) {
                     let status = finish(&child, STOP_GRACE);
+                    ended.store(true, Ordering::SeqCst);
                     on(Incoming::Exited(match end {
                         Some(e) => e,
                         None => format!("o app saiu sozinho ({status})"),
@@ -207,7 +225,13 @@ impl Process {
                 }
             });
         }
-        Ok(Process { tx: Some(tx), child, stopping })
+        Ok(Process { tx: Some(tx), child, stopping, ended })
+    }
+
+    /// O sinal de "terminou de vez", para quem precisa esperar o processo largar os
+    /// arquivos (apagar os dados do app).
+    pub fn ended(&self) -> Arc<AtomicBool> {
+        self.ended.clone()
     }
 
     pub fn send(&self, msg: &ToApp) {
@@ -222,9 +246,10 @@ impl Process {
         self.stopping.store(true, Ordering::SeqCst);
         let _ = tx.send(ToApp::Stop.line());
         drop(tx);
-        let child = self.child.clone();
+        let (child, ended) = (self.child.clone(), self.ended.clone());
         let _ = std::thread::Builder::new().name("app-stop".into()).spawn(move || {
             finish(&child, STOP_GRACE);
+            ended.store(true, Ordering::SeqCst);
         });
     }
 }
@@ -298,6 +323,9 @@ mod tests {
         assert_eq!(parse_line(r#"{"type":"notify","title":"oi"}"#).unwrap(), FromApp::Notify { title: "oi".into(), body: String::new() });
         assert!(parse_line("print de depuração").is_err());
         assert!(parse_line(r#"{"type":"apagar_tudo"}"#).is_err());
+        assert_eq!(parse_line(r#"{"type":"migrated","version":2}"#).unwrap(), FromApp::Migrated { version: 2 });
+        let start = ToApp::Start { api: 1, id: "a.b".into(), os: "linux", data_dir: "/d".into(), data_version: 3, settings: serde_json::json!({}) };
+        assert!(start.line().contains("\"data_version\":3"));
     }
 
     #[test]
@@ -343,14 +371,29 @@ done
         })
         .unwrap();
         assert!(data.is_dir(), "a pasta de dados é criada");
-        p.send(&ToApp::Start { api: PROTOCOL, id: "io.x.app".into(), os: "linux", data_dir: String::new(), settings: serde_json::json!({}) });
+        p.send(&ToApp::Start {
+            api: PROTOCOL,
+            id: "io.x.app".into(),
+            os: "linux",
+            data_dir: String::new(),
+            data_version: 1,
+            settings: serde_json::json!({}),
+        });
         p.send(&ToApp::Tick);
         let t = Duration::from_secs(5);
         assert_eq!(rx.recv_timeout(t).unwrap(), Incoming::Msg(FromApp::Set { prop: "id".into(), value: "io.x.app".into() }));
         assert_eq!(rx.recv_timeout(t).unwrap(), Incoming::Msg(FromApp::Mood { mood: "busy".into() }));
+        let ended = p.ended();
+        assert!(!ended.load(Ordering::SeqCst));
         p.stop();
         // parou a pedido: nada de "saiu sozinho"
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+        // e avisa quando terminou de vez (o hub espera isso para apagar os dados)
+        let ate = Instant::now() + Duration::from_secs(5);
+        while !ended.load(Ordering::SeqCst) && Instant::now() < ate {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ended.load(Ordering::SeqCst));
 
         // um app que sai sozinho vira aviso
         std::fs::write(&prog, "#!/bin/sh\nexit 3\n").unwrap();

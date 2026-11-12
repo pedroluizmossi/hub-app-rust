@@ -54,6 +54,7 @@ impl Hub {
         let m = a.manifest();
         let settings = self.settings_of(m);
         let theme = self.host.theme_for(m);
+        let (data, has_data) = super::data::describe(&m.id, &a.data_spec());
         AppInfo {
             id: m.id.clone().into(),
             name: m.name.clone().into(),
@@ -65,6 +66,8 @@ impl Hub {
             settings: ModelRc::new(VecModel::from(settings)),
             page: self.host.config.borrow().page_of(&m.id).unwrap_or(0) as i32,
             origin: origin(&m.id).into(),
+            data: data.into(),
+            has_data,
         }
     }
 

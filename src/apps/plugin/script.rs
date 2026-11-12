@@ -10,6 +10,7 @@ use std::time::Duration;
 use slint::{ModelRc, VecModel};
 use slint_interpreter::Value;
 
+use super::db::{Db, DbSpec};
 use crate::apps::external::FromApp;
 use crate::core::bus::Event;
 use crate::core::chatter::FactKind;
@@ -86,6 +87,8 @@ pub(super) enum ScriptOut {
     Error(String),
     /// O processo do app externo saiu sem o host pedir.
     Exited(String),
+    /// A migração dos dados terminou: a versão nova, ou o erro (o host devolve a cópia).
+    Migrated(Result<u32, String>),
 }
 
 /// Da UI (ou de uma tarefa assíncrona) para o script.
@@ -117,6 +120,12 @@ pub(super) struct ScriptEnv {
     pub(super) net: Vec<String>,
     /// Arquivo dos dados (`store_get`/`store_set`); `None` = só na memória.
     pub(super) data: Option<PathBuf>,
+    /// O app declarou `kv` (sem isso, `store_set` é erro).
+    pub(super) kv: bool,
+    /// O banco, se o app declarou `sqlite` (`db.rs`).
+    pub(super) db: Option<DbSpec>,
+    /// Migrar os dados de uma versão para outra antes de `start()` (`fn migrate(de, para)`).
+    pub(super) migrate: Option<(u32, u32)>,
     /// Canal de volta para as tarefas assíncronas (`None` = sem elas).
     pub(super) back: Option<Sender<ScriptIn>>,
 }
@@ -175,7 +184,7 @@ pub(super) fn json_to_dyn(v: serde_json::Value) -> rhai::Dynamic {
 }
 
 /// Valor do Rhai → JSON (o que não tem equivalente vira texto).
-fn dyn_to_json(d: &rhai::Dynamic) -> serde_json::Value {
+pub(super) fn dyn_to_json(d: &rhai::Dynamic) -> serde_json::Value {
     use serde_json::Value as J;
     if d.is_unit() {
         J::Null
@@ -324,12 +333,19 @@ pub(super) fn from_app(msg: FromApp) -> ScriptOut {
             fact_out(&kind, &subject, value.map(|v| v as f32)).unwrap_or_else(ScriptOut::Error)
         }
         FromApp::Error { message } => ScriptOut::Error(message),
+        FromApp::Migrated { version } => ScriptOut::Migrated(Ok(version)),
     }
 }
 
 /// O interpretador com a API do host e os limites (um script em loop não trava nada:
 /// estoura o limite de operações e vira erro na tela).
-pub(super) fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: Arc<Mutex<rhai::Map>>, store: Arc<Mutex<Store>>) -> rhai::Engine {
+pub(super) fn engine(
+    out: Arc<Mutex<Vec<ScriptOut>>>,
+    env: ScriptEnv,
+    settings: Arc<Mutex<rhai::Map>>,
+    store: Arc<Mutex<Store>>,
+    db: Arc<Mutex<Db>>,
+) -> rhai::Engine {
     let mut e = rhai::Engine::new();
     e.set_max_operations(5_000_000)
         .set_max_call_levels(32)
@@ -371,12 +387,16 @@ pub(super) fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: 
     e.register_fn("fact", move |k: &str, s: &str, v: i64| f(k, s, Some(v as f32)));
     e.register_fn("fact", move |k: &str, s: &str, v: f64| fact(k, s, Some(v as f32)));
 
-    // dados guardados entre execuções
+    // dados guardados entre execuções (`kv` no [data]; sem [data], o script tem)
     let st = store.clone();
     e.register_fn("store_get", move |key: &str| -> rhai::Dynamic {
         st.lock().ok().and_then(|s| s.data.get(key).cloned()).unwrap_or(rhai::Dynamic::UNIT)
     });
-    e.register_fn("store_set", move |key: &str, value: rhai::Dynamic| {
+    let kv = env.kv;
+    e.register_fn("store_set", move |key: &str, value: rhai::Dynamic| -> Res<()> {
+        if !kv {
+            return Err("store_set: este app não declarou kv no [data] do manifest.toml".into());
+        }
         if let Ok(mut s) = store.lock() {
             if value.is_unit() {
                 s.data.remove(key);
@@ -385,7 +405,22 @@ pub(super) fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: 
             }
             s.dirty = true;
         }
+        Ok(())
     });
+
+    // banco SQLite (`sqlite` no [data]; ver db.rs)
+    fn lock(db: &Mutex<Db>) -> Result<std::sync::MutexGuard<'_, Db>, Box<rhai::EvalAltResult>> {
+        db.lock().map_err(|_| "banco: travado".into())
+    }
+    let d = db.clone();
+    e.register_fn("db_batch", move |sql: &str| -> Res<()> { lock(&d)?.batch(sql).map_err(Into::into) });
+    let d = db.clone();
+    e.register_fn("db_exec", move |sql: &str| -> Res<i64> { lock(&d)?.exec(sql, &Vec::new()).map_err(Into::into) });
+    let d = db.clone();
+    e.register_fn("db_exec", move |sql: &str, p: rhai::Array| -> Res<i64> { lock(&d)?.exec(sql, &p).map_err(Into::into) });
+    let d = db.clone();
+    e.register_fn("db_query", move |sql: &str| -> Res<rhai::Array> { lock(&d)?.query(sql, &Vec::new()).map_err(Into::into) });
+    e.register_fn("db_query", move |sql: &str, p: rhai::Array| -> Res<rhai::Array> { lock(&db)?.query(sql, &p).map_err(Into::into) });
 
     // JSON
     e.register_fn("parse_json", |text: &str| -> Res<rhai::Dynamic> {
@@ -411,20 +446,27 @@ pub(super) fn engine(out: Arc<Mutex<Vec<ScriptOut>>>, env: ScriptEnv, settings: 
     e
 }
 
-/// O laço da thread do script: roda o topo do arquivo, `start()`, e depois atende os
-/// pedidos até `Stop` (ou o canal fechar). Cada leva de mensagens vai para a UI por
-/// `deliver`; os dados gravados com `store_set` vão para o disco depois de cada chamada.
+/// O laço da thread do script: roda o topo do arquivo, a migração dos dados (se o host
+/// pediu), `start()`, e depois atende os pedidos até `Stop` (ou o canal fechar). Cada leva
+/// de mensagens vai para a UI por `deliver`; os dados gravados com `store_set` vão para o
+/// disco depois de cada chamada, e uma transação do banco esquecida aberta é desfeita.
 pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, rx: Receiver<ScriptIn>, deliver: impl Fn(Vec<ScriptOut>)) {
     let out = Arc::new(Mutex::new(Vec::new()));
     let shared_settings = Arc::new(Mutex::new(settings.clone()));
     let data = env.data.clone();
+    let migrate = env.migrate;
     let store = Arc::new(Mutex::new(Store::load(data.as_deref())));
-    let engine = engine(out.clone(), env, shared_settings.clone(), store.clone());
+    let db = Arc::new(Mutex::new(Db::new(env.db.clone())));
+    let engine = engine(out.clone(), env, shared_settings.clone(), store.clone(), db.clone());
     let flush = || {
         let saved = store.lock().map_err(|e| e.to_string()).and_then(|mut s| s.save(data.as_deref()));
         if let Err(e) = saved
             && let Ok(mut v) = out.lock() {
                 v.push(ScriptOut::Error(e));
+            }
+        if let Some(warn) = db.lock().ok().and_then(|mut d| d.end_call())
+            && let Ok(mut v) = out.lock() {
+                v.push(ScriptOut::Error(warn));
             }
         let batch = out.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
         if !batch.is_empty() {
@@ -460,6 +502,26 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
         let opts = rhai::CallFnOptions::new().eval_ast(false).rewind_scope(true).bind_this_ptr(this);
         engine.call_fn_with_options::<rhai::Dynamic>(opts, &mut scope, &ast, name, args).map(|_| ())
     };
+    // dados de uma versão antiga: fn migrate(de, para) antes de tudo. Falhou: fecha o banco
+    // e não grava nada (o host devolve a cópia de antes) e o app não começa.
+    if let Some((from, to)) = migrate {
+        let r = call("migrate", vec![(from as rhai::INT).into(), (to as rhai::INT).into()], &mut this);
+        let open_tx = db.lock().ok().and_then(|mut d| d.end_call());
+        let failed = match (r, open_tx) {
+            (Err(e), _) => Some(format!("main.rhai: {e}")),
+            (Ok(()), Some(w)) => Some(w),
+            (Ok(()), None) => None,
+        };
+        if let Some(e) = failed {
+            if let Ok(mut d) = db.lock() {
+                d.close();
+            }
+            deliver(vec![ScriptOut::Migrated(Err(e))]);
+            return;
+        }
+        flush();
+        deliver(vec![ScriptOut::Migrated(Ok(to))]);
+    }
     report(call("start", vec![], &mut this));
     flush();
     while let Ok(msg) = rx.recv() {
@@ -493,7 +555,7 @@ mod tests {
 
     fn env(exec: &[&str], data: Option<PathBuf>) -> ScriptEnv {
         let exec: Vec<String> = exec.iter().map(|s| s.to_string()).collect();
-        ScriptEnv { exec: Exec::new("t", &exec), net: vec!["api.exemplo.com".into()], data, back: None }
+        ScriptEnv { exec: Exec::new("t", &exec), net: vec!["api.exemplo.com".into()], data, kv: true, db: None, migrate: None, back: None }
     }
 
     fn rodar_com(script: &str, env: ScriptEnv, entradas: Vec<ScriptIn>) -> Vec<ScriptOut> {
@@ -524,6 +586,46 @@ mod tests {
         ));
         // tipo de fato desconhecido vira erro na célula, não pânico
         assert!(matches!(from_app(FromApp::Fact { kind: "x".into(), subject: String::new(), value: None }), ScriptOut::Error(e) if e.contains("desconhecido")));
+    }
+
+    #[test]
+    fn script_usa_o_banco_e_migra_antes_de_comecar() {
+        let dir = std::env::temp_dir().join(format!("miniutils-script-db-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let com = |migrate: Option<(u32, u32)>| {
+            let mut e = env(&[], None);
+            e.db = Some(DbSpec { path: dir.join("data.sqlite"), max_bytes: 1 << 20 });
+            e.migrate = migrate;
+            e
+        };
+        let s = r#"
+            fn migrate(de, para) {
+                if de == 1 { db_batch("ALTER TABLE notas ADD COLUMN feita INTEGER DEFAULT 0"); }
+                if para == 9 { throw "não sei ir para a 9"; }
+            }
+            fn start() {
+                db_batch("CREATE TABLE IF NOT EXISTS notas(texto TEXT)");
+                db_exec("INSERT INTO notas(texto) VALUES (?)", ["oi"]);
+                let rows = db_query("SELECT count(*) AS n FROM notas");
+                ui("n", rows[0].n);
+            }
+        "#;
+        let out = format!("{:?}", rodar_com(s, com(None), vec![]));
+        assert!(out.contains(r#"Set("n", Num(1.0))"#), "{out}");
+        // versão 1 → 2: a migração roda antes do start e o banco continua
+        let out = format!("{:?}", rodar_com(s, com(Some((1, 2))), vec![]));
+        assert!(out.contains("Migrated(Ok(2))") && out.contains(r#"Set("n", Num(2.0))"#), "{out}");
+        // a migração falha: nada de start
+        let out = format!("{:?}", rodar_com(s, com(Some((2, 9))), vec![]));
+        assert!(out.contains("Migrated(Err(") && out.contains("não sei ir") && !out.contains(r#"Set("n""#), "{out}");
+        let _ = std::fs::remove_dir_all(&dir);
+        // sem declarar: banco e kv viram erro na tela
+        let mut sem = env(&[], None);
+        sem.kv = false;
+        let out = format!("{:?}", rodar_com(r#"fn start() { store_set("a", 1); }"#, sem, vec![]));
+        assert!(out.contains("não declarou kv"), "{out}");
+        let out = format!("{:?}", rodar(r#"fn start() { db_exec("SELECT 1"); }"#, vec![]));
+        assert!(out.contains("[data]"), "{out}");
     }
 
     #[test]

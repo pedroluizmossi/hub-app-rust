@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use super::{Hub, with_hub};
-use crate::core::plugins;
+use crate::core::{appdata, plugins};
 use crate::store::{self, Source, Status, Trust};
 use crate::ui::{StoreApp, StoreRow};
 
@@ -123,7 +123,10 @@ impl Hub {
             if st.busy.is_some() {
                 return;
             }
-            let same = st.armed.as_ref().is_some_and(|(i, v, at)| i == id && v == verb && at.elapsed() < ARM_TTL);
+            // "remove-purge" é o outro botão do segundo clique de "remove"
+            let same = st.armed.as_ref().is_some_and(|(i, v, at)| {
+                i == id && (v == verb || (v == "remove" && verb == "remove-purge")) && at.elapsed() < ARM_TTL
+            });
             if same {
                 st.armed = None;
                 st.busy = Some(id.to_string());
@@ -136,15 +139,26 @@ impl Hub {
         if !confirmed {
             return;
         }
-        // app externo: o processo para antes de a pasta ser trocada (`store_done` religa)
+        // a lógica do plugin para antes de a pasta ser trocada (`store_done` religa); para
+        // apagar os dados, espera também ela soltar os arquivos
         crate::apps::plugin::suspend(id);
+        if verb == "remove-purge" {
+            wait_release(id.to_string(), 0);
+        } else {
+            self.store_spawn(id, verb);
+        }
+    }
+
+    /// Instala, atualiza ou remove numa thread; o resultado volta em `store_done`.
+    fn store_spawn(&self, id: &str, verb: &str) {
         let src = Source::from_config(&self.host.config.borrow());
         let (id, verb) = (id.to_string(), verb.to_string());
         let spawned = std::thread::Builder::new().name("loja".into()).spawn(move || {
             let root = plugins::dir();
             // a confirmação já foi o segundo clique, com o resumo na tela
             let result = match verb.as_str() {
-                "remove" => store::remove(&id, &root),
+                "remove" => store::remove(&id, &root, &appdata::root(), false),
+                "remove-purge" => store::remove(&id, &root, &appdata::root(), true),
                 _ => store::install(&src, &id, &root, &mut |_| true).map(|_| format!("{id} instalado")),
             };
             let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_done(&id, &verb, result)));
@@ -191,6 +205,13 @@ impl Hub {
                 let e = &s.entry;
                 let verb = armed.filter(|(i, _, _)| *i == e.id).map(|(_, v, _)| v.as_str()).unwrap_or("");
                 let perms = e.grants_text();
+                // dados guardados (só importa para quem está instalado: a remoção pergunta)
+                let dir = appdata::dir(&e.id);
+                let data = if s.installed.is_some() && appdata::has_data(&dir) {
+                    appdata::human(appdata::size(&dir).0)
+                } else {
+                    String::new()
+                };
                 let new_perms = s.new_permissions();
                 let state = match &s.installed {
                     None => "não instalado".to_string(),
@@ -204,6 +225,10 @@ impl Hub {
                     "install" => format!("Clique de novo para instalar. O plugin pede: {perms}."),
                     "update" if !new_perms.is_empty() => format!("Clique de novo para atualizar e permitir também: {}.", new_perms.join(", ")),
                     "update" => "Clique de novo para atualizar (sem permissão nova).".into(),
+                    "remove" if !data.is_empty() => format!(
+                        "{} tem {data} de dados guardados. Manter: ficam para quando você reinstalar (e aparecem em Configurações › Sistema). Apagar: some tudo.",
+                        e.name
+                    ),
                     "remove" => format!("Clique de novo para remover {}.", e.name),
                     _ => String::new(),
                 };
@@ -228,6 +253,7 @@ impl Hub {
                     armed: verb.into(),
                     confirm: confirm.into(),
                     busy: st.busy.as_deref() == Some(e.id.as_str()),
+                    data: data.into(),
                 }
             })
             .collect();
@@ -237,4 +263,18 @@ impl Hub {
         g.set_failed(st.failed);
         g.set_loading(st.loading);
     }
+}
+
+/// Espera a lógica do plugin soltar os arquivos (até 5 s) e então remove apagando os dados.
+fn wait_release(id: String, tries: u32) {
+    const POLL: Duration = Duration::from_millis(100);
+    slint::Timer::single_shot(POLL, move || {
+        with_hub(|h| {
+            if crate::apps::plugin::released(&id) || tries >= 50 {
+                h.store_spawn(&id, "remove-purge");
+            } else {
+                wait_release(id.clone(), tries + 1);
+            }
+        })
+    });
 }

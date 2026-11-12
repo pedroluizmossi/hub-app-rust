@@ -28,6 +28,7 @@ use std::time::Duration;
 use ring::signature::{self, KeyPair};
 use serde::{Deserialize, Serialize};
 
+use crate::core::appdata::{self, Kind};
 use crate::core::config::Config;
 use crate::core::exec;
 use crate::core::plugins::{self, Plugin};
@@ -37,7 +38,9 @@ loja de plugins:
   miniutils --loja [índice]                     lista os plugins e o estado de cada um
   miniutils --instalar <id> [índice] [--sim]    instala (pergunta antes, sem --sim)
   miniutils --atualizar <id> [índice] [--sim]   atualiza para o commit do índice
-  miniutils --remover <id>                      remove um plugin instalado
+  miniutils --remover <id> [--apagar-dados | --manter-dados]
+                                                remove um plugin instalado; se ele tiver
+                                                dados, pergunta se apaga (ou siga a opção)
   miniutils --plugins                           lista os instalados (da loja e locais)
   miniutils --recarregar                        o MiniUtils aberto relê os apps e os temas
   --chave <hex>     chave pública que assina o índice (padrão: store_key da config)
@@ -121,6 +124,9 @@ pub struct Entry {
     /// App externo (`[app]`): roda um executável próprio com as permissões do usuário.
     #[serde(default)]
     pub full_access: bool,
+    /// Guarda dados num banco SQLite (`[data] kinds` com "sqlite"; tem de bater com o manifesto).
+    #[serde(default)]
+    pub sqlite: bool,
     /// Executável de um app externo, por sistema ("linux", "windows").
     #[serde(default)]
     pub binaries: BTreeMap<String, Binary>,
@@ -141,21 +147,22 @@ impl Entry {
         if self.full_access {
             return plugins::describe_full_access(&self.uses);
         }
-        plugins::describe_grants(&self.permissions, &self.net, &self.uses)
+        plugins::describe_grants(&self.permissions, &self.net, &self.uses, self.sqlite)
     }
 }
 
 /// O que se perde ao dar acesso total, na lista de permissões novas de uma atualização.
 const FULL_ACCESS: &str = "ACESSO TOTAL";
 
-/// Cada permissão com o tipo na frente ("ps", "rede: api.x.com", "lê: sys", "ACESSO
-/// TOTAL"), para comparar versões.
-fn grant_list(exec: &[String], net: &[String], uses: &[String], full: bool) -> Vec<String> {
+/// Cada permissão com o tipo na frente ("ps", "rede: api.x.com", "lê: sys", "guarda:
+/// banco SQLite", "ACESSO TOTAL"), para comparar versões.
+fn grant_list(exec: &[String], net: &[String], uses: &[String], sqlite: bool, full: bool) -> Vec<String> {
     full.then(|| FULL_ACCESS.to_string())
         .into_iter()
         .chain(exec.iter().cloned())
         .chain(net.iter().map(|h| format!("rede: {h}")))
         .chain(uses.iter().map(|t| format!("lê: {t}")))
+        .chain(sqlite.then(|| plugins::GRANT_SQLITE.to_string()))
         .collect()
 }
 
@@ -174,6 +181,8 @@ pub struct Installed {
     pub uses: Vec<String>,
     #[serde(default)]
     pub full_access: bool,
+    #[serde(default)]
+    pub sqlite: bool,
 }
 
 /// Como o índice foi conferido.
@@ -201,9 +210,13 @@ impl Status {
     /// Permissões que a versão do índice pede e a instalada não pedia ("who", "rede:
     /// api.x.com", "lê: agents").
     pub fn new_permissions(&self) -> Vec<String> {
-        let had = self.installed.as_ref().map(|i| grant_list(&i.permissions, &i.net, &i.uses, i.full_access)).unwrap_or_default();
+        let had = self
+            .installed
+            .as_ref()
+            .map(|i| grant_list(&i.permissions, &i.net, &i.uses, i.sqlite, i.full_access))
+            .unwrap_or_default();
         let e = &self.entry;
-        grant_list(&e.permissions, &e.net, &e.uses, e.full_access).into_iter().filter(|p| !had.contains(p)).collect()
+        grant_list(&e.permissions, &e.net, &e.uses, e.sqlite, e.full_access).into_iter().filter(|p| !had.contains(p)).collect()
     }
 }
 
@@ -225,15 +238,20 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     ) {
         return None;
     }
+    // os dados dos apps no lugar de antes (`--remover` precisa vê-los)
+    appdata::migrate_legacy(false);
     // `--chave <hex>` e `--sim` podem vir em qualquer posição
     let mut key = None;
     let mut yes = false;
+    let mut purge: Option<bool> = None;
     let mut pos: Vec<&str> = Vec::new();
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--chave" => key = it.next().cloned(),
             "--sim" => yes = true,
+            "--apagar-dados" => purge = Some(true),
+            "--manter-dados" => purge = Some(false),
             s => pos.push(s),
         }
     }
@@ -253,7 +271,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
         Ok(s.with_official_key())
     };
     let root = plugins::dir();
-    let (mut always, mut prompt) = (|_: &str| true, ask);
+    let (mut always, mut prompt) = (|_: &str| true, ask_install);
     let confirm: &mut dyn FnMut(&str) -> bool = if yes { &mut always } else { &mut prompt };
     let id = pos.first().copied();
     let result = match (cmd, id) {
@@ -264,7 +282,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
                 format!("instalado em {}", dir.display())
             })
         }
-        ("--remover", Some(id)) => remove(id, &root).inspect(|_| {
+        ("--remover", Some(id)) => remove_cli(id, &root, purge, !yes).inspect(|_| {
             crate::instance::notify_plugins_changed();
         }),
         ("--plugins", _) => Ok(installed_list(&root)),
@@ -327,8 +345,13 @@ fn list(src: &Source, root: &Path) -> Result<String, String> {
 }
 
 /// Pergunta no terminal se pode instalar.
-fn ask(summary: &str) -> bool {
-    print!("{summary}\nInstalar? [s/N] ");
+fn ask_install(summary: &str) -> bool {
+    ask(summary, "Instalar?")
+}
+
+/// Mostra o resumo e pergunta (sim/não; o padrão é não).
+fn ask(summary: &str, question: &str) -> bool {
+    print!("{summary}\n{question} [s/N] ");
     let _ = std::io::stdout().flush();
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
@@ -598,8 +621,8 @@ fn fetch_and_install(
 
     let new_perms: Vec<String> = match previous {
         Some(p) => {
-            let had = grant_list(&p.permissions, &p.net, &p.uses, p.full_access);
-            grant_list(&e.permissions, &e.net, &e.uses, e.full_access).into_iter().filter(|x| !had.contains(x)).collect()
+            let had = grant_list(&p.permissions, &p.net, &p.uses, p.sqlite, p.full_access);
+            grant_list(&e.permissions, &e.net, &e.uses, e.sqlite, e.full_access).into_iter().filter(|x| !had.contains(x)).collect()
         }
         None => Vec::new(),
     };
@@ -666,6 +689,7 @@ fn fetch_and_install(
         net: plugin.manifest.permissions.net.clone(),
         uses: plugin.manifest.uses.iter().map(|t| t.name().to_string()).collect(),
         full_access: plugin.full_access(),
+        sqlite: plugin.data().has(Kind::Sqlite),
     };
     let meta = serde_json::to_string_pretty(&installed).map_err(|err| err.to_string())?;
     std::fs::write(staged.join("installed.json"), meta).map_err(|err| err.to_string())?;
@@ -712,6 +736,13 @@ fn check_matches(e: &Entry, p: &Plugin) -> Result<(), String> {
             return Err(format!("{}: o índice traz executável para {os}, que o manifesto não declara", e.id));
         }
     }
+    if e.sqlite != p.data().has(Kind::Sqlite) {
+        return Err(if e.sqlite {
+            format!("{}: o índice anuncia sqlite, mas o manifesto não pede banco ([data] kinds)", e.id)
+        } else {
+            format!("{}: o manifesto guarda dados num banco ([data] kinds = [\"sqlite\"]), mas o índice não anuncia sqlite", e.id)
+        });
+    }
     let uses: Vec<String> = p.manifest.uses.iter().map(|t| t.name().to_string()).collect();
     let pairs = [
         ("executar", &e.permissions, &p.manifest.permissions.exec),
@@ -727,17 +758,44 @@ fn check_matches(e: &Entry, p: &Plugin) -> Result<(), String> {
     Ok(())
 }
 
-pub fn remove(id: &str, root: &Path) -> Result<String, String> {
+/// Remove o plugin `id` de `root`. Os dados (a pasta do app em `data_root`, ver
+/// `core/appdata.rs`) ficam guardados para uma reinstalação, a menos que `purge`.
+pub fn remove(id: &str, root: &Path, data_root: &Path, purge: bool) -> Result<String, String> {
     plugins::validate_id(id)?;
     let dir = root.join(id);
     if !dir.join("manifest.toml").is_file() {
         return Err(format!("\"{id}\" não está instalado"));
     }
     std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    // os dados que o script (ou o app externo) gravou vão junto
-    let _ = std::fs::remove_file(plugins::data_file(root, id));
-    let _ = std::fs::remove_dir_all(plugins::data_dir(root, id));
-    Ok(format!("{id} removido"))
+    let kept = !purge && appdata::has_data(&data_root.join(id));
+    // apagar; ou, sem dados, só a pasta que guardava a versão
+    if !kept {
+        appdata::delete(data_root, id).map_err(|e| format!("{id} removido, mas os dados ficaram: {e}"))?;
+    }
+    Ok(match (purge, kept) {
+        (true, _) => format!("{id} removido, com os dados"),
+        (false, true) => format!("{id} removido; os dados ficaram guardados para quando você reinstalar"),
+        (false, false) => format!("{id} removido"),
+    })
+}
+
+/// `--remover`: com dados guardados e sem `--apagar-dados`/`--manter-dados`, pergunta.
+fn remove_cli(id: &str, root: &Path, choice: Option<bool>, confirm_tty: bool) -> Result<String, String> {
+    let data_root = appdata::root();
+    let data = data_root.join(id);
+    let purge = match choice {
+        Some(p) => p,
+        None if appdata::has_data(&data) && root.join(id).join("manifest.toml").is_file() => {
+            let (bytes, _) = appdata::size(&data);
+            confirm_tty
+                && ask(
+                    &format!("{id} tem {} de dados em {}.", appdata::human(bytes), data.display()),
+                    "Apagar os dados também? (não: ficam guardados para quando você reinstalar)",
+                )
+        }
+        None => false,
+    };
+    remove(id, root, &data_root, purge)
 }
 
 fn installed_list(root: &Path) -> String {
@@ -834,7 +892,12 @@ mod tests {
         assert_eq!(instalados.len(), 1);
         assert_eq!(instalados[0].manifest.name, "Tempo ligado");
         assert!(install(&src, "io.github.exemplo.uptime", &root, &mut |_| true).unwrap_err().contains("já está instalado"));
-        assert!(remove("io.github.exemplo.uptime", &root).is_ok());
+        let dados = root.join("dados-de-teste");
+        std::fs::create_dir_all(dados.join("io.github.exemplo.uptime")).unwrap();
+        std::fs::write(dados.join("io.github.exemplo.uptime").join("store.json"), "{}").unwrap();
+        // sem "apagar os dados": a pasta de dados fica para a reinstalação
+        assert!(remove("io.github.exemplo.uptime", &root, &dados, false).unwrap().contains("guardados"));
+        assert!(dados.join("io.github.exemplo.uptime").join("store.json").exists());
         assert!(plugins::load_installed(&root).is_empty());
     }
 
@@ -944,10 +1007,12 @@ mod tests {
         assert!(inst.full_access);
         let p = &plugins::load_installed(&root)[0];
         assert!(p.full_access() && p.binary_path().unwrap().is_file());
-        // remover leva também a pasta de dados do app
-        std::fs::create_dir_all(plugins::data_dir(&root, id)).unwrap();
-        remove(id, &root).unwrap();
-        assert!(!plugins::data_dir(&root, id).exists());
+        // remover com "apagar os dados" leva também a pasta de dados do app
+        let dados = dir.join("dados");
+        std::fs::create_dir_all(dados.join(id)).unwrap();
+        std::fs::write(dados.join(id).join("x"), "1").unwrap();
+        remove(id, &root, &dados, true).unwrap();
+        assert!(!dados.join(id).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -967,6 +1032,7 @@ mod tests {
             net: vec![],
             uses: vec!["sys".into()],
             full_access: full,
+            sqlite: false,
             binaries: BTreeMap::new(),
         };
         let antes = Installed {
@@ -978,9 +1044,16 @@ mod tests {
             net: vec![],
             uses: vec!["sys".into()],
             full_access: false,
+            sqlite: false,
         };
-        let st = Status { entry: entry(true), installed: Some(antes) };
+        let st = Status { entry: entry(true), installed: Some(antes.clone()) };
         assert_eq!(st.new_permissions(), [FULL_ACCESS]);
+        // passar a guardar num banco também aparece como permissão nova
+        let mut com_banco = entry(false);
+        com_banco.sqlite = true;
+        assert!(com_banco.grants_text().ends_with(plugins::GRANT_SQLITE));
+        let st2 = Status { entry: com_banco, installed: Some(antes) };
+        assert_eq!(st2.new_permissions(), [plugins::GRANT_SQLITE]);
         assert!(st.entry.grants_text().starts_with("ACESSO TOTAL"));
         // binário em índice que não anuncia acesso total
         let mut e = entry(false);

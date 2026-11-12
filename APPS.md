@@ -8,7 +8,7 @@ o que ela pode fazer.
 | Tipo | Seção no manifesto | A lógica é | Pode | Distribuição | Exemplo |
 |---|---|---|---|---|---|
 | **Plugin simples** | `[run]` | um comando que o hub roda a cada N s | só os programas declarados | loja | [`examples/plugin-uptime`](examples/plugin-uptime) |
-| **Plugin com tela** | `[ui]` | um script Rhai isolado + `view.slint` | API do hub: programas declarados, HTTPS para domínios declarados, provedores | loja | [`examples/plugin-top`](examples/plugin-top) |
+| **Plugin com tela** | `[ui]` | um script Rhai isolado + `view.slint` | API do hub: programas declarados, HTTPS para domínios declarados, provedores, dados (chave-valor e banco SQLite) | loja | [`examples/plugin-top`](examples/plugin-top), [`examples/plugin-notas`](examples/plugin-notas) (banco) |
 | **App externo** | `[app]` | um executável seu (qualquer linguagem) + `view.slint` | **tudo** o que o usuário pode (acesso total) | loja, com binário conferido por SHA-256 | [`examples/app-hello`](examples/app-hello) |
 | **Mini-app embutido** | (nenhuma) | Rust compilado dentro do hub | tudo, inclusive a interface compilada e provedores novos | pull request neste repositório | [`miniapps/todo`](miniapps/todo) + [`src/apps/todo.rs`](src/apps/todo.rs) |
 
@@ -18,9 +18,10 @@ Comece pelo mais simples que resolve:
 
 1. **Mostrar a saída de um comando** (`uptime`, `df -h /`, `git -C ~/x status -s`)? Plugin
    simples. Só manifesto, sem código.
-2. **Tela própria, botões, juntar dados dos provedores do hub, consultar uma API HTTPS**?
-   Plugin com tela. O script é isolado: não lê arquivo nem roda nada fora do que o
-   manifesto declara, e a loja mostra exatamente isso antes de instalar.
+2. **Tela própria, botões, juntar dados dos provedores do hub, consultar uma API HTTPS,
+   guardar estado ou histórico num banco**? Plugin com tela. O script é isolado: não lê
+   arquivo nem roda nada fora do que o manifesto declara (o banco é do app, na pasta que o
+   hub cuida), e a loja mostra exatamente isso antes de instalar.
 3. **Ler ou gravar arquivos, vigiar pastas, sockets, `http://` ou rede local, bibliotecas
    nativas, processo de vida longa**? App externo. Ele roda com as permissões do usuário, e
    a loja o instala com um aviso de "ACESSO TOTAL" em destaque. Use só quando o script não
@@ -124,16 +125,20 @@ O script responde a eventos e usa a API do hub:
 | `fn tick()` a cada `every` | `mood("happy")`, `summary("texto")` |
 | `fn action(name, arg)` clique na tela | `run([...])`, `run_async([...], "fn")` |
 | `fn on_event(topic, data)` provedores | `http_get(url)`, `http_get_async(url, "fn")` |
-| `fn settings()` opção mudou | `store_get("k")`, `store_set("k", v)` |
+| `fn settings()` opção mudou | `store_get("k")`, `store_set("k", v)` (chave-valor) |
+| `fn migrate(de, para)` dados de versão antiga | `db_batch(sql)`, `db_exec(sql, [params])`, `db_query(sql, [params])` (banco) |
 | | `fact("strain", "CPU", 93)`, `notify("t", "texto")` |
 
-O estado entre chamadas fica em `this` (`this.settings` traz as opções). Limites: 5 milhões
-de operações por chamada, `run` com prazo de 30 s, respostas HTTP de até 1 MiB, até 4
-tarefas assíncronas e 1 MiB de dados guardados. A referência completa está no topo de
-[`src/apps/plugin/mod.rs`](src/apps/plugin/mod.rs).
+O estado entre chamadas fica em `this` (`this.settings` traz as opções); o que tem de durar
+vai para os dados do app ([abaixo](#dados-que-duram-data)). Limites: 5 milhões de operações
+por chamada, `run` com prazo de 30 s, respostas HTTP de até 1 MiB, até 4 tarefas
+assíncronas e 1 MiB no chave-valor. A referência completa está no topo de
+[`src/apps/plugin/mod.rs`](src/apps/plugin/mod.rs) e, para o banco, de
+[`src/apps/plugin/db.rs`](src/apps/plugin/db.rs).
 
 Exemplos: [`examples/plugin-top`](examples/plugin-top) (processos pelo provedor `procs`,
-sem executar nada) e os plugins da loja,
+sem executar nada), [`examples/plugin-notas`](examples/plugin-notas) (notas num banco
+SQLite, com migração de versão) e os plugins da loja,
 [Top processos](https://github.com/pedroluizmossi/miniutils-plugin-top-processes) e
 [Pulso](https://github.com/pedroluizmossi/miniutils-plugin-pulso) (provedor `sys`, `ps` e
 uma consulta HTTPS).
@@ -157,10 +162,11 @@ Sem `[permissions]`: o app pode tudo o que o usuário pode.
 
 | Do hub para o app (entrada) | Do app para o hub (saída) |
 |---|---|
-| `start` (id, sistema, pasta de dados, opções) | `set` (propriedade da tela), `image` (PNG do disco) |
+| `start` (id, sistema, pasta de dados, versão dos dados, opções) | `set` (propriedade da tela), `image` (PNG do disco) |
 | `tick`, `action`, `event`, `settings` | `mood`, `summary`, `notify` |
 | `shown` (a janela abriu) | `fact` (conversa entre mascotes) |
 | `stop` (ou entrada fechada): saia | `error` (célula em alarme; `""` limpa) |
+| | `migrated` (terminou de migrar os dados; ver abaixo) |
 
 A saída de erro do app vai para o registro do hub (depuração é ali; a saída padrão é só do
 protocolo). Se o app sair sozinho, o cartão fica em alarme e o botão de atualizar o inicia
@@ -184,7 +190,8 @@ pull request neste repositório e sai em todas as instalações.
 O passo a passo está em [DESIGN.md › Mini-apps](DESIGN.md#5-mini-apps) e o contrato em
 [ARCHITECTURE.md › O mini-app](ARCHITECTURE.md#o-mini-app). Exemplos, do mais simples ao
 mais completo:
-- [`src/apps/todo.rs`](src/apps/todo.rs): sem provedor, com arquivo próprio;
+- [`src/apps/todo.rs`](src/apps/todo.rs): sem provedor, com um arquivo na pasta de dados
+  do app (`[data] kinds = ["files"]`);
 - [`src/apps/ports.rs`](src/apps/ports.rs): provedor, ações em segundo plano e programas
   da allowlist;
 - [`src/apps/vitals.rs`](src/apps/vitals.rs): várias mascotes, avisos sustentados e
@@ -202,6 +209,64 @@ mais completo:
 - A célula vai de ~300 × 160 px (1×1 numa grade de 3 colunas) à janela inteira: esconda o
   secundário quando não couber e use `overflow: elide` em texto. Ver
   [DESIGN.md › Tamanhos](DESIGN.md#tamanhos).
+
+## Dados que duram (`[data]`)
+
+Cada app tem uma pasta de dados que o hub cuida, fora da pasta do app: uma atualização
+troca a pasta do app inteira, e os dados ficam.
+
+| Sistema | Pasta dos dados (uma subpasta por `id`) |
+|---|---|
+| Linux | `~/.local/share/miniutils/app-data/` (segue `XDG_DATA_HOME`) |
+| Windows | `%APPDATA%\miniutils\app-data\` |
+
+`miniutils --pastas` mostra o caminho (`MINIUTILS_DADOS` troca a pasta). O app diz o que
+guarda no manifesto:
+
+```toml
+[data]
+kinds = ["sqlite", "kv"]   # o que guarda (abaixo)
+version = 1                # formato dos dados; subir pede migração
+max_mb = 10                # cota do banco (1 a 1024; padrão 10)
+```
+
+| `kinds` | Quem usa | O que é |
+|---|---|---|
+| `kv` | plugin com tela | `store_get`/`store_set`: valores soltos (até 1 MiB), num `store.json` que o hub grava depois de cada chamada |
+| `sqlite` | plugin com tela | `db_batch`/`db_exec`/`db_query`: um banco SQLite só do app (`data.sqlite`), com a cota de `max_mb` |
+| `files` | app externo, mini-app embutido | a pasta, para o app gravar o que quiser (`data_dir` no `start`, `MINIUTILS_APP_DATA`) |
+
+Sem `[data]`, o plugin com tela tem `kv` e o app externo tem `files`; o plugin simples não
+guarda nada.
+
+**O banco** (`sqlite`): estado, histórico, contas sobre muitos registros. Parâmetros com
+`?` (`db_exec("INSERT INTO t VALUES (?, ?)", [nome, now()])`); lista ou mapa vira texto
+JSON. O script fica dentro da pasta dele: `ATTACH`, `VACUUM INTO` e `PRAGMA` que muda o banco
+são recusados (o `user_version` e a leitura da estrutura podem); cada instrução tem até 5 s
+e cada consulta devolve até 10 mil linhas (use `LIMIT`); uma transação (`BEGIN`) aberta no
+fim da chamada é desfeita. Na loja, o banco aparece nas permissões ("guarda: banco SQLite")
+e o índice tem de anunciá-lo (`"sqlite": true`).
+
+**Versão e migração.** Mudou o formato dos dados (tabela nova, coluna, outro JSON)? Suba o
+`version`. Quando o app começa com dados de uma versão antiga, o hub copia a pasta para
+`.copias/<id>/` e:
+- plugin com tela: chama `fn migrate(de, para)` antes de `start()`;
+- app externo: manda `data_version` (a versão dos dados) no `start`; o app migra e responde
+  `{"type":"migrated","version":N}` com a versão nova.
+
+Se a migração falhar (erro no `migrate`, o app sair antes do `migrated`), a cópia volta e o
+cartão mostra o erro. Dados de uma versão **mais nova** que a do app (alguém voltou a uma
+versão antiga) não são abertos: o app não começa. A instalação nova já começa na versão do
+manifesto, sem migração: crie as tabelas no formato atual (`CREATE TABLE IF NOT EXISTS`) e
+use `migrate` só para levar o formato antigo ao novo. Exemplo completo em
+[`examples/plugin-notas`](examples/plugin-notas).
+
+**Para quem usa:** em **Configurações**, nas opções de cada app, a linha **Dados** mostra o
+que ele guarda e quanto, com **Exportar** (cópia em `Downloads/miniutils-dados/`) e
+**Apagar dados** (o app para, os dados somem e ele recomeça do zero). Remover um app que
+tem dados pergunta se eles ficam: os que ficam voltam numa reinstalação e aparecem em
+**Configurações › Sistema › Dados de apps removidos** (`miniutils --remover <id>` pergunta
+também, ou siga `--manter-dados` / `--apagar-dados`).
 
 ## Apps locais (sem a loja)
 
@@ -245,7 +310,8 @@ o modo dev roda numa instância só dele.
 - **Plugin** (simples ou com tela): repositório público com `manifest.toml`, `README.md` e
   `LICENSE`, e um pull request na
   [loja](https://github.com/pedroluizmossi/miniutils-store) acrescentando a entrada no
-  `registry.json`, com o commit revisado e as permissões iguais às do manifesto.
+  `registry.json`, com o commit revisado e as permissões iguais às do manifesto (com banco,
+  `"sqlite": true`).
 - **App externo**: o código num repositório público e os executáveis num Release compilado
   pelo CI a partir de uma tag. A entrada da loja traz `"full_access": true` e, por sistema,
   o endereço e o SHA-256 do executável; o hub só instala se o hash bater. O workflow do

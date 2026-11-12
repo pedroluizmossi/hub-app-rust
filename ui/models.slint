@@ -51,6 +51,15 @@ export struct AppInfo {
     settings: [SettingRow],
     page: int,           // página onde o app está
     origin: string,      // "" (embutido), "loja", "local" ou "dev" (--plugin-dev)
+    // o que guarda e quanto ("banco SQLite · 1,2 MB (banco até 10 MB)"); "" = não guarda nada
+    data: string,
+    has-data: bool,      // há algo para exportar ou apagar
+}
+
+// Dados guardados de um app que não está mais instalado (Configurações › Sistema).
+export struct DataRow {
+    id: string,
+    text: string,        // "io.github.x.app · 1,2 MB"
 }
 
 // Uma página do painel (item da barra lateral).

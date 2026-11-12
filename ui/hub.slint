@@ -13,7 +13,7 @@ import { AgentsApp, AgentRow, AgentSub } from "../miniapps/agents/view.slint";
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
 import { StoreView, StoreApp, StoreRow } from "store.slint";
-import { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem } from "models.slint";
+import { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow } from "models.slint";
 import { Ambient } from "ambient.slint";
 import { AppsView } from "settings.slint";
 import { Rail, PageBar, TopTabs } from "nav.slint";
@@ -31,7 +31,7 @@ import "fonts/PixelifySans-Bold.ttf";
 
 export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 // structs que o Rust preenche (definidas em models.slint)
-export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem }
+export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow }
 
 export component HubWindow inherits Window {
     title: app-name;
@@ -90,6 +90,13 @@ export component HubWindow inherits Window {
     in property <bool> autostart: false;
     in property <string> version;
     in property <string> log-dir;
+    // dados dos apps (src/hub/data.rs): os de apps removidos e o aviso do último pedido
+    in property <[DataRow]> orphan-data;
+    in property <string> data-note-app;
+    in property <string> data-note;
+    in property <bool> data-note-bad;
+    callback export-data(string);
+    callback delete-data(string);
     // apps locais: a pasta, o resumo ("2 apps locais · 1 da loja") e as pastas recusadas
     in property <string> apps-dir;
     in property <string> apps-summary;
@@ -498,6 +505,12 @@ export component HubWindow inherits Window {
                 apps-skipped: apps-skipped;
                 open-apps-dir => { root.open-apps-dir(); }
                 reload-apps => { root.reload-apps(); }
+                orphan-data: orphan-data;
+                data-note-app: data-note-app;
+                data-note: data-note;
+                data-note-bad: data-note-bad;
+                export-data(id) => { root.export-data(id); }
+                delete-data(id) => { root.delete-data(id); }
                 accents: accents;
                 accent-index: accent-index;
                 accent-chosen(i) => { root.accent-chosen(i); }

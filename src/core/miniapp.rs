@@ -170,6 +170,23 @@ pub trait MiniApp {
     /// O usuário mudou alguma configuração ou o tema.
     fn settings_changed(&mut self, _ui: &HubWindow) {}
 
+    /// O que o app guarda (`[data]`; ver `core/appdata.rs`).
+    fn data_spec(&self) -> crate::core::appdata::DataSpec {
+        self.manifest().data.clone().unwrap_or_else(|| crate::core::appdata::DataSpec::with(&[]))
+    }
+
+    /// Vão apagar os dados do app (`core/appdata.rs`): pare de usar os arquivos (feche o
+    /// banco, pare o processo). O hub espera `data_released` e depois chama `reload_data`.
+    fn release_data(&mut self, _ui: &HubWindow) {}
+
+    /// Os arquivos de dados já estão soltos (a thread do script ou o processo terminou).
+    fn data_released(&self) -> bool {
+        true
+    }
+
+    /// Os dados mudaram por fora (apagados): releia, e volte a rodar se estava ligado.
+    fn reload_data(&mut self, _ui: &HubWindow) {}
+
     /// Humor do app; a bandeja mostra o app em pior estado.
     fn mood(&self) -> Mood;
 

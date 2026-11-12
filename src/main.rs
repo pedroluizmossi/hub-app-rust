@@ -38,8 +38,9 @@ Uso: miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]
 fn dirs_text() -> String {
     let logs = core::os::log_dir().map_or_else(|| "(sem pasta)".into(), |d| d.display().to_string());
     format!(
-        "apps locais:   {}\n               (um app por pasta, com o nome do id do manifest.toml)\naparência:     {}\n               (temas/, visuais/ e fundos/, um .toml cada; exemplos em examples/aparencia)\nconfiguração:  {}\nregistros:     {logs}",
+        "apps locais:   {}\n               (um app por pasta, com o nome do id do manifest.toml)\ndados dos apps: {}\n               (uma pasta por app: o que ele guarda; ver [data] no APPS.md)\naparência:     {}\n               (temas/, visuais/ e fundos/, um .toml cada; exemplos em examples/aparencia)\nconfiguração:  {}\nregistros:     {logs}",
         core::plugins::dir().display(),
+        core::appdata::root().display(),
         skin::user::dir().display(),
         core::config::Config::path().display(),
     )
@@ -131,6 +132,8 @@ fn main() -> anyhow::Result<()> {
         log::warn!("sem instância única ({e})");
     }
     autostart::refresh();
+    // dados dos apps que ainda estão no lugar antigo (plugins/.data, todo.json da config)
+    core::appdata::migrate_legacy(true);
 
     let result = (|| -> anyhow::Result<()> {
         let positionable = popup::select_backend()?;

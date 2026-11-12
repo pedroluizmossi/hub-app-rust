@@ -91,6 +91,9 @@ hub-app-rust/
       pages.rs                páginas: barra lateral, página aberta, edição
       grid.rs                 grade do painel e modo de edição (mover, redimensionar)
       settings.rs             Configurações: lista de apps e formulário do manifesto
+      data.rs                 dados de cada app nas Configurações: tamanho, exportar,
+                              apagar (espera o app soltar os arquivos), órfãos
+      store.rs                a tela da loja: instalar, atualizar, remover (com ou sem dados)
       bind.rs                 callbacks da tela e eventos da janela
     instance.rs, instance/    instância única (a 2ª só pede para abrir): socket Unix no Linux,
                               named pipe no Windows
@@ -103,6 +106,8 @@ hub-app-rust/
       miniapp.rs              o trait MiniApp, o Host (serviços) e o Reporter (recado de
                               uma ação em segundo plano para o app que a pediu)
       manifest.rs             formato do manifest.toml
+      appdata.rs              pasta de dados de cada app (app-data/<id>/): [data], versão,
+                              cópia antes de migrar, tamanho, exportar, apagar, pastas antigas
       registry.rs             liga/desliga mini-apps e distribui eventos
       config.rs               ~/.config/miniutils/config.toml (versão, migrações, nome exibido)
       layout.rs               grade do painel: posições, encaixe ao arrastar (settle), vagas
@@ -158,13 +163,15 @@ hub-app-rust/
       ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
       ai_pace.rs              previsão de esgotamento pelo ritmo de uso (duas janelas) e gráfico da última hora
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
-      todo.rs                 To-do rápido: lista salva em ~/.config/miniutils/todo.json
+      todo.rs                 To-do rápido: lista em todo.json, na pasta de dados do app
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou
       plugin/                 plugins da comunidade: tela genérica, tela interpretada + Rhai,
                               ou tela interpretada + processo do app externo
         mod.rs                conjunto de plugins carregados e o mini-app; API do script no topo
         view.rs               tela interpretada (slint-interpreter): imports e imagens permitidos
-        script.rs             o main.rhai numa thread própria: API, allowlist, HTTP, dados
+        script.rs             o main.rhai numa thread própria: API, allowlist, HTTP, dados,
+                              migração antes do start()
+        db.rs                 o banco SQLite do script: cota, ATTACH/PRAGMA recusados, prazo
       external.rs             app externo: protocolo JSON por linha e o processo (iniciar,
                               ler, escrever, encerrar o grupo)
 ```
@@ -363,7 +370,7 @@ anterior intacto. Arquivo vazio conta como ausente, não como versão 0 a migrar
 | 3 → 4 | `columns` e `rows` viram a página "Geral" em `[[pages]]`, com os apps ligados |
 
 Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se faltar), `skin`,
-`nav` (`"side"` ou `"top"`), `reduce_motion`, `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
+`nav` (`"side"`, `"right"`, `"bottom"` ou `"top"`), `reduce_motion`, `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
 Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copiada.
 
 ## Registro e iniciar com o sistema
@@ -408,8 +415,8 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
     não trava o script), consultar por HTTPS os domínios de `[permissions] net`
     (`http_get`, com prazo, limite de 1 MiB e redirecionamento só para domínio
     permitido), receber as leituras dos provedores de `uses` (`fn on_event(topic, data)`,
-    o mesmo barramento dos apps embutidos), guardar dados (`store_get`/`store_set`, um
-    JSON por plugin em `plugins/.data/`, gravado pelo host e apagado ao remover), contar
+    o mesmo barramento dos apps embutidos), guardar dados (`store_get`/`store_set` e um banco
+    SQLite, `db_exec`/`db_query`, na pasta de dados do app; ver "Dados dos apps"), contar
     fatos para a conversa entre mascotes (`fact`) e notificar. A tela importa
     `std-widgets.slint`, `miniutils.slint` (o `Theme`, servido pelo host, com as cores do
     tema do app e as fontes do visual) e as telas de `ui/` do próprio plugin; imagens só de
@@ -418,14 +425,29 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - **App externo** (`[app]`, acesso total; `src/apps/external.rs`): para o que um script não
   alcança. A lógica é um executável próprio (qualquer linguagem; o exemplo é Rust), que o host
   inicia ao ligar o app e encerra (com o grupo de processos) ao desligar. Conversam por JSON,
-  uma mensagem por linha: o host manda `start`, `tick`, `action`, `event` (provedores de
-  `uses`), `settings`, `shown` e `stop`; o app manda `set`, `image`, `mood`, `summary`,
-  `notify`, `fact` e `error`. A saída de erro do app vai para o registro. A tela é o mesmo
+  uma mensagem por linha: o host manda `start` (com a pasta e a versão dos dados), `tick`,
+  `action`, `event` (provedores de `uses`), `settings`, `shown` e `stop`; o app manda `set`,
+  `image`, `mood`, `summary`, `notify`, `fact`, `error` e `migrated`. A saída de erro do app vai para o registro. A tela é o mesmo
   `view.slint` interpretado dos plugins com tela, e humor, bandeja e conversa também são
   os mesmos. O app roda com as permissões do usuário, então não declara `[permissions]`. Se
   sair sozinho, o cartão fica em alarme e o botão de atualizar o inicia de novo. O processo
   isola: um app que trava ou cai não derruba o hub. Custa um processo a mais por app
   ligado (exceção ao princípio 1, só para apps externos).
+- **Dados dos apps** (`src/core/appdata.rs`): uma pasta por app em
+  `<dados>/miniutils/app-data/<id>/` (ou `MINIUTILS_DADOS`), fora da pasta do app, para
+  todos os tipos (o To-do também). O `[data]` do manifesto declara o que o app guarda
+  (`kv`, `sqlite`, `files`), a versão do formato e a cota do banco; sem ele, o script tem
+  `kv` e o app externo, `files`. O hub guarda a versão em `.miniutils.json` e, quando o app
+  sobe a versão, copia a pasta para `.copias/<id>/` antes de o app migrar (`fn migrate` no
+  script; `data_version`/`migrated` no app externo) e a devolve se a migração falhar; dados
+  mais novos que o app não são abertos. O banco do script (`apps/plugin/db.rs`) abre na
+  primeira chamada, com `max_page_count` pela cota, `ATTACH` e `PRAGMA` de escrita
+  recusados pelo autorizador, prazo por instrução (progress handler) e transação esquecida
+  desfeita no fim da chamada. Nas Configurações, cada app mostra o que guarda e quanto,
+  com exportar (o banco sai por `VACUUM INTO`) e apagar (o hub para a lógica, espera ela
+  soltar os arquivos, apaga e a religa). Remover pergunta se os dados ficam; os que ficam
+  aparecem em Sistema como dados de apps removidos e voltam numa reinstalação. Os dados do
+  lugar antigo (`plugins/.data/`, `~/.config/miniutils/todo.json`) vêm sozinhos ao abrir.
 - Desenvolvimento: `miniutils --plugin-dev <pasta>` carrega o plugin direto da pasta (já
   ligado, na primeira página), recarrega ao salvar e mostra no terminal os erros da tela e
   do script.
@@ -438,7 +460,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
   `store::OFFICIAL_INDEX`/`OFFICIAL_KEY`); a config (`store_index`, `store_key`) troca por
   outra. Índice que não é o oficial, sem chave, só é aceito se for local. A instalação clona sem
   hooks, confere o commit, valida manifesto, tela e script, confere que as permissões
-  anunciadas (`permissions`, `net`, `uses` no índice) batem com as pedidas e mostra o que o
+  anunciadas (`permissions`, `net`, `uses` e `sqlite` no índice) batem com as pedidas e mostra o que o
   plugin vai executar, consultar e ler (numa atualização,
   as permissões novas aparecem em destaque) antes do segundo clique.
 - Na loja, o app externo é anunciado com `full_access` e, por sistema, o endereço e o

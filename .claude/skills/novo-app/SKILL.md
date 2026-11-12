@@ -17,6 +17,7 @@ Use "Qual escolher" do `APPS.md`: o mais simples que resolve.
 |---|---|---|
 | mostrar a saída de um comando | plugin simples | `examples/plugin-uptime` |
 | tela própria, botões, dados de provedores, HTTPS | plugin com tela | `examples/plugin-top` |
+| o mesmo, guardando estado ou histórico num banco | plugin com tela + `[data] kinds = ["sqlite"]` | `examples/plugin-notas` |
 | arquivos, sockets, rede local, processo longo, outra linguagem | app externo | `examples/app-hello` |
 | parte do produto, provedor novo, tela compilada | mini-app embutido | `miniapps/todo` + `src/apps/todo.rs` |
 
@@ -42,6 +43,11 @@ de se chamar exatamente o `id`. Ver `APPS.md › Apps locais`.
 3. `icon`: uma mascote existente (`key:` em `src/mascot/sprites.rs`). Leia a lista; não
    invente nome.
 4. `uses` e `[permissions]` só com o que o app usa de fato (a loja mostra isso ao instalar).
+   O que tem de durar entre aberturas vai em `[data]` (`kv` para valores soltos, `sqlite`
+   para tabelas; app externo grava na pasta `data_dir`), nunca em arquivo solto nem em
+   `this`. Banco: crie as tabelas no formato atual com `CREATE TABLE IF NOT EXISTS` no
+   `start()`; mudou o formato depois de publicado, suba `version` e escreva
+   `fn migrate(de, para)`. Ver `APPS.md › Dados que duram`.
 5. Tela: `component Main`, cores de `theme`, `font-size: 13px * theme.text-scale`,
    `overflow: elide` em texto, e esconda o secundário em célula pequena (~300 × 160 px).
    Ver "A tela" no `APPS.md`.
@@ -53,7 +59,9 @@ que um app novo toca (confira com `grep -rn todo` se algo mudou de lugar):
   (`export global <App>App` + `export component <App>View`; `font-size` sempre
   `× Skin.text-scale`);
 - `src/apps/<app>.rs` (struct com `create(host, ui)` + trait `MiniApp`) e `pub mod` em
-  `src/apps/mod.rs`;
+  `src/apps/mod.rs`; se guardar algo, `[data] kinds = ["files"]` no manifesto e o arquivo
+  em `appdata::dir(&manifest.id)` (como o `todo.json`), mais `reload_data` no trait para o
+  "Apagar dados" das Configurações;
 - `src/hub/mod.rs`: `registry.add(crate::apps::<app>::<App>Mini::create(host.clone(), &ui) as AppRef, None);`
   junto dos outros;
 - `ui/dashboard.slint`: importar a view e um `if c.id == "cyber.<nome>": <App>View { … }`;

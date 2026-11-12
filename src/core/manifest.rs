@@ -2,6 +2,7 @@
 
 use serde::Deserialize;
 
+use super::appdata::DataSpec;
 use super::bus::Topic;
 use crate::mascot::sprites;
 
@@ -25,6 +26,10 @@ pub struct Manifest {
     pub permissions: Permissions,
     #[serde(default)]
     pub settings: Vec<SettingDef>,
+    /// O que o app guarda (`[data]`; ver `core/appdata.rs`). Sem a seção, vale o padrão
+    /// do tipo de app (`Plugin::data`).
+    #[serde(default)]
+    pub data: Option<DataSpec>,
 }
 
 fn default_icon() -> String {
@@ -101,6 +106,9 @@ impl Manifest {
             m.api,
             API_VERSION
         );
+        if let Some(d) = &m.data {
+            d.check().map_err(anyhow::Error::msg)?;
+        }
         Ok(m)
     }
 

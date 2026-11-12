@@ -57,9 +57,18 @@
 //!
 //! Arquivos de um plugin (`files`): os de `TOP_FILES` na raiz, mais `ui/*.slint` (telas que o
 //! `view.slint` importa) e `assets/*.png|jpg|svg` (imagens, por `@image-url`). Nada de
-//! link ou outra pasta; binário só em `bin/` de um app externo. Os dados que o script grava
-//! (`store_set`) ficam fora da pasta do plugin (`data_file`; o app externo ganha a pasta
-//! `data_dir`), para sobreviver a uma atualização.
+//! link ou outra pasta; binário só em `bin/` de um app externo. Os dados ficam fora da pasta
+//! do plugin, na pasta de dados do app (`core/appdata.rs`), para sobreviver a uma
+//! atualização. O que o app guarda vai em `[data]`:
+//!
+//! ```toml
+//! [data]
+//! kinds = ["sqlite", "kv"]   # script: kv (store_set) e/ou sqlite (db_exec); app externo: files
+//! version = 1                # formato dos dados; subir chama fn migrate(de, para)
+//! max_mb = 10                # cota do banco
+//! ```
+//!
+//! Sem `[data]`, o script tem `kv` e o app externo, `files`; o plugin simples não guarda nada.
 //!
 //! Instalados ficam em `dir()`: `~/.local/share/miniutils/plugins/<id>/` no Linux,
 //! `%APPDATA%\miniutils\plugins\<id>\` no Windows. A loja instala ali (ver `store.rs`) e
@@ -72,6 +81,7 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
+use super::appdata::{DataSpec, Kind};
 use super::manifest::{Manifest, SettingDef, SettingKind};
 use crate::mascot::sprites;
 
@@ -249,6 +259,20 @@ impl Plugin {
                 return Err("[ui] every: use de 1 a 3600 segundos".into());
             }
         }
+        if let Some(d) = &manifest.data {
+            let bad = |k: &Kind| match (&extra.run, &extra.ui) {
+                (Some(_), _) => true,
+                (_, Some(_)) => *k == Kind::Files,
+                _ => *k != Kind::Files,
+            };
+            if let Some(k) = d.kinds.iter().find(|k| bad(k)) {
+                return Err(match (&extra.run, &extra.ui) {
+                    (Some(_), _) => "[data]: o plugin simples não guarda dados (use [ui] ou [app])".to_string(),
+                    (_, Some(_)) => format!("[data] kinds: \"{}\" não vale para script (use \"kv\" e/ou \"sqlite\")", k.key()),
+                    _ => format!("[data] kinds: \"{}\" não vale para app externo (ele grava o que quiser: use \"files\")", k.key()),
+                });
+            }
+        }
         if let Some(n) = extra.display.lines
             && !(1..=6).contains(&n) {
                 return Err(format!("[display] lines = {n}: use de 1 a 6"));
@@ -288,7 +312,20 @@ impl Plugin {
         if self.app.is_some() {
             return describe_full_access(&uses);
         }
-        describe_grants(&self.manifest.permissions.exec, &self.manifest.permissions.net, &uses)
+        describe_grants(&self.manifest.permissions.exec, &self.manifest.permissions.net, &uses, self.data().has(Kind::Sqlite))
+    }
+
+    /// O que o app guarda: o `[data]` do manifesto ou, sem ele, o padrão do tipo (`kv` no
+    /// script, `files` no app externo, nada no plugin simples).
+    pub fn data(&self) -> DataSpec {
+        if let Some(d) = &self.manifest.data {
+            return d.clone();
+        }
+        DataSpec::with(match (&self.ui, &self.app) {
+            (Some(_), _) => &[Kind::Kv],
+            (_, Some(_)) => &[Kind::Files],
+            _ => &[],
+        })
     }
 
     /// App externo: roda um executável próprio com as permissões do usuário.
@@ -332,9 +369,9 @@ pub fn valid_host(h: &str) -> bool {
     chars && labels && h.contains('.') && h.len() <= 253
 }
 
-/// Texto das permissões: "executa: ps · rede: api.x.com · lê: sys" (ou "não executa
-/// programas" se não pede nada).
-pub fn describe_grants(exec: &[String], net: &[String], uses: &[String]) -> String {
+/// Texto das permissões: "executa: ps · rede: api.x.com · lê: sys · guarda: banco SQLite"
+/// (ou "não executa programas" se não pede nada).
+pub fn describe_grants(exec: &[String], net: &[String], uses: &[String], sqlite: bool) -> String {
     let mut parts = Vec::new();
     if !exec.is_empty() {
         parts.push(format!("executa: {}", exec.join(", ")));
@@ -345,8 +382,14 @@ pub fn describe_grants(exec: &[String], net: &[String], uses: &[String]) -> Stri
     if !uses.is_empty() {
         parts.push(format!("lê: {}", uses.join(", ")));
     }
+    if sqlite {
+        parts.push(GRANT_SQLITE.into());
+    }
     if parts.is_empty() { "não executa programas nem usa a rede".into() } else { parts.join(" · ") }
 }
+
+/// O banco de dados na lista de permissões (e nas permissões novas de uma atualização).
+pub const GRANT_SQLITE: &str = "guarda: banco SQLite";
 
 /// Texto das permissões de um app externo: "ACESSO TOTAL: … · lê: sys".
 pub fn describe_full_access(uses: &[String]) -> String {
@@ -463,17 +506,6 @@ fn bin_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
 /// Arquivo dentro de `bin/` (executável de app externo)?
 pub fn is_bin(rel: &Path) -> bool {
     rel.starts_with(BIN_DIR)
-}
-
-/// Onde ficam os dados que o script grava (`store_set`): fora da pasta do plugin, que é
-/// trocada inteira numa atualização.
-pub fn data_file(root: &Path, id: &str) -> PathBuf {
-    root.join(".data").join(format!("{id}.json"))
-}
-
-/// A pasta de dados de um app externo (o host cria e passa ao app; sai ao remover).
-pub fn data_dir(root: &Path, id: &str) -> PathBuf {
-    root.join(".data").join(id)
 }
 
 /// Plugin em desenvolvimento (`miniutils --plugin-dev <pasta>`).

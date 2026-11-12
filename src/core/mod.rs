@@ -1,5 +1,6 @@
 //! Núcleo do hub: o contrato dos mini-apps e os serviços que o host oferece a eles.
 pub mod about;
+pub mod appdata;
 pub mod bus;
 pub mod chatter;
 pub mod config;

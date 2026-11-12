@@ -17,7 +17,8 @@
 #
 # A instância usa MINIUTILS_INSTANCE=dev-ui (não conversa com o MiniUtils que você usa) e
 # XDG_CONFIG_HOME/XDG_STATE_HOME em target/dev-ui (não mexe na sua config nem no seu
-# registro). Os plugins instalados são os seus, de verdade.
+# registro). Os plugins instalados são os seus, de verdade; os dados deles não:
+# MINIUTILS_DADOS=target/dev-ui/app-data (começam vazios e não mexem nos seus).
 #
 # Limites do live-preview do Slint 1.18 (conferidos): (1) ele só percebe arquivo gravado
 # no lugar (VS Code, `cat >`); gravar trocando o arquivo (a ferramenta Edit do agente,
@@ -99,6 +100,7 @@ abrir)
     fi
     SLINT_MCP_PORT=$PORT MINIUTILS_INSTANCE=dev-ui \
         XDG_CONFIG_HOME="$PWD/$DIR/config" XDG_STATE_HOME="$PWD/$DIR/state" \
+        MINIUTILS_DADOS="$PWD/$DIR/app-data" \
         setsid target/debug/miniutils "$@" >"$DIR/app.log" 2>&1 </dev/null &
     echo $! >"$DIR/pid"
     for _ in $(seq 60); do

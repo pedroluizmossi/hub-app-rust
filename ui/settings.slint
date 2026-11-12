@@ -3,7 +3,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
-import { SettingRow, AppInfo, PageInfo } from "models.slint";
+import { SettingRow, AppInfo, PageInfo, DataRow } from "models.slint";
 
 // Linhas com altura mínima de 44 px: `max(44px, self.preferred-height)`, nunca só `44px`.
 // Um min-height fixo vira a altura da linha, e um texto que quebra (ou o texto em 125%)
@@ -140,6 +140,14 @@ export component AppsView inherits ScrollView {
     in property <string> apps-skipped;
     callback open-apps-dir();
     callback reload-apps();
+    // dados dos apps: exportar e apagar (de um app, ou que ficaram de um app removido) e o
+    // aviso do último pedido, mostrado na linha do app `data-note-app`
+    in property <[DataRow]> orphan-data;
+    in property <string> data-note-app;
+    in property <string> data-note;
+    in property <bool> data-note-bad;
+    callback export-data(string);
+    callback delete-data(string);
     // aparência: destaque, tamanho do texto, fundo animado e a pasta de temas/visuais/fundos
     in property <[string]> accents;
     in property <int> accent-index;
@@ -495,6 +503,72 @@ export component AppsView inherits ScrollView {
                         }
                     }
                 }
+                // dados que ficaram de apps removidos (a remoção pergunta; quem guardou, apaga aqui)
+                if orphan-data.length > 0: VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Dados de apps removidos"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                    Text {
+                        text: "Ficaram guardados ao remover. Reinstalar o mesmo app os traz de volta.";
+                        color: Skin.sub;
+                        font-size: 12px * Skin.text-scale;
+                        wrap: word-wrap;
+                    }
+                    for d in orphan-data: HorizontalLayout {
+                        property <bool> armed;
+                        spacing: 8px;
+                        min-height: max(40px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: d.text;
+                                color: Skin.sub;
+                                font-family: Skin.font-mono;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            if data-note-app == d.id && data-note != "": Text {
+                                text: data-note;
+                                color: data-note-bad ? Skin.danger : Skin.accent;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            TextButton {
+                                text: "Exportar";
+                                font-size: 13px * Skin.text-scale;
+                                clicked => { root.export-data(d.id); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            TextButton {
+                                text: armed ? "Confirmar" : "Apagar";
+                                icon: Icons.close;
+                                ink: Skin.danger;
+                                edge: Skin.danger-edge;
+                                font-size: 13px * Skin.text-scale;
+                                accessible-label: (armed ? "Confirmar: apagar os dados de " : "Apagar os dados de ") + d.id;
+                                clicked => {
+                                    if armed {
+                                        armed = false;
+                                        root.delete-data(d.id);
+                                    } else {
+                                        armed = true;
+                                    }
+                                }
+                            }
+                        }
+                        // o segundo clique vale por pouco tempo
+                        Timer {
+                            interval: 6s;
+                            running: armed;
+                            triggered => { armed = false; }
+                        }
+                    }
+                }
             }
         }
 
@@ -729,6 +803,71 @@ export component AppsView inherits ScrollView {
                         toggled => { root.setting-toggled(s.app, s.key); }
                         int-edited(v) => { root.setting-int(s.app, s.key, v); }
                         chosen(i) => { root.setting-chosen(s.app, s.key, i); }
+                    }
+                    // o que o app guarda (core/appdata.rs): exportar e apagar com dois cliques
+                    if app.data != "": HorizontalLayout {
+                        property <bool> armed;
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: "Dados"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: app.data;
+                                color: Skin.sub;
+                                font-family: Skin.font-mono;
+                                font-size: 11px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            if armed: Text {
+                                text: "Clique de novo para apagar: o app volta a começar do zero.";
+                                color: Skin.danger;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            if !armed && data-note-app == app.id && data-note != "": Text {
+                                text: data-note;
+                                color: data-note-bad ? Skin.danger : accent;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        if app.has-data: VerticalLayout {
+                            alignment: center;
+                            TextButton {
+                                text: "Exportar";
+                                ink: accent;
+                                font-size: 13px * Skin.text-scale;
+                                accessible-label: "Exportar os dados de " + app.name;
+                                clicked => { root.export-data(app.id); }
+                            }
+                        }
+                        if app.has-data: VerticalLayout {
+                            alignment: center;
+                            TextButton {
+                                text: armed ? "Confirmar" : "Apagar dados";
+                                icon: Icons.close;
+                                ink: Skin.danger;
+                                edge: Skin.danger-edge;
+                                font-size: 13px * Skin.text-scale;
+                                accessible-label: (armed ? "Confirmar: apagar os dados de " : "Apagar os dados de ") + app.name;
+                                clicked => {
+                                    if armed {
+                                        armed = false;
+                                        root.delete-data(app.id);
+                                    } else {
+                                        armed = true;
+                                    }
+                                }
+                            }
+                        }
+                        Timer {
+                            interval: 6s;
+                            running: armed;
+                            triggered => { armed = false; }
+                        }
                     }
                 }
             }

@@ -25,6 +25,8 @@ export struct StoreRow {
     // texto do segundo clique ("Confirmar: instalar e permitir uptime")
     confirm: string,
     busy: bool,
+    // dados guardados do plugin ("1,2 MB"; "" = nenhum): ao remover, escolhe se apaga
+    data: string,
 }
 
 export global StoreApp {
@@ -38,7 +40,7 @@ export global StoreApp {
     in property <bool> loading;
     callback reload();
     callback save-source(string /* índice */, string /* chave */);
-    callback act(string /* id */, string /* install | update | remove */);
+    callback act(string /* id */, string /* install | update | remove | remove-purge */);
 }
 
 // Campo de texto de uma linha, nas cores da janela.
@@ -115,8 +117,17 @@ component PluginRow inherits Rectangle {
             alignment: end;
             spacing: 8px;
             if item.busy: Text { text: "trabalhando…"; color: Skin.dim; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
+            // com dados guardados, o segundo clique escolhe: manter ou apagar os dados
+            if !item.busy && item.installed && item.armed == "remove" && item.data != "": TextButton {
+                text: "Remover e apagar os dados";
+                icon: Icons.close;
+                ink: Skin.danger;
+                edge: Skin.danger-edge;
+                font-size: 13px * Skin.text-scale;
+                clicked => { StoreApp.act(item.id, "remove-purge"); }
+            }
             if !item.busy && item.installed: TextButton {
-                text: item.armed == "remove" ? "Confirmar remoção" : "Remover";
+                text: item.armed != "remove" ? "Remover" : item.data != "" ? "Remover e manter os dados" : "Confirmar remoção";
                 icon: Icons.close;
                 ink: Skin.danger;
                 edge: Skin.danger-edge;

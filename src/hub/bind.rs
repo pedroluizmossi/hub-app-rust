@@ -18,6 +18,7 @@ impl Hub {
                 let store = id == "store";
                 if id == "apps" {
                     h.apply_system();
+                    h.refresh_data();
                 }
                 h.ui.set_current(id);
                 if store {
@@ -130,6 +131,19 @@ impl Hub {
         ui.on_open_logs(move || {
             if let Some(h) = w.upgrade() {
                 h.open_logs();
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_export_data(move |id| {
+            if let Some(h) = w.upgrade() {
+                h.export_data(&id);
+            }
+        });
+        let w = Rc::downgrade(hub);
+        ui.on_delete_data(move |id| {
+            if let Some(h) = w.upgrade() {
+                h.delete_data(&id);
             }
         });
 
