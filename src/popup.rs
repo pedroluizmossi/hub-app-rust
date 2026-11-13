@@ -41,6 +41,15 @@ pub fn select_backend() -> anyhow::Result<bool> {
     Ok(x11)
 }
 
+/// Retângulo em pixels físicos.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
 /// Monitor em pixels físicos (como o winit informa) e o fator de escala dele.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Monitor {
@@ -49,6 +58,65 @@ pub struct Monitor {
     pub w: i32,
     pub h: i32,
     pub scale: f64,
+    /// Área útil (o monitor sem os painéis), física. O próprio monitor quando não se sabe.
+    pub work: Rect,
+}
+
+/// Borda do monitor em que fica o painel da bandeja.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Side {
+    Bottom,
+    Top,
+    Left,
+    Right,
+}
+
+/// O pedaço de `work` que cai em `m`. `None` quando sobra menos da metade do monitor em
+/// alguma direção: aí a área útil não descreve este monitor (no X11 ela é uma só para a
+/// tela virtual inteira, e com monitores de alturas diferentes pode sair torta).
+fn useful_part(m: Rect, work: Rect) -> Option<Rect> {
+    let x0 = m.x.max(work.x);
+    let y0 = m.y.max(work.y);
+    let x1 = (m.x + m.w).min(work.x + work.w);
+    let y1 = (m.y + m.h).min(work.y + work.h);
+    let (w, h) = (x1 - x0, y1 - y0);
+    (w * 2 >= m.w && h * 2 >= m.h).then_some(Rect { x: x0, y: y0, w, h })
+}
+
+/// Lados em que a área útil é menor que o monitor: onde há painel.
+fn panel_sides(m: &Monitor) -> Vec<Side> {
+    let wk = m.work;
+    let insets = [
+        (Side::Bottom, (m.y + m.h) - (wk.y + wk.h)),
+        (Side::Top, wk.y - m.y),
+        (Side::Left, wk.x - m.x),
+        (Side::Right, (m.x + m.w) - (wk.x + wk.w)),
+    ];
+    insets.into_iter().filter(|&(_, d)| d > 0).map(|(s, _)| s).collect()
+}
+
+/// Lado do painel. Com o clique: a borda mais próxima dele, entre as que têm painel (se a
+/// área útil diz quais) — isso desempata o clique no canto. Sem clique: a primeira borda
+/// com painel, ou embaixo. Empate vai para embaixo/em cima, que é o painel mais comum.
+fn panel_side(m: &Monitor, anchor: Option<(i32, i32)>) -> Side {
+    let known = panel_sides(m);
+    let Some((ax, ay)) = anchor else { return known.first().copied().unwrap_or(Side::Bottom) };
+    let dist = [
+        (Side::Bottom, m.y + m.h - 1 - ay),
+        (Side::Top, ay - m.y),
+        (Side::Left, ax - m.x),
+        (Side::Right, m.x + m.w - 1 - ax),
+    ];
+    dist.into_iter()
+        .filter(|(s, _)| known.is_empty() || known.contains(s))
+        .min_by_key(|&(_, d)| d)
+        .map_or(Side::Bottom, |(s, _)| s)
+}
+
+/// Encaixa `pos` (com `size`) entre `start` e `start + len`, a `gap` das bordas. Se não
+/// cabe, fica colado no começo (a parte de cima/esquerda, onde está o título, aparece).
+fn fit(pos: i32, size: i32, start: i32, len: i32, gap: i32) -> i32 {
+    pos.clamp(start + gap, (start + len - size - gap).max(start + gap))
 }
 
 /// A bandeja entrega o ponto clicado em pixels lógicos (o SNI, no Linux) ou físicos (o
@@ -89,18 +157,32 @@ pub fn position_with(
     // margens e metade do painel são em pixels lógicos: aqui viram físicos
     let gap = (GAP as f64 * m.scale).round() as i32;
     let half = (PANEL_HALF as f64 * m.scale).round() as i32;
-    let (ax, ay) = match (anchor, found) {
-        (_, Some((_, p))) => p,
-        (Some(a), None) => to_physical(a, m.scale),
-        // sem âncora: canto inferior direito do monitor, onde costuma ficar a bandeja
-        (None, None) => (m.x + m.w - gap, m.y + m.h - gap),
+    let point = match (anchor, found) {
+        (_, Some((_, p))) => Some(p),
+        (Some(a), None) => Some(to_physical(a, m.scale)),
+        (None, None) => None,
     };
-
-    let x = (ax - pw / 2).clamp(m.x + gap, (m.x + m.w - pw - gap).max(m.x + gap));
-    // painel embaixo (clique na metade de baixo): abre para cima; senão para baixo
-    let y = if ay > m.y + m.h / 2 { ay - half - gap - ph } else { ay + half + gap };
-    let y = y.clamp(m.y, (m.y + m.h - ph).max(m.y));
-    Some((x, y))
+    let wk = m.work;
+    let side = panel_side(m, point);
+    let (x, y) = match point {
+        // abre para longe do painel: o clique cai no meio dele, por isso `half`
+        Some((ax, ay)) => match side {
+            Side::Bottom => (ax - pw / 2, ay - half - gap - ph),
+            Side::Top => (ax - pw / 2, ay + half + gap),
+            Side::Left => (ax + half + gap, ay - ph / 2),
+            Side::Right => (ax - half - gap - pw, ay - ph / 2),
+        },
+        // sem clique: no canto da área útil junto do painel (direita, ou esquerda se o
+        // painel é o da esquerda); o `fit` abaixo encosta nas bordas
+        None => {
+            let left = side == Side::Left;
+            let x = if left { i32::MIN / 2 } else { i32::MAX / 2 };
+            let y = if side == Side::Top { i32::MIN / 2 } else { i32::MAX / 2 };
+            (x, y)
+        }
+    };
+    // dentro da área útil: não cobre painel nenhum, nem o que for mais grosso que `half`
+    Some((fit(x, pw, wk.x, wk.w, gap), fit(y, ph, wk.y, wk.h, gap)))
 }
 
 fn to_physical((x, y): (i32, i32), scale: f64) -> (i32, i32) {
@@ -117,11 +199,14 @@ pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
     window.with_winit_window(|w| {
         let size = w.outer_size();
         let handles: Vec<_> = w.available_monitors().collect();
+        let desktop = desktop_work_area();
         let monitors: Vec<Monitor> = handles
             .iter()
-            .map(|m| {
-                let (p, s) = (m.position(), m.size());
-                Monitor { x: p.x, y: p.y, w: s.width as i32, h: s.height as i32, scale: m.scale_factor() }
+            .map(|h| {
+                let (p, s) = (h.position(), h.size());
+                let rect = Rect { x: p.x, y: p.y, w: s.width as i32, h: s.height as i32 };
+                let work = monitor_work_area(h).or(desktop).and_then(|wk| useful_part(rect, wk)).unwrap_or(rect);
+                Monitor { x: rect.x, y: rect.y, w: rect.w, h: rect.h, scale: h.scale_factor(), work }
             })
             .collect();
         // o monitor atual (ou o primário) é o reserva quando a âncora não cai em nenhum
@@ -132,6 +217,40 @@ pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
             w.set_outer_position(PhysicalPosition::new(x, y));
         }
     });
+}
+
+/// Área útil de um monitor (sem a barra de tarefas), física. O Windows dá por monitor.
+#[cfg(windows)]
+fn monitor_work_area(h: &winit::monitor::MonitorHandle) -> Option<Rect> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
+    use winit::platform::windows::MonitorHandleExtWindows;
+    let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    // SAFETY: o HMONITOR vem do winit (monitor que existe agora) e `info` tem o cbSize certo.
+    let ok = unsafe { GetMonitorInfoW(HMONITOR(h.hmonitor() as *mut std::ffi::c_void), &mut info) };
+    let r = info.rcWork;
+    ok.as_bool().then_some(Rect { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top })
+}
+
+/// O X11 não dá a área útil por monitor (ver `desktop_work_area`).
+#[cfg(target_os = "linux")]
+fn monitor_work_area(_: &winit::monitor::MonitorHandle) -> Option<Rect> {
+    None
+}
+
+/// Área útil da tela virtual inteira (`_NET_WORKAREA`, X11); cada monitor fica com o seu
+/// pedaço (`useful_part`). Painel no meio de dois monitores não aparece nela.
+#[cfg(target_os = "linux")]
+fn desktop_work_area() -> Option<Rect> {
+    x11::work_area().unwrap_or_else(|e| {
+        log::debug!("sem _NET_WORKAREA: {e}");
+        None
+    })
+}
+
+/// No Windows a área vem por monitor (`monitor_work_area`).
+#[cfg(windows)]
+fn desktop_work_area() -> Option<Rect> {
+    None
 }
 
 /// Começa a mover a janela (sem moldura) com o mouse pressionado, como na barra de título
@@ -277,6 +396,22 @@ mod x11 {
         })
     }
 
+    /// `_NET_WORKAREA` da área de trabalho atual (a tela virtual menos os painéis).
+    pub fn work_area() -> anyhow::Result<Option<super::Rect>> {
+        let (conn, screen) = x11rb::connect(None)?;
+        let root = conn.setup().roots[screen].root;
+        let atom = |name: &str| -> anyhow::Result<u32> { Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom) };
+        let current = conn.get_property(false, root, atom("_NET_CURRENT_DESKTOP")?, AtomEnum::CARDINAL, 0, 1)?.reply()?;
+        let desk = current.value32().and_then(|mut v| v.next()).unwrap_or(0);
+        // uma área (x, y, w, h) por área de trabalho; o deslocamento conta em palavras de 32 bits
+        let area = conn.get_property(false, root, atom("_NET_WORKAREA")?, AtomEnum::CARDINAL, desk.saturating_mul(4), 4)?.reply()?;
+        let v: Vec<u32> = area.value32().map(Iterator::collect).unwrap_or_default();
+        Ok(match v[..] {
+            [x, y, w, h] if w > 0 && h > 0 => Some(super::Rect { x: x as i32, y: y as i32, w: w as i32, h: h as i32 }),
+            _ => None,
+        })
+    }
+
     pub fn set_states(window: u32) -> anyhow::Result<()> {
         let (conn, screen) = x11rb::connect(None)?;
         let root = conn.setup().roots[screen].root;
@@ -324,7 +459,12 @@ mod tests {
     use super::*;
 
     fn mon(x: i32, y: i32, w: i32, h: i32, scale: f64) -> Monitor {
-        Monitor { x, y, w, h, scale }
+        Monitor { x, y, w, h, scale, work: Rect { x, y, w, h } }
+    }
+
+    /// Monitor 1920x1080 (escala 1) com a área útil dada.
+    fn mon_work(x: i32, y: i32, w: i32, h: i32) -> Monitor {
+        Monitor { work: Rect { x, y, w, h }, ..mon(0, 0, 1920, 1080, 1.0) }
     }
 
     #[test]
@@ -366,8 +506,8 @@ mod tests {
         let m = [mon(0, 0, 1920, 1080, 1.0), mon(1920, -1080, 1920, 1080, 1.0)];
         // clique na bandeja do monitor de cima (y negativo), no canto direito
         assert_eq!(popup_position(Some((3800, -10)), (400, 500), &m, 0), Some((3430, -544)));
-        // sem âncora, usa o monitor do reserva (o de cima)
-        assert_eq!(popup_position(None, (400, 500), &m, 1), Some((3430, -544)));
+        // sem âncora, usa o monitor do reserva (o de cima), no canto inferior direito
+        assert_eq!(popup_position(None, (400, 500), &m, 1), Some((3430, -10 - 500)));
     }
 
     #[test]
@@ -381,10 +521,11 @@ mod tests {
 
     #[test]
     fn sem_ancora_vai_para_o_canto_do_monitor_de_reserva() {
+        // encostado no canto inferior direito, a `GAP` das bordas
         let m = [mon(0, 0, 1920, 1080, 1.0)];
-        assert_eq!(popup_position(None, (400, 500), &m, 0), Some((1510, 536)));
+        assert_eq!(popup_position(None, (400, 500), &m, 0), Some((1920 - 10 - 400, 1080 - 10 - 500)));
         let m15 = [mon(0, 0, 2880, 1620, 1.5)];
-        assert_eq!(popup_position(None, (600, 750), &m15, 0), Some((2265, 804)));
+        assert_eq!(popup_position(None, (600, 750), &m15, 0), Some((2880 - 15 - 600, 1620 - 15 - 750)));
     }
 
     #[test]
@@ -404,6 +545,64 @@ mod tests {
     fn janela_maior_que_o_monitor_nao_quebra() {
         let m = [mon(0, 0, 300, 200, 1.0)];
         let (x, y) = popup_position(Some((100, 100)), (400, 500), &m, 0).unwrap();
-        assert_eq!((x, y), (10, 0));
+        // não cabe: fica no começo, a `GAP` da borda (nos dois eixos)
+        assert_eq!((x, y), (10, 10));
+    }
+
+    #[test]
+    fn painel_a_esquerda_abre_para_a_direita() {
+        // painel vertical de 48 px à esquerda, clique no meio dele
+        let m = [mon_work(48, 0, 1872, 1080)];
+        assert_eq!(popup_position(Some((24, 540)), (400, 500), &m, 0), Some((24 + 24 + 10, 540 - 250)));
+        // sem área útil conhecida: a borda mais próxima do clique decide igual
+        let m = [mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(popup_position(Some((24, 540)), (400, 500), &m, 0), Some((58, 290)));
+    }
+
+    #[test]
+    fn painel_a_direita_abre_para_a_esquerda() {
+        let m = [mon_work(0, 0, 1872, 1080)];
+        assert_eq!(popup_position(Some((1896, 300)), (400, 500), &m, 0), Some((1896 - 24 - 10 - 400, 300 - 250)));
+        // perto do topo: não sobe além da área útil
+        assert_eq!(popup_position(Some((1896, 20)), (400, 500), &m, 0), Some((1462, 10)));
+    }
+
+    #[test]
+    fn painel_grosso_embaixo_nao_e_coberto() {
+        // painel de 80 px: o clique em 1040 menos `PANEL_HALF` ainda cairia dentro dele
+        let m = [mon_work(0, 0, 1920, 1000)];
+        let (_, y) = popup_position(Some((1800, 1040)), (400, 500), &m, 0).unwrap();
+        assert_eq!(y, 1000 - 10 - 500);
+    }
+
+    #[test]
+    fn clique_no_canto_segue_o_painel_da_area_util() {
+        // o clique (1918, 1060) está mais perto da borda direita, mas o painel é o de baixo
+        let m = [mon_work(0, 0, 1920, 1032)];
+        let (x, y) = popup_position(Some((1918, 1060)), (400, 500), &m, 0).unwrap();
+        assert_eq!((x, y), (1510, 1032 - 10 - 500));
+    }
+
+    #[test]
+    fn sem_ancora_painel_a_esquerda_vai_para_o_canto_inferior_esquerdo() {
+        let m = [mon_work(48, 0, 1872, 1080)];
+        assert_eq!(popup_position(None, (400, 500), &m, 0), Some((58, 570)));
+        // painel em cima: canto superior direito, abaixo dele
+        let m = [mon_work(0, 32, 1920, 1048)];
+        assert_eq!(popup_position(None, (400, 500), &m, 0), Some((1510, 42)));
+    }
+
+    #[test]
+    fn area_util_recortada_por_monitor() {
+        let left = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        let right = Rect { x: 1920, y: 0, w: 1920, h: 1080 };
+        // X11: uma área para a tela virtual inteira, painel embaixo
+        let desk = Rect { x: 0, y: 0, w: 3840, h: 1032 };
+        assert_eq!(useful_part(left, desk), Some(Rect { x: 0, y: 0, w: 1920, h: 1032 }));
+        assert_eq!(useful_part(right, desk), Some(Rect { x: 1920, y: 0, w: 1920, h: 1032 }));
+        // área que mal toca o monitor não vale para ele
+        let other = Rect { x: 1800, y: 0, w: 2040, h: 1080 };
+        assert_eq!(useful_part(left, other), None);
+        assert_eq!(useful_part(left, Rect { x: 5000, y: 0, w: 10, h: 10 }), None);
     }
 }

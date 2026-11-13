@@ -50,12 +50,13 @@ zbus = { version = "5.19", default-features = false, features = ["async-io", "bl
 tray-icon = "0.26"
 # CPU, memória, discos, rede e processos (no Linux isso vem direto de /proc e /sys)
 sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "network"] }
-# Win32 (pipe da instância única, processos, shell, janela) e WinRT (o que está tocando)
+# Win32 (pipe da instância única, processos, shell, janela, área útil do monitor) e WinRT (o que está tocando)
 windows = { version = "0.62", features = [
     "Foundation",
     "Foundation_Collections",
     "Media_Control",
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",

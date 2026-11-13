@@ -35,11 +35,15 @@ impl Hub {
             popup::place(window, anchor);
         }
         popup::focus(window);
-        // o gerenciador de janelas às vezes reposiciona ao mapear: reaplica a posição
+        // o gerenciador de janelas às vezes reposiciona ao mapear: reaplica a posição.
+        // Na 1ª abertura a janela nativa só existe depois que o laço de eventos roda, e as
+        // chamadas acima não acharam nada: os estados (fora da barra, por cima, em todas as
+        // áreas de trabalho) também vão aqui. Repetir nas outras vezes não muda nada.
         if self.positionable {
             let weak = self.ui.as_weak();
             Timer::single_shot(Duration::from_millis(60), move || {
                 if let Some(ui) = weak.upgrade() {
+                    popup::skip_taskbar(ui.window());
                     popup::place(ui.window(), anchor);
                 }
             });
