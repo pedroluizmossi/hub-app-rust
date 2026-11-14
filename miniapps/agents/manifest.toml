@@ -39,7 +39,7 @@ default = false
 
 [[settings]]
 key = "heroes"
-label = "Subagents walk as the imported mascots (a different one for each new subagent)"
+label = "Subagents walk as the mascots that can walk (a different one for each new subagent)"
 type = "bool"
 default = true
 

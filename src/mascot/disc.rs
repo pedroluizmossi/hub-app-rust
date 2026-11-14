@@ -1,11 +1,14 @@
 //! The pixel-art CD: a 24×24 disc drawn in the app theme, with a spinning highlight.
 //!
-//! Like the mascots, it is drawn here (not loaded from the player): the MPRIS cover is a
-//! JPEG file that would need Slint's image decoder, and pixel art matches the rest of the
-//! hub. The iridescence uses the theme colors.
+//! Like the mascots, it is drawn here, in pixel art like the rest of the hub. The
+//! iridescence uses the theme colors. When the player gives an album cover, it goes on the
+//! label, already pixelated (`providers::media::Art`, `ART_SIZE` across). The cover itself
+//! does not turn: rotating 16 pixels with no smoothing flickers, so the spin shows in the
+//! moving highlight.
 
 use super::render::darker;
 use super::themes::Theme;
+use crate::providers::media::{ART_SIZE, Art};
 
 pub const SIZE: usize = 24;
 /// Frames in one turn (22.5° each; ~2 s at 8 frames/s).
@@ -15,10 +18,13 @@ pub const STEPS: u8 = 16;
 const R: f32 = 11.4;
 /// Radius of the center hole.
 const HOLE: f32 = 1.5;
+/// Radius of the label with the album cover: the cover spans its diameter, one cover pixel
+/// per disc pixel.
+const LABEL_R: f32 = ART_SIZE as f32 / 2.0;
 
 /// The disc in one frame. `spin` is the frame within the turn; `lit = false` dims the disc
-/// when there is no player.
-pub fn pixels(theme: &Theme, spin: u8, lit: bool) -> [[u8; 4]; SIZE * SIZE] {
+/// when there is no player; `art` (the album cover) goes on the label.
+pub fn pixels(theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> [[u8; 4]; SIZE * SIZE] {
     let mut out = [[0u8; 4]; SIZE * SIZE];
     let c = (SIZE as f32 - 1.0) / 2.0;
     let rot = spin as f32 / STEPS as f32 * std::f32::consts::TAU;
@@ -39,6 +45,20 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool) -> [[u8; 4]; SIZE * SIZE] {
             let mut color = if r <= HOLE + 0.9 {
                 // rim of the hole
                 darker(theme.muted, 0.8)
+            } else if let Some(art) = art.filter(|_| r <= LABEL_R) {
+                // label: the cover pixel under this disc pixel
+                let side = ART_SIZE as usize;
+                let at = |d: f32| ((d + LABEL_R).floor().max(0.0) as usize).min(side - 1);
+                let [r8, g8, b8] = art.px[at(dy) * side + at(dx)];
+                let mut c = ((r8 as u32) << 16) | ((g8 as u32) << 8) | b8 as u32;
+                // the highlight passes over the label too, softer
+                let spec = (a - rot).cos().max(0.0).powf(6.0);
+                c = mix(c, 0xffffff, spec * 0.25);
+                // edge of the label: a thin dark line where the data area starts
+                if r > LABEL_R - 0.8 {
+                    c = darker(c, 0.7);
+                }
+                c
             } else {
                 // iridescence: two theme colors that turn with the disc
                 let iri = mix(theme.visor, theme.fur, 0.5 + 0.5 * (2.0 * a - rot).cos());
@@ -67,8 +87,8 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool) -> [[u8; 4]; SIZE * SIZE] {
 }
 
 /// A frame as a Slint image (scaled up with `image-rendering: pixelated`).
-pub fn image(theme: &Theme, spin: u8, lit: bool) -> slint::Image {
-    let px = pixels(theme, spin, lit);
+pub fn image(theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> slint::Image {
+    let px = pixels(theme, spin, lit, art);
     let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(SIZE as u32, SIZE as u32);
     for (dst, src) in buffer.make_mut_slice().iter_mut().zip(px.iter()) {
         *dst = slint::Rgba8Pixel { r: src[0], g: src[1], b: src[2], a: src[3] };
@@ -77,22 +97,22 @@ pub fn image(theme: &Theme, spin: u8, lit: bool) -> slint::Image {
 }
 
 /// Last frame handed to the UI. Slint repaints when the image changes, so the disc is only
-/// redrawn when the frame (or the theme) changes.
+/// redrawn when the frame, the theme, the state or the cover change.
 #[derive(Default)]
 pub struct Cache {
-    key: Option<(&'static str, u8, bool)>,
+    key: Option<(&'static str, u8, bool, Option<u64>)>,
     img: Option<slint::Image>,
 }
 
 impl Cache {
     /// Redraws if needed; `true` when the image changed.
-    pub fn update(&mut self, theme: &Theme, spin: u8, lit: bool) -> bool {
-        let key = (theme.key, spin, lit);
+    pub fn update(&mut self, theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> bool {
+        let key = (theme.key, spin, lit, art.map(|a| a.id));
         if self.key == Some(key) {
             return false;
         }
         self.key = Some(key);
-        self.img = Some(image(theme, spin, lit));
+        self.img = Some(image(theme, spin, lit, art));
         true
     }
 
@@ -126,7 +146,7 @@ mod tests {
     #[test]
     fn outside_is_transparent_and_center_is_the_hole() {
         let t = themes::get("neon");
-        let p = pixels(t, 0, true);
+        let p = pixels(t, 0, true, None);
         assert_eq!(px(&p, 0, 0)[3], 0);
         assert_eq!(px(&p, SIZE - 1, 0)[3], 0);
         // center: transparent hole (the disc's well shows through)
@@ -136,23 +156,43 @@ mod tests {
     }
 
     #[test]
+    fn cover_goes_on_the_label_and_the_rim_stays() {
+        let t = themes::get("neon");
+        let px_count = (ART_SIZE * ART_SIZE) as usize;
+        let art = Art { id: 1, px: std::sync::Arc::new(vec![[200, 10, 10]; px_count]) };
+        let plain = pixels(t, 0, true, None);
+        let with = pixels(t, 0, true, Some(&art));
+        // left of the hole, inside the label and away from the highlight (which starts on
+        // the right at spin 0): exactly the cover's color
+        assert_eq!(px(&with, SIZE / 2 - 5, SIZE / 2), [200, 10, 10, 255]);
+        // the hole and the outer data area are the same with or without a cover
+        assert_eq!(px(&with, SIZE / 2, SIZE / 2), px(&plain, SIZE / 2, SIZE / 2));
+        assert_eq!(px(&with, SIZE / 2 - 11, SIZE / 2), px(&plain, SIZE / 2 - 11, SIZE / 2));
+        // another cover redraws the cached frame
+        let mut c = Cache::default();
+        assert!(c.update(t, 0, true, Some(&art)));
+        assert!(!c.update(t, 0, true, Some(&art)));
+        assert!(c.update(t, 0, true, Some(&Art { id: 2, ..art.clone() })));
+    }
+
+    #[test]
     fn spinning_and_theme_change_the_pixels() {
         let t = themes::get("neon");
-        assert_ne!(pixels(t, 0, true), pixels(t, 4, true));
-        assert_ne!(pixels(t, 0, true), pixels(t, 0, false));
-        assert_ne!(pixels(t, 0, true), pixels(themes::get("aconchego"), 0, true));
+        assert_ne!(pixels(t, 0, true, None), pixels(t, 4, true, None));
+        assert_ne!(pixels(t, 0, true, None), pixels(t, 0, false, None));
+        assert_ne!(pixels(t, 0, true, None), pixels(themes::get("aconchego"), 0, true, None));
         // same frame, same image
-        assert_eq!(pixels(t, 3, true), pixels(t, 3, true));
+        assert_eq!(pixels(t, 3, true, None), pixels(t, 3, true, None));
     }
 
     #[test]
     fn cache_redraws_only_on_change() {
         let t = themes::get("neon");
         let mut c = Cache::default();
-        assert!(c.update(t, 0, true));
-        assert!(!c.update(t, 0, true));
-        assert!(c.update(t, 1, true));
-        assert!(c.update(t, 1, false));
+        assert!(c.update(t, 0, true, None));
+        assert!(!c.update(t, 0, true, None));
+        assert!(c.update(t, 1, true, None));
+        assert!(c.update(t, 1, false, None));
         assert_eq!((c.image().size().width, c.image().size().height), (SIZE as u32, SIZE as u32));
     }
 }

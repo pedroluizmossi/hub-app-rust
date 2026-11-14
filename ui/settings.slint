@@ -5,6 +5,48 @@ import { Skin, Icons, Anim } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
 import { SettingRow, AppInfo, PageInfo, DataRow, ProcUsage } from "models.slint";
 
+// Header of a settings block that opens and closes (blocks with many options start closed).
+// A click anywhere on it toggles; `summary` shows only while closed. Children (e.g. a
+// button) go on the right and keep their own click.
+component SectionHead inherits Rectangle {
+    in property <string> title;
+    in property <string> summary;
+    in-out property <bool> open;
+    min-height: row.preferred-height;
+    TouchArea {
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: root.open ? @tr("Close {}", root.title) : @tr("Open {}", root.title);
+        accessible-action-default => { root.open = !root.open; }
+        clicked => { root.open = !root.open; }
+    }
+    row := HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                icon: root.open ? Icons.chevron : Icons.chevron-right;
+                ink: root.open ? Skin.accent : Skin.dim;
+                size: 16px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.title; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
+            if !root.open && root.summary != "": Text {
+                text: root.summary;
+                color: Skin.dim;
+                font-family: Skin.font-mono;
+                font-size: 11px * Skin.text-scale;
+                wrap: word-wrap;
+            }
+        }
+        @children
+    }
+}
+
 // Rows with a minimum height of 44 px: `max(44px, self.preferred-height)`, never just `44px`.
 // A fixed min-height becomes the row's height, and text that wraps (or text at 125%)
 // spills into the row below.
@@ -125,6 +167,9 @@ export component AppsView inherits ScrollView {
     // reduce motion (still mascots, no reactions)
     in property <bool> reduce-motion;
     callback reduce-motion-toggled();
+    // mascots do not perk up on hover (a sub-option of reduce motion, but independent)
+    in property <bool> still-on-hover;
+    callback still-on-hover-toggled();
     // how much the mascots chat (0 never, 1 sometimes, 2 a lot)
     in property <int> chatter-index;
     callback chatter-chosen(int);
@@ -181,6 +226,10 @@ export component AppsView inherits ScrollView {
     callback toggle-app(string);
     // app with its options open (one at a time; kept here because Rust rebuilds the list)
     in-out property <string> open-app;
+    // open blocks (they start closed; hub.slint keeps them while the hub runs)
+    in-out property <bool> appearance-open;
+    in-out property <bool> system-open;
+    in-out property <bool> pages-open;
     callback setting-toggled(string, string);
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
@@ -241,163 +290,198 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                Text { text: @tr("Appearance"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
-                ChoiceRow {
-                    title: @tr("Window skin");
-                    hint: @tr("Background, frame, fonts and colors. Apps with the “Follows the window” theme change along.");
-                    options: skins;
-                    index: skin-index;
-                    chosen(i) => { root.skin-chosen(i); }
+                SectionHead {
+                    title: @tr("Appearance");
+                    summary: @tr("Skin, colors, text size, motion, language and tray icon");
+                    open <=> root.appearance-open;
                 }
-                ChoiceRow {
-                    title: @tr("Accent color");
-                    hint: @tr("Buttons, focus and the dashboard background. Adjusted to the skin to stay readable.");
-                    options: accents;
-                    index: accent-index;
-                    chosen(i) => { root.accent-chosen(i); }
-                }
-                ChoiceRow {
-                    title: @tr("Text size");
-                    hint: @tr("Text of the window and the built-in apps (plugins follow if they use theme.text-scale).");
-                    options: text-sizes;
-                    index: text-size-index;
-                    chosen(i) => { root.text-size-chosen(i); }
-                }
-                HorizontalLayout {
-                    spacing: 16px;
-                    min-height: max(44px, self.preferred-height);
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Animated background"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                        Text {
-                            text: @tr("Rain, stars and a scan line behind the dashboard. Also off with Reduce motion.");
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
+                if appearance-open: VerticalLayout {
+                    spacing: 10px;
+                    ChoiceRow {
+                        title: @tr("Window skin");
+                        hint: @tr("Background, frame, fonts and colors. Apps with the “Follows the window” theme change along.");
+                        options: skins;
+                        index: skin-index;
+                        chosen(i) => { root.skin-chosen(i); }
+                    }
+                    ChoiceRow {
+                        title: @tr("Accent color");
+                        hint: @tr("Buttons, focus and the dashboard background. Adjusted to the skin to stay readable.");
+                        options: accents;
+                        index: accent-index;
+                        chosen(i) => { root.accent-chosen(i); }
+                    }
+                    ChoiceRow {
+                        title: @tr("Text size");
+                        hint: @tr("Text of the window and the built-in apps (plugins follow if they use theme.text-scale).");
+                        options: text-sizes;
+                        index: text-size-index;
+                        chosen(i) => { root.text-size-chosen(i); }
+                    }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Animated background"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: @tr("Rain, stars and a scan line behind the dashboard. Also off with Reduce motion.");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SqSwitch {
+                                checked: ambient-on;
+                                label: @tr("Animated background");
+                                toggled => { root.ambient-toggled(); }
+                            }
                         }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        SqSwitch {
-                            checked: ambient-on;
-                            label: @tr("Animated background");
-                            toggled => { root.ambient-toggled(); }
+                    ChoiceRow {
+                        title: @tr("Pages");
+                        hint: @tr("Where the pages show up: in a bar on the left, on the right or at the bottom, or as tabs in the header.");
+                        // same order as `appearance::NAVS`
+                        options: [@tr("Bar on the left"), @tr("Bar on the right"), @tr("Bar at the bottom"), @tr("Tabs on top")];
+                        index: nav-index;
+                        chosen(i) => { root.nav-chosen(i); }
+                    }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Reduce motion"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: @tr("Mascots without bounces or shakes, and without celebrations or surprises.");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SqSwitch {
+                                checked: reduce-motion;
+                                label: @tr("Reduce motion");
+                                toggled => { root.reduce-motion-toggled(); }
+                            }
                         }
                     }
-                }
-                ChoiceRow {
-                    title: @tr("Pages");
-                    hint: @tr("Where the pages show up: in a bar on the left, on the right or at the bottom, or as tabs in the header.");
-                    // same order as `appearance::NAVS`
-                    options: [@tr("Bar on the left"), @tr("Bar on the right"), @tr("Bar at the bottom"), @tr("Tabs on top")];
-                    index: nav-index;
-                    chosen(i) => { root.nav-chosen(i); }
-                }
-                HorizontalLayout {
-                    spacing: 16px;
-                    min-height: max(44px, self.preferred-height);
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Reduce motion"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                        Text {
-                            text: @tr("Mascots without bounces or shakes, and without celebrations or surprises.");
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
+                    // sub-option of Reduce motion, indented under it; it works on its own
+                    // (with Reduce motion on, the mascots are still anyway)
+                    HorizontalLayout {
+                        padding-left: 24px;
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
+                        Rectangle { width: 2px; background: Skin.surface-edge; }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Still mascots on hover"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: @tr("Mascots do not hop up when the pointer is over their app. Works without Reduce motion.");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SqSwitch {
+                                checked: still-on-hover;
+                                label: @tr("Still mascots on hover");
+                                toggled => { root.still-on-hover-toggled(); }
+                            }
                         }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        SqSwitch {
-                            checked: reduce-motion;
-                            label: @tr("Reduce motion");
-                            toggled => { root.reduce-motion-toggled(); }
-                        }
+                    ChoiceRow {
+                        title: @tr("Language");
+                        hint: @tr("Language of the interface. Automatic follows the system. Some texts change only after restarting MiniUtils.");
+                        options: [@tr("Automatic"), "English", "Português (Brasil)"];
+                        index: language-index;
+                        chosen(i) => { root.language-chosen(i); }
                     }
-                }
-                ChoiceRow {
-                    title: @tr("Language");
-                    hint: @tr("Language of the interface. Automatic follows the system. Some texts change only after restarting MiniUtils.");
-                    options: [@tr("Automatic"), "English", "Português (Brasil)"];
-                    index: language-index;
-                    chosen(i) => { root.language-chosen(i); }
-                }
-                ChoiceRow {
-                    title: @tr("Mascot chatter");
-                    hint: @tr("The mascots comment on what happens in the apps and, when all is calm, make small talk. Click a mascot to make it speak.");
-                    options: [@tr("Never"), @tr("Sometimes"), @tr("A lot")];
-                    index: chatter-index;
-                    chosen(i) => { root.chatter-chosen(i); }
-                }
-                ChoiceRow {
-                    title: @tr("Tray icon");
-                    hint: @tr("Mascot shown in the tray. On automatic, it is the one of the app in the worst state.");
-                    options: tray-icons;
-                    images: tray-icon-images;
-                    index: tray-icon-index;
-                    chosen(i) => { root.tray-icon-chosen(i); }
-                }
-                ChoiceRow {
-                    title: @tr("Icon colors");
-                    hint: @tr("Theme of the mascot in the tray. On automatic, it follows the theme of the app shown.");
-                    options: tray-themes;
-                    index: tray-theme-index;
-                    chosen(i) => { root.tray-theme-chosen(i); }
-                }
-                // themes, skins and backgrounds from files (src/skin/user.rs). No min-height:
-                // a fixed value becomes the row's height, and taller text spills out
-                HorizontalLayout {
-                    spacing: 16px;
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Your themes, skins and backgrounds"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                        Text {
-                            text: @tr(".toml files in themes/, skins/ and backdrops/ in this folder (examples in examples/appearance). After changing them, click Reload.");
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: looks-dir;
-                            color: Skin.sub;
-                            font-family: Skin.font-mono;
-                            font-size: 11px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: looks-summary;
-                            color: Skin.dim;
-                            font-family: Skin.font-mono;
-                            font-size: 11px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                        if looks-skipped != "": Text {
-                            text: looks-skipped;
-                            color: Skin.danger;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
+                    ChoiceRow {
+                        title: @tr("Mascot chatter");
+                        hint: @tr("The mascots comment on what happens in the apps and, when all is calm, make small talk. Click a mascot to make it speak.");
+                        options: [@tr("Never"), @tr("Sometimes"), @tr("A lot")];
+                        index: chatter-index;
+                        chosen(i) => { root.chatter-chosen(i); }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 6px;
-                        TextButton {
-                            text: @tr("Open folder");
-                            font-size: 13px * Skin.text-scale;
-                            clicked => { root.open-looks-dir(); }
+                    ChoiceRow {
+                        title: @tr("Tray icon");
+                        hint: @tr("Mascot shown in the tray. On automatic, it is the one of the app in the worst state.");
+                        options: tray-icons;
+                        images: tray-icon-images;
+                        index: tray-icon-index;
+                        chosen(i) => { root.tray-icon-chosen(i); }
+                    }
+                    ChoiceRow {
+                        title: @tr("Icon colors");
+                        hint: @tr("Theme of the mascot in the tray. On automatic, it follows the theme of the app shown.");
+                        options: tray-themes;
+                        index: tray-theme-index;
+                        chosen(i) => { root.tray-theme-chosen(i); }
+                    }
+                    // themes, skins and backgrounds from files (src/skin/user.rs). No min-height:
+                    // a fixed value becomes the row's height, and taller text spills out
+                    HorizontalLayout {
+                        spacing: 16px;
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Your themes, skins and backgrounds"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: @tr(".toml files in themes/, skins/, backdrops/ and sprites/, and PNG mascots in mascots/, in this folder (examples in examples/appearance). After changing them, click Reload.");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: looks-dir;
+                                color: Skin.sub;
+                                font-family: Skin.font-mono;
+                                font-size: 11px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: looks-summary;
+                                color: Skin.dim;
+                                font-family: Skin.font-mono;
+                                font-size: 11px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            if looks-skipped != "": Text {
+                                text: looks-skipped;
+                                color: Skin.danger;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
                         }
-                        TextButton {
-                            text: @tr("Reload");
-                            icon: Icons.refresh;
-                            ink: Skin.accent;
-                            font-size: 13px * Skin.text-scale;
-                            clicked => { root.reload-looks(); }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 6px;
+                            TextButton {
+                                text: @tr("Open folder");
+                                font-size: 13px * Skin.text-scale;
+                                clicked => { root.open-looks-dir(); }
+                            }
+                            TextButton {
+                                text: @tr("Reload");
+                                icon: Icons.refresh;
+                                ink: Skin.accent;
+                                font-size: 13px * Skin.text-scale;
+                                clicked => { root.reload-looks(); }
+                            }
                         }
                     }
                 }
@@ -412,278 +496,285 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                Text { text: @tr("System"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
-                HorizontalLayout {
-                    spacing: 16px;
-                    min-height: max(44px, self.preferred-height);
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Start with the system"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                        Text {
-                            text: @tr("Opens only in the tray when you log in.");
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        SqSwitch {
-                            checked: autostart;
-                            label: @tr("Start with the system");
-                            toggled => { root.autostart-toggled(); }
-                        }
-                    }
+                SectionHead {
+                    title: @tr("System");
+                    summary: @tr("Startup, version, logs, usage and local apps");
+                    open <=> root.system-open;
                 }
-                HorizontalLayout {
-                    spacing: 16px;
-                    min-height: max(44px, self.preferred-height);
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Version {}", version); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                        Text {
-                            text: log-dir == "" ? @tr("No folder for the logs.") : @tr("Logs (warnings and errors): {}", log-dir);
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        if log-dir != "": TextButton {
-                            text: @tr("Open logs");
-                            font-size: 13px * Skin.text-scale;
-                            clicked => { root.open-logs(); }
-                        }
-                    }
-                }
-                // usage now: the hub and each external app (CPU colored by load) and the total
-                if usage-rows.length > 0: VerticalLayout {
-                    spacing: 6px;
+                if system-open: VerticalLayout {
+                    spacing: 10px;
                     HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: @tr("Usage now");
-                            color: Skin.ink;
-                            font-size: 14px * Skin.text-scale;
-                            vertical-alignment: center;
-                        }
-                        // "live" light: blinks with the animation frame (still with "reduce motion")
-                        Rectangle {
-                            width: 6px;
-                            height: 6px;
-                            y: (parent.height - self.height) / 2;
-                            background: Skin.accent;
-                            opacity: Anim.calm || mod(Anim.frame, 8) < 4 ? 1 : 0.2;
-                            animate opacity { duration: 250ms; }
-                        }
-                        Text {
-                            text: @tr("live");
-                            color: Skin.dim;
-                            font-size: 11px * Skin.text-scale;
-                            vertical-alignment: center;
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
                             horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Start with the system"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: @tr("Opens only in the tray when you log in.");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SqSwitch {
+                                checked: autostart;
+                                label: @tr("Start with the system");
+                                toggled => { root.autostart-toggled(); }
+                            }
                         }
                     }
-                    Rectangle {
-                        background: Skin.field;
-                        border-width: 1px;
-                        border-color: Skin.field-edge;
+                    HorizontalLayout {
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
                         VerticalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            padding-top: 6px;
-                            padding-bottom: 6px;
+                            alignment: center;
+                            horizontal-stretch: 1;
                             spacing: 2px;
-                            // column titles
-                            HorizontalLayout {
-                                spacing: 16px;
-                                Rectangle { horizontal-stretch: 1; }
-                                Text { text: @tr("CPU"); width: 90px; color: Skin.dim; font-size: 10px * Skin.text-scale; horizontal-alignment: right; }
-                                Text { text: @tr("Memory"); width: 110px; color: Skin.dim; font-size: 10px * Skin.text-scale; horizontal-alignment: right; }
+                            Text { text: @tr("Version {}", version); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: log-dir == "" ? @tr("No folder for the logs.") : @tr("Logs (warnings and errors): {}", log-dir);
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
                             }
-                            for u in usage-rows: VerticalLayout {
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            if log-dir != "": TextButton {
+                                text: @tr("Open logs");
+                                font-size: 13px * Skin.text-scale;
+                                clicked => { root.open-logs(); }
+                            }
+                        }
+                    }
+                    // usage now: the hub and each external app (CPU colored by load) and the total
+                    if usage-rows.length > 0: VerticalLayout {
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: @tr("Usage now");
+                                color: Skin.ink;
+                                font-size: 14px * Skin.text-scale;
+                                vertical-alignment: center;
+                            }
+                            // "live" light: blinks with the animation frame (still with "reduce motion")
+                            Rectangle {
+                                width: 6px;
+                                height: 6px;
+                                y: (parent.height - self.height) / 2;
+                                background: Skin.accent;
+                                opacity: Anim.calm || mod(Anim.frame, 8) < 4 ? 1 : 0.2;
+                                animate opacity { duration: 250ms; }
+                            }
+                            Text {
+                                text: @tr("live");
+                                color: Skin.dim;
+                                font-size: 11px * Skin.text-scale;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                        Rectangle {
+                            background: Skin.field;
+                            border-width: 1px;
+                            border-color: Skin.field-edge;
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 6px;
+                                padding-bottom: 6px;
                                 spacing: 2px;
-                                if u.total: Rectangle { height: 1px; background: Skin.field-edge; }
+                                // column titles
                                 HorizontalLayout {
                                     spacing: 16px;
-                                    min-height: max(26px, self.preferred-height);
-                                    Text {
-                                        text: u.name;
-                                        horizontal-stretch: 1;
-                                        color: u.total ? Skin.ink : Skin.sub;
-                                        font-size: 13px * Skin.text-scale;
-                                        font-weight: u.total ? 700 : 400;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                    // number in the load's color (calm, busy, heavy), unit apart
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Text { text: @tr("CPU"); width: 90px; color: Skin.dim; font-size: 10px * Skin.text-scale; horizontal-alignment: right; }
+                                    Text { text: @tr("Memory"); width: 110px; color: Skin.dim; font-size: 10px * Skin.text-scale; horizontal-alignment: right; }
+                                }
+                                for u in usage-rows: VerticalLayout {
+                                    spacing: 2px;
+                                    if u.total: Rectangle { height: 1px; background: Skin.field-edge; }
                                     HorizontalLayout {
-                                        width: 90px;
-                                        alignment: end;
-                                        spacing: 2px;
+                                        spacing: 16px;
+                                        min-height: max(26px, self.preferred-height);
                                         Text {
-                                            text: u.cpu-text;
-                                            color: u.cpu >= 40 ? Skin.bad : u.cpu >= 10 ? Skin.accent.mix(Skin.bad, 0.5) : Skin.accent;
-                                            animate color { duration: 400ms; }
-                                            font-family: Skin.font-mono;
-                                            font-size: 16px * Skin.text-scale;
-                                            font-weight: 700;
+                                            text: u.name;
+                                            horizontal-stretch: 1;
+                                            color: u.total ? Skin.ink : Skin.sub;
+                                            font-size: 13px * Skin.text-scale;
+                                            font-weight: u.total ? 700 : 400;
+                                            overflow: elide;
                                             vertical-alignment: center;
                                         }
-                                        Text {
-                                            text: "%";
-                                            color: Skin.dim;
-                                            font-family: Skin.font-mono;
-                                            font-size: 11px * Skin.text-scale;
-                                            vertical-alignment: center;
+                                        // number in the load's color (calm, busy, heavy), unit apart
+                                        HorizontalLayout {
+                                            width: 90px;
+                                            alignment: end;
+                                            spacing: 2px;
+                                            Text {
+                                                text: u.cpu-text;
+                                                color: u.cpu >= 40 ? Skin.bad : u.cpu >= 10 ? Skin.accent.mix(Skin.bad, 0.5) : Skin.accent;
+                                                animate color { duration: 400ms; }
+                                                font-family: Skin.font-mono;
+                                                font-size: 16px * Skin.text-scale;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: "%";
+                                                color: Skin.dim;
+                                                font-family: Skin.font-mono;
+                                                font-size: 11px * Skin.text-scale;
+                                                vertical-alignment: center;
+                                            }
                                         }
-                                    }
-                                    HorizontalLayout {
-                                        width: 110px;
-                                        alignment: end;
-                                        spacing: 4px;
-                                        Text {
-                                            text: u.mem-text;
-                                            color: Skin.ink;
-                                            font-family: Skin.font-mono;
-                                            font-size: 16px * Skin.text-scale;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: u.mem-unit;
-                                            color: Skin.dim;
-                                            font-family: Skin.font-mono;
-                                            font-size: 11px * Skin.text-scale;
-                                            vertical-alignment: center;
+                                        HorizontalLayout {
+                                            width: 110px;
+                                            alignment: end;
+                                            spacing: 4px;
+                                            Text {
+                                                text: u.mem-text;
+                                                color: Skin.ink;
+                                                font-family: Skin.font-mono;
+                                                font-size: 16px * Skin.text-scale;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: u.mem-unit;
+                                                color: Skin.dim;
+                                                font-family: Skin.font-mono;
+                                                font-size: 11px * Skin.text-scale;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                // local apps: whatever is in this folder joins the list below. No
-                // min-height: a fixed value becomes the row's height, and taller text spills out
-                HorizontalLayout {
-                    spacing: 16px;
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Local apps"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                        Text {
-                            text: @tr("One app per folder, named after the id in manifest.toml. After adding or changing an app, click Reload.");
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: apps-dir;
-                            color: Skin.sub;
-                            font-family: Skin.font-mono;
-                            font-size: 11px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: apps-summary;
-                            color: Skin.dim;
-                            font-family: Skin.font-mono;
-                            font-size: 11px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                        if apps-skipped != "": Text {
-                            text: apps-skipped;
-                            color: Skin.danger;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 6px;
-                        TextButton {
-                            text: @tr("Open folder");
-                            font-size: 13px * Skin.text-scale;
-                            clicked => { root.open-apps-dir(); }
-                        }
-                        TextButton {
-                            text: @tr("Reload");
-                            icon: Icons.refresh;
-                            ink: Skin.accent;
-                            font-size: 13px * Skin.text-scale;
-                            clicked => { root.reload-apps(); }
-                        }
-                    }
-                }
-                // data left over from removed apps (removal asks; whoever kept it deletes it here)
-                if orphan-data.length > 0: VerticalLayout {
-                    spacing: 6px;
-                    Text { text: @tr("Data of removed apps"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
-                    Text {
-                        text: @tr("Kept when the app was removed. Reinstalling the same app brings them back.");
-                        color: Skin.sub;
-                        font-size: 12px * Skin.text-scale;
-                        wrap: word-wrap;
-                    }
-                    for d in orphan-data: HorizontalLayout {
-                        property <bool> armed;
-                        spacing: 8px;
-                        min-height: max(40px, self.preferred-height);
+                    // local apps: whatever is in this folder joins the list below. No
+                    // min-height: a fixed value becomes the row's height, and taller text spills out
+                    HorizontalLayout {
+                        spacing: 16px;
                         VerticalLayout {
                             alignment: center;
                             horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Local apps"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                             Text {
-                                text: d.text;
+                                text: @tr("One app per folder, named after the id in manifest.toml. After adding or changing an app, click Reload.");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: apps-dir;
                                 color: Skin.sub;
                                 font-family: Skin.font-mono;
-                                font-size: 12px * Skin.text-scale;
+                                font-size: 11px * Skin.text-scale;
                                 wrap: word-wrap;
                             }
-                            if data-note-app == d.id && data-note != "": Text {
-                                text: data-note;
-                                color: data-note-bad ? Skin.danger : Skin.accent;
+                            Text {
+                                text: apps-summary;
+                                color: Skin.dim;
+                                font-family: Skin.font-mono;
+                                font-size: 11px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            if apps-skipped != "": Text {
+                                text: apps-skipped;
+                                color: Skin.danger;
                                 font-size: 12px * Skin.text-scale;
                                 wrap: word-wrap;
                             }
                         }
                         VerticalLayout {
                             alignment: center;
+                            spacing: 6px;
                             TextButton {
-                                text: @tr("Export");
+                                text: @tr("Open folder");
                                 font-size: 13px * Skin.text-scale;
-                                clicked => { root.export-data(d.id); }
+                                clicked => { root.open-apps-dir(); }
+                            }
+                            TextButton {
+                                text: @tr("Reload");
+                                icon: Icons.refresh;
+                                ink: Skin.accent;
+                                font-size: 13px * Skin.text-scale;
+                                clicked => { root.reload-apps(); }
                             }
                         }
-                        VerticalLayout {
-                            alignment: center;
-                            TextButton {
-                                text: armed ? @tr("Confirm") : @tr("Delete");
-                                icon: Icons.close;
-                                ink: Skin.danger;
-                                edge: Skin.danger-edge;
-                                font-size: 13px * Skin.text-scale;
-                                accessible-label: armed ? @tr("Confirm: delete the data of {}", d.id) : @tr("Delete the data of {}", d.id);
-                                clicked => {
-                                    if armed {
-                                        armed = false;
-                                        root.delete-data(d.id);
-                                    } else {
-                                        armed = true;
+                    }
+                    // data left over from removed apps (removal asks; whoever kept it deletes it here)
+                    if orphan-data.length > 0: VerticalLayout {
+                        spacing: 6px;
+                        Text { text: @tr("Data of removed apps"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text {
+                            text: @tr("Kept when the app was removed. Reinstalling the same app brings them back.");
+                            color: Skin.sub;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        for d in orphan-data: HorizontalLayout {
+                            property <bool> armed;
+                            spacing: 8px;
+                            min-height: max(40px, self.preferred-height);
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: d.text;
+                                    color: Skin.sub;
+                                    font-family: Skin.font-mono;
+                                    font-size: 12px * Skin.text-scale;
+                                    wrap: word-wrap;
+                                }
+                                if data-note-app == d.id && data-note != "": Text {
+                                    text: data-note;
+                                    color: data-note-bad ? Skin.danger : Skin.accent;
+                                    font-size: 12px * Skin.text-scale;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                TextButton {
+                                    text: @tr("Export");
+                                    font-size: 13px * Skin.text-scale;
+                                    clicked => { root.export-data(d.id); }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                TextButton {
+                                    text: armed ? @tr("Confirm") : @tr("Delete");
+                                    icon: Icons.close;
+                                    ink: Skin.danger;
+                                    edge: Skin.danger-edge;
+                                    font-size: 13px * Skin.text-scale;
+                                    accessible-label: armed ? @tr("Confirm: delete the data of {}", d.id) : @tr("Delete the data of {}", d.id);
+                                    clicked => {
+                                        if armed {
+                                            armed = false;
+                                            root.delete-data(d.id);
+                                        } else {
+                                            armed = true;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        // the second click is valid only for a short time
-                        Timer {
-                            interval: 6s;
-                            running: armed;
-                            triggered => { armed = false; }
+                            // the second click is valid only for a short time
+                            Timer {
+                                interval: 6s;
+                                running: armed;
+                                triggered => { armed = false; }
+                            }
                         }
                     }
                 }
@@ -698,100 +789,101 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                HorizontalLayout {
-                    spacing: 12px;
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text { text: @tr("Pages"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
-                        Text {
-                            text: @tr("Each page has its own grid and shows in the page bar. To move an app to another page, open its options below.");
-                            color: Skin.sub;
-                            font-size: 12px * Skin.text-scale;
-                            wrap: word-wrap;
-                        }
-                    }
+                SectionHead {
+                    title: @tr("Pages");
+                    summary: @tr("Name, icon and order of the pages");
+                    open <=> root.pages-open;
                     VerticalLayout {
                         alignment: center;
                         TextButton {
                             text: @tr("New page");
                             font-size: 13px * Skin.text-scale;
-                            clicked => { root.page-added(); }
+                            // opens the block too, so the new page shows up
+                            clicked => { root.pages-open = true; root.page-added(); }
                         }
                     }
                 }
-                for p[i] in pages: HorizontalLayout {
+                if pages-open: VerticalLayout {
                     spacing: 10px;
-                    min-height: max(44px, self.preferred-height);
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 40px;
-                            height: 35px;
-                            background: p.theme.bg1;
-                            Image { source: p.icon; image-rendering: pixelated; width: 32px; height: 28px; }
-                        }
+                    Text {
+                        text: @tr("Each page has its own grid and shows in the page bar. To move an app to another page, open its options below.");
+                        color: Skin.sub;
+                        font-size: 12px * Skin.text-scale;
+                        wrap: word-wrap;
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        Rectangle {
-                            height: 34px;
-                            border-width: 1px;
-                            border-color: name.has-focus ? Skin.accent : Skin.field-edge;
-                            background: Skin.field;
-                            name := TextInput {
-                                x: 10px;
-                                width: parent.width - 20px;
-                                text: p.name;
-                                color: Skin.ink;
-                                font-size: 14px * Skin.text-scale;
-                                vertical-alignment: center;
-                                single-line: true;
-                                accessible-label: @tr("Name of page {}", i + 1);
-                                accepted => { root.page-renamed(i, self.text); }
-                                changed has-focus => {
-                                    if !self.has-focus && self.text != p.name { root.page-renamed(i, self.text); }
+                    for p[i] in pages: HorizontalLayout {
+                        spacing: 10px;
+                        min-height: max(44px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 40px;
+                                height: 35px;
+                                background: p.theme.bg1;
+                                Image { source: p.icon; image-rendering: pixelated; width: 32px; height: 28px; }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Rectangle {
+                                height: 34px;
+                                border-width: 1px;
+                                border-color: name.has-focus ? Skin.accent : Skin.field-edge;
+                                background: Skin.field;
+                                name := TextInput {
+                                    x: 10px;
+                                    width: parent.width - 20px;
+                                    text: p.name;
+                                    color: Skin.ink;
+                                    font-size: 14px * Skin.text-scale;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                    accessible-label: @tr("Name of page {}", i + 1);
+                                    accepted => { root.page-renamed(i, self.text); }
+                                    changed has-focus => {
+                                        if !self.has-focus && self.text != p.name { root.page-renamed(i, self.text); }
+                                    }
                                 }
                             }
                         }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        MascotSelect {
-                            width: 150px;
-                            options: mascots;
-                            images: mascot-images;
-                            index: p.icon-index;
-                            accent: Skin.accent;
-                            label: @tr("Icon of page {}", p.name);
-                            chosen(k) => { root.page-icon-chosen(i, k); }
+                        VerticalLayout {
+                            alignment: center;
+                            MascotSelect {
+                                width: 150px;
+                                options: mascots;
+                                images: mascot-images;
+                                index: p.icon-index;
+                                accent: Skin.accent;
+                                label: @tr("Icon of page {}", p.name);
+                                chosen(k) => { root.page-icon-chosen(i, k); }
+                            }
                         }
-                    }
-                    IconButton {
-                        width: 34px;
-                        height: 34px;
-                        icon: Icons.chevron-up;
-                        enabled: i > 0;
-                        label: @tr("Move {} up", p.name);
-                        clicked => { root.page-moved(i, -1); }
-                    }
-                    IconButton {
-                        width: 34px;
-                        height: 34px;
-                        icon: Icons.chevron;
-                        enabled: i < pages.length - 1;
-                        label: @tr("Move {} down", p.name);
-                        clicked => { root.page-moved(i, 1); }
-                    }
-                    IconButton {
-                        width: 34px;
-                        height: 34px;
-                        icon: Icons.close;
-                        ink: Skin.danger;
-                        enabled: pages.length > 1;
-                        label: @tr("Delete {} (its apps go to the previous page)", p.name);
-                        clicked => { root.page-removed(i); }
+                        IconButton {
+                            width: 34px;
+                            height: 34px;
+                            icon: Icons.chevron-up;
+                            enabled: i > 0;
+                            label: @tr("Move {} up", p.name);
+                            clicked => { root.page-moved(i, -1); }
+                        }
+                        IconButton {
+                            width: 34px;
+                            height: 34px;
+                            icon: Icons.chevron;
+                            enabled: i < pages.length - 1;
+                            label: @tr("Move {} down", p.name);
+                            clicked => { root.page-moved(i, 1); }
+                        }
+                        IconButton {
+                            width: 34px;
+                            height: 34px;
+                            icon: Icons.close;
+                            ink: Skin.danger;
+                            enabled: pages.length > 1;
+                            label: @tr("Delete {} (its apps go to the previous page)", p.name);
+                            clicked => { root.page-removed(i); }
+                        }
                     }
                 }
             }

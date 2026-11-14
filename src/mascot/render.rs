@@ -11,7 +11,7 @@ use super::anim::{Look, Reaction};
 pub const W: usize = 16;
 pub const H: usize = 14;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub enum Mood {
     #[default]
     Sleep,
@@ -209,6 +209,41 @@ impl Painter<'_> {
     }
 }
 
+/// A sprite with no drawing: gives the role colors to whoever has no `Sprite` of their own
+/// (the PNG sprites with `[palette]`, see `role_color`).
+static BLANK: Sprite = Sprite {
+    key: "",
+    label: "",
+    eye_bg: b'.',
+    shade_from: usize::MAX,
+    fur: None,
+    ear: None,
+    pixel: None,
+    grid: [""; 14],
+};
+
+/// Color of color role `role` (`K`, `P`, `E`, `A`…, see `sprites.rs`) in `theme` and
+/// `mood`, without blinking: how a PNG sprite with `[palette]` follows the theme. A closed
+/// eye (asleep) takes the outline color. `None` for a letter that isn't a role.
+pub fn role_color(theme: &Theme, role: u8, mood: Mood) -> Option<u32> {
+    let p = Painter {
+        s: &BLANK,
+        t: theme,
+        mood,
+        frame: 0,
+        blink: false,
+        reaction: None,
+        closed_row: usize::MAX,
+        fur: theme.fur,
+        ear: theme.ear,
+    };
+    match role {
+        b'E' | b'W' if mood == Mood::Sleep => Some(theme.outline),
+        b'.' => None,
+        _ => p.cell(role, 0),
+    }
+}
+
 /// Color of a pixel of a "pixel" mascot (own palette): only the eye follows mood/theme.
 fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, look: &Look) -> Option<u32> {
     let (mood, frame) = (look.mood, look.frame);
@@ -290,7 +325,7 @@ pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W *
 /// imported mascot (`pack.rs`) comes out at the size of its PNG.
 pub fn image(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> slint::Image {
     if let Some(art) = pack::art(sprite) {
-        return art.image(art.pick(&Look::from_frame(mood, frame)));
+        return art.image_in(art.pick(&Look::from_frame(mood, frame)), theme, mood);
     }
     to_image(&render(sprite, theme, mood, frame))
 }
@@ -309,7 +344,7 @@ fn to_image(px: &[[u8; 4]; W * H]) -> slint::Image {
 pub struct Cache {
     px: Option<Box<[[u8; 4]; W * H]>>,
     /// The imported mascot's frame from last time (instead of `px`).
-    art: Option<(usize, pack::FrameKey)>,
+    art: Option<(usize, pack::FrameKey, &'static str, Mood)>,
     img: slint::Image,
 }
 
@@ -318,11 +353,13 @@ impl Cache {
     /// `image()` has the new image.
     pub fn update_look(&mut self, sprite: &Sprite, theme: &Theme, look: &Look) -> bool {
         if let Some(art) = pack::art(sprite) {
-            let key = (art as *const pack::Art as usize, art.pick(look));
+            // theme and mood count only for a PNG with `[palette]` (they recolor it)
+            let (t, m) = if art.themed() { (theme.key, look.mood) } else { ("", Mood::Sleep) };
+            let key = (art as *const pack::Art as usize, art.pick(look), t, m);
             if self.art == Some(key) {
                 return false;
             }
-            self.img = art.image(key.1);
+            self.img = art.image_in(key.1, theme, look.mood);
             self.art = Some(key);
             self.px = None;
             return true;
@@ -346,7 +383,7 @@ impl Cache {
 /// Square frame scaled `scale`× in RGBA: the side and the pixels. Base of the tray icons.
 pub fn rgba_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
     if let Some(art) = pack::art(sprite) {
-        return art.square(art.pick(&Look::from_frame(mood, frame)), W * scale);
+        return art.square(art.pick(&Look::from_frame(mood, frame)), theme, mood, W * scale);
     }
     let px = render(sprite, theme, mood, frame);
     let side = W * scale;

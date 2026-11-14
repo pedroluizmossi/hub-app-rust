@@ -72,7 +72,7 @@ places a new app touches (check with `grep -rn todo` in case something moved):
   the trait for Settings' "Delete data";
 - `src/hub/mod.rs`: `registry.add(crate::apps::<app>::<App>Mini::create(host.clone(), &ui) as AppRef, None);`
   next to the others;
-- `ui/dashboard.slint`: import the view and add `if c.id == "cyber.<name>": <App>View { … }`;
+- `ui/dashboard.slint`: import the view and add `if c.id == "cyber.<name>": <App>View { hovered: cell.hovered; … }` (the view passes it to its `Mascot` as `noticed`);
 - `ui/hub.slint`: import the global and the view's structs and put them in `export { … }`;
 - `src/core/manifest.rs`: the new manifest in the list of the test
   `built_in_manifests_are_valid`.

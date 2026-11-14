@@ -29,6 +29,7 @@ fn help() -> String {
     for line in [
         tr!("miniutils [--hidden] [--tab <name>] [--plugin-dev <folder>]"),
         tr!("miniutils --import-mascot <folder>"),
+        tr!("miniutils --check-mascot <folder or .toml>"),
         "miniutils --dirs",
         "miniutils --version",
     ] {
@@ -50,6 +51,10 @@ fn help() -> String {
         (
             "--import-mascot",
             tr!("copies the PNG sheets (Name_Animation_N.png) in the folder and its\nsubfolders to the mascots folder, one mascot per character"),
+        ),
+        (
+            "--check-mascot",
+            tr!("checks a mascot without installing it (a folder of PNG sheets or a\n.toml): moods, walking, theme and free actions"),
         ),
         ("--dirs", tr!("where the local apps, the themes/skins/backdrops/mascots,\nthe configuration and the logs are")),
         ("--version", tr!("shows the version (also in Settings › System)")),
@@ -149,6 +154,21 @@ fn main() -> anyhow::Result<()> {
             Err(e) => {
                 eprintln!("{e}");
                 std::process::exit(2);
+            }
+        }
+        return Ok(());
+    }
+    // what a mascot has (the same report as the Mascots app); opens no window
+    if args.first().is_some_and(|a| a == "--check-mascot") {
+        let Some(p) = args.get(1) else {
+            eprintln!("{}", tr!("--check-mascot <folder or .toml>: missing the mascot to check"));
+            std::process::exit(2);
+        };
+        match mascot::check::path(std::path::Path::new(p)) {
+            Ok(r) => print!("{}", r.text()),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
             }
         }
         return Ok(());

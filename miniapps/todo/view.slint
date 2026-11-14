@@ -148,6 +148,8 @@ component Row inherits Rectangle {
 }
 
 export component TodoView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     property <Colors> t: TodoApp.theme;
     property <bool> narrow: self.width < 420px;
     property <bool> short: self.height < 260px;
@@ -165,6 +167,7 @@ export component TodoView inherits Rectangle {
             height: mascot-h + 8px;
             background: TodoApp.pending == 0 && TodoApp.done > 0 ? t.ok.with-alpha(0.14) : t.fur.with-alpha(0.1);
             Mascot {
+                noticed: root.hovered;
                 theme: t;
                 frame: TodoApp.mascot;
                 mood: TodoApp.mood;

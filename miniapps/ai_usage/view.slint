@@ -98,6 +98,8 @@ component Meter inherits VerticalLayout {
 }
 
 component AccountCard inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     in property <UsageCard> account;
     in property <Colors> t;
     in property <int> index;
@@ -116,6 +118,7 @@ component AccountCard inherits Rectangle {
             alignment: center;
             spacing: dense ? 4px : 8px;
             Mascot {
+                noticed: root.hovered;
                 theme: root.t;
                 frame: account.mascot;
                 mood: account.mood;
@@ -160,6 +163,8 @@ component AccountCard inherits Rectangle {
 }
 
 export component AiUsageView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     // app width in the grid, in cells: 1 = list; 2 or more = cards side by side,
     // one per cell, and the rest wrap to the next row
     in property <int> span: 1;
@@ -218,7 +223,7 @@ export component AiUsageView inherits Rectangle {
                         width: scroll.cw;
                         // the layout passes the card height to the row; cards in a row get the same height
                         VerticalLayout {
-                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; dense: scroll.dense; reset: scroll.reset; }
+                            if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; hovered: root.hovered; dense: scroll.dense; reset: scroll.reset; }
                         }
                     }
                 }

@@ -37,6 +37,9 @@ use crate::core::plugins::{self, Plugin};
 use crate::tr;
 
 mod entry;
+mod mascots;
+
+pub use mascots::{MascotEntry, MascotStatus};
 
 /// The store part of `--help`, in the current language (`println!("{}", store::USAGE)`).
 pub const USAGE: Usage = Usage;
@@ -74,15 +77,15 @@ fn usage_line(out: &mut String, cmd: &str, desc: &str) {
 /// The store commands for `--help` (and the answer to a malformed store command).
 pub fn usage() -> String {
     let mut out = String::new();
-    out.push_str(tr!("plugin store:"));
+    out.push_str(tr!("store (plugins and mascots):"));
     out.push('\n');
-    usage_line(&mut out, "miniutils --store [index]", tr!("lists the plugins and the state of each"));
+    usage_line(&mut out, "miniutils --store [index]", tr!("lists the plugins and mascot packs and the\nstate of each"));
     usage_line(&mut out, "miniutils --install <id> [index] [--yes]", tr!("installs (asks first, without --yes)"));
     usage_line(&mut out, "miniutils --update <id> [index] [--yes]", tr!("updates to the index's commit"));
     usage_line(
         &mut out,
         "miniutils --remove <id> [--delete-data | --keep-data]",
-        tr!("removes an installed plugin; if it has\ndata, asks whether to delete it (or follows the option)"),
+        tr!("removes an installed plugin or mascot pack;\nif it has data, asks whether to delete it (or\nfollows the option)"),
     );
     usage_line(&mut out, "miniutils --plugins", tr!("lists the installed ones (from the store and local)"));
     usage_line(&mut out, "miniutils --reload", tr!("the running MiniUtils rereads the apps and themes"));
@@ -141,6 +144,18 @@ impl Source {
 pub struct Index {
     pub schema: u32,
     pub plugins: Vec<Entry>,
+    /// Packs of mascots (drawings only, see `store/mascots.rs`). Optional: an index
+    /// without it is still valid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mascots: Vec<MascotEntry>,
+}
+
+/// Everything in the index and its state here.
+#[derive(Debug, Clone)]
+pub struct Catalog {
+    pub plugins: Vec<Status>,
+    pub mascots: Vec<MascotStatus>,
+    pub trust: Trust,
 }
 
 /// An index entry. Fields are in the order `registry.json` writes them, and empty ones are
@@ -336,9 +351,9 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     let id = pos.first().copied();
     let result = match (cmd, id) {
         ("--store", _) => source(0).and_then(|s| list(&s, &root)),
-        ("--install", Some(id)) | ("--update", Some(id)) => source(1).and_then(|s| install(&s, id, &root, confirm)).map(|dir| {
+        ("--install", Some(id)) | ("--update", Some(id)) => source(1).and_then(|s| install_cli(&s, id, &root, confirm)).inspect(|_| {
+            // the running hub rereads apps and appearance (where the mascots go)
             crate::instance::notify_plugins_changed();
-            tr!("installed in {}", dir.display())
         }),
         ("--remove", Some(id)) => remove_cli(id, &root, purge, !yes).inspect(|_| {
             crate::instance::notify_plugins_changed();
@@ -378,15 +393,15 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
 }
 
 fn list(src: &Source, root: &Path) -> Result<String, String> {
-    let (statuses, trust) = statuses(src, root)?;
+    let catalog = statuses(src, root, &crate::skin::user::dir())?;
     let mut out = tr!(
         "{} plugin(s) in {} ({}):",
-        statuses.len(),
+        catalog.plugins.len(),
         src.index,
-        if trust == Trust::Signed { tr!("signature checked") } else { tr!("local index, signature not checked") }
+        if catalog.trust == Trust::Signed { tr!("signature checked") } else { tr!("local index, signature not checked") }
     );
     out.push('\n');
-    for s in &statuses {
+    for s in &catalog.plugins {
         let e = &s.entry;
         let state = match &s.installed {
             None => tr!("not installed").to_string(),
@@ -402,6 +417,28 @@ fn list(src: &Source, root: &Path) -> Result<String, String> {
             e.license,
             e.description,
             e.grants_text()
+        ));
+    }
+    if !catalog.mascots.is_empty() {
+        out.push('\n');
+        out.push_str(&tr!("{} mascot pack(s) (drawings only, no code):", catalog.mascots.len()));
+        out.push('\n');
+    }
+    for s in &catalog.mascots {
+        let e = &s.entry;
+        let state = match &s.installed {
+            None => tr!("not installed").to_string(),
+            Some(i) if s.has_update() => tr!("installed {} · update to {}", i.version, e.version),
+            Some(i) => format!("{} · {}", tr!("installed {}", i.version), i.contents()),
+        };
+        out.push_str(&format!(
+            "\n  {}  {} {}  ({}, {})  [{state}]\n    {}\n",
+            e.id,
+            e.name,
+            e.version,
+            if e.author.is_empty() { tr!("no author") } else { &e.author },
+            e.license,
+            e.description,
         ));
     }
     Ok(out)
@@ -514,10 +551,11 @@ pub fn installed(root: &Path, id: &str) -> Option<Installed> {
     serde_json::from_str(&text).ok()
 }
 
-/// Each plugin in the index and whether it is installed (and at which commit).
-pub fn statuses(src: &Source, root: &Path) -> Result<(Vec<Status>, Trust), String> {
+/// Each plugin and mascot pack in the index and whether it is installed (plugins in `root`,
+/// mascots in the appearance folder `appearance`).
+pub fn statuses(src: &Source, root: &Path, appearance: &Path) -> Result<Catalog, String> {
     let (index, trust) = load_index(src)?;
-    let list = index
+    let plugins = index
         .plugins
         .into_iter()
         .map(|entry| {
@@ -525,7 +563,38 @@ pub fn statuses(src: &Source, root: &Path) -> Result<(Vec<Status>, Trust), Strin
             Status { entry, installed }
         })
         .collect();
-    Ok((list, trust))
+    let mascots = index
+        .mascots
+        .into_iter()
+        .map(|entry| {
+            let installed = mascots::installed(appearance, &entry.id);
+            MascotStatus { entry, installed }
+        })
+        .collect();
+    Ok(Catalog { plugins, mascots, trust })
+}
+
+/// Installs (or updates) mascot pack `id` from the index into the appearance folder.
+/// Returns a line on what went in.
+pub fn install_mascot(src: &Source, id: &str, appearance: &Path, confirm: &mut dyn FnMut(&str) -> bool) -> Result<String, String> {
+    let (index, trust) = load_index(src)?;
+    let entry = index.mascots.iter().find(|e| e.id == id).ok_or_else(|| tr!("\"{}\" is not in the index", id))?;
+    mascots::install(entry, &trust, appearance, confirm)
+}
+
+/// Removes what mascot pack `id` installed in the appearance folder.
+pub fn remove_mascot(id: &str, appearance: &Path) -> Result<String, String> {
+    mascots::remove(appearance, id)
+}
+
+/// `--install`/`--update` from the command line: a plugin, or a mascot pack if the index
+/// lists `id` among the mascots.
+fn install_cli(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str) -> bool) -> Result<String, String> {
+    let (index, _) = load_index(src)?;
+    if !index.plugins.iter().any(|e| e.id == id) && index.mascots.iter().any(|e| e.id == id) {
+        return install_mascot(src, id, &crate::skin::user::dir(), confirm);
+    }
+    install(src, id, root, confirm).map(|dir| tr!("installed in {}", dir.display()))
 }
 
 /// Installs (or updates) plugin `id` from the index into `root/<id>/`. `confirm` gets the
@@ -550,22 +619,42 @@ pub fn install(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str
     result
 }
 
-/// Checks what the index says before downloading anything.
-fn check_entry(e: &Entry) -> Result<(), String> {
-    if e.commit.len() != 40 || !e.commit.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(tr!("{}: the index must pin the commit (40-character SHA)", e.id));
+/// Checks where an entry (plugin or mascot) comes from, before downloading anything: the
+/// pinned commit, an https repository, a path inside it and a declared license.
+fn check_source(id: &str, repo: &str, path: &str, commit: &str, license: &str) -> Result<(), String> {
+    if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(tr!("{}: the index must pin the commit (40-character SHA)", id));
     }
     // only https or a local folder: no ext::, ssh with a command, file:// with tricks
-    let local = Path::new(&e.repo).is_absolute();
-    if !(e.repo.starts_with("https://") || local) {
-        return Err(tr!("{}: the repository must be https:// (or a local folder, for tests)", e.id));
+    let local = Path::new(repo).is_absolute();
+    if !(repo.starts_with("https://") || local) {
+        return Err(tr!("{}: the repository must be https:// (or a local folder, for tests)", id));
     }
-    if e.path.contains("..") || e.path.starts_with('/') {
-        return Err(tr!("{}: invalid path in the index: {}", e.id, e.path));
+    if path.contains("..") || path.starts_with('/') {
+        return Err(tr!("{}: invalid path in the index: {}", id, path));
     }
-    if e.license.trim().is_empty() {
-        return Err(tr!("{}: the index does not declare the license", e.id));
+    if license.trim().is_empty() {
+        return Err(tr!("{}: the index does not declare the license", id));
     }
+    Ok(())
+}
+
+/// Clones `repo` into `into` and checks out exactly `commit` (no hooks, no submodules: the
+/// clone runs nothing from the repository).
+fn checkout(id: &str, repo: &str, commit: &str, into: &Path) -> Result<(), String> {
+    let into_s = into.to_string_lossy().to_string();
+    git(&["clone", "--quiet", "--no-checkout", "-c", "core.hooksPath=/dev/null", "--", repo, &into_s])?;
+    git(&["-C", &into_s, "-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", commit])?;
+    let head = git(&["-C", &into_s, "rev-parse", "HEAD"])?;
+    if !head.trim().eq_ignore_ascii_case(commit) {
+        return Err(tr!("{}: the repository delivered commit {}, not the index's {}", id, head.trim(), commit));
+    }
+    Ok(())
+}
+
+/// Checks what the index says before downloading anything.
+fn check_entry(e: &Entry) -> Result<(), String> {
+    check_source(&e.id, &e.repo, &e.path, &e.commit, &e.license)?;
     if !e.full_access && !e.binaries.is_empty() {
         return Err(tr!("{}: only an app with full_access brings an executable (binaries)", e.id));
     }
@@ -650,14 +739,7 @@ fn fetch_and_install(
     confirm: &mut dyn FnMut(&str) -> bool,
 ) -> Result<PathBuf, String> {
     let checkout = tmp.join("repo");
-    let checkout_s = checkout.to_string_lossy().to_string();
-    // no hooks or submodules: the clone runs nothing from the repository
-    git(&["clone", "--quiet", "--no-checkout", "-c", "core.hooksPath=/dev/null", "--", &e.repo, &checkout_s])?;
-    git(&["-C", &checkout_s, "-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", &e.commit])?;
-    let head = git(&["-C", &checkout_s, "rev-parse", "HEAD"])?;
-    if !head.trim().eq_ignore_ascii_case(&e.commit) {
-        return Err(tr!("{}: the repository delivered commit {}, not the index's {}", e.id, head.trim(), e.commit));
-    }
+    self::checkout(&e.id, &e.repo, &e.commit, &checkout)?;
 
     let src = if e.path.is_empty() { checkout.clone() } else { checkout.join(&e.path) };
     let text = std::fs::read_to_string(src.join("manifest.toml")).map_err(|err| tr!("{}: no manifest.toml ({})", e.id, err))?;
@@ -848,6 +930,11 @@ pub fn remove(id: &str, root: &Path, data_root: &Path, purge: bool) -> Result<St
 
 /// `--remove`: with stored data and no `--delete-data`/`--keep-data`, asks.
 fn remove_cli(id: &str, root: &Path, choice: Option<bool>, confirm_tty: bool) -> Result<String, String> {
+    // not a plugin here, but a mascot pack from the store: only drawings, no data to ask about
+    let appearance = crate::skin::user::dir();
+    if !root.join(id).join("manifest.toml").is_file() && mascots::installed(&appearance, id).is_some() {
+        return remove_mascot(id, &appearance);
+    }
     let data_root = appdata::root();
     let data = data_root.join(id);
     let purge = match choice {
@@ -1020,7 +1107,7 @@ mod tests {
         std::fs::write(repo.join("manifest.toml"), manifest).unwrap();
         let commit2 = Store::commit(&repo, "v2");
         let src = store.index(&commit2, "0.2.0", r#""uptime", "who""#);
-        let (st, _) = statuses(&src, &root).unwrap();
+        let st = statuses(&src, &root, &store.dir.join("appearance")).unwrap().plugins;
         assert!(st[0].has_update());
         assert_eq!(st[0].new_permissions(), ["who"]);
         let mut summary = String::new();
@@ -1182,6 +1269,104 @@ mod tests {
         assert_eq!(Source::from_config(&cfg).key, "");
         cfg.store_key = "ab".repeat(32);
         assert_eq!(Source::from_config(&cfg).key, "ab".repeat(32));
+    }
+
+    /// A PNG sheet of `frames` 16×16 frames side by side, with something drawn in each.
+    fn sheet(frames: u32) -> Vec<u8> {
+        let img = image::RgbaImage::from_fn(16 * frames, 16, |x, y| {
+            if (4..12).contains(&(x % 16)) && (4..12).contains(&y) { image::Rgba([200, 80, 40, 255]) } else { image::Rgba([0, 0, 0, 0]) }
+        });
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    /// A mascot pack: installs only the drawings (a sprite and a PNG mascot), refuses a key
+    /// that already exists, updates by swapping only its own files, and removes them.
+    #[test]
+    fn mascot_pack_installs_updates_and_removes_only_its_drawings() {
+        if !exec::which("git") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("miniutils-store-mascots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("repo");
+        let sprite = include_str!("../examples/appearance/sprites/jellyfish.toml");
+        std::fs::create_dir_all(repo.join("sprites")).unwrap();
+        std::fs::create_dir_all(repo.join("mascots/knight")).unwrap();
+        std::fs::write(repo.join("sprites/owl.toml"), sprite).unwrap();
+        std::fs::write(repo.join("sprites/notes.txt"), "not a sprite").unwrap();
+        std::fs::write(repo.join("mascots/knight/Knight_Idle_2.png"), sheet(2)).unwrap();
+        std::fs::write(repo.join("mascots/knight/Knight_Run_2.png"), sheet(2)).unwrap();
+        std::fs::write(repo.join("install.sh"), "rm -rf ~").unwrap(); // must not be copied
+        let v1 = Store::commit(&repo, "v1");
+        let index = |id: &str, commit: &str, version: &str| -> Source {
+            let path = dir.join(format!("{id}.json"));
+            let r = serde_json::to_string(&repo.to_string_lossy()).unwrap();
+            let json = format!(
+                r#"{{"schema":1,"plugins":[],"mascots":[{{"id":"{id}","name":"Critters","license":"CC0-1.0","version":"{version}","repo":{r},"commit":"{commit}"}}]}}"#
+            );
+            std::fs::write(&path, json).unwrap();
+            Source { index: path.to_string_lossy().to_string(), key: String::new() }
+        };
+        let appearance = dir.join("appearance");
+        let id = "io.github.exemplo.critters";
+        let src = index(id, &v1, "1.0.0");
+
+        // the person's own code mascot `knight`: the pack's PNG `knight` would push it out
+        std::fs::create_dir_all(appearance.join("sprites")).unwrap();
+        std::fs::write(appearance.join("sprites/knight.toml"), "mine").unwrap();
+        let err = install_mascot(&src, id, &appearance, &mut |_| true).unwrap_err();
+        assert!(err.contains("sprites/knight.toml"), "{err}");
+        assert!(!appearance.join("mascots/knight").exists());
+        std::fs::remove_file(appearance.join("sprites/knight.toml")).unwrap();
+
+        let mut summary = String::new();
+        let msg = install_mascot(&src, id, &appearance, &mut |s| {
+            summary = s.to_string();
+            true
+        })
+        .unwrap();
+        assert!(msg.contains("owl") && msg.contains("knight"), "{msg}");
+        assert!(summary.contains("only drawings"), "{summary}");
+        assert!(appearance.join("sprites/owl.toml").is_file());
+        assert!(appearance.join("mascots/knight/Knight_Idle_2.png").is_file());
+        assert!(!appearance.join("sprites/notes.txt").exists());
+        assert!(!appearance.join("install.sh").exists());
+        // what the hub reads from the folder
+        let (sprites, skipped) = crate::mascot::file::load(&appearance.join("sprites"), &[]);
+        assert!(skipped.is_empty() && sprites.len() == 1, "{skipped:?}");
+        let catalog = statuses(&src, &dir.join("plugins"), &appearance).unwrap();
+        let r = catalog.mascots[0].installed.as_ref().unwrap();
+        assert_eq!((r.sprites.as_slice(), r.packs.as_slice()), (["owl".to_string()].as_slice(), ["knight".to_string()].as_slice()));
+        assert!(install_mascot(&src, id, &appearance, &mut |_| true).unwrap_err().contains("already installed"));
+
+        // another entry with the same keys: refused, nothing touched
+        let other = index("io.github.exemplo.copycat", &v1, "1.0.0");
+        let err = install_mascot(&other, "io.github.exemplo.copycat", &appearance, &mut |_| true).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+
+        // the update renames the sprite: the old file goes, the new one comes
+        std::fs::rename(repo.join("sprites/owl.toml"), repo.join("sprites/cat.toml")).unwrap();
+        let v2 = Store::commit(&repo, "v2");
+        let src = index(id, &v2, "1.1.0");
+        install_mascot(&src, id, &appearance, &mut |_| true).unwrap();
+        assert!(!appearance.join("sprites/owl.toml").exists());
+        assert!(appearance.join("sprites/cat.toml").is_file());
+
+        // a broken sprite in the next version: refused before touching the folder
+        std::fs::write(repo.join("sprites/cat.toml"), "grid = 1").unwrap();
+        let v3 = Store::commit(&repo, "v3");
+        let src = index(id, &v3, "1.2.0");
+        assert!(install_mascot(&src, id, &appearance, &mut |_| true).unwrap_err().contains("cat.toml"));
+        assert!(appearance.join("sprites/cat.toml").is_file());
+
+        let msg = remove_mascot(id, &appearance).unwrap();
+        assert!(msg.contains("removed"), "{msg}");
+        assert!(!appearance.join("sprites/cat.toml").exists());
+        assert!(!appearance.join("mascots/knight").exists());
+        assert!(remove_mascot(id, &appearance).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

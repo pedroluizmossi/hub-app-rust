@@ -111,9 +111,22 @@ fn library() -> &'static RwLock<Arc<Library>> {
     })
 }
 
+/// Animations of the sprites from files (`file.rs`), by key. `set_extra` replaces them.
+static EXTRA: RwLock<Option<Arc<Library>>> = RwLock::new(None);
+
 /// Animations of mascot `key`, if it has any.
 pub fn of(key: &str) -> Option<Arc<Clips>> {
-    library().read().ok()?.get(key).cloned()
+    if let Some(c) = library().read().ok()?.get(key).cloned() {
+        return Some(c);
+    }
+    EXTRA.read().ok()?.as_ref()?.get(key).cloned()
+}
+
+/// Replaces the animations of the sprites from files.
+pub fn set_extra(lib: HashMap<String, Arc<Clips>>) {
+    if let Ok(mut extra) = EXTRA.write() {
+        *extra = Some(Arc::new(lib));
+    }
 }
 
 fn load_embedded() -> Library {
@@ -201,7 +214,7 @@ fn watch(dir: PathBuf) {
 // ---- format -------------------------------------------------------------------------
 
 /// Valid color roles in a regular mascot (see the top of `sprites.rs`).
-const ROLES: &[u8] = b".KPSHMCEWBTFDA";
+pub(crate) const ROLES: &[u8] = b".KPSHMCEWBTFDA";
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]

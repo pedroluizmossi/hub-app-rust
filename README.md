@@ -41,10 +41,11 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 |---|---|---|
 | **Docker** | Containers e stacks com ações rápidas: iniciar, parar, reiniciar, logs e shell. Notifica quando algo cai, entra em loop ou fica *unhealthy*. | ligado |
 | **Sinais vitais** | CPU, RAM, GPU (NVIDIA ou AMD), disco e rede, cada um com a própria mascote, histórico do último minuto e temperatura. | ligado |
-| **CD Player** | O que está tocando (MPRIS no Linux, controles de mídia no Windows): disco em pixel art girando, faixa, progresso e controles. Pode pôr a música no menu da bandeja. | ligado |
+| **CD Player** | O que está tocando (MPRIS no Linux, controles de mídia no Windows): disco em pixel art girando com a capa do álbum no rótulo, faixa, progresso (clique para pular) e controles. Pode pôr a música no menu da bandeja. | ligado |
 | **Assinaturas de IA** | Janelas de uso do Codex, Claude Code e OpenCode Go e créditos do Kiro, com previsão de quando o limite acaba. [Detalhes](#assinaturas-de-ia) | desligado |
 | **Portas abertas** | Quem escuta em cada porta, se é só local ou aberta para a rede, atalho para abrir no navegador e botão de encerrar (dois cliques). | desligado |
 | **To-do rápido** | Lista curta de tarefas: Enter acrescenta, clique marca como feita, e a mascote comemora quando a lista zera. | desligado |
+| **Mascotes** | Suas mascotes num lugar só: importa uma pasta ou um `.zip` baixado (mascotes em código e sprites PNG), renomeia, escolhe a animação de cada humor, as cores que seguem o tema, onde os subagentes param, e coloca a mascote num app, numa página ou na bandeja. | desligado |
 | **Agentes de IA** | Sessões do Claude Code, Codex e OpenCode: quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes. Abre a pasta, um terminal ou retoma a sessão. | desligado |
 
 Os apps desligados se ligam em **Configurações › Apps**.
@@ -220,6 +221,8 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
 --import-mascot <pasta>
                       copia folhas PNG (Nome_Animação_N.png) para a pasta de mascotes
+--check-mascot <pasta ou .toml>
+                      confere uma mascote sem instalar: humores, andar, tema e ações livres
 --dirs                onde ficam os apps locais, os dados dos apps, a configuração e os registros
 --version             mostra a versão (também em Configurações › Sistema)
 ```

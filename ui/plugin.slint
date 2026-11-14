@@ -32,6 +32,8 @@ export global PluginApps {
 }
 
 export component PluginView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     in property <PluginCard> card;
     in property <Colors> theme;
     property <Colors> t: theme;
@@ -54,6 +56,7 @@ export component PluginView inherits Rectangle {
                 height: mascot-w * 14 / 16 + 8px;
                 background: card.failed ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
                 Mascot {
+                    noticed: root.hovered;
                     theme: t;
                     frame: card.mascot;
                     mood: card.mood;

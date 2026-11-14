@@ -8,11 +8,18 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
 
-use super::{MediaSnapshot, friendly_app, usable};
+use windows::Storage::Streams::DataReader;
+
+use super::{ART_MAX_BYTES, ArtCache, MediaSnapshot, Score, friendly_app, usable};
 use crate::tr;
 
+/// Where the players come from (System Media Transport Controls), for the label in the
+/// CD Player display.
+pub const SOURCE: &str = "SMTC";
 /// After a failure, wait this long before asking for the service again.
 const RETRY: Duration = Duration::from_secs(10);
+/// Reads of the same track's cover before giving up (the cover may come late).
+const ART_TRIES: u8 = 4;
 /// Windows counts time in 100 ns steps.
 const TICKS_PER_SEC: i64 = 10_000_000;
 /// Seconds between 1601 (start of the Windows clock) and 1970 (start of Unix time).
@@ -25,6 +32,8 @@ pub struct MediaProvider {
     player: String,
     last: Option<MediaSnapshot>,
     retry_at: Option<Instant>,
+    /// Cover of the current track (read once per track).
+    art: ArtCache,
 }
 
 impl MediaProvider {
@@ -71,17 +80,25 @@ impl MediaProvider {
     fn poll(&mut self, manager: &Manager) -> windows::core::Result<MediaSnapshot> {
         // Several apps may have a session open. Keep the one that is playing and knows
         // length/position; a tie keeps the current one.
-        let mut best: Option<((u8, u8, u8, u8), MediaSnapshot)> = None;
+        let mut best: Option<(Score, MediaSnapshot, Session)> = None;
         for session in manager.GetSessions()? {
             let Ok(snap) = snapshot(&session) else { continue };
             let score = usable(&snap, &self.player);
-            if best.as_ref().is_none_or(|(s, _)| score > *s) {
-                best = Some((score, snap));
+            if best.as_ref().is_none_or(|(s, _, _)| score > *s) {
+                best = Some((score, snap, session));
             }
         }
         match best {
-            Some((_, snap)) => {
+            Some((_, mut snap, session)) => {
                 self.player = snap.player.clone();
+                // the session has no cover id: the track stands for it
+                let key = if snap.title.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}|{}|{}|{}", snap.player, snap.title, snap.artist, snap.album)
+                };
+                // the app may hand the cover a moment after the title: a few more reads
+                snap.art = self.art.get(&key, ART_TRIES, || thumbnail(&session));
                 Ok(snap)
             }
             None => {
@@ -155,19 +172,54 @@ fn snapshot(session: &Session) -> windows::core::Result<MediaSnapshot> {
         can_previous: can(controls.IsPreviousEnabled()),
         can_next: can(controls.IsNextEnabled()),
         can_seek: can(controls.IsPlaybackPositionEnabled()),
+        // Windows has no way to bring another app's window to the front from here
+        can_raise: false,
+        // the cover is read by the provider (`ArtCache`), only for the chosen session
+        art: None,
     })
+}
+
+/// Bytes of the session's cover (`Thumbnail`, usually a PNG or JPEG), if the app gives one.
+fn thumbnail(session: &Session) -> Option<Vec<u8>> {
+    let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
+    let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
+    let size = stream.Size().ok()?;
+    if size == 0 || size > ART_MAX_BYTES {
+        return None;
+    }
+    let reader = DataReader::CreateDataReader(&stream).ok()?;
+    let read = reader.LoadAsync(size as u32).ok()?.join().ok()?;
+    let mut bytes = vec![0u8; read as usize];
+    reader.ReadBytes(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+/// The open session of player `service`.
+fn session_of(service: &str) -> anyhow::Result<Session> {
+    if !valid_service(service) {
+        anyhow::bail!("{}", tr!("invalid player"));
+    }
+    let mut sessions = manager()?.GetSessions()?.into_iter();
+    sessions
+        .find(|s| s.SourceAppUserModelId().is_ok_and(|id| id == service))
+        .ok_or_else(|| anyhow::anyhow!("{}", tr!("the player closed")))
+}
+
+/// Jumps to `fraction` (0..1) of the track (a click on the progress bar).
+pub fn seek_to(service: &str, fraction: f64) -> anyhow::Result<()> {
+    let session = session_of(service)?;
+    let (start, end, _) = timeline(&session, false)?;
+    anyhow::ensure!(end > start, "{}", tr!("the track has no known length"));
+    let target = start + ((end - start) as f64 * fraction.clamp(0.0, 1.0)) as i64;
+    let accepted = session.TryChangePlaybackPositionAsync(target)?.join()?;
+    anyhow::ensure!(accepted, "{}", tr!("the player refused the command"));
+    Ok(())
 }
 
 /// Runs a command on the player. Verbs: play-pause, next, prev, back, fwd, raise.
 /// `seek_us` is the jump of the back/forward buttons, in microseconds.
 pub fn send(service: &str, verb: &str, seek_us: i64) -> anyhow::Result<()> {
-    if !valid_service(service) {
-        anyhow::bail!("{}", tr!("invalid player"));
-    }
-    let mut sessions = manager()?.GetSessions()?.into_iter();
-    let session = sessions
-        .find(|s| s.SourceAppUserModelId().is_ok_and(|id| id == service))
-        .ok_or_else(|| anyhow::anyhow!("{}", tr!("the player closed")))?;
+    let session = session_of(service)?;
     let accepted = match verb {
         "play-pause" => session.TryTogglePlayPauseAsync()?.join()?,
         "next" => session.TrySkipNextAsync()?.join()?,

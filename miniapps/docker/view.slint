@@ -348,6 +348,8 @@ component GroupHeader inherits Rectangle {
 }
 
 export component DockerView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     property <Colors> t: DockerApp.theme;
     property <bool> narrow: self.width < 560px;
     property <bool> tiny: self.width < 420px;
@@ -369,6 +371,7 @@ export component DockerView inherits Rectangle {
             height: mascot-h + 8px;
             background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
             Mascot {
+                noticed: root.hovered;
                 theme: t;
                 frame: DockerApp.mascot;
                 mood: DockerApp.mood;

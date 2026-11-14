@@ -941,10 +941,22 @@ pub static SPRITES: &[Sprite] = &[
     },
 ];
 
-/// Imported mascots (`pack.rs`), after the built-in ones. `pack::set` replaces them.
+/// Sprites from files (`file.rs`, `sprites/<key>.toml`), after the built-in ones.
+/// `file::set` replaces them.
+static FILES: RwLock<Vec<&'static Sprite>> = RwLock::new(Vec::new());
+/// Imported mascots (`pack.rs`, PNG), after the sprites. `pack::set` replaces them.
 static EXTRA: RwLock<Vec<&'static Sprite>> = RwLock::new(Vec::new());
-/// Changes every time the imported ones are replaced: drawing caches (pickers) rebuild.
+/// Changes every time the file or imported ones are replaced: drawing caches (pickers)
+/// rebuild.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Replaces the sprites from files.
+pub fn set_files(list: Vec<&'static Sprite>) {
+    if let Ok(mut files) = FILES.write() {
+        *files = list;
+    }
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+}
 
 /// Replaces the imported mascots.
 pub fn set_extra(list: Vec<&'static Sprite>) {
@@ -959,14 +971,19 @@ pub fn generation() -> u64 {
     GENERATION.load(Ordering::Relaxed)
 }
 
-/// Every mascot: the built-in ones, then the imported ones. This is the pickers' order.
+/// Every mascot: the built-in ones, the sprites from files, then the imported ones. This
+/// is the pickers' order.
 pub fn all() -> Vec<&'static Sprite> {
+    let files = FILES.read().map(|e| e.clone()).unwrap_or_default();
     let extra = EXTRA.read().map(|e| e.clone()).unwrap_or_default();
-    SPRITES.iter().chain(extra).collect()
+    SPRITES.iter().chain(files).chain(extra).collect()
 }
 
 pub fn find(key: &str) -> Option<&'static Sprite> {
     if let Some(s) = SPRITES.iter().find(|s| s.key == key) {
+        return Some(s);
+    }
+    if let Some(s) = FILES.read().ok().and_then(|f| f.iter().copied().find(|s| s.key == key)) {
         return Some(s);
     }
     EXTRA.read().ok()?.iter().copied().find(|s| s.key == key)

@@ -23,8 +23,8 @@ msgstr "Notificar quando um agente esperar por você"
 msgid "Notify when an agent finishes"
 msgstr "Notificar quando um agente terminar"
 
-msgid "Subagents walk as the imported mascots (a different one for each new subagent)"
-msgstr "Subagentes andando com as mascotes importadas (um diferente a cada novo)"
+msgid "Subagents walk as the mascots that can walk (a different one for each new subagent)"
+msgstr "Subagentes andando com as mascotes que andam (uma diferente a cada novo)"
 
 msgid "effort"
 msgstr "esforço"
@@ -428,3 +428,229 @@ msgstr "Mascote da rede"
 
 msgid "not found"
 msgstr "não encontrado"
+
+# Mascots (miniapps/mascots, src/apps/mascots.rs, src/mascot/import.rs, src/mascot/edit.rs)
+msgid "Mascots"
+msgstr "Mascotes"
+
+msgid "Your mascots in one place: import a folder or a .zip, rename, choose animations and colors, and put them to use."
+msgstr "Suas mascotes num lugar só: importe uma pasta ou um .zip, renomeie, escolha animações e cores e coloque-as em uso."
+
+msgid "Mascots: {}"
+msgstr "Mascotes: {}"
+
+msgid "{} mascots · {} walk"
+msgstr "{} mascotes · {} andam"
+
+msgid "{} of your own: {} in code · {} PNG sprites"
+msgstr "{} suas: {} em código · {} sprites PNG"
+
+msgid "No mascots of your own yet. Import a folder or a .zip."
+msgstr "Ainda não há mascotes suas. Importe uma pasta ou um .zip."
+
+msgid "Import folder…"
+msgstr "Importar pasta…"
+
+msgid "Import .zip…"
+msgstr "Importar .zip…"
+
+msgid "Folder…"
+msgstr "Pasta…"
+
+msgid ".zip…"
+msgstr ".zip…"
+
+msgid "Manage"
+msgstr "Gerenciar"
+
+msgid "Import mascots from a folder"
+msgstr "Importar mascotes de uma pasta"
+
+msgid "Import mascots from a .zip"
+msgstr "Importar mascotes de um .zip"
+
+msgid "No thread for the import: {}"
+msgstr "Sem thread para a importação: {}"
+
+msgid "Choose a mascot on the left."
+msgstr "Escolha uma mascote à esquerda."
+
+msgid "Name of the mascot"
+msgstr "Nome da mascote"
+
+msgid "key: {} · Enter saves the name"
+msgstr "chave: {} · Enter salva o nome"
+
+msgid "key: {} · built-in (can't be changed)"
+msgstr "chave: {} · embutida (não dá para mudar)"
+
+msgid "Preview"
+msgstr "Prévia"
+
+msgid "Calm"
+msgstr "Calma"
+
+msgid "Happy"
+msgstr "Feliz"
+
+msgid "Busy"
+msgstr "Ocupada"
+
+msgid "Alarm"
+msgstr "Alarme"
+
+msgid "Sleeping"
+msgstr "Dormindo"
+
+msgid "Walking"
+msgstr "Andando"
+
+msgid "Celebrating"
+msgstr "Comemorando"
+
+msgid "Surprised"
+msgstr "Surpresa"
+
+msgid "Animations"
+msgstr "Animações"
+
+msgid "(usual name)"
+msgstr "(nome usual)"
+
+msgid "Colors that follow the theme"
+msgstr "Cores que seguem o tema"
+
+msgid "Give a color a role and it takes the app theme's color for that role (the eye follows the mood). Without a role, it keeps its own color."
+msgstr "Dê um papel a uma cor e ela passa a usar a cor do tema do app para esse papel (o olho segue o humor). Sem papel, ela mantém a própria cor."
+
+msgid "keeps its own color"
+msgstr "mantém a própria cor"
+
+msgid "outline"
+msgstr "contorno"
+
+msgid "main color"
+msgstr "cor principal"
+
+msgid "shadow"
+msgstr "sombra"
+
+msgid "highlight"
+msgstr "brilho"
+
+msgid "light detail"
+msgstr "detalhe claro"
+
+msgid "visor"
+msgstr "visor"
+
+msgid "eye"
+msgstr "olho"
+
+msgid "eye glint"
+msgstr "brilho do olho"
+
+msgid "blush"
+msgstr "bochecha"
+
+msgid "mouth"
+msgstr "boca"
+
+msgid "skin"
+msgstr "pele"
+
+msgid "hardware"
+msgstr "hardware"
+
+msgid "LED (follows the mood)"
+msgstr "LED (segue o humor)"
+
+msgid "Stops of the walking subagents"
+msgstr "Paradas dos subagentes andando"
+
+msgid "Besides resting (idle), they stop to play the animations turned on here. The others only play when an app asks."
+msgstr "Além de descansar (idle), eles param para fazer as animações ligadas aqui. As outras só tocam quando um app pede."
+
+msgid "Use in"
+msgstr "Usar em"
+
+msgid "Put this mascot in:"
+msgstr "Colocar esta mascote em:"
+
+msgid "Choose…"
+msgstr "Escolha…"
+
+msgid "Page: {}"
+msgstr "Página: {}"
+
+msgid "{} is in use there now."
+msgstr "{} agora está em uso lá."
+
+msgid "Name saved."
+msgstr "Nome salvo."
+
+msgid "Animation saved."
+msgstr "Animação salva."
+
+msgid "Color saved."
+msgstr "Cor salva."
+
+msgid "Stops saved."
+msgstr "Paradas salvas."
+
+msgid "Installed by the store: remove it in the Store tab."
+msgstr "Instalada pela loja: remova na aba Loja."
+
+msgid "Click again to remove {}. Whatever uses it goes back to the first mascot."
+msgstr "Clique de novo para remover {}. O que a usa volta para a primeira mascote."
+
+msgid "{} removed."
+msgstr "{} removida."
+
+msgid "built-in"
+msgstr "embutida"
+
+msgid "yours"
+msgstr "sua"
+
+msgid "code"
+msgstr "código"
+
+msgid "sprite"
+msgstr "sprite"
+
+msgid "walks"
+msgstr "anda"
+
+msgid "a built-in mascot can't be changed"
+msgstr "uma mascote embutida não pode ser mudada"
+
+msgid "a code mascot already follows the theme"
+msgstr "uma mascote em código já segue o tema"
+
+msgid "only a PNG sprite chooses its animations here"
+msgstr "só um sprite PNG escolhe as animações aqui"
+
+msgid "{}: choose a folder or a .zip"
+msgstr "{}: escolha uma pasta ou um .zip"
+
+msgid "{}: no mascot found (PNG sheets named like Name_Animation_N.png, or a mascot .toml)"
+msgstr "{}: nenhuma mascote encontrada (folhas PNG no formato Nome_Animação_N.png, ou o .toml de uma mascote)"
+
+msgid "{}: not a zip file I can read ({})"
+msgstr "{}: não é um zip que eu consiga ler ({})"
+
+msgid "{}: not imported: {}"
+msgstr "{}: não importada: {}"
+
+msgid "{}: too big to import (more than {} files or {} MiB)"
+msgstr "{}: grande demais para importar (mais de {} arquivos ou {} MiB)"
+
+msgid "{}: {} (code mascot)"
+msgstr "{}: {} (mascote em código)"
+
+msgid "The pages changed: choose again."
+msgstr "As páginas mudaram: escolha de novo."
+
+msgid "key: {} · from the store (an update would undo changes)"
+msgstr "chave: {} · da loja (uma atualização desfaria as mudanças)"

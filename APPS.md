@@ -334,6 +334,16 @@ o modo dev roda numa instância só dele.
   [miniutils-apps](https://github.com/pedroluizmossi/miniutils-apps) gera essa entrada
   pronta. Precisa do MiniUtils 0.2.0 ou mais novo.
 - **Mini-app embutido**: pull request neste repositório.
+- **Pacote de mascotes** (só desenhos, sem código): repositório público com
+  `sprites/<chave>.toml` (sprites 16 × 14, que seguem o tema;
+  [DESIGN.md › Sprites por arquivo](DESIGN.md#sprites-por-arquivo)) e/ou `mascots/<chave>/`
+  (mascotes PNG com `sprite.toml`), mais `README.md` e `LICENSE`. A entrada vai na lista
+  `mascots` do `registry.json`, com `id`, `name`, `license`, `version`, `repo`, `commit`
+  (e `path`, se o pacote estiver numa subpasta). A arte precisa poder ser redistribuída
+  (própria, CC0 ou CC-BY com crédito no README): pacotes que proíbem redistribuir não entram.
+  O hub copia só esses arquivos para a pasta de aparência, confere cada um com os mesmos
+  leitores do app antes de instalar, e recusa uma chave que já exista lá. Instala, atualiza e
+  remove como um plugin (`miniutils --install <id>`, ou a aba Loja).
 
 Como a loja revisa cada tipo: README da
 [loja](https://github.com/pedroluizmossi/miniutils-store#o-que-%C3%A9-revisado).

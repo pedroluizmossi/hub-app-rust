@@ -253,8 +253,11 @@ Um app novo, do zero:
    `src/apps/mod.rs`.
 4. **Registro** — em `src/hub/mod.rs`, `registry.add(crate::apps::<app>::<App>Mini::create(…))`.
 5. **No painel** — em `ui/dashboard.slint`, importe a view e acrescente no `Dashboard` um
-   `if c.id == "cyber.<nome>": <App>View { … }`; em `ui/hub.slint`, importe o global (e as
-   structs da tela) e exporte-os no `export { … }`, para o Rust enxergar.
+   `if c.id == "cyber.<nome>": <App>View { hovered: cell.hovered; … }`; em `ui/hub.slint`,
+   importe o global (e as structs da tela) e exporte-os no `export { … }`, para o Rust
+   enxergar. Com o mouse sobre o cartão, a borda acende na cor do app e a mascote se
+   levanta (se "Mascotes paradas ao passar o mouse" estiver desligada; vem ligada): dê
+   à view um `in property <bool> hovered` e ao `Mascot` `noticed: root.hovered`.
 6. **Provedor** (se precisar de dado novo) — `src/providers/<nome>.rs` com um `collect()`
    que devolve um snapshot; um caso novo em `bus::Event`; `bus.spawn("<nome>", intervalo, …)`
    no `Hub::new`. O provedor só roda enquanto algum app ativo o tiver em `uses`.
@@ -401,6 +404,26 @@ OpenGameArt, Kenney) funcionam do mesmo jeito se o quadro for 16 × 14; confira 
 3. `cargo test`: `todas_as_mascotes_tem_16x14` e `mascotes_pixel_tem_cor_para_cada_letra`
    pegam linha torta e letra sem cor.
 
+### Sprites por arquivo
+
+A mesma mascote 16 × 14, sem recompilar: um `sprites/<chave>.toml` na pasta de aparência
+(`miniutils --dirs`), lido por `src/mascot/file.rs` (formato completo, comentado, no topo
+dele; exemplo em [`examples/appearance/sprites/jellyfish.toml`](examples/appearance/sprites/jellyfish.toml)).
+Funciona como as embutidas: segue o tema (formato 1), pisca, tem LED, olhos do humor e
+glitch, e aparece em todo seletor (depois das embutidas, antes das PNG).
+
+- `label`, `grid` (14 linhas de 16) e, se quiser, `eye_bg`, `shade_from`, `fur`/`ear`:
+  os mesmos campos do formato 1.
+- Com `[palette]` (`eye` e uma cor por letra minúscula) vira o formato 2, com `e` no olho.
+- Animações em `[anim.<nome>]`, no formato de `src/mascot/clips/` (humores, reações,
+  transições), conferidas contra o desenho. Com `[anim.walk]` (e, se quiser, `run`/`jump`)
+  ela anda como os subagentes; `extras = [...]`, no topo do arquivo, diz onde mais ela para.
+- A chave é o nome do arquivo (a-z, 0-9, `-` e `_`, até 32): não pode repetir uma embutida
+  nem uma mascote PNG (`mascots/<chave>/`). Arquivo de até 64 KiB.
+- Entra com **Configurações › Aparência › Recarregar** (ou `miniutils --reload`). Arquivo com
+  erro fica de fora com o motivo; erros dentro de `[anim]` vêm do `clips.rs`, em inglês.
+- A loja instala sprites assim (pacotes de mascotes, abaixo e em [APPS.md](APPS.md#publicar)).
+
 ### Mascotes importadas (PNG)
 
 Pixel art de qualquer tamanho (16 × 16, 32 × 32, 64 × 64…), lida de PNG em tempo de
@@ -414,8 +437,11 @@ execução, **da pasta da pessoa**: `mascots/<chave>/` dentro da pasta de aparê
   animação vale para cada humor e reação.
 - **Humor pela animação**: `sleep`/`idle` → `idle`, `busy` → `run`, `alarm` → `hurt`,
   comemorar → `jump`, susto → `hurt` (nomes usuais dos pacotes; `[moods]` e `[reactions]`
-  trocam). Dormindo, a animação vai na metade da velocidade e esmaecida. Não segue o tema,
-  não pisca e não tem LED: o desenho é o do PNG.
+  trocam). Dormindo, a animação vai na metade da velocidade e esmaecida. Não pisca.
+- **Cores do tema (`[palette]`)**: no `sprite.toml`, `"#rrggbb" = "K"` liga uma cor do PNG a
+  um papel (os mesmos do formato 1); essa cor passa a ser a do tema do app, o olho (`E`)
+  segue o humor e `A` vira LED. Cor sem papel fica como no PNG; sem `[palette]`, o PNG
+  inteiro mantém as cores. O app Mascotes edita isso com prévia.
 - **Só as animações em uso são lidas** (as dos humores e das reações, mais as dos
   subagentes), e cada grupo ganha **um corte** da borda transparente: a mascote não pula ao
   trocar de animação e preenche a caixa em vez de ficar pequena no meio de um quadro de 32.
@@ -423,26 +449,50 @@ execução, **da pasta da pessoa**: `mascots/<chave>/` dentro da pasta de aparê
 - Onde aparece: em todo seletor de mascote (no fim da grade), no cabeçalho dos apps, nas
   páginas, na conversa e na bandeja (`argb_square` amplia por inteiro). O `Mascot`
   (`widgets.slint`) usa a proporção da imagem, então um desenho em pé não deforma.
-- **Subagentes**: no app de agentes, cada subagente trabalhando anda com uma importada que
-  tenha `walk` (ou `run`), no tamanho do desenho (até 32 px de altura). Cada subagente novo
-  pega a próxima da fila (`Roster` em `apps/agents.rs`) e fica com ela enquanto anda. A
-  coreografia (`src/mascot/stroll.rs`, testada sem tela) é do Rust, quadro a quadro:
-  - anda um pouco, às vezes de outro jeito do pacote (`walk+attack`), e às vezes dá
-    meia-volta; na ponta da faixa, vira;
-  - para e faz uma das outras animações do pacote, sem repetir a última (ataques, empurrar,
-    arremessar, escalar, parado); fora ficam `death` e `hurt`, e o `extras = [...]` do
-    `sprite.toml` escolhe outra lista;
+- **Subagentes**: no app de agentes, cada subagente trabalhando anda com uma mascote que
+  tenha `walk` (ou `run`), **dos dois tipos**: PNG com a folha `walk`, ou mascote em código
+  com `[anim.walk]` (desenhada no tema do app e ampliada 2×). A lista é a de
+  `src/mascot/walkers.rs`; um desenho PNG aparece no tamanho dele (até 32 px de altura).
+  Cada subagente novo pega a próxima da fila (`Roster` em `apps/agents.rs`) e fica com ela
+  enquanto anda. A coreografia (`src/mascot/stroll.rs`, testada sem tela) é do Rust, quadro
+  a quadro:
+  - anda um pouco, às vezes de outro jeito (`walk+attack`), e às vezes dá meia-volta; na
+    ponta da faixa, vira;
+  - para em `idle` (a mascote em código sem `[anim.idle]` para no desenho base) e nas
+    animações que `extras = [...]` lista, sem repetir a última;
   - **corre** (`run`) enquanto chama ferramentas: o subagente gravou no registro da conversa
     há menos de 4 s (`Details::wrote_ms`) ou a ação dele mudou há menos de 5 s;
   - **pula** (`jump`) uma vez quando termina, e só então sai da faixa;
   - cada um tem passo e sequência próprios (sorteados pelo id), então não andam em
     compasso; com "reduzir movimento", ficam parados, espalhados.
 
-  A opção "Subagentes andando com as mascotes importadas" desliga (andam com a mascote da
+  A opção "Subagentes andando com as mascotes que andam" desliga (andam com a mascote da
   ferramenta).
-- Entra com `miniutils --import-mascot <pasta>` (copia as folhas de cada personagem da
-  pasta e das subpastas e escreve o `sprite.toml`) e sai apagando a pasta. Depois de mudar
-  a pasta: **Configurações › Aparência › Recarregar** ou `miniutils --reload`.
+- **Ações livres**: animação que não é humor, reação, jeito de andar (`walk`, `run`, `jump`
+  e variações) nem está em `extras` (ex.: `explosion`, `attack`) nunca toca sozinha; fica
+  para quando um app pedir. Vale para os dois tipos.
+- Entra pelo **app Mascotes** (Importar pasta… / Importar .zip…) ou por
+  `miniutils --import-mascot <pasta>`: copia as folhas de cada personagem da pasta e das
+  subpastas (até 5 níveis, como vem num zip baixado) e escreve o `sprite.toml`; uma pasta
+  que já tem `sprite.toml` entra como está. Sai apagando a pasta (ou Remover no app).
+  Depois de mudar a pasta à mão: **Configurações › Aparência › Recarregar** ou
+  `miniutils --reload`.
+- **Conferir antes:** `miniutils --check-mascot <pasta ou .toml>` mostra o que a mascote tem
+  (humores, reações, se anda e onde para, se segue o tema, ações livres), com os mesmos
+  leitores do hub; a ficha do app Mascotes mostra o mesmo relatório.
+
+### App Mascotes
+
+O mini-app `cyber.mascots` (`src/apps/mascots.rs`, `miniapps/mascots/`) junta tudo isso
+para quem não quer mexer em arquivo: o cartão conta as mascotes e importa uma pasta ou um
+`.zip` (diálogo do sistema, `rfd`; `src/mascot/import.rs` abre o zip só com `.png`/`.toml`,
+com limites, e recusa caminho que sai da pasta). "Gerenciar" abre uma janela com todas as
+mascotes e a ficha da escolhida: renomear (o nome que aparece; a chave fica), relatório,
+animação de cada humor e reação (PNG), cores do tema (`[palette]`, PNG), paradas dos
+subagentes (`extras`), "Usar em" (bandeja, página ou a opção de mascote de um app ligado) e
+remover. Cada mudança vai para o arquivo da própria mascote por `src/mascot/edit.rs`
+(`toml_edit`, mantém comentários) e é conferida relendo a mascote; se ela não carregar, o
+arquivo volta ao que era. Embutidas só se veem; as da loja se removem na Loja.
 - Limites: quadro de até 256 × 256, até 64 quadros por animação e 32 animações, PNG de até
   4 MiB. A pasta com erro fica de fora com o motivo (Aparência e registro). Só lê PNG e TOML.
 

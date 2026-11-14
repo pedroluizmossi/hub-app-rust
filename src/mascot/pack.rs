@@ -13,7 +13,8 @@
 //! fps = 8                     # default for every animation
 //! facing = "right"            # where the drawing looks (walking the other way mirrors it)
 //! trim = true                 # trims the transparent border (the same cut on everything)
-//! # walking subagents: what they do at their stops (default: everything but death/hurt)
+//! # walking subagents: what they do at their stops (default: idle only; any other action of
+//! # the pack, like an attack or an explosion, plays only when listed or when an app asks)
 //! extras = ["idle", "attack1", "push", "throw"]
 //! [anim]
 //! idle = "Pink_Monster_Idle_4.png"                      # frames from the _4 in the name
@@ -22,6 +23,9 @@
 //! busy = "run"
 //! [reactions]                 # celebrate, surprised
 //! celebrate = "jump"
+//! [palette]                   # PNG color → color role: these colors follow the app theme
+//! "#1b1b2a" = "K"             # outline   (roles: see `sprites.rs`; E is the eye, A the LED)
+//! "#e05a3a" = "P"             # main color
 //! ```
 //!
 //! Without `sprite.toml`, each `<Name>_<Animation>_<N>.png` becomes the animation
@@ -31,17 +35,20 @@
 //! are (`idle`, `walk`, `run`…: the usual names of free sprite packs).
 //!
 //! The imported mascot becomes a `Sprite` registered in `sprites` (key = folder name) and
-//! shows up everywhere mascots are shown. The drawing is the PNG's: it doesn't follow the
-//! theme nor blink; the mood shows through the animation chosen for it, and asleep it gets
-//! slower and dimmed. Only PNG and TOML are read: nothing in the folder is executed.
+//! shows up everywhere mascots are shown. The drawing is the PNG's: it doesn't blink; the
+//! mood shows through the animation chosen for it, and asleep it gets slower and dimmed.
+//! With `[palette]`, the listed colors take the app theme's color for their role (the eye
+//! follows the mood); without it, the PNG keeps its own colors. Only PNG and TOML are read:
+//! nothing in the folder is executed.
 //!
 //! With a walking animation (`walk` or `run`), it also walks as the subagents of the agents
-//! app (`Troupe`, choreography in `stroll`): walks, stops doing the pack's other
-//! animations, runs (`run`) while calling tools and jumps (`jump`) when done.
+//! app (`Troupe`, choreography in `stroll`, the list of both kinds in `walkers`): walks,
+//! stops (`idle` and the `extras`), runs (`run`) while calling tools and jumps (`jump`) when
+//! done.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 use serde::Deserialize;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
@@ -49,6 +56,7 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use super::Mood;
 use super::anim::{self, Look, Reaction};
 use super::sprites::{self, Sprite};
+use super::themes::Theme;
 use super::stroll::Script;
 use crate::tr;
 
@@ -73,9 +81,6 @@ const MOOD_NAMES: [&[&str]; 5] = [
 const WALK_NAMES: &[&str] = &["walk", "run"];
 /// Jump for when a subagent finishes.
 const JUMP_NAMES: &[&str] = &["jump", "celebrate"];
-/// Left out of the subagents' stops (without `extras` in `sprite.toml`): dying and getting
-/// hurt don't suit someone who is working.
-const GRIM: &[&str] = &["death", "dead", "die", "hurt", "hit"];
 /// Reactions (`Reaction`): celebrate, surprise.
 const REACTION_NAMES: [&[&str]; 2] = [&["celebrate", "jump"], &["surprised", "hurt"]];
 
@@ -105,6 +110,12 @@ pub struct Art {
     reactions: [Option<usize>; 2],
     /// Walking as the subagents (`None` = no walking animation).
     troupe: Option<Troupe>,
+    /// `[palette]`: PNG colors that become a theme color role (empty = the PNG as it is).
+    palette: Vec<([u8; 3], u8)>,
+    /// Frames already recolored, by theme and mood (only with `palette`).
+    themed: Mutex<HashMap<(&'static str, FrameKey, Mood), Buf>>,
+    /// Every animation the pack declares (also the ones nothing uses: the free actions).
+    all_names: Vec<String>,
 }
 
 /// A mascot's animations for walking as the subagents, with their own cut (a wide attack
@@ -151,8 +162,79 @@ impl Art {
         if dim { &a.dim[f] } else { &a.frames[f] }
     }
 
-    pub fn image(&self, key: FrameKey) -> Image {
-        Image::from_rgba8(self.buf(key).clone())
+    /// `[palette]`: each listed PNG color and its role.
+    pub fn palette(&self) -> &[([u8; 3], u8)] {
+        &self.palette
+    }
+
+    /// Follows the theme (has `[palette]`).
+    pub fn themed(&self) -> bool {
+        !self.palette.is_empty()
+    }
+
+    /// The frame in `theme` and `mood`: with `[palette]`, the listed colors become the
+    /// theme's (recolored once per theme, mood and frame); without it, the PNG as it is.
+    pub fn image_in(&self, key: FrameKey, theme: &Theme, mood: Mood) -> Image {
+        Image::from_rgba8(self.buf_in(key, theme, mood))
+    }
+
+    fn buf_in(&self, key: FrameKey, theme: &Theme, mood: Mood) -> Buf {
+        if self.palette.is_empty() {
+            return self.buf(key).clone();
+        }
+        let ck = (theme.key, key, mood);
+        if let Some(b) = self.themed.lock().ok().and_then(|m| m.get(&ck).cloned()) {
+            return b;
+        }
+        // from the plain frame (the dimmed one no longer has the palette's colors), dimmed after
+        let (a, f, dim) = key;
+        let mut b = recolor(&self.anims[a].frames[f], &self.palette, theme, mood);
+        if dim {
+            for p in b.make_mut_slice() {
+                (p.r, p.g, p.b) = (dim8(p.r), dim8(p.g), dim8(p.b));
+            }
+        }
+        if let Ok(mut m) = self.themed.lock() {
+            m.insert(ck, b.clone());
+        }
+        b
+    }
+
+    /// A walking frame (`Troupe::frames`) in `theme`: recolored with `[palette]`, as is
+    /// without it.
+    pub fn troupe_frame(&self, buf: &Buf, theme: &Theme) -> Buf {
+        if self.palette.is_empty() { buf.clone() } else { recolor(buf, &self.palette, theme, Mood::Happy) }
+    }
+
+    /// The PNG's colors that `[palette]` doesn't list, in the animations in use (for the
+    /// mascot check: what keeps its own color). At most `max`.
+    pub fn loose_colors(&self, max: usize) -> Vec<[u8; 3]> {
+        let mut out: Vec<[u8; 3]> = Vec::new();
+        for a in &self.anims {
+            for f in &a.frames {
+                for p in f.as_slice() {
+                    let c = [p.r, p.g, p.b];
+                    if p.a > 0 && !self.palette.iter().any(|(k, _)| *k == c) && !out.contains(&c) {
+                        out.push(c);
+                        if out.len() >= max {
+                            return out;
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Every animation the pack declares, read or not (sorted).
+    pub fn declared_names(&self) -> &[String] {
+        &self.all_names
+    }
+
+    /// Animation used for each mood (in `Mood` order) and reaction (celebrate, surprised).
+    pub fn mapping(&self) -> ([String; 5], [Option<String>; 2]) {
+        let name = |i: usize| self.anims[i].name.clone();
+        (self.moods.map(name), self.reactions.map(|r| r.map(name)))
     }
 
     /// Shortest frame (ms) of the current animation, if it moves: the hub speeds up its timer.
@@ -168,12 +250,13 @@ impl Art {
 
     /// Frame centered in a square of side `side` or more (scaled up by a whole factor until
     /// close to `side`), in RGBA: the side and the pixels. Base of the tray icon.
-    pub fn square(&self, key: FrameKey, side: usize) -> (i32, Vec<u8>) {
+    pub fn square(&self, key: FrameKey, theme: &Theme, mood: Mood, side: usize) -> (i32, Vec<u8>) {
         let big = self.w.max(self.h);
         let k = (side / big).max(1);
         let side = big * k;
         let (ox, oy) = ((side - self.w * k) / 2, (side - self.h * k) / 2);
-        let src = self.buf(key).as_bytes();
+        let buf = self.buf_in(key, theme, mood);
+        let src = buf.as_bytes();
         let mut out = vec![0u8; side * side * 4];
         for y in 0..self.h * k {
             for x in 0..self.w * k {
@@ -197,11 +280,6 @@ static ARTS: RwLock<Vec<(&'static Sprite, &'static Art)>> = RwLock::new(Vec::new
 pub fn art(sprite: &Sprite) -> Option<&'static Art> {
     let list = ARTS.read().ok()?;
     list.iter().find(|(s, _)| std::ptr::eq(*s, sprite)).map(|(_, a)| *a)
-}
-
-/// The imported mascots that can walk, in key order.
-pub fn walkers() -> Vec<&'static Art> {
-    ARTS.read().map(|l| l.iter().map(|(_, a)| *a).filter(|a| a.troupe.is_some()).collect()).unwrap_or_default()
 }
 
 /// Replaces the program's imported mascots.
@@ -236,6 +314,14 @@ pub struct Skipped {
     pub dir: String,
     /// Shown to the user (translated).
     pub reason: String,
+}
+
+/// Reads one mascot folder anywhere (to check it before it goes in): the key comes from the
+/// folder name, made valid (`Pink Monster` → `pink-monster`).
+pub fn read_folder(dir: &Path) -> Result<Art, String> {
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let key = slug(&name);
+    load_pack(dir, if key.is_empty() { "mascot" } else { &key })
 }
 
 /// Reads `root` (the `mascots/` folder) without
@@ -286,6 +372,9 @@ struct Spec {
     reactions: BTreeMap<String, String>,
     /// Stops of the walking subagents (names from `[anim]`).
     extras: Option<Vec<String>>,
+    /// Color of the PNG → color role (`"#1b1b2a" = "K"`): those colors follow the theme.
+    #[serde(default)]
+    palette: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -365,7 +454,10 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
                     cast.push(find(name).ok_or_else(|| missing("extras", name))?);
                 }
             }
-            None => cast.extend((0..names.len()).filter(|&i| !GRIM.iter().any(|g| names[i].starts_with(g)))),
+            // without `extras`, only movement (other ways of walking or running) and the idle
+            // above: an action of the pack (attack, explosion…) only plays at a stop when
+            // listed, or when an app asks for it
+            None => cast.extend((0..names.len()).filter(|&i| super::walkers::is_moving(names[i]))),
         }
         cast.sort();
         cast.dedup();
@@ -462,7 +554,7 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
             let at = |i: usize| cast.iter().position(|c| *c == i);
             let jump = pick(JUMP_NAMES);
             let run = find("run").filter(|r| *r != walk);
-            let moving = |i: usize| names[i].contains("walk") || names[i].contains("run");
+            let moving = |i: usize| super::walkers::is_moving(names[i]);
             let script = Script {
                 names: cast.iter().map(|i| names[*i].to_string()).collect(),
                 frames: cast.iter().map(|i| raw[i].0.len()).collect(),
@@ -492,7 +584,9 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
     let list: Vec<&str> = anims.iter().map(|a| a.name.as_str()).collect();
     let walking = troupe.as_ref().map(|t| t.script.names.join(", ")).unwrap_or_else(|| "doesn't walk".into());
     log::debug!("mascot {key}: {w}×{h}, animations {}; subagents: {walking}", list.join(", "));
-    Ok(Art { key: key.to_string(), name, w, h, anims, moods, reactions, troupe })
+    let palette = palette(&spec.palette)?;
+    let all_names = spec.anim.keys().cloned().collect();
+    Ok(Art { key: key.to_string(), name, w, h, anims, moods, reactions, troupe, palette, themed: Mutex::default(), all_names })
 }
 
 /// `Pink_Monster_Walk_6.png` → 6.
@@ -514,7 +608,8 @@ fn infer(dir: &Path) -> Result<Spec, String> {
     let mut by_prefix: BTreeMap<String, BTreeMap<String, AnimSpec>> = BTreeMap::new();
     let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
     for path in entries.flatten().map(|e| e.path()) {
-        let Some(file) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        // `._Name.png`: the copy of a file's metadata that a zip made on a Mac brings
+        let Some(file) = path.file_name().and_then(|n| n.to_str()).filter(|f| !f.starts_with('.')) else { continue };
         let Some(stem) = file.strip_suffix(".png").or_else(|| file.strip_suffix(".PNG")) else { continue };
         if let Some((prefix, anim, _)) = parse_sheet_name(stem) {
             by_prefix.entry(prefix.to_string()).or_default().insert(anim, AnimSpec::File(file.to_string()));
@@ -544,6 +639,33 @@ fn bbox<'a>(frames: impl Iterator<Item = &'a Pixels>, w: usize, h: usize) -> Opt
 /// Dimmed channel (asleep): ~55% of the brightness.
 fn dim8(c: u8) -> u8 {
     (c as u16 * 11 / 20) as u8
+}
+
+/// `[palette]` of `sprite.toml`: `"#RRGGBB" = "K"` (a color role, see `sprites.rs`).
+fn palette(spec: &BTreeMap<String, String>) -> Result<Vec<([u8; 3], u8)>, String> {
+    let mut out = Vec::new();
+    for (color, role) in spec {
+        let c = crate::skin::color::parse_hex(color).ok_or_else(|| tr!("{}: expected a color \"#RRGGBB\"", format!("palette \"{color}\"")))?;
+        let r = role.as_bytes();
+        if r.len() != 1 || r[0] == b'.' || !super::clips::ROLES.contains(&r[0]) {
+            return Err(tr!("[palette] \"{}\" = \"{}\": use a color role (K P S H M C E W B T F D A)", color, role));
+        }
+        out.push(([(c >> 16) as u8, (c >> 8) as u8, c as u8], r[0]));
+    }
+    Ok(out)
+}
+
+/// A frame with each `palette` color swapped for its role's color in `theme` and `mood`
+/// (alpha kept); the other colors stay.
+fn recolor(src: &Buf, palette: &[([u8; 3], u8)], theme: &Theme, mood: Mood) -> Buf {
+    let roles: Vec<([u8; 3], Option<u32>)> = palette.iter().map(|(c, r)| (*c, super::render::role_color(theme, *r, mood))).collect();
+    let mut out = src.clone();
+    for p in out.make_mut_slice() {
+        if let Some((_, Some(to))) = roles.iter().find(|(c, _)| *c == [p.r, p.g, p.b]) {
+            (p.r, p.g, p.b) = ((to >> 16) as u8, (to >> 8) as u8, *to as u8);
+        }
+    }
+    out
 }
 
 fn to_buf(px: &[[u8; 4]], w: usize, h: usize) -> Buf {
@@ -595,47 +717,143 @@ fn read_png(path: &Path) -> Result<(usize, usize, Pixels), String> {
 /// character's into `mascots/<name>/` and writes a `sprite.toml` to tweak. Doesn't overwrite
 /// a mascot that already exists. Returns one line per character (shown to the user).
 pub fn import(src: &Path, root: &Path) -> Result<Vec<String>, String> {
-    let mut dirs = vec![src.to_path_buf()];
-    if let Ok(entries) = std::fs::read_dir(src) {
-        let mut subs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
-        subs.sort();
-        dirs.extend(subs);
-    }
-    let mut out = Vec::new();
-    for dir in dirs {
-        let spec = infer(&dir)?;
-        let Some(name) = spec.name.clone().filter(|_| spec.anim.len() >= 2) else { continue };
-        let key = slug(&name);
-        let dest = root.join(&key);
-        if dest.exists() {
-            out.push(tr!("{}: already exists in {} (delete the folder to import it again)", key, dest.display()));
-            continue;
-        }
-        check_key(&key)?;
-        std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-        // a config file the user edits: its comments are in English, like the format docs
-        let mut toml = format!(
-            "# Mascot imported from {}\n# Format: top of src/mascot/pack.rs (or DESIGN.md › Imported mascots).\nname = \"{name}\"\nfps = {DEFAULT_FPS}\nfacing = \"right\"\n# walking subagents: what they do at their stops (without this, everything but death/hurt)\n# extras = [\"idle\", \"attack1\", \"push\"]\n\n[anim]\n",
-            dir.display().to_string().replace('"', "'")
-        );
-        for (anim, a) in &spec.anim {
-            let file = a.file();
-            std::fs::copy(dir.join(file), dest.join(file)).map_err(|e| format!("{file}: {e}"))?;
-            let k = if anim.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') { anim.clone() } else { format!("\"{anim}\"") };
-            toml.push_str(&format!("{k} = \"{file}\"\n"));
-        }
-        toml.push_str("\n# mood → animation (sleep, idle, happy, busy, alarm); without this, the usual names apply\n# [moods]\n# busy = \"run\"\n");
-        std::fs::write(dest.join(SPEC), toml).map_err(|e| format!("{SPEC}: {e}"))?;
-        // check right away: what was copied must load
-        match load_pack(&dest, &key) {
-            Ok(a) => out.push(tr!("{}: {} ({} animations, {}×{} frame after trimming)", key, a.name, a.anims.len(), a.w, a.h)),
-            Err(e) => out.push(tr!("{}: copied, but it doesn't load: {}", key, e)),
-        }
-    }
+    let out = import_sheets(src, root)?;
     if out.is_empty() {
         return Err(tr!("{}: no sheet named like Name_Animation_N.png (at least two animations)", src.display()));
     }
     Ok(out)
+}
+
+/// The folders under `src` (itself included, a few levels down, as a downloaded pack nests
+/// them), skipping hidden ones and the `__MACOSX` a zip made on a Mac brings.
+pub fn folders(src: &Path) -> Vec<PathBuf> {
+    const DEPTH: usize = 5;
+    const MAX: usize = 400;
+    let mut out = vec![src.to_path_buf()];
+    let mut level = vec![src.to_path_buf()];
+    for _ in 0..DEPTH {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(entries) = std::fs::read_dir(dir) else { continue };
+            let mut subs: Vec<PathBuf> = entries
+                .flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .map(|e| e.path())
+                .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.starts_with('.') && n != "__MACOSX"))
+                .collect();
+            subs.sort();
+            next.extend(subs);
+        }
+        if next.is_empty() || out.len() + next.len() > MAX {
+            break;
+        }
+        out.extend(next.iter().cloned());
+        level = next;
+    }
+    out
+}
+
+/// Like `import`, but finding nothing is not an error (the Mascots app imports code
+/// mascots from the same folder). A folder that already has a `sprite.toml` (a pack made
+/// for MiniUtils) is copied as it is; the others get one deduced from the sheet names.
+pub fn import_sheets(src: &Path, root: &Path) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    // a folder that fails says why in its own line: the others still come in
+    let shown = |dir: &Path| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    for dir in folders(src) {
+        if dir.join(SPEC).is_file() {
+            out.push(import_ready(&dir, root).unwrap_or_else(|e| tr!("{}: not imported: {}", shown(&dir), e)));
+            continue;
+        }
+        match import_inferred(&dir, root) {
+            Ok(Some(line)) => out.push(line),
+            Ok(None) => {}
+            Err(e) => out.push(tr!("{}: not imported: {}", shown(&dir), e)),
+        }
+    }
+    Ok(out)
+}
+
+/// One folder without `sprite.toml`: its sheets copied to `mascots/<key>/` with a
+/// `sprite.toml` deduced from the names. `None` = no character here.
+fn import_inferred(dir: &Path, root: &Path) -> Result<Option<String>, String> {
+    let spec = infer(dir)?;
+    let Some(name) = spec.name.clone().filter(|_| spec.anim.len() >= 2) else { return Ok(None) };
+    let key = slug(&name);
+    let dest = root.join(&key);
+    if dest.exists() {
+        return Ok(Some(tr!("{}: already exists in {} (delete the folder to import it again)", key, dest.display())));
+    }
+    check_key(&key)?;
+    std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    // a config file the user edits: its comments are in English, like the format docs
+    let mut toml = format!(
+        "# Mascot imported from {}\n# Format: top of src/mascot/pack.rs (or DESIGN.md › Imported mascots).\nname = {}\nfps = {DEFAULT_FPS}\nfacing = \"right\"\n# walking subagents: what they do at their stops (without this, only idle)\n# extras = [\"idle\", \"attack1\", \"push\"]\n\n[anim]\n",
+        dir.display().to_string().replace(['\n', '\r'], " "),
+        quoted(&name)
+    );
+    for (anim, a) in &spec.anim {
+        let file = a.file();
+        std::fs::copy(dir.join(file), dest.join(file)).map_err(|e| format!("{file}: {e}"))?;
+        toml.push_str(&format!("{} = {}\n", toml_key(anim), quoted(file)));
+    }
+    toml.push_str("\n# mood → animation (sleep, idle, happy, busy, alarm); without this, the usual names apply\n# [moods]\n# busy = \"run\"\n");
+    std::fs::write(dest.join(SPEC), toml).map_err(|e| format!("{SPEC}: {e}"))?;
+    // check right away: what was copied must load
+    Ok(Some(match load_pack(&dest, &key) {
+        Ok(a) => tr!("{}: {} ({} animations, {}×{} frame after trimming)", key, a.name, a.anims.len(), a.w, a.h),
+        Err(e) => tr!("{}: copied, but it doesn't load: {}", key, e),
+    }))
+}
+
+/// `s` as a TOML string, escaped (`"`, `\` and the like in a file name stay valid).
+fn quoted(s: &str) -> String {
+    toml::Value::String(s.to_string()).to_string()
+}
+
+/// `s` as a TOML key: bare when it can be, quoted otherwise.
+fn toml_key(s: &str) -> String {
+    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') { s.to_string() } else { quoted(s) }
+}
+
+/// The `sprite.toml` of mascot folder `dir`, written from the sheet names if it has none
+/// (so the Mascots app has a file to change). Returns its path.
+pub fn ensure_spec(dir: &Path) -> Result<PathBuf, String> {
+    let path = dir.join(SPEC);
+    if path.is_file() {
+        return Ok(path);
+    }
+    let spec = infer(dir)?;
+    if spec.anim.is_empty() {
+        return Err(tr!("no animations (no sprite.toml, and no PNG named like Name_Animation_N.png)").into());
+    }
+    let mut toml = format!("name = {}\n\n[anim]\n", quoted(&spec.name.unwrap_or_default()));
+    for (anim, a) in &spec.anim {
+        toml.push_str(&format!("{} = {}\n", toml_key(anim), quoted(a.file())));
+    }
+    std::fs::write(&path, toml).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
+}
+
+/// A folder made for MiniUtils (with `sprite.toml`): checked where it is, then its PNG and
+/// TOML files copied as they are to `mascots/<key>/` (key: the folder name, made valid).
+fn import_ready(dir: &Path, root: &Path) -> Result<String, String> {
+    let art = read_folder(dir)?;
+    let dest = root.join(&art.key);
+    if dest.exists() {
+        return Ok(tr!("{}: already exists in {} (delete the folder to import it again)", art.key, dest.display()));
+    }
+    std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let keep = entry.file_type().is_ok_and(|t| t.is_file())
+            && !name.starts_with('.')
+            && (name.to_ascii_lowercase().ends_with(".png") || name == SPEC);
+        if keep {
+            std::fs::copy(entry.path(), dest.join(&name)).map_err(|e| format!("{name}: {e}"))?;
+        }
+    }
+    Ok(tr!("{}: {} ({} animations, {}×{} frame after trimming)", art.key, art.name, art.anims.len(), art.w, art.h))
 }
 
 /// "Pink Monster" → "pink-monster".
@@ -683,6 +901,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// `[palette]`: the listed color becomes the theme's role color; the others stay.
+    #[test]
+    fn palette_follows_the_theme() {
+        let d = temp("palette");
+        let p = d.join("blob");
+        std::fs::create_dir_all(&p).unwrap();
+        // two colors: #c80a1e (the sheet's first frame) listed as P, and a loose #102030
+        let mut px = vec![[0u8; 4]; 8 * 8];
+        for (i, c) in px.iter_mut().enumerate().take(16) {
+            *c = if i < 8 { [200, 0, 30, 255] } else { [16, 32, 48, 255] };
+        }
+        png(&p.join("Blob_Idle_1.png"), 8, 8, &px);
+        png(&p.join("Blob_Run_1.png"), 8, 8, &px);
+        std::fs::write(p.join("sprite.toml"), "[anim]\nidle = \"Blob_Idle_1.png\"\nrun = \"Blob_Run_1.png\"\n[palette]\n\"#c8001e\" = \"P\"\n").unwrap();
+        let (arts, skipped) = load(&d);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let a = &arts[0];
+        assert!(a.themed());
+        let neon = crate::mascot::themes::get("neon");
+        let img = a.image_in((0, 0, false), neon, Mood::Idle);
+        let buf = img.to_rgba8().unwrap();
+        let first = buf.as_slice()[0];
+        let fur = neon.fur;
+        assert_eq!((first.r, first.g, first.b), ((fur >> 16) as u8, (fur >> 8) as u8, fur as u8));
+        // the loose color keeps its own, and the check lists it
+        assert!(buf.as_slice().iter().any(|p| (p.r, p.g, p.b) == (16, 32, 48)));
+        assert_eq!(a.loose_colors(8), [[16, 32, 48]]);
+        // a role that doesn't exist is refused
+        std::fs::write(p.join("sprite.toml"), "[anim]\nidle = \"Blob_Idle_1.png\"\n[palette]\n\"#c8001e\" = \"Z\"\n").unwrap();
+        let (_, skipped) = load(&d);
+        assert!(skipped[0].reason.contains("\"Z\""), "{skipped:?}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -735,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn subagents_use_the_whole_pack_except_dying() {
+    fn subagents_stop_at_idle_unless_extras_lists_more() {
         let d = temp("troupe");
         let p = d.join("t");
         std::fs::create_dir_all(&p).unwrap();
@@ -757,8 +1009,20 @@ mod tests {
         assert!(!s.names.iter().any(|n| n == "death"), "{:?}", s.names);
         assert_eq!((name(s.walk), s.run.map(name), s.jump.map(name), s.idle.map(name)), ("walk", Some("run"), Some("jump"), Some("idle")));
         assert_eq!(s.strolls.iter().map(|&i| name(i)).collect::<Vec<_>>(), ["walk+attack"]);
+        // without `extras`, the pack's actions (attack1) don't play by themselves
+        assert_eq!(s.extras.iter().map(|&i| name(i)).collect::<Vec<_>>(), ["idle"]);
+        assert!(!s.names.iter().any(|n| n == "attack1"), "{:?}", s.names);
+
+        // listed in `extras`, the attack is a stop too
+        let toml = "extras = [\"idle\", \"attack1\"]\n[anim]\nidle = \"T_Idle_4.png\"\nwalk = \"T_Walk_6.png\"\nrun = \"T_Run_6.png\"\njump = \"T_Jump_8.png\"\nattack1 = \"T_Attack1_2.png\"\n";
+        std::fs::write(p.join("sprite.toml"), toml).unwrap();
+        let (arts, skipped) = load(&d);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let a = &arts[0];
+        let s = &a.troupe().unwrap().script;
+        let name = |i: usize| s.names[i].as_str();
         assert_eq!(s.extras.iter().map(|&i| name(i)).collect::<Vec<_>>(), ["attack1", "idle"]);
-        // header: cut of the mood animations; subagents: the whole frame (16 wide)
+        // header: cut of the mood animations; subagents: the whole frame (16 wide, the attack)
         assert!(a.w < 16);
         let (right, _) = a.troupe().unwrap().frames(0);
         assert_eq!(right[0].width(), 16);
@@ -836,7 +1100,7 @@ mod tests {
         sheet(&p.join("Q_Idle_2.png"), 2, 16);
         let (arts, _) = load(&d);
         let a = &arts[0];
-        let (side, px) = a.square((0, 0, false), 32);
+        let (side, px) = a.square((0, 0, false), crate::mascot::themes::get("neon"), Mood::Idle, 32);
         // trimmed 3×3 frame → scaled 10× → 30
         assert_eq!(side, 30);
         assert_eq!(px.len(), 30 * 30 * 4);

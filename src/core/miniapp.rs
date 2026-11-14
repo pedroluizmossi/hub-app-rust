@@ -76,6 +76,33 @@ impl Reporter {
 }
 
 /// Services the host offers every mini-app.
+/// An app setting that picks a mascot (a mascot choice in its manifest): where the Mascots
+/// app can put one ("Use in").
+#[derive(Debug, Clone, PartialEq)]
+pub struct MascotTarget {
+    pub app: String,
+    /// The app's name, in the interface language.
+    pub name: String,
+    /// The setting's key (`mascot`, `gpu_mascot`…).
+    pub setting: String,
+    /// The setting's label, when the app has more than one.
+    pub label: String,
+}
+
+/// The mascot settings of the enabled apps, filled in by the hub whenever it rebuilds the
+/// Settings list (the apps' manifests live there).
+static MASCOT_TARGETS: std::sync::RwLock<Vec<MascotTarget>> = std::sync::RwLock::new(Vec::new());
+
+pub fn set_mascot_targets(list: Vec<MascotTarget>) {
+    if let Ok(mut t) = MASCOT_TARGETS.write() {
+        *t = list;
+    }
+}
+
+pub fn mascot_targets() -> Vec<MascotTarget> {
+    MASCOT_TARGETS.read().map(|t| t.clone()).unwrap_or_default()
+}
+
 pub struct Host {
     pub config: RefCell<Config>,
     pub bus: Bus,

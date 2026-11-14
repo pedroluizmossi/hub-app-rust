@@ -134,12 +134,19 @@ impl Hub {
     }
 
     /// Reduce motion: mascots stand still on screen (`Anim.calm`); the apps stop firing
-    /// reactions (they read `reduce_motion` from the config).
+    /// reactions (they read `reduce_motion` from the config). Also "still on hover", which
+    /// works on its own: the mascot does not perk up when its card is hovered.
     pub(super) fn apply_motion(&self) {
-        let calm = self.host.config.borrow().reduce_motion;
+        let (calm, still) = {
+            let cfg = self.host.config.borrow();
+            (cfg.reduce_motion, cfg.still_on_hover)
+        };
         crate::mascot::anim::set_calm(calm);
         self.ui.set_reduce_motion(calm);
-        self.ui.global::<Anim>().set_calm(calm);
+        self.ui.set_still_on_hover(still);
+        let anim = self.ui.global::<Anim>();
+        anim.set_calm(calm);
+        anim.set_still_on_hover(still);
     }
 
     /// "System" card of the settings: start with the system, version and logs. Read again
@@ -197,6 +204,15 @@ impl Hub {
         {
             let mut cfg = self.host.config.borrow_mut();
             cfg.reduce_motion = !cfg.reduce_motion;
+            cfg.save();
+        }
+        self.apply_motion();
+    }
+
+    pub(super) fn toggle_still_on_hover(&self) {
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            cfg.still_on_hover = !cfg.still_on_hover;
             cfg.save();
         }
         self.apply_motion();
@@ -326,10 +342,11 @@ impl Hub {
         self.rebuild_lists();
     }
 
-    /// Opens the folder of themes, skins, backdrops and mascots (creating the subfolders first).
+    /// Opens the folder of themes, skins, backdrops, sprites and mascots (creating the
+    /// subfolders first).
     pub(super) fn open_looks_dir(&self) {
         let root = skin::user::dir();
-        for sub in [skin::user::THEMES, skin::user::SKINS, skin::user::BACKDROPS, crate::mascot::pack::DIR] {
+        for sub in [skin::user::THEMES, skin::user::SKINS, skin::user::BACKDROPS, crate::mascot::file::DIR, crate::mascot::pack::DIR] {
             if let Err(e) = std::fs::create_dir_all(root.join(sub)) {
                 log::warn!("could not create {}: {e}", root.join(sub).display());
                 return;

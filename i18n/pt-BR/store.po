@@ -2,11 +2,11 @@
 # shows.
 
 # --help (store part)
-msgid "plugin store:"
-msgstr "loja de plugins:"
+msgid "store (plugins and mascots):"
+msgstr "loja (plugins e mascotes):"
 
-msgid "lists the plugins and the state of each"
-msgstr "lista os plugins e o estado de cada um"
+msgid "lists the plugins and mascot packs and the\nstate of each"
+msgstr "lista os plugins e os pacotes de mascotes e o\nestado de cada um"
 
 msgid "installs (asks first, without --yes)"
 msgstr "instala (pergunta antes, sem --yes)"
@@ -14,8 +14,8 @@ msgstr "instala (pergunta antes, sem --yes)"
 msgid "updates to the index's commit"
 msgstr "atualiza para o commit do índice"
 
-msgid "removes an installed plugin; if it has\ndata, asks whether to delete it (or follows the option)"
-msgstr "remove um plugin instalado; se ele tiver\ndados, pergunta se apaga (ou siga a opção)"
+msgid "removes an installed plugin or mascot pack;\nif it has data, asks whether to delete it (or\nfollows the option)"
+msgstr "remove um plugin ou pacote de mascotes instalado;\nse tiver dados, pergunta se apaga (ou\nsegue a opção)"
 
 msgid "lists the installed ones (from the store and local)"
 msgstr "lista os instalados (da loja e locais)"
@@ -340,3 +340,49 @@ msgstr "{}: não há essa tag, branch ou commit no repositório (a tag foi envia
 
 msgid "{}: use https://… or owner/repository (on GitHub)"
 msgstr "{}: use https://… ou dono/repositório (no GitHub)"
+
+# Mascot packs in the store (src/store/mascots.rs, src/hub/store.rs, ui/store.slint)
+msgid "mascots"
+msgstr "mascotes"
+
+msgid "only drawings: no code and no permissions"
+msgstr "só desenhos: sem código e sem permissões"
+
+msgid "sprites: {}"
+msgstr "sprites: {}"
+
+msgid "PNG: {}"
+msgstr "PNG: {}"
+
+msgid "{} installed ({})"
+msgstr "{} instalado ({})"
+
+msgid "{} removed ({})"
+msgstr "{} removido ({})"
+
+msgid "{} mascot pack(s) (drawings only, no code):"
+msgstr "{} pacote(s) de mascotes (só desenhos, sem código):"
+
+msgid "{} · plugins: {} · mascots: {}"
+msgstr "{} · plugins: {} · mascotes: {}"
+
+msgid "Click again to install. The mascots show up in every mascot picker."
+msgstr "Clique de novo para instalar. As mascotes aparecem em todo seletor de mascote."
+
+msgid "Click again to remove {}. An app or page using one of its mascots goes back to the first one."
+msgstr "Clique de novo para remover {}. Um app ou página que use uma das mascotes dele volta para a primeira."
+
+msgid "{}: no mascot (sprites/<key>.toml or mascots/<key>/) in the repository"
+msgstr "{}: nenhuma mascote (sprites/<chave>.toml ou mascots/<chave>/) no repositório"
+
+msgid "{}: too many sprites ({}; up to {})"
+msgstr "{}: sprites demais ({}; até {})"
+
+msgid "{}: too many PNG mascots ({}; up to {})"
+msgstr "{}: mascotes PNG demais ({}; até {})"
+
+msgid "{}: {}/{} has too many files (up to {})"
+msgstr "{}: {}/{} tem arquivos demais (até {})"
+
+msgid "{}: {} already exists (yours or from another entry): rename or delete it first"
+msgstr "{}: {} já existe (seu ou de outra entrada): renomeie ou apague antes"

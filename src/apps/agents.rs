@@ -15,7 +15,8 @@ use crate::core::miniapp::{Host, MiniApp};
 use super::kit::{HeaderMascot, Speech, plural};
 use crate::mascot::anim::Reaction;
 use crate::mascot::stroll::{Pose, Script, Stage};
-use crate::mascot::{Mood, anim, pack, render, sprites};
+use crate::mascot::themes::Theme;
+use crate::mascot::{Mood, anim, render, sprites, walkers};
 use crate::core::bus::Topic;
 use crate::providers::agents::{self, Agent, AgentsSnapshot, State, Step, StepKind, Tool, clip};
 use crate::tr;
@@ -296,7 +297,8 @@ impl AgentsMini {
                 (session_key(a), working.map(|s| (s.id.clone(), self.heroes.calling_tools(s, now))).collect())
             })
             .collect();
-        self.heroes.sync(on, &walking);
+        let theme = self.host.theme_for(&self.manifest);
+        self.heroes.sync(on, &walking, theme);
         self.cards = cards;
         let list: Vec<Agent> = list.into_iter().map(|(a, _)| a.clone()).collect();
         self.shown = list.clone();
@@ -491,7 +493,7 @@ struct Card {
 struct Heroes {
     /// Mascots that walk and their frames, from the mascot-list generation they were read
     /// in (reloading the folder replaces everything).
-    cast: Option<(u64, Vec<Hero>)>,
+    cast: Option<((u64, &'static str), Vec<Hero>)>,
     roster: Roster,
     /// Strip of each card, by session key.
     stages: HashMap<String, Stage>,
@@ -503,11 +505,9 @@ struct Heroes {
     clock: Option<Instant>,
 }
 
-/// A mascot that walks: the script and the frames (right, left) of each animation.
-struct Hero {
-    script: &'static Script,
-    frames: Vec<(Vec<slint::Image>, Vec<slint::Image>)>,
-}
+/// A mascot that walks (PNG sprite or code mascot, see `mascot::walkers`): the script and
+/// the frames (right, left) of each animation.
+type Hero = walkers::Walker;
 
 /// Wrote to its log less than this ago (or has a new action less than `BUSY_MS` ago): it
 /// is calling tools, and the mascot runs.
@@ -520,24 +520,12 @@ impl Heroes {
         self.clock.get_or_insert_with(Instant::now).elapsed().as_millis() as u64
     }
 
-    /// The mascots that walk (read again when the mascot folder is reloaded).
-    fn load(&mut self) -> usize {
-        let generation = sprites::generation();
+    /// The mascots that walk, of both kinds, drawn in the app's theme (read again when the
+    /// mascots are reloaded or the theme changes).
+    fn load(&mut self, theme: &Theme) -> usize {
+        let generation = (sprites::generation(), theme.key);
         if self.cast.as_ref().is_none_or(|(g, _)| *g != generation) {
-            let list = pack::walkers()
-                .into_iter()
-                .filter_map(|art| {
-                    let t = art.troupe()?;
-                    let imgs = |v: &[pack::Buf]| v.iter().map(|b| slint::Image::from_rgba8(b.clone())).collect();
-                    let frames = (0..t.script.names.len())
-                        .map(|c| {
-                            let (right, left) = t.frames(c);
-                            (imgs(right), imgs(left))
-                        })
-                        .collect();
-                    Some(Hero { script: &t.script, frames })
-                })
-                .collect();
+            let list = walkers::all(theme);
             self.cast = Some((generation, list));
             self.stages.clear();
         }
@@ -565,8 +553,8 @@ impl Heroes {
     /// Who walks on each card now: (card, [(subagent, calling tools)]).
     /// When off (or with no mascot that walks), the strips empty out and the screen uses the
     /// tool's mascot.
-    fn sync(&mut self, on: bool, walking: &[(String, Vec<(String, bool)>)]) {
-        let n = if on { self.load() } else { 0 };
+    fn sync(&mut self, on: bool, walking: &[(String, Vec<(String, bool)>)], theme: &Theme) {
+        let n = if on { self.load(theme) } else { 0 };
         self.models.retain(|key, _| walking.iter().any(|(k, _)| k == key));
         self.busy.retain(|id, _| walking.iter().any(|(_, subs)| subs.iter().any(|(s, _)| s == id)));
         // a subagent that stopped walking frees its slot (the next new one follows the rotation)
@@ -582,7 +570,7 @@ impl Heroes {
         }
         let now = self.now();
         let Some((_, heroes)) = &self.cast else { return };
-        let scripts: Vec<&Script> = heroes.iter().map(|h| h.script).collect();
+        let scripts: Vec<&Script> = heroes.iter().map(|h| &h.script).collect();
         self.stages.retain(|key, _| walking.iter().any(|(k, _)| k == key));
         for (key, subs) in walking {
             let here: Vec<(String, usize, bool)> =
@@ -601,7 +589,7 @@ impl Heroes {
         }
         let now = self.now();
         if let Some((_, heroes)) = &self.cast {
-            let scripts: Vec<&Script> = heroes.iter().map(|h| h.script).collect();
+            let scripts: Vec<&Script> = heroes.iter().map(|h| &h.script).collect();
             for stage in self.stages.values_mut() {
                 stage.step(now, &scripts);
             }
@@ -612,7 +600,7 @@ impl Heroes {
     /// Passes the poses of each strip to the screen and asks the hub for the animation pace.
     fn draw(&mut self, now: u64) {
         let Some((_, heroes)) = &self.cast else { return };
-        let scripts: Vec<&Script> = heroes.iter().map(|h| h.script).collect();
+        let scripts: Vec<&Script> = heroes.iter().map(|h| &h.script).collect();
         let calm = anim::calm();
         for (key, stage) in &self.stages {
             let Some(model) = self.models.get(key) else { continue };

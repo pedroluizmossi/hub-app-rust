@@ -46,6 +46,9 @@ pub struct Config {
     pub ambient: bool,
     /// Reduce motion: mascots without jumps or shakes, and no reactions or easter eggs.
     pub reduce_motion: bool,
+    /// Mascots stay put when the pointer is over their card (on by default; works on its
+    /// own, without "Reduce motion", which keeps them still anyway).
+    pub still_on_hover: bool,
     /// How much the mascots chat with each other: `"off"`, `"some"` or `"lots"`.
     pub chatter: String,
     /// Interface language: `"auto"` (the system's), `"en"` or `"pt-BR"` (`core::i18n`).
@@ -123,6 +126,7 @@ impl Default for Config {
             text_scale: 100,
             ambient: true,
             reduce_motion: false,
+            still_on_hover: true,
             chatter: "some".into(),
             language: "auto".into(),
             nav: "side".into(),

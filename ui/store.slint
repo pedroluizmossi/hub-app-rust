@@ -1,12 +1,16 @@
-// Plugin store (src/hub/store.rs): where the index comes from, the list with each plugin's
-// state, and the actions. Install, update and remove ask for a second click, which shows
-// what the plugin will run.
+// Store (src/hub/store.rs): where the index comes from, the list with each plugin's and
+// mascot pack's state, and the actions. Install, update and remove ask for a second click,
+// which shows what the plugin will run.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons } from "theme.slint";
 import { Icon, TextButton } from "widgets.slint";
 
 export struct StoreRow {
     id: string,
+    // what the actions name: the id, or "mascot:<id>" for a mascot pack
+    target: string,
+    // "plugin" | "mascot" (a pack of drawings, no code)
+    kind: string,
     name: string,
     version: string,
     // "author · license"
@@ -40,7 +44,7 @@ export global StoreApp {
     in property <bool> loading;
     callback reload();
     callback save-source(string /* index */, string /* key */);
-    callback act(string /* id */, string /* install | update | remove | remove-purge */);
+    callback act(string /* target (the row's) */, string /* install | update | remove | remove-purge */);
 }
 
 // Single-line text field, in the window's colors.
@@ -100,6 +104,24 @@ component PluginRow inherits Rectangle {
                 horizontal-stretch: 1;
                 overflow: elide;
             }
+            // a mascot pack, not an app
+            if item.kind == "mascot": VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    border-width: 1px;
+                    border-color: Skin.accent;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        Text {
+                            text: @tr("mascots");
+                            color: Skin.accent;
+                            font-family: Skin.font-mono;
+                            font-size: 11px * Skin.text-scale;
+                        }
+                    }
+                }
+            }
             Text {
                 text: item.state;
                 color: item.update ? Skin.accent2 : item.installed ? Skin.accent : Skin.dim;
@@ -124,7 +146,7 @@ component PluginRow inherits Rectangle {
                 ink: Skin.danger;
                 edge: Skin.danger-edge;
                 font-size: 13px * Skin.text-scale;
-                clicked => { StoreApp.act(item.id, "remove-purge"); }
+                clicked => { StoreApp.act(item.target, "remove-purge"); }
             }
             if !item.busy && item.installed: TextButton {
                 text: item.armed != "remove" ? @tr("Remove") : item.data != "" ? @tr("Remove and keep the data") : @tr("Confirm removal");
@@ -132,21 +154,21 @@ component PluginRow inherits Rectangle {
                 ink: Skin.danger;
                 edge: Skin.danger-edge;
                 font-size: 13px * Skin.text-scale;
-                clicked => { StoreApp.act(item.id, "remove"); }
+                clicked => { StoreApp.act(item.target, "remove"); }
             }
             if !item.busy && item.update: TextButton {
                 text: item.armed == "update" ? @tr("Confirm update") : @tr("Update");
                 icon: Icons.refresh;
                 ink: Skin.accent;
                 font-size: 13px * Skin.text-scale;
-                clicked => { StoreApp.act(item.id, "update"); }
+                clicked => { StoreApp.act(item.target, "update"); }
             }
             if !item.busy && !item.installed: TextButton {
                 text: item.armed == "install" ? @tr("Confirm install") : @tr("Install");
                 icon: Icons.plus;
                 ink: Skin.accent;
                 font-size: 13px * Skin.text-scale;
-                clicked => { StoreApp.act(item.id, "install"); }
+                clicked => { StoreApp.act(item.target, "install"); }
             }
         }
     }
@@ -213,7 +235,7 @@ export component StoreView inherits ScrollView {
         for r in StoreApp.rows: PluginRow { item: r; }
 
         if StoreApp.rows.length == 0 && !StoreApp.loading: Text {
-            text: @tr("No plugins to show.");
+            text: @tr("Nothing to show.");
             color: Skin.dim;
             font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;

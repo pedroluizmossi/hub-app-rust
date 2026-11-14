@@ -167,6 +167,8 @@ component Row inherits Rectangle {
 }
 
 export component PortsView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     property <Colors> t: PortsApp.theme;
     property <bool> narrow: self.width < 520px;
     property <bool> short: self.height < 260px;
@@ -185,6 +187,7 @@ export component PortsView inherits Rectangle {
             height: mascot-h + 8px;
             background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
             Mascot {
+                noticed: root.hovered;
                 theme: t;
                 frame: PortsApp.mascot;
                 mood: PortsApp.mood;

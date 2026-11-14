@@ -97,6 +97,22 @@ impl Hub {
         }
         let apps: Vec<AppInfo> = self.registry.all().iter().map(|a| self.app_info(a)).collect();
         self.ui.set_apps(ModelRc::new(VecModel::from(apps)));
+        // where the Mascots app can put a mascot: the enabled apps' mascot settings
+        let mut targets = Vec::new();
+        for app in self.registry.enabled() {
+            let a = app.borrow();
+            let m = a.manifest();
+            // the manifest's texts are already in the interface language (Manifest::parse)
+            for s in m.settings.iter().filter(|s| sprites::is_choice(&s.live_options())) {
+                targets.push(crate::core::miniapp::MascotTarget {
+                    app: m.id.clone(),
+                    name: m.name.clone(),
+                    setting: s.key.clone(),
+                    label: s.label.clone(),
+                });
+            }
+        }
+        crate::core::miniapp::set_mascot_targets(targets);
     }
 
     pub(super) fn settings_of(&self, m: &Manifest) -> Vec<SettingRow> {

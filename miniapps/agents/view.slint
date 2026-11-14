@@ -373,12 +373,14 @@ component Row inherits Rectangle {
         height: walk-h;
         // the ground
         Rectangle { y: parent.height - 7px; height: 1px; background: t.ok.with-alpha(0.35); }
-        // imported mascots: Rust picks the frame and the place (src/mascot/stroll.rs)
+        // mascots that walk (PNG sprites and code mascots with `walk`): Rust picks the frame
+        // and the place (src/mascot/stroll.rs, src/mascot/walkers.rs)
         for h in a.heroes: Image {
             source: h.frame;
             image-rendering: pixelated;
-            // at the drawing size (crisp), up to 32 px tall
-            property <length> hero-h: min(32px, h.frame.height * 1px);
+            // at the drawing size (crisp), up to 32 px tall; a small drawing (a 16×14 code
+            // mascot) doubles, so it isn't a speck next to the others
+            property <length> hero-h: h.frame.height <= 16 ? h.frame.height * 2px : min(32px, h.frame.height * 1px);
             height: hero-h;
             width: hero-h * h.frame.width / max(1, h.frame.height);
             x: h.x * (parent.width - self.width);
@@ -443,6 +445,8 @@ component Row inherits Rectangle {
 }
 
 export component AgentsView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
     property <Colors> t: AgentsApp.theme;
     property <bool> narrow: self.width < 520px;
     property <bool> short: self.height < 260px;
@@ -460,6 +464,7 @@ export component AgentsView inherits Rectangle {
             height: mascot-h + 8px;
             background: AgentsApp.waiting > 0 ? t.warn.with-alpha(0.16) : t.fur.with-alpha(0.1);
             Mascot {
+                noticed: root.hovered;
                 theme: t;
                 frame: AgentsApp.mascot;
                 mood: AgentsApp.mood;

@@ -4,11 +4,13 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use zbus::blocking::{Connection, Proxy};
-use zbus::zvariant::OwnedValue;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
-use super::{MediaSnapshot, usable};
+use super::{ART_MAX_BYTES, ArtCache, MediaSnapshot, Score, file_url_path, usable};
 use crate::tr;
 
+/// Where the players come from, for the label in the CD Player display.
+pub const SOURCE: &str = "MPRIS";
 /// Prefix of the services that speak MPRIS.
 const PREFIX: &str = "org.mpris.MediaPlayer2.";
 const PATH: &str = "/org/mpris/MediaPlayer2";
@@ -33,6 +35,8 @@ pub struct MediaProvider {
     player: String,
     last: Option<MediaSnapshot>,
     retry_at: Option<Instant>,
+    /// Cover of the current track (read once per `mpris:artUrl`).
+    art: ArtCache,
 }
 
 
@@ -92,20 +96,23 @@ impl MediaProvider {
         // Two players may describe the same song (Firefox and the browser integration, for
         // example). Keep the one that is playing and knows length/position; a tie keeps the
         // current one.
-        let mut best: Option<((u8, u8, u8, u8), MediaSnapshot)> = None;
+        let mut best: Option<(Score, MediaSnapshot, String)> = None;
         for name in &names {
             let Ok(player) = props(conn, name, PLAYER) else { continue };
             let root = props(conn, name, ROOT).unwrap_or_default();
             let position = position(conn, name).ok();
             let snap = parse(name, &root, &player, position);
             let score = usable(&snap, &self.player);
-            if best.as_ref().is_none_or(|(s, _)| score > *s) {
-                best = Some((score, snap));
+            if best.as_ref().is_none_or(|(s, _, _)| score > *s) {
+                best = Some((score, snap, text(metadata(&player).get("mpris:artUrl"))));
             }
         }
         match best {
-            Some((_, snap)) => {
+            Some((_, mut snap, art_url)) => {
                 self.player = snap.player.clone();
+                // a late cover comes with a new URL (a new key): one read per URL, so a
+                // download that fails (offline) does not hold the readings again
+                snap.art = self.art.get(&art_url, 1, || art_bytes(&art_url));
                 Ok(snap)
             }
             None => {
@@ -144,10 +151,7 @@ pub fn parse(
     player: &HashMap<String, OwnedValue>,
     position_us: Option<i64>,
 ) -> MediaSnapshot {
-    let meta = player
-        .get("Metadata")
-        .and_then(|v| HashMap::<String, OwnedValue>::try_from(v.clone()).ok())
-        .unwrap_or_default();
+    let meta = metadata(player);
     MediaSnapshot {
         ok: true,
         error: String::new(),
@@ -164,7 +168,75 @@ pub fn parse(
         can_previous: flag(player, "CanGoPrevious"),
         can_next: flag(player, "CanGoNext"),
         can_seek: flag(player, "CanSeek"),
+        can_raise: flag(root, "CanRaise"),
+        // the cover is read by the provider (`ArtCache`), not here
+        art: None,
     }
+}
+
+/// The track's `Metadata` (empty if the player has none).
+fn metadata(player: &HashMap<String, OwnedValue>) -> HashMap<String, OwnedValue> {
+    player
+        .get("Metadata")
+        .and_then(|v| HashMap::<String, OwnedValue>::try_from(v.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// Deadline to download a cover (Spotify gives an `https://` URL).
+const ART_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Bytes of the cover at `url` (`mpris:artUrl`): a local file (browsers, local players) or
+/// HTTP(S) (Spotify). Capped at `ART_MAX_BYTES`; anything else is ignored.
+fn art_bytes(url: &str) -> Option<Vec<u8>> {
+    if let Some(path) = file_url_path(url) {
+        let meta = std::fs::metadata(&path).ok()?;
+        if !meta.is_file() || meta.len() > ART_MAX_BYTES {
+            return None;
+        }
+        return std::fs::read(&path).ok();
+    }
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return None;
+    }
+    let client = reqwest::blocking::Client::builder().timeout(ART_TIMEOUT).build().ok()?;
+    let resp = client.get(url).send().and_then(|r| r.error_for_status()).ok()?;
+    if resp.content_length().is_some_and(|n| n > ART_MAX_BYTES) {
+        return None;
+    }
+    // without a declared length (chunked), never more than the limit is read: one byte past
+    // it says the cover is too big
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(resp, ART_MAX_BYTES + 1), &mut bytes).ok()?;
+    (bytes.len() as u64 <= ART_MAX_BYTES).then_some(bytes)
+}
+
+/// Jumps to `fraction` (0..1) of the track (a click on the progress bar): `SetPosition`
+/// with the track id, as the spec asks; a player without `mpris:trackid` gets a relative
+/// `Seek` from the current position instead.
+pub fn seek_to(service: &str, fraction: f64) -> anyhow::Result<()> {
+    if !valid_service(service) {
+        anyhow::bail!("{}", tr!("invalid player"));
+    }
+    let conn = connect()?;
+    let meta = metadata(&props(&conn, service, PLAYER)?);
+    let length = micros(meta.get("mpris:length"));
+    anyhow::ensure!(length > 0, "{}", tr!("the track has no known length"));
+    let target = (length as f64 * fraction.clamp(0.0, 1.0)) as i64;
+    let player = Proxy::new(&conn, service, PATH, PLAYER)?;
+    // the id is an object path per the spec; some players send it as a string
+    let track = meta.get("mpris:trackid").and_then(|v| {
+        OwnedObjectPath::try_from(v.clone()).ok().or_else(|| OwnedObjectPath::try_from(text(Some(v))).ok())
+    });
+    match track {
+        Some(track) => {
+            player.call_method("SetPosition", &(track, target))?;
+        }
+        None => {
+            let now = position(&conn, service)?;
+            player.call_method("Seek", &(target - now,))?;
+        }
+    }
+    Ok(())
 }
 
 /// Runs a command on the player. Verbs: play-pause, next, prev, back, fwd, raise.
@@ -282,7 +354,7 @@ mod tests {
 
     #[test]
     fn reads_metadata_and_capabilities() {
-        let root = map(&[("Identity", Value::from("firefox"))]);
+        let root = map(&[("Identity", Value::from("firefox")), ("CanRaise", Value::from(true))]);
         let s = parse("org.mpris.MediaPlayer2.firefox", &root, &player_props("Playing"), Some(42_600_000));
         assert_eq!(s.app, "firefox");
         assert_eq!(s.state, "Playing");
@@ -294,6 +366,7 @@ mod tests {
         assert_eq!(s.position, 42);
         assert!(s.can_next && s.can_play && s.can_seek);
         assert!(!s.can_previous);
+        assert!(s.can_raise);
         assert!(s.has_player());
         assert_eq!(s.summary(), "CD Player: Céu de Brasília — Tonico, Tinoco");
     }
@@ -307,6 +380,8 @@ mod tests {
         assert_eq!(s.title, "");
         assert_eq!(s.length, 0);
         assert_eq!(s.summary(), "CD Player: org.mpris.MediaPlayer2.x open");
+        // no `CanRaise`: the "open" button stays hidden
+        assert!(!s.can_raise);
     }
 
     #[test]

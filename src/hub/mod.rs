@@ -175,6 +175,7 @@ impl Hub {
         registry.add(crate::apps::ai_usage::AiUsageMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::ports::PortsMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::todo::TodoMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::mascots::MascotsMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::agents::AgentsMini::create(host.clone(), &ui) as AppRef, None);
         // installed community plugins (see `store.rs`)
         crate::apps::plugin::sync(&host, &ui, &registry, true);

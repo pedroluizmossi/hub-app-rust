@@ -1,0 +1,491 @@
+// Manager window of the Mascots app (src/apps/mascots.rs), outside the hub popup (it shows
+// in the taskbar), like the agents' detail window: no system frame (the skin's `Frame`),
+// drags by the header, resizes by the edges, closes with the header button or Esc.
+//
+// Left: every mascot (built-in, yours, from the store), with its kind. Right: the card of
+// the chosen one: preview, name, what it has (the same report as `--check-mascot`), which
+// animation shows each mood (PNG sprite), the [palette] colors (PNG sprite), the walking
+// stops, and where to use it. Every change is written to the mascot's own file.
+import { ScrollView } from "std-widgets.slint";
+import { Colors, Skin, Icons } from "../../ui/theme.slint";
+import { TextButton, HeaderButton, Select, SqSwitch } from "../../ui/widgets.slint";
+import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
+
+export struct MascotItem {
+    key: string,
+    name: string,
+    // "code" | "sprite"
+    kind: string,
+    // "built-in" | "yours" | "store" (translated by Rust)
+    origin: string,
+    icon: image,
+    walks: bool,
+    themed: bool,
+}
+
+// A color of a PNG sprite and the role it takes ([palette]).
+export struct PaletteRow {
+    color: color,
+    // "#rrggbb"
+    hex: string,
+    // index into `roles` (0 = keeps its own color)
+    role: int,
+}
+
+// An animation and whether the walking subagents stop to play it (`extras`).
+export struct StopRow {
+    name: string,
+    on: bool,
+}
+
+export global MascotsManager {
+    in property <Colors> theme;
+    in property <[MascotItem]> items;
+    in property <int> selected: -1;
+    // the chosen one
+    in property <string> name;
+    in property <string> key;
+    // has a file of its own (not built-in): can be renamed and changed
+    in property <bool> editable;
+    // installed by the store: removing goes through the Store
+    in property <bool> from-store;
+    // the check report (`mascot::check`)
+    in property <string> report;
+    in property <image> preview;
+    // "Calm", "Busy"…, "Walking" (when it walks)
+    in property <[string]> preview-modes;
+    in property <int> preview-index;
+    // which animation shows each mood/reaction (PNG sprite): the options and the choice
+    // (0 = the usual name) of sleep, idle, happy, busy, alarm, celebrate, surprised
+    in property <bool> can-map;
+    in property <[string]> anim-options;
+    in property <[int]> mapping;
+    // [palette] (PNG sprite)
+    in property <bool> can-palette;
+    in property <[string]> roles;
+    in property <[PaletteRow]> palette;
+    // walking stops (when it walks)
+    in property <bool> can-stops;
+    in property <[StopRow]> stops;
+    // where it can go: "Tray icon", "Page: General", "Docker · Mascot"…
+    in property <[string]> targets;
+    in property <string> status;
+    in property <bool> status-bad;
+    // "remove" waiting for the second click
+    in property <bool> armed-remove;
+    in property <bool> busy;
+
+    callback select(int);
+    callback rename(string);
+    callback preview-mode(int);
+    callback map(int /* mood or reaction */, int /* option */);
+    callback palette-role(int /* row */, int /* role */);
+    callback stop-toggled(int);
+    callback use-in(int);
+    callback remove();
+    callback open-folder();
+    callback import-folder();
+    callback import-zip();
+    // own frame: close, drag by the header, resize by the `dir` edge
+    callback close();
+    callback start-move();
+    callback start-resize(string);
+}
+
+// Section title inside the card.
+component Heading inherits Text {
+    color: MascotsManager.theme.text;
+    font-size: 14px * Skin.text-scale;
+    font-weight: 700;
+}
+
+// A row with a label and a control on the right.
+component Line inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 12px;
+    min-height: max(36px, self.preferred-height);
+    Text {
+        text: label;
+        color: MascotsManager.theme.sub;
+        font-size: 13px * Skin.text-scale;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+        overflow: elide;
+    }
+    @children
+}
+
+component ItemRow inherits Rectangle {
+    in property <MascotItem> item;
+    in property <bool> chosen;
+    in property <int> index;
+    property <Colors> t: MascotsManager.theme;
+    height: max(44px, row.preferred-height);
+    background: chosen ? t.visor.with-alpha(0.16) : touch.has-hover ? t.visor.with-alpha(0.06) : transparent;
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { MascotsManager.select(index); }
+    }
+    row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: item.icon;
+                image-rendering: pixelated;
+                height: 28px;
+                width: min(40px, self.height * item.icon.width / max(1, item.icon.height));
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: item.name;
+                color: t.text;
+                font-size: 13px * Skin.text-scale;
+                font-weight: chosen ? 700 : 400;
+                overflow: elide;
+            }
+            Text {
+                text: (item.kind == "code" ? @tr("code") : @tr("sprite")) + " · " + item.origin + (item.walks ? " · " + @tr("walks") : "");
+                color: t.sub;
+                font-family: Skin.font-mono;
+                font-size: 10px * Skin.text-scale;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+export component MascotsWindow inherits Window {
+    property <Colors> t: MascotsManager.theme;
+    title: @tr("Mascots");
+    preferred-width: 820px;
+    preferred-height: 640px;
+    min-width: 640px;
+    min-height: 420px;
+    no-frame: true;
+    background: transparent;
+    default-font-family: Skin.font-ui;
+    default-font-size: 13px * Skin.text-scale;
+
+  FocusScope {
+    init => { self.focus(); }
+    key-pressed(e) => {
+        if e.text == Key.Escape {
+            MascotsManager.close();
+            return accept;
+        }
+        reject
+    }
+
+    Frame { }
+
+    VerticalLayout {
+        padding: Skin.border;
+
+        // header: drags the window
+        Bar {
+            TouchArea {
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        MascotsManager.start-move();
+                    }
+                }
+            }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 10px;
+                Text {
+                    text: @tr("Mascots");
+                    color: Skin.panel-ink;
+                    font-family: Skin.font-title;
+                    font-size: 16px * Skin.text-scale;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: @tr("Import folder…");
+                        icon: Icons.plus;
+                        font-size: 12px * Skin.text-scale;
+                        enabled: !MascotsManager.busy;
+                        clicked => { MascotsManager.import-folder(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: @tr("Import .zip…");
+                        icon: Icons.plus;
+                        font-size: 12px * Skin.text-scale;
+                        enabled: !MascotsManager.busy;
+                        clicked => { MascotsManager.import-zip(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    HeaderButton {
+                        text: @tr("Close");
+                        short: @tr("close");
+                        icon: Icons.close;
+                        px-icon: Icons.px-close;
+                        clicked => { MascotsManager.close(); }
+                    }
+                }
+            }
+        }
+
+        // content in the app theme, in a card away from the edge (the cut corner)
+        Rectangle {
+            vertical-stretch: 1;
+          Rectangle {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+            background: t.bg0.mix(t.bg1, 0.75).with-alpha(Skin.card-alpha);
+            border-width: 1px;
+            border-color: t.muted.mix(t.bg0, 0.55);
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 12px;
+
+                // every mascot
+                Rectangle {
+                    width: 230px;
+                    border-width: 1px;
+                    border-color: t.muted.with-alpha(0.45);
+                    background: t.bg1.mix(t.bg0, 0.6);
+                    ScrollView {
+                        VerticalLayout {
+                            alignment: start;
+                            for it[i] in MascotsManager.items: ItemRow {
+                                item: it;
+                                index: i;
+                                chosen: i == MascotsManager.selected;
+                            }
+                        }
+                    }
+                }
+
+                // the chosen one
+                ScrollView {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 10px;
+                        padding-right: 8px;
+
+                        if MascotsManager.selected < 0: Text {
+                            text: @tr("Choose a mascot on the left.");
+                            color: t.sub;
+                        }
+
+                        if MascotsManager.selected >= 0: HorizontalLayout {
+                            spacing: 14px;
+                            Rectangle {
+                                width: 112px;
+                                height: 98px;
+                                background: t.fur.with-alpha(0.1);
+                                Image {
+                                    source: MascotsManager.preview;
+                                    image-rendering: pixelated;
+                                    property <float> k: min(96 / max(1, MascotsManager.preview.width), 84 / max(1, MascotsManager.preview.height));
+                                    width: MascotsManager.preview.width * k * 1px;
+                                    height: MascotsManager.preview.height * k * 1px;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 6px;
+                                horizontal-stretch: 1;
+                                // rename: Enter saves (the key, what the config stores, stays)
+                                Rectangle {
+                                    height: 34px;
+                                    border-width: 1px;
+                                    border-color: name.has-focus ? t.visor : t.muted.with-alpha(0.6);
+                                    background: t.bg1;
+                                    name := TextInput {
+                                        x: 10px;
+                                        width: parent.width - 20px;
+                                        text: MascotsManager.name;
+                                        read-only: !MascotsManager.editable;
+                                        color: t.text;
+                                        font-size: 15px * Skin.text-scale;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                        accessible-label: @tr("Name of the mascot");
+                                        accepted => { MascotsManager.rename(self.text); }
+                                    }
+                                }
+                                Text {
+                                    text: MascotsManager.editable ? @tr("key: {} · Enter saves the name", MascotsManager.key)
+                                        : MascotsManager.from-store ? @tr("key: {} · from the store (an update would undo changes)", MascotsManager.key)
+                                        : @tr("key: {} · built-in (can't be changed)", MascotsManager.key);
+                                    color: t.sub;
+                                    font-family: Skin.font-mono;
+                                    font-size: 11px * Skin.text-scale;
+                                    overflow: elide;
+                                }
+                                Line {
+                                    label: @tr("Preview");
+                                    Select {
+                                        width: 180px;
+                                        options: MascotsManager.preview-modes;
+                                        index: MascotsManager.preview-index;
+                                        accent: t.visor;
+                                        label: @tr("Preview");
+                                        chosen(i) => { MascotsManager.preview-mode(i); }
+                                    }
+                                }
+                            }
+                        }
+
+                        if MascotsManager.selected >= 0: Text {
+                            text: MascotsManager.report;
+                            color: t.sub;
+                            font-family: Skin.font-mono;
+                            font-size: 11px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+
+                        // which animation shows each mood and reaction
+                        if MascotsManager.can-map: VerticalLayout {
+                            spacing: 4px;
+                            Heading { text: @tr("Animations"); }
+                            for label[i] in [@tr("Sleeping"), @tr("Calm"), @tr("Happy"), @tr("Busy"), @tr("Alarm"), @tr("Celebrating"), @tr("Surprised")]: Line {
+                                label: label;
+                                Select {
+                                    width: 200px;
+                                    options: MascotsManager.anim-options;
+                                    index: MascotsManager.mapping[i];
+                                    accent: t.visor;
+                                    label: label;
+                                    chosen(k) => { MascotsManager.map(i, k); }
+                                }
+                            }
+                        }
+
+                        // [palette]: the PNG colors that follow the theme
+                        if MascotsManager.can-palette: VerticalLayout {
+                            spacing: 4px;
+                            Heading { text: @tr("Colors that follow the theme"); }
+                            Text {
+                                text: @tr("Give a color a role and it takes the app theme's color for that role (the eye follows the mood). Without a role, it keeps its own color.");
+                                color: t.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            for p[i] in MascotsManager.palette: HorizontalLayout {
+                                spacing: 10px;
+                                min-height: 36px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle { width: 22px; height: 22px; background: p.color; border-width: 1px; border-color: t.muted; }
+                                }
+                                Text {
+                                    text: p.hex;
+                                    color: t.text;
+                                    font-family: Skin.font-mono;
+                                    font-size: 12px * Skin.text-scale;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Select {
+                                    width: 200px;
+                                    options: MascotsManager.roles;
+                                    index: p.role;
+                                    accent: t.visor;
+                                    label: p.hex;
+                                    chosen(k) => { MascotsManager.palette-role(i, k); }
+                                }
+                            }
+                        }
+
+                        // walking stops
+                        if MascotsManager.can-stops: VerticalLayout {
+                            spacing: 4px;
+                            Heading { text: @tr("Stops of the walking subagents"); }
+                            Text {
+                                text: @tr("Besides resting (idle), they stop to play the animations turned on here. The others only play when an app asks.");
+                                color: t.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                            for s[i] in MascotsManager.stops: Line {
+                                label: s.name;
+                                VerticalLayout {
+                                    alignment: center;
+                                    SqSwitch {
+                                        checked: s.on;
+                                        accent: t.visor;
+                                        label: s.name;
+                                        toggled => { MascotsManager.stop-toggled(i); }
+                                    }
+                                }
+                            }
+                        }
+
+                        // use in…
+                        if MascotsManager.selected >= 0: VerticalLayout {
+                            spacing: 4px;
+                            Heading { text: @tr("Use in"); }
+                            Line {
+                                label: @tr("Put this mascot in:");
+                                Select {
+                                    width: 260px;
+                                    options: MascotsManager.targets;
+                                    index: 0;
+                                    accent: t.visor;
+                                    label: @tr("Use in");
+                                    chosen(k) => { MascotsManager.use-in(k); }
+                                }
+                            }
+                        }
+
+                        if MascotsManager.status != "": Text {
+                            text: MascotsManager.status;
+                            color: MascotsManager.status-bad ? t.alarm : t.ok;
+                            font-family: Skin.font-mono;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+
+                        if MascotsManager.selected >= 0: HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            if MascotsManager.editable: TextButton {
+                                text: @tr("Open folder");
+                                ink: t.visor;
+                                font-size: 12px * Skin.text-scale;
+                                clicked => { MascotsManager.open-folder(); }
+                            }
+                            if MascotsManager.editable: TextButton {
+                                text: MascotsManager.armed-remove ? @tr("Confirm removal") : @tr("Remove");
+                                icon: Icons.close;
+                                ink: t.alarm;
+                                font-size: 12px * Skin.text-scale;
+                                clicked => { MascotsManager.remove(); }
+                            }
+                        }
+                    }
+                }
+            }
+          }
+        }
+    }
+
+    ResizeHandles {
+        start(dir) => { MascotsManager.start-resize(dir); }
+    }
+  }
+}

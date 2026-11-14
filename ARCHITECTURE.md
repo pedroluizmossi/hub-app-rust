@@ -97,7 +97,8 @@ hub-app-rust/
                               --import-mascot, comandos da loja) e event loop
     autostart.rs, autostart/  iniciar com o sistema: `.desktop` XDG no Linux, chave Run no
                               Windows (ver "Registro e iniciar com o sistema")
-    store.rs                  loja de plugins: índice assinado, instalar, atualizar, remover
+    store.rs, store/          loja: índice assinado, instalar, atualizar, remover plugins e
+                              pacotes de mascotes (`store/mascots.rs`: só desenhos)
                               (linha de comando e o que a tela da loja chama)
     hub/                      o host, um `impl Hub` dividido por assunto:
       mod.rs                  estado, montagem, `update` (acordado pelo barramento),
@@ -152,7 +153,8 @@ hub-app-rust/
       gpu.rs                  NVIDIA por um `nvidia-smi -l` de vida longa; senão amdgpu via sysfs
       docker.rs               docker ps / stats / events
       media.rs, media/        o que está tocando e comandos do player: MPRIS pelo D-Bus no
-                              Linux, controles de mídia do sistema no Windows
+                              Linux, controles de mídia do sistema no Windows; a capa do
+                              álbum (arquivo, URL ou `Thumbnail`) já sai pixelizada
       ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go);
                               fonte que falha mantém a última leitura, marcada como velha
       ai_usage_direct.rs      consultas diretas aos serviços (formatos do ai-usagebar, ver
@@ -187,10 +189,18 @@ hub-app-rust/
       clips.rs, clips/        animações quadro a quadro por mascote (`<chave>.toml`): humor
                               com entrada/saída/variações, reação, duração por quadro;
                               `MINIUTILS_CLIPS=<pasta>` lê do disco e recarrega ao salvar
-      disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
+      disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote);
+                              a capa do álbum vai no rótulo, pixelizada
+      file.rs                 sprites 16×14 por arquivo (`<dados>/miniutils/sprites/<chave>.toml`):
+                              como as embutidas (tema, piscada, LED, `[anim]`), sem recompilar
       pack.rs                 mascotes importadas: folhas PNG de qualquer tamanho em
                               `<dados>/miniutils/mascots/<chave>/` (com `sprite.toml`
                               opcional), sem recompilar; `--import-mascot` copia para lá
+      walkers.rs              quem anda, dos dois tipos (PNG com `walk`, código com `[anim.walk]`):
+                              roteiro e quadros para os subagentes
+      check.rs                o que uma mascote tem (`--check-mascot` e a ficha do app Mascotes)
+      import.rs               importar pasta ou .zip (os dois tipos, sem sobrescrever)
+      edit.rs                 mudar o arquivo de uma mascote (`toml_edit`), conferindo ao gravar
       stroll.rs               subagentes andando na faixa do app Agentes com as mascotes
                               importadas: anda, para, faz uma animação, corre chamando
                               ferramenta, pula ao terminar (só números; o app desenha)
@@ -198,13 +208,15 @@ hub-app-rust/
       kit.rs                  peças comuns: mascote do cabeçalho (`HeaderMascot`), fala
                               com prazo (`Speech`), `plural`, `unix_now`
       docker.rs  vitals.rs    lógica de cada mini-app
-      cdplayer.rs             CD Player: faixa, progresso, comandos e humor
+      cdplayer.rs             CD Player: faixa, capa, progresso (clicável), comandos e humor
       ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
       ai_pace.rs              previsão de esgotamento pelo ritmo de uso (duas janelas) e gráfico da última hora
       ai_mascots.rs           mascotes das fontes de IA (Claude, Codex…), usadas pelas
                               Assinaturas de IA e pelos Agentes
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
       todo.rs                 To-do rápido: lista em todo.json, na pasta de dados do app
+      mascots.rs              Mascotes: importar, janela de gerenciar (renomear, animações,
+                              cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
                               detalhe de uma sessão com a linha do tempo; subagentes andando
       plugin/                 plugins da comunidade: tela genérica, tela interpretada + Rhai,
@@ -295,7 +307,8 @@ Reações das mascotes (`src/mascot/anim.rs`): o `Mood` é o estado que dura; um
 quadro). Cada mascote tem um `Animator`, que também defasa a piscada para mascotes iguais não
 piscarem juntas. Um alerta interrompe a reação; reações têm prioridade e intervalo mínimo.
 O Docker comemora quando um container volta; três cliques rápidos numa mascote disparam o
-easter egg (nunca durante um alerta). `reduce_motion` na config desliga movimento e reações.
+easter egg (nunca durante um alerta). `reduce_motion` na config desliga movimento e reações;
+`still_on_hover` (sozinho) só impede a mascote de subir com o mouse sobre o cartão.
 A bandeja não mostra reações, só o humor.
 
 A bandeja mostra a mascote e o tema do app em **pior** humor, a menos que a config fixe
@@ -411,7 +424,7 @@ migra mais: é tratada como quebrada (vira `.broken`) e o app volta ao padrão.
 | 3 → 4 | `columns` e `rows` viram a página "Geral" em `[[pages]]`, com os apps ligados |
 
 Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se faltar), `skin`,
-`nav` (`"side"`, `"right"`, `"bottom"` ou `"top"`), `reduce_motion`, `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
+`nav` (`"side"`, `"right"`, `"bottom"` ou `"top"`), `reduce_motion`, `still_on_hover` (mascote não sobe com o mouse sobre o cartão; padrão ligado), `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
 
 ## Registro e iniciar com o sistema
 
@@ -441,7 +454,7 @@ Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se 
 - [x] Mini-app Agentes de IA (Claude Code, Codex e OpenCode, só leitura)
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
-- [x] Temas, visuais e fundos por arquivo (`skin/user.rs`) e mascotes importadas de PNG
+- [x] Temas, visuais, fundos e sprites por arquivo (`skin/user.rs`, `mascot/file.rs`) e mascotes importadas de PNG
   (`mascot/pack.rs`), sem recompilar; Configurações › Aparência › Recarregar relê tudo
 
 **Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin/mod.rs`,
@@ -495,6 +508,13 @@ Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se 
 - Loja na janela (Configurações > Loja de plugins, `ui/store.slint`, `src/hub/store.rs`) e
   na linha de comando (`miniutils --help`): listar, instalar, atualizar e remover sem
   reiniciar (o app aberto relê a pasta; a linha de comando avisa pelo socket da instância).
+- Pacotes de mascotes (lista `mascots` do índice, opcional; `src/store/mascots.rs`): só
+  desenhos (`sprites/<chave>.toml` e `mascots/<chave>/`), sem código nem permissões. Mesmo
+  clone sem hooks no commit revisado; copia só esses arquivos para a pasta de aparência,
+  confere a cópia com os leitores do app (`mascot/file.rs`, `mascot/pack.rs`) e grava o que
+  entrou em `store/<id>.json`: atualizar e remover mexem só nesses arquivos, e uma chave que
+  já exista (da pessoa ou de outra entrada) é recusada. Na tela, a linha do pacote tem a
+  etiqueta "mascotes" e as ações usam `mascot:<id>`.
 - O índice (`registry.json`, no modelo do marketplace do Omarchy) fixa o commit revisado de
   cada plugin e é assinado com ed25519 (`registry.json.sig`). Por padrão vale a loja
   oficial (github.com/pedroluizmossi/miniutils-store; índice e chave em

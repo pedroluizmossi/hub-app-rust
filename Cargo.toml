@@ -25,6 +25,15 @@ rusqlite = { version = "0.37", features = ["bundled", "hooks", "limits"] }
 chrono = "0.4"
 # imported mascots (the user's PNGs, see mascot/pack.rs); the same version as sprite-import
 png = "0.18"
+# album covers of the CD Player (PNG/JPEG from the player), pixelated; already pulled in by Slint
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Mascots app: mascot packs downloaded as .zip (read only, deflate: what packs use)
+zip = { version = "9.5", default-features = false, features = ["deflate-flate2"] }
+# Mascots app: "choose a folder / .zip" dialog (the system's; on Linux through the XDG
+# portal, with no GTK to build)
+rfd = "0.18"
+# Mascots app: edits sprite.toml and the mascot .toml keeping the person's comments and order
+toml_edit = "0.25"
 # plugins with their own view: the plugin's .slint is interpreted at run time and
 # fitted into the window (ComponentContainer). Exactly the same version as slint.
 slint-interpreter = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "internal"] }
@@ -55,6 +64,7 @@ windows = { version = "0.62", features = [
     "Foundation",
     "Foundation_Collections",
     "Media_Control",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",

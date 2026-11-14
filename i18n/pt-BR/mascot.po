@@ -189,3 +189,98 @@ msgstr "{}: copiada, mas não carrega: {}"
 
 msgid "{}: no sheet named like Name_Animation_N.png (at least two animations)"
 msgstr "{}: nenhuma folha no formato Nome_Animação_N.png (pelo menos duas animações)"
+
+# Sprites from files (src/mascot/file.rs)
+msgid "grid: {} rows, expected 14"
+msgstr "grid: {} linhas, esperava 14"
+
+msgid "grid: row {} has {} characters, expected 16"
+msgstr "grid: a linha {} tem {} caracteres, esperava 16"
+
+msgid "grid: row {}: '{}' is not a color role (. K P S H M C E W B T F D A)"
+msgstr "grid: linha {}: '{}' não é um papel de cor (. K P S H M C E W B T F D A)"
+
+msgid "grid: row {}: the letter '{}' has no color in [palette]"
+msgstr "grid: linha {}: a letra '{}' não tem cor em [palette]"
+
+msgid "grid: no eye ({} in this mascot)"
+msgstr "grid: sem olho ({} nesta mascote)"
+
+msgid "eye_bg: one color of this mascot (a role, or a letter of [palette])"
+msgstr "eye_bg: uma cor desta mascote (um papel, ou uma letra de [palette])"
+
+msgid "fur and ear only apply to a mascot by color roles (without [palette])"
+msgstr "fur e ear só valem para mascote por papéis de cor (sem [palette])"
+
+msgid "[palette]: \"{}\" is not a lowercase letter (e is the eye)"
+msgstr "[palette]: \"{}\" não é uma letra minúscula (e é o olho)"
+
+msgid "[palette]: eye = \"#RRGGBB\" is missing"
+msgstr "[palette]: falta eye = \"#RRGGBB\""
+
+msgid "anim: {}"
+msgstr "anim: {}"
+
+msgid "the imported mascot {}/{} already uses this key"
+msgstr "a mascote importada {}/{} já usa esta chave"
+
+# Mascot check (src/mascot/check.rs, --check-mascot in src/main.rs)
+msgid "code mascot"
+msgstr "mascote em código"
+
+msgid "PNG sprite"
+msgstr "sprite PNG"
+
+msgid "drawing"
+msgstr "desenho"
+
+msgid "effect"
+msgstr "efeito"
+
+msgid "  moods: {}"
+msgstr "  humores: {}"
+
+msgid "  reactions: {}"
+msgstr "  reações: {}"
+
+msgid "  doesn't walk: no \"walk\" animation (the walking subagents leave it out)"
+msgstr "  não anda: sem animação \"walk\" (os subagentes andando a deixam de fora)"
+
+msgid "  walks: {} · stops: {}"
+msgstr "  anda: {} · paradas: {}"
+
+msgid "  follows the theme: yes"
+msgstr "  segue o tema: sim"
+
+msgid "  follows the theme: only the eye ([palette] has its own colors)"
+msgstr "  segue o tema: só o olho ([palette] tem cores próprias)"
+
+msgid "  follows the theme: no (add [palette] to sprite.toml)"
+msgstr "  segue o tema: não (acrescente [palette] ao sprite.toml)"
+
+msgid "  follows the theme: yes ([palette])"
+msgstr "  segue o tema: sim ([palette])"
+
+msgid "  follows the theme: yes ([palette]); keep their color: {}"
+msgstr "  segue o tema: sim ([palette]); mantêm a própria cor: {}"
+
+msgid "  free actions (only when an app asks): {}"
+msgstr "  ações livres (só quando um app pede): {}"
+
+msgid "{}: give a folder of PNG sheets or a mascot .toml"
+msgstr "{}: indique uma pasta de folhas PNG ou o .toml de uma mascote"
+
+msgid "--check-mascot <folder or .toml>: missing the mascot to check"
+msgstr "--check-mascot <pasta ou .toml>: falta a mascote a conferir"
+
+msgid "miniutils --check-mascot <folder or .toml>"
+msgstr "miniutils --check-mascot <pasta ou .toml>"
+
+msgid "checks a mascot without installing it (a folder of PNG sheets or a\n.toml): moods, walking, theme and free actions"
+msgstr "confere uma mascote sem instalar (uma pasta de folhas PNG ou um\n.toml): humores, andar, tema e ações livres"
+
+msgid "extras: \"{}\" is not in [anim]"
+msgstr "extras: \"{}\" não está em [anim]"
+
+msgid "[palette] \"{}\" = \"{}\": use a color role (K P S H M C E W B T F D A)"
+msgstr "[palette] \"{}\" = \"{}\": use um papel de cor (K P S H M C E W B T F D A)"

@@ -1,4 +1,5 @@
-//! CD Player mini-app: the active MPRIS player, with a spinning disc, track and controls.
+//! CD Player mini-app: the active player (MPRIS on Linux, the system media controls on
+//! Windows), with a spinning disc, track and controls.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -68,23 +69,44 @@ impl CdPlayerMini {
                 a.borrow().command(&verb);
             }
         });
+        let a = Rc::downgrade(app);
+        g.on_seek_to(move |fraction| {
+            if let Some(a) = a.upgrade() {
+                a.borrow().seek_to(fraction);
+            }
+        });
     }
 
-    /// Player command on a thread: D-Bus may take a while and the UI doesn't wait.
+    /// Player command (a button or the tray menu).
     fn command(&self, verb: &str) {
+        let step = self.host.config.borrow().int(&self.manifest, "seek").clamp(1, 300) * 1_000_000;
+        let verb = verb.to_string();
+        self.run(verb.clone(), move |player| media::send(player, &verb, step));
+    }
+
+    /// Click on the progress bar: jump to `fraction` (0..1) of the track.
+    fn seek_to(&self, fraction: f32) {
+        if !self.snap.can_seek || self.snap.length == 0 {
+            return;
+        }
+        let fraction = f64::from(fraction.clamp(0.0, 1.0));
+        self.run("seek-to".into(), move |player| media::seek_to(player, fraction));
+    }
+
+    /// Runs `action` on the current player in a thread: the system may take a while and the
+    /// UI doesn't wait. Then asks for a fresh reading; a failure reaches the app through
+    /// `on_report`, labeled `what`.
+    fn run(&self, what: String, action: impl FnOnce(&str) -> anyhow::Result<()> + Send + 'static) {
         if !media::valid_service(&self.snap.player) {
             return;
         }
-        let step = self.host.config.borrow().int(&self.manifest, "seek").clamp(1, 300) * 1_000_000;
         let (player, poker, reporter) =
             (self.snap.player.clone(), self.host.bus.poker(Topic::Media), self.host.reporter(&self.manifest));
-        let verb = verb.to_string();
         let failed = reporter.clone();
-        let spawned = std::thread::Builder::new().name("mpris-command".into()).spawn(move || {
-            let result = media::send(&player, &verb, step);
+        let spawned = std::thread::Builder::new().name("media-command".into()).spawn(move || {
+            let result = action(&player);
             poker.poke();
-            // the failure reaches the app through `on_report`
-            reporter.result(&verb, &result);
+            reporter.result(&what, &result);
         });
         if let Err(e) = spawned {
             failed.error(tr!("No thread for the command: {}", e));
@@ -179,13 +201,17 @@ impl CdPlayerMini {
         g.set_can_prev(self.snap.can_previous);
         g.set_can_next(self.snap.can_next);
         g.set_can_seek(self.snap.can_seek);
+        g.set_has_length(self.snap.length > 0);
+        g.set_can_raise(self.snap.can_raise);
+        g.set_can_play_pause(self.snap.can_play_pause());
+        g.set_backend(media::SOURCE.into());
         g.set_progress(self.progress());
         g.set_time_text(self.time_text().into());
         g.set_seek_label(self.seek_step.to_string().into());
         g.set_mood(self.mood.as_str().into());
         // the disc is only redrawn when the frame, the theme or the state change
         let lit = self.snap.ok && self.snap.has_player();
-        self.disc.update(theme, self.spin(), lit);
+        self.disc.update(theme, self.spin(), lit, self.snap.art.as_ref());
         g.set_disc(self.disc.image());
     }
 }
@@ -236,13 +262,14 @@ impl MiniApp for CdPlayerMini {
             self.error_at = None;
             self.push(ui);
         }
-        if !self.snap.playing() {
+        // with "Reduce motion" the disc stands still (it only shows the state)
+        if !self.snap.playing() || crate::mascot::anim::calm() {
             return;
         }
         self.spin = self.spin.wrapping_add(1) % SPIN_LIMIT;
         let theme = self.host.theme_for(&self.manifest);
         let lit = self.snap.ok && self.snap.has_player();
-        if self.disc.update(theme, self.spin, lit) {
+        if self.disc.update(theme, self.spin, lit, self.snap.art.as_ref()) {
             ui.global::<CdPlayerApp>().set_disc(self.disc.image());
         }
     }
@@ -275,8 +302,7 @@ impl MiniApp for CdPlayerMini {
         Some(TrayMedia {
             summary: self.snap.summary(),
             playing: self.snap.playing(),
-            can_play_pause: self.snap.has_player()
-                && if self.snap.playing() { self.snap.can_pause } else { self.snap.can_play },
+            can_play_pause: self.snap.can_play_pause(),
             can_previous: self.snap.can_previous,
             can_next: self.snap.can_next,
         })
@@ -380,6 +406,8 @@ mod tests {
     fn tray_menu_follows_config_and_capabilities() {
         let mut a = app();
         assert!(a.tray_media().is_none());
+        // no player: play/pause does nothing
+        assert!(!a.snap.can_play_pause());
         a.host.config.borrow_mut().set("cyber.cd", "tray_controls", toml::Value::Boolean(true));
         a.snap = MediaSnapshot {
             ok: true,

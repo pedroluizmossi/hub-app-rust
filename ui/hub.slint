@@ -11,6 +11,8 @@ import { PortsApp, PortRow } from "../miniapps/ports/view.slint";
 import { TodoApp, TodoRow } from "../miniapps/todo/view.slint";
 import { AgentsApp, AgentRow, AgentSub, AgentWalker } from "../miniapps/agents/view.slint";
 import { AgentDetailWindow, AgentDetail, AgentStep } from "../miniapps/agents/detail.slint";
+import { MascotsApp } from "../miniapps/mascots/view.slint";
+import { MascotsWindow, MascotsManager, MascotItem, PaletteRow, StopRow } from "../miniapps/mascots/manager.slint";
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
 import { StoreView, StoreApp, StoreRow } from "store.slint";
@@ -30,9 +32,9 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 // windows besides the hub: each has its own globals (Rust applies the skin to them)
-export { AgentDetailWindow }
+export { AgentDetailWindow, MascotsWindow }
 // structs Rust fills in (defined in models.slint)
 export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow, ProcUsage }
 
@@ -88,7 +90,12 @@ export component HubWindow inherits Window {
     in property <string> nav: "side";
     in property <int> nav-index: 0;
     property <bool> nav-top: nav == "top";
+    // open blocks in Settings (closed at start; kept while the hub runs)
+    property <bool> settings-appearance-open;
+    property <bool> settings-system-open;
+    property <bool> settings-pages-open;
     in property <bool> reduce-motion: false;
+    in property <bool> still-on-hover: true;
     in property <int> chatter-index: 1;
     in property <int> language-index;
     in property <bool> autostart: false;
@@ -150,6 +157,7 @@ export component HubWindow inherits Window {
     callback tray-theme-chosen(int);
     callback nav-chosen(int);
     callback reduce-motion-toggled();
+    callback still-on-hover-toggled();
     callback chatter-chosen(int);
     callback language-chosen(int);
     callback autostart-toggled();
@@ -491,6 +499,9 @@ export component HubWindow inherits Window {
             if current == "apps": AppsView {
                 vertical-stretch: 1;
                 horizontal-stretch: 1;
+                appearance-open <=> root.settings-appearance-open;
+                system-open <=> root.settings-system-open;
+                pages-open <=> root.settings-pages-open;
                 apps: apps;
                 pages: pages;
                 page-names: page-names;
@@ -500,6 +511,8 @@ export component HubWindow inherits Window {
                 nav-chosen(i) => { root.nav-chosen(i); }
                 reduce-motion: reduce-motion;
                 reduce-motion-toggled => { root.reduce-motion-toggled(); }
+                still-on-hover: still-on-hover;
+                still-on-hover-toggled => { root.still-on-hover-toggled(); }
                 chatter-index: chatter-index;
                 chatter-chosen(i) => { root.chatter-chosen(i); }
                 language-index: language-index;

@@ -26,6 +26,9 @@ msgstr "o player fechou"
 msgid "the player refused the command"
 msgstr "o player recusou o comando"
 
+msgid "the track has no known length"
+msgstr "a faixa não tem duração conhecida"
+
 # agents
 msgid "could not open the database"
 msgstr "não consegui abrir o banco"

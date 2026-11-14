@@ -146,8 +146,8 @@ msgstr "carregando…"
 msgid "Save and load"
 msgstr "Salvar e carregar"
 
-msgid "No plugins to show."
-msgstr "Nenhum plugin para mostrar."
+msgid "Nothing to show."
+msgstr "Nada para mostrar."
 
 # ui/widgets.slint
 msgid "Increase"
@@ -247,8 +247,8 @@ msgstr "Tema da mascote na bandeja. No automático, segue o tema do app mostrado
 msgid "Your themes, skins and backgrounds"
 msgstr "Temas, visuais e fundos seus"
 
-msgid ".toml files in themes/, skins/ and backdrops/ in this folder (examples in examples/appearance). After changing them, click Reload."
-msgstr "Arquivos .toml em themes/, skins/ e backdrops/ desta pasta (exemplos em examples/appearance). Depois de mudar, clique em Recarregar."
+msgid ".toml files in themes/, skins/, backdrops/ and sprites/, and PNG mascots in mascots/, in this folder (examples in examples/appearance). After changing them, click Reload."
+msgstr "Arquivos .toml em themes/, skins/, backdrops/ e sprites/, e mascotes PNG em mascots/, desta pasta (exemplos em examples/appearance). Depois de mudar, clique em Recarregar."
 
 msgid "Open folder"
 msgstr "Abrir pasta"
@@ -370,3 +370,25 @@ msgstr "CPU"
 
 msgid "Memory"
 msgstr "Memória"
+
+# Collapsible blocks in Settings (ui/settings.slint › SectionHead)
+msgid "Open {}"
+msgstr "Abrir {}"
+
+msgid "Close {}"
+msgstr "Fechar {}"
+
+msgid "Skin, colors, text size, motion, language and tray icon"
+msgstr "Visual, cores, tamanho do texto, movimento, idioma e ícone da bandeja"
+
+msgid "Startup, version, logs, usage and local apps"
+msgstr "Inicialização, versão, registros, uso e apps locais"
+
+msgid "Name, icon and order of the pages"
+msgstr "Nome, ícone e ordem das páginas"
+
+msgid "Still mascots on hover"
+msgstr "Mascotes paradas ao passar o mouse"
+
+msgid "Mascots do not hop up when the pointer is over their app. Works without Reduce motion."
+msgstr "As mascotes não pulam quando o mouse passa sobre o app delas. Funciona sem Reduzir movimento."

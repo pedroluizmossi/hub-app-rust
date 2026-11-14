@@ -1,0 +1,66 @@
+# A 16 × 14 mascot, like the built-in ones: each letter is a color ROLE and the app theme
+# picks the color, so the jellyfish changes color with the theme (try it with "Ocean").
+#   .  transparent   K outline   P main color   S shadow   H highlight   M light detail
+#   C  visor   E eye   W eye glint   B blush   T mouth   F skin   D hardware   A LED
+# The file name is the key ("jellyfish"): it is what the config stores, so don't rename it
+# after choosing it somewhere. Format: DESIGN.md › Sprites por arquivo.
+
+label = "Jellyfish"
+# what shows where the eye closes (blinking, asleep)
+eye_bg = "C"
+
+grid = """
+................
+.....KKKKKK.....
+...KKHHPPPPKK...
+..KHPPPPPPPPPK..
+..KPPPPPPPPPPK..
+.KPPCCCCCCCCPPK.
+.KPPCEWCCEWCPPK.
+.KPPCEECCEECPPK.
+.KPPPBPTTPBPPPK.
+..KKKKKKKKKKKK..
+..KM.KM..MK.MK..
+..KM..KM.MK..MK.
+...KM.KM..MK.K..
+....K..K...K....
+"""
+
+# Calm, the tentacles sway (the same format as the built-in animations). The blink and the
+# mood's eyes still apply on top of each frame.
+[anim.idle]
+durations = [700, 700]
+frames = [
+"""
+................
+.....KKKKKK.....
+...KKHHPPPPKK...
+..KHPPPPPPPPPK..
+..KPPPPPPPPPPK..
+.KPPCCCCCCCCPPK.
+.KPPCEWCCEWCPPK.
+.KPPCEECCEECPPK.
+.KPPPBPTTPBPPPK.
+..KKKKKKKKKKKK..
+..KM.KM..MK.MK..
+..KM..KM.MK..MK.
+...KM.KM..MK.K..
+....K..K...K....
+""",
+"""
+................
+.....KKKKKK.....
+...KKHHPPPPKK...
+..KHPPPPPPPPPK..
+..KPPPPPPPPPPK..
+.KPPCCCCCCCCPPK.
+.KPPCEWCCEWCPPK.
+.KPPCEECCEECPPK.
+.KPPPBPTTPBPPPK.
+..KKKKKKKKKKKK..
+..MK.MK..KM.KM..
+.MK..MK.KM..KM..
+..MK.MK..KM.K...
+...K..K...K.....
+""",
+]

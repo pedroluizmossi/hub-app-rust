@@ -5,6 +5,7 @@
 //! ├── themes/<key>.toml          colors of an app theme (and of the mascot)
 //! ├── skins/<key>.toml           look of the window
 //! ├── backdrops/<key>.toml       panel backdrop, in layers
+//! ├── sprites/<key>.toml         16 × 14 mascot, like the built-in ones (see `mascot/file.rs`)
 //! └── mascots/<key>/             imported mascot: PNG sheets (see `mascot/pack.rs`)
 //! ```
 //!
@@ -22,6 +23,7 @@ use serde::Deserialize;
 use super::backdrop::{self, Backdrop, Layer};
 use super::color::parse_hex;
 use super::{Buttons, FONTS, NUM_FIELDS, Skin, Tag, TitleStyle};
+use crate::mascot::file as mascot_file;
 use crate::mascot::pack;
 use crate::mascot::themes::{self, Theme};
 use crate::tr;
@@ -52,7 +54,8 @@ pub struct Loaded {
     pub themes: Vec<Theme>,
     pub skins: Vec<Skin>,
     pub backdrops: Vec<Backdrop>,
-    /// Imported mascots that got in (they themselves live in `mascot::pack`).
+    /// Mascots that got in: sprites from files and imported PNG ones (they themselves live
+    /// in `mascot::file` and `mascot::pack`).
     pub mascots: usize,
     pub skipped: Vec<Skipped>,
 }
@@ -69,8 +72,13 @@ pub fn reload() -> Loaded {
     let root = dir();
     let mut loaded = load(&root);
     let (arts, skipped) = pack::load(&root.join(pack::DIR));
-    loaded.mascots = arts.len();
     loaded.skipped.extend(skipped.into_iter().map(|s| Skipped { file: s.dir, reason: s.reason }));
+    // a sprite file can't take the key of an imported mascot (both are in the pickers)
+    let taken: Vec<String> = arts.iter().map(|a| a.key.clone()).collect();
+    let (files, skipped) = mascot_file::load(&root.join(mascot_file::DIR), &taken);
+    loaded.skipped.extend(skipped.into_iter().map(|s| Skipped { file: s.file, reason: s.reason }));
+    loaded.mascots = arts.len() + files.len();
+    mascot_file::set(files);
     pack::set(arts);
     for s in &loaded.skipped {
         log::warn!("{} skipped: {}", root.join(&s.file).display(), s.reason);
@@ -333,6 +341,11 @@ mod tests {
         let s = &l.skins[0];
         assert_eq!((s.app_theme, s.backdrop), (l.themes[0].key, l.backdrops[0].key));
         assert_eq!(l.summary(), "Themes: 1 · skins: 1 · backdrops: 1 · mascots: 0");
+        // the example sprite, with its animation
+        let (sprites, skipped) = mascot_file::load(&root.join(mascot_file::DIR), &[]);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(sprites.iter().map(|f| f.sprite.key).collect::<Vec<_>>(), ["jellyfish"]);
+        assert!(sprites[0].clips.as_ref().is_some_and(|c| c.contains_key("idle")));
     }
 
     #[test]

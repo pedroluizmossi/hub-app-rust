@@ -1,5 +1,5 @@
 // View of the CD Player mini-app: a deck with the spinning disc (pixel art coloured by the
-// theme), the display with track/artist and the controls of the active MPRIS player.
+// theme), the display with track/artist and the controls of the active player.
 //
 // Responsive, like the other apps: the disc shrinks with the cell height, the text goes
 // away in narrow cells and the skip buttons only show when there is room.
@@ -24,6 +24,14 @@ export global CdPlayerApp {
     in property <bool> can-prev;
     in property <bool> can-next;
     in property <bool> can-seek;
+    // the track length is known (the progress bar can be clicked to seek)
+    in property <bool> has-length;
+    // the player can bring its window to the front ("open"); never on Windows
+    in property <bool> can-raise;
+    // play/pause does something now (a player is open and accepts it)
+    in property <bool> can-play-pause;
+    // where the players come from, shown in the display: "MPRIS" (Linux), "SMTC" (Windows)
+    in property <string> backend;
     // 0..1
     in property <float> progress;
     // "1:23 / 4:30"
@@ -34,6 +42,8 @@ export global CdPlayerApp {
     in property <string> mood: "sleep";
     // play-pause | next | prev | back | fwd | raise
     callback command(string);
+    // click on the progress bar: jump to that fraction (0..1) of the track
+    callback seek-to(float);
 }
 
 export component CdPlayerView inherits Rectangle {
@@ -56,7 +66,7 @@ export component CdPlayerView inherits Rectangle {
                     width: 7px;
                     height: 7px;
                     background: accent;
-                    opacity: CdPlayerApp.playing ? (mod(Anim.frame, 8) < 5 ? 1 : 0.25) : 1;
+                    opacity: CdPlayerApp.playing && !Anim.calm ? (mod(Anim.frame, 8) < 5 ? 1 : 0.25) : 1;
                 }
             }
             Text {
@@ -69,7 +79,8 @@ export component CdPlayerView inherits Rectangle {
                 vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; }
-            if !CdPlayerApp.ok: Text {
+            // the error (reading or a failed command) takes the source's place while it lasts
+            if CdPlayerApp.error-text != "": Text {
                 text: CdPlayerApp.error-text;
                 color: t.alarm;
                 font-family: Skin.font-mono;
@@ -77,7 +88,7 @@ export component CdPlayerView inherits Rectangle {
                 vertical-alignment: center;
                 overflow: elide;
             }
-            if CdPlayerApp.ok && CdPlayerApp.source != "": Text {
+            if CdPlayerApp.error-text == "" && CdPlayerApp.source != "": Text {
                 text: CdPlayerApp.source;
                 color: t.muted;
                 font-family: Skin.font-mono;
@@ -148,14 +159,35 @@ export component CdPlayerView inherits Rectangle {
 
                     Rectangle { vertical-stretch: 1; min-height: 2px; }
 
-                    // progress bar
+                    // progress bar: a click jumps there (when the player can seek and the
+                    // length is known). The click area is taller than the 4 px bar.
                     Rectangle {
-                        height: 4px;
-                        background: t.muted.with-alpha(0.35);
+                        property <bool> seekable: CdPlayerApp.can-seek && CdPlayerApp.has-length;
+                        property <bool> aiming: seekable && seek.has-hover;
+                        height: 12px;
                         Rectangle {
-                            width: parent.width * min(max(CdPlayerApp.progress, 0), 1);
-                            height: parent.height;
-                            background: accent;
+                            y: (parent.height - self.height) / 2;
+                            height: aiming ? 6px : 4px;
+                            background: t.muted.with-alpha(aiming ? 0.5 : 0.35);
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * min(max(CdPlayerApp.progress, 0), 1);
+                                height: parent.height;
+                                background: accent;
+                            }
+                            // where a click would land
+                            if aiming: Rectangle {
+                                x: clamp(seek.mouse-x, 0, parent.width - 2px);
+                                width: 2px;
+                                height: parent.height + 4px;
+                                y: -2px;
+                                background: t.text;
+                            }
+                        }
+                        seek := TouchArea {
+                            enabled: parent.seekable;
+                            mouse-cursor: parent.seekable ? pointer : default;
+                            clicked => { CdPlayerApp.seek-to(self.mouse-x / self.width); }
                         }
                     }
                     HorizontalLayout {
@@ -168,7 +200,7 @@ export component CdPlayerView inherits Rectangle {
                         }
                         Rectangle { horizontal-stretch: 1; }
                         if !narrow: Text {
-                            text: "MPRIS";
+                            text: CdPlayerApp.backend;
                             color: t.muted;
                             font-family: Skin.font-mono;
                             font-size: 10px * Skin.text-scale;
@@ -185,11 +217,12 @@ export component CdPlayerView inherits Rectangle {
             spacing: 6px;
             if !narrow: TextButton {
                 text: "−" + CdPlayerApp.seek-label + "s";
-                ink: CdPlayerApp.can-seek ? t.sub : t.muted;
+                ink: t.sub;
+                enabled: CdPlayerApp.can-seek;
                 height: btn;
                 font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 0;
-                clicked => { if CdPlayerApp.can-seek { CdPlayerApp.command("back"); } }
+                clicked => { CdPlayerApp.command("back"); }
             }
             IconButton {
                 width: btn;
@@ -205,13 +238,14 @@ export component CdPlayerView inherits Rectangle {
             Rectangle {
                 width: short ? 42px : 46px;
                 height: self.width;
-                background: accent;
+                background: CdPlayerApp.can-play-pause ? accent : t.muted.with-alpha(0.4);
                 IconButton {
                     width: parent.width;
                     height: parent.height;
                     icon: CdPlayerApp.playing ? Icons.pause : Icons.play;
                     ink: t.bg0;
                     edge: transparent;
+                    enabled: CdPlayerApp.can-play-pause;
                     label: CdPlayerApp.playing ? @tr("Pause") : @tr("Play");
                     clicked => { CdPlayerApp.command("play-pause"); }
                 }
@@ -228,21 +262,22 @@ export component CdPlayerView inherits Rectangle {
             }
             if !narrow: TextButton {
                 text: "+" + CdPlayerApp.seek-label + "s";
-                ink: CdPlayerApp.can-seek ? t.sub : t.muted;
+                ink: t.sub;
+                enabled: CdPlayerApp.can-seek;
                 height: btn;
                 font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 0;
-                clicked => { if CdPlayerApp.can-seek { CdPlayerApp.command("fwd"); } }
+                clicked => { CdPlayerApp.command("fwd"); }
             }
             Rectangle { horizontal-stretch: 1; }
-            if !narrow: TextButton {
+            // only when the player can come to the front (never on Windows)
+            if !narrow && CdPlayerApp.can-raise: TextButton {
                 text: @tr("open");
-                ink: CdPlayerApp.has-player ? t.visor : t.muted;
-                edge: t.visor;
+                ink: t.visor;
                 height: btn;
                 font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 0;
-                clicked => { if CdPlayerApp.has-player { CdPlayerApp.command("raise"); } }
+                clicked => { CdPlayerApp.command("raise"); }
             }
         }
     }

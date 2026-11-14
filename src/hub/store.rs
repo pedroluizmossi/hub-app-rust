@@ -1,6 +1,7 @@
-//! The plugin store screen (`ui/store.slint`): loads the index, shows the state of each
-//! plugin and installs, updates or removes with two clicks. The work (downloading the index,
-//! `git clone`, copying) runs in a thread; the result comes back through the UI thread.
+//! The store screen (`ui/store.slint`): loads the index, shows the state of each plugin and
+//! mascot pack and installs, updates or removes with two clicks. The work (downloading the
+//! index, `git clone`, copying) runs in a thread; the result comes back through the UI
+//! thread. A mascot pack's row id is `mascot:<id>` (plugin and mascot ids may repeat).
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -9,16 +10,19 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 
 use super::{Hub, with_hub};
 use crate::core::{appdata, plugins};
-use crate::store::{self, Source, Status, Trust};
+use crate::store::{self, Catalog, MascotStatus, Source, Status, Trust};
 use crate::tr;
 use crate::ui::{StoreApp, StoreRow};
 
 /// Time for the second click to confirm an action.
 const ARM_TTL: Duration = Duration::from_secs(8);
+/// Prefix of a mascot pack's row id.
+const MASCOT: &str = "mascot:";
 
 #[derive(Default)]
 pub(super) struct StoreState {
     statuses: Vec<Status>,
+    mascots: Vec<MascotStatus>,
     status: String,
     failed: bool,
     loading: bool,
@@ -59,7 +63,7 @@ impl Hub {
         }
         self.store_push();
         let spawned = std::thread::Builder::new().name("store".into()).spawn(move || {
-            let result = store::statuses(&src, &plugins::dir());
+            let result = store::statuses(&src, &plugins::dir(), &crate::skin::user::dir());
             let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_loaded(result)));
         });
         if let Err(e) = spawned {
@@ -67,22 +71,25 @@ impl Hub {
         }
     }
 
-    fn store_loaded(&self, result: Result<(Vec<Status>, Trust), String>) {
+    fn store_loaded(&self, result: Result<Catalog, String>) {
         {
             let mut st = self.store.borrow_mut();
             st.loading = false;
             match result {
-                Ok((list, trust)) => {
-                    st.status = format!(
-                        "{} · plugins: {}",
-                        if trust == Trust::Signed { tr!("signature verified") } else { tr!("local index, not signed") },
-                        list.len()
+                Ok(c) => {
+                    st.status = tr!(
+                        "{} · plugins: {} · mascots: {}",
+                        if c.trust == Trust::Signed { tr!("signature verified") } else { tr!("local index, not signed") },
+                        c.plugins.len(),
+                        c.mascots.len()
                     );
-                    st.statuses = list;
+                    st.statuses = c.plugins;
+                    st.mascots = c.mascots;
                     st.failed = false;
                 }
                 Err(e) => {
                     st.statuses.clear();
+                    st.mascots.clear();
                     st.status = e;
                     st.failed = true;
                 }
@@ -126,6 +133,11 @@ impl Hub {
         if !confirmed {
             return;
         }
+        // a mascot pack is only drawings: nothing running to stop, no data
+        if id.starts_with(MASCOT) {
+            self.store_spawn(id, verb);
+            return;
+        }
         // the plugin logic stops before the folder is swapped (`store_done` restarts it); to
         // delete the data, it also waits for it to release the files
         crate::apps::plugin::suspend(id);
@@ -143,10 +155,12 @@ impl Hub {
         let spawned = std::thread::Builder::new().name("store".into()).spawn(move || {
             let root = plugins::dir();
             // the confirmation was the second click, with the summary on screen
-            let result = match verb.as_str() {
-                "remove" => store::remove(&id, &root, &appdata::root(), false),
-                "remove-purge" => store::remove(&id, &root, &appdata::root(), true),
-                _ => store::install(&src, &id, &root, &mut |_| true).map(|_| tr!("{} installed", id)),
+            let result = match (id.strip_prefix(MASCOT), verb.as_str()) {
+                (Some(m), "remove") => store::remove_mascot(m, &crate::skin::user::dir()),
+                (Some(m), _) => store::install_mascot(&src, m, &crate::skin::user::dir(), &mut |_| true),
+                (None, "remove") => store::remove(&id, &root, &appdata::root(), false),
+                (None, "remove-purge") => store::remove(&id, &root, &appdata::root(), true),
+                (None, _) => store::install(&src, &id, &root, &mut |_| true).map(|_| tr!("{} installed", id)),
             };
             let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_done(&id, &verb, result)));
         });
@@ -157,6 +171,25 @@ impl Hub {
 
     fn store_done(&self, id: &str, verb: &str, result: Result<String, String>) {
         self.store.borrow_mut().busy = None;
+        if id.starts_with(MASCOT) {
+            match result {
+                Ok(msg) => {
+                    // the new mascots show up in every picker at once
+                    self.reload_looks();
+                    self.store_reload();
+                    let mut st = self.store.borrow_mut();
+                    st.status = msg;
+                    st.failed = false;
+                }
+                Err(e) => {
+                    let mut st = self.store.borrow_mut();
+                    st.status = e;
+                    st.failed = true;
+                }
+            }
+            self.store_push();
+            return;
+        }
         match result {
             Ok(msg) => {
                 // the plugin comes into (or leaves) the hub without restarting
@@ -185,7 +218,7 @@ impl Hub {
     fn store_push(&self) {
         let st = self.store.borrow();
         let armed = st.armed.as_ref().filter(|(_, _, at)| at.elapsed() < ARM_TTL);
-        let rows: Vec<StoreRow> = st
+        let mut rows: Vec<StoreRow> = st
             .statuses
             .iter()
             .map(|s| {
@@ -221,6 +254,8 @@ impl Hub {
                 };
                 StoreRow {
                     id: e.id.as_str().into(),
+                    target: e.id.as_str().into(),
+                    kind: "plugin".into(),
                     name: e.name.as_str().into(),
                     version: e.version.as_str().into(),
                     byline: format!("{} · {}", if e.author.is_empty() { tr!("no author") } else { &e.author }, e.license).into(),
@@ -244,6 +279,45 @@ impl Hub {
                 }
             })
             .collect();
+        // mascot packs: only drawings, so no permissions, data or warnings
+        rows.extend(st.mascots.iter().map(|s| {
+            let e = &s.entry;
+            let target = format!("{MASCOT}{}", e.id);
+            let verb = armed.filter(|(i, _, _)| *i == target).map(|(_, v, _)| v.as_str()).unwrap_or("");
+            let state = match &s.installed {
+                None => tr!("not installed").to_string(),
+                Some(i) if s.has_update() => tr!("update: {} → {}", i.version, e.version),
+                Some(i) => tr!("installed {}", i.version),
+            };
+            let contents = match &s.installed {
+                Some(i) => format!("{} · {}", tr!("only drawings: no code and no permissions"), i.contents()),
+                None => tr!("only drawings: no code and no permissions").to_string(),
+            };
+            let confirm = match verb {
+                "install" => tr!("Click again to install. The mascots show up in every mascot picker.").to_string(),
+                "update" => tr!("Click again to update (no new permission).").into(),
+                "remove" => tr!("Click again to remove {}. An app or page using one of its mascots goes back to the first one.", e.name),
+                _ => String::new(),
+            };
+            StoreRow {
+                id: e.id.as_str().into(),
+                target: target.as_str().into(),
+                kind: "mascot".into(),
+                name: e.name.as_str().into(),
+                version: e.version.as_str().into(),
+                byline: format!("{} · {}", if e.author.is_empty() { tr!("no author") } else { &e.author }, e.license).into(),
+                description: e.description.as_str().into(),
+                permissions: contents.into(),
+                state: state.into(),
+                installed: s.installed.is_some(),
+                update: s.has_update(),
+                warning: "".into(),
+                armed: verb.into(),
+                confirm: confirm.into(),
+                busy: st.busy.as_deref() == Some(target.as_str()),
+                data: "".into(),
+            }
+        }));
         let g = self.ui.global::<StoreApp>();
         g.set_rows(ModelRc::new(VecModel::from(rows)));
         g.set_status(st.status.as_str().into());

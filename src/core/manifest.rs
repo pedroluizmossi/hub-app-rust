@@ -140,6 +140,7 @@ mod tests {
             include_str!("../../miniapps/ports/manifest.toml"),
             include_str!("../../miniapps/todo/manifest.toml"),
             include_str!("../../miniapps/agents/manifest.toml"),
+            include_str!("../../miniapps/mascots/manifest.toml"),
         ] {
             let m = Manifest::parse(text).unwrap();
             for s in &m.settings {

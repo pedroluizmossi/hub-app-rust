@@ -16,6 +16,9 @@ export component Mascot inherits Rectangle {
     in property <string> reaction;
     in property <bool> moving: !Anim.calm;
     in property <string> voice;
+    // the pointer is over the mascot's card: it perks up (a sleeping one keeps sleeping),
+    // unless "Still mascots on hover" is on (`Anim.still-on-hover`)
+    in property <bool> noticed;
     callback poked;
     property <bool> talking: voice != "" && voice == Chatter.speaker;
     property <bool> listening: voice != "" && voice == Chatter.listener;
@@ -62,6 +65,7 @@ export component Mascot inherits Rectangle {
                 : talking ? (mod(f, 2) == 0 ? -parent.height * 0.08 : 0)
                 : party ? (mod(f, 4) < 2 ? -parent.height * 0.24 : 0)
                 : startled ? -parent.height * 0.12
+                : noticed && !Anim.still-on-hover && mood != "sleep" && mood != "alarm" ? -parent.height * 0.14
                 : mood == "busy" || mood == "happy" ? (mod(f, 4) < 2 ? -parent.height * 0.1 : 0)
                 : mood == "idle" ? (mod(f, 16) < 8 ? -parent.height * 0.04 : 0)
                 : 0;
@@ -190,10 +194,13 @@ export component TextButton inherits Rectangle {
     in property <int> font-weight: 600;
     in property <length> letter-spacing: 0;
     in property <bool> compact: false;        // icon only
+    // off: faded, no hover and no click (and screen readers know it)
+    in property <bool> enabled: true;
     callback clicked;
     height: 36px;
     min-width: row.preferred-width + 24px;
     horizontal-stretch: 0;
+    opacity: enabled ? 1 : 0.35;
     border-width: fill == transparent ? 1px : 0;
     border-color: edge;
     background: fill != transparent ? (touch.pressed ? fill.darker(0.2) : touch.has-hover ? fill.brighter(0.15) : fill)
@@ -201,7 +208,8 @@ export component TextButton inherits Rectangle {
     animate background { duration: 120ms; }
     accessible-role: button;
     accessible-label: text;
-    accessible-action-default => { root.clicked(); }
+    accessible-enabled: enabled;
+    accessible-action-default => { if enabled { root.clicked(); } }
 
     row := HorizontalLayout {
         alignment: center;
@@ -220,7 +228,8 @@ export component TextButton inherits Rectangle {
         }
     }
     touch := TouchArea {
-        mouse-cursor: pointer;
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
 }

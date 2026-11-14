@@ -62,6 +62,7 @@ impl Hub {
         ui.on_chatter_chosen(|i| with_hub(|h| h.choose_chatter(idx(i))));
         ui.on_language_chosen(|i| with_hub(|h| h.choose_language(idx(i))));
         ui.on_reduce_motion_toggled(|| with_hub(|h| h.toggle_motion()));
+        ui.on_still_on_hover_toggled(|| with_hub(|h| h.toggle_still_on_hover()));
         ui.on_autostart_toggled(|| with_hub(|h| h.toggle_autostart()));
         ui.on_open_logs(|| with_hub(|h| h.open_logs()));
 
