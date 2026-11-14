@@ -24,6 +24,8 @@ pub fn display_name() -> String {
 /// Current version of the file format. When the structure changes, bump the number and
 /// add the matching migration in `migrate`.
 pub const CURRENT_VERSION: u32 = 4;
+/// Oldest file format that still migrates; an older file is set aside like a broken one.
+const OLDEST_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -247,20 +249,9 @@ impl Config {
         dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("miniutils/config.toml")
     }
 
-    /// Reads the configuration; if missing or broken, uses the defaults. The first time, it
-    /// copies the config from when the app was called CyberHub.
+    /// Reads the configuration; if missing or broken, uses the defaults.
     pub fn load() -> Self {
         let path = Self::path();
-        if !path.exists()
-            && let Some(old) = dirs::config_dir().map(|d| d.join("cyberhub/config.toml")).filter(|p| p.exists()) {
-                if let Some(dir) = path.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                match std::fs::copy(&old, &path) {
-                    Ok(_) => log::info!("config copied from {}", old.display()),
-                    Err(e) => log::warn!("could not copy {}: {e}", old.display()),
-                }
-            }
         let mut cfg = Self::load_from(&path);
         // keep the `name` line in the file, so the user finds where to change the name
         let no_name = std::fs::read_to_string(&path)
@@ -315,6 +306,9 @@ impl Config {
             return Config { state: SaveState::ReadOnly, ..cfg };
         }
 
+        if version < OLDEST_VERSION {
+            return Self::broken(&format!("version {version} is too old to migrate"));
+        }
         let old = version < CURRENT_VERSION;
         if old {
             migrate(&mut table, version);
@@ -419,7 +413,7 @@ fn write_logged(path: &Path, text: &str) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Err(e) = write_atomic(path, text.as_bytes()) {
+    if let Err(e) = crate::core::os::write_atomic(path, text.as_bytes()) {
         log::error!("could not save {}: {e}", path.display());
     }
 }
@@ -482,25 +476,6 @@ mod writer {
     }
 }
 
-/// Writes `bytes` to `path` without ever leaving the file half-written: writes to a
-/// temporary file next to it, makes sure it reached the disk and only then moves it into
-/// place (`rename` is atomic). A full disk, a power cut or a killed process leave the
-/// previous file intact.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let tmp = with_suffix(path, ".tmp");
-    let written = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written
-}
-
 /// Deserializes the (already migrated) TOML table into the configuration.
 fn deserialize(table: toml::Table) -> Result<Config, String> {
     toml::Value::Table(table).try_into::<Config>().map_err(|e| e.to_string())
@@ -510,62 +485,12 @@ fn deserialize(table: toml::Table) -> Result<Config, String> {
 fn migrate(t: &mut toml::Table, from: u32) {
     for v in from..CURRENT_VERSION {
         match v {
-            0 => migrate_0_to_1(t),
-            1 => migrate_1_to_2(t),
             2 => migrate_2_to_3(t),
             3 => migrate_3_to_4(t),
             _ => {}
         }
     }
     t.insert("version".to_string(), toml::Value::Integer(CURRENT_VERSION.into()));
-}
-
-/// v0 -> v1: the global `theme` becomes each app's theme (unless it has its own); `mascot`
-/// is dropped.
-fn migrate_0_to_1(t: &mut toml::Table) {
-    let theme = t.remove("theme");
-    t.remove("mascot");
-    let Some(theme) = theme else { return };
-    let apps = t.entry("apps").or_insert_with(|| toml::Value::Table(toml::Table::new()));
-    let Some(apps) = apps.as_table_mut() else { return };
-    for id in ["cyber.docker", "cyber.vitals"] {
-        let app = apps.entry(id).or_insert_with(|| toml::Value::Table(toml::Table::new()));
-        if let Some(app) = app.as_table_mut()
-            && !app.contains_key("theme") {
-                app.insert("theme".to_string(), theme.clone());
-            }
-    }
-}
-
-/// v1 -> v2: the grid is no longer packed in order; each app keeps its position (`x`, `y`)
-/// besides its size, and the grid gets a number of rows. Positions come from the old packing.
-fn migrate_1_to_2(t: &mut toml::Table) {
-    let cols = t.get("columns").and_then(|v| v.as_integer()).unwrap_or(2).clamp(1, layout::MAX_COLS as i64) as u32;
-    let enabled: Vec<String> = match t.get("enabled").and_then(|v| v.as_array()) {
-        Some(a) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
-        None => Config::default().enabled,
-    };
-    let mut lay = match t.remove("layout") {
-        Some(toml::Value::Table(l)) => l,
-        _ => toml::Table::new(),
-    };
-    let size = |lay: &toml::Table, id: &str, field: &str, default: u32| -> u32 {
-        lay.get(id).and_then(|v| v.get(field)).and_then(|v| v.as_integer()).map_or(default, |n| n.max(1) as u32)
-    };
-    let spans: Vec<(u32, u32)> =
-        enabled.iter().map(|id| (size(&lay, id, "w", cols).min(cols), size(&lay, id, "h", 1).min(3))).collect();
-    let (placed, rows) = layout::pack(&spans, cols);
-    for (id, r) in enabled.iter().zip(placed) {
-        lay.insert(id.clone(), rect_toml(r));
-    }
-    // disabled apps keep only their size; the position is chosen when re-enabled
-    let disabled: Vec<String> = lay.keys().filter(|k| !enabled.contains(k)).cloned().collect();
-    for id in disabled {
-        let r = Rect::new(0, 0, size(&lay, &id, "w", 1).min(cols), size(&lay, &id, "h", 1).min(3));
-        lay.insert(id, rect_toml(r));
-    }
-    t.insert("layout".into(), toml::Value::Table(lay));
-    t.insert("rows".into(), toml::Value::Integer(rows.clamp(1, layout::MAX_ROWS) as i64));
 }
 
 /// v2 -> v3: the CD Player mini-app comes enabled (in the first free spot of the grid).
@@ -587,14 +512,6 @@ fn migrate_3_to_4(t: &mut toml::Table) {
     let apps = t.get("enabled").cloned().unwrap_or_else(|| toml::Value::Array(Vec::new()));
     page.insert("apps".into(), apps);
     t.insert("pages".into(), toml::Value::Array(vec![toml::Value::Table(page)]));
-}
-
-fn rect_toml(r: Rect) -> toml::Value {
-    let mut t = toml::Table::new();
-    for (k, v) in [("x", r.x), ("y", r.y), ("w", r.w), ("h", r.h)] {
-        t.insert(k.into(), toml::Value::Integer(v as i64));
-    }
-    toml::Value::Table(t)
 }
 
 /// Copies the file to `.bak`, unless that already exists. Returns `false` on failure.
@@ -677,72 +594,24 @@ mod tests {
         // when it cannot write (the target is a directory), what exists stays as it is
         let taken = tmp.0.join("taken");
         std::fs::create_dir_all(taken.join("inside")).unwrap();
-        assert!(write_atomic(&taken, b"x").is_err());
+        assert!(crate::core::os::write_atomic(&taken, b"x").is_err());
         assert!(taken.join("inside").is_dir());
         assert!(!with_suffix(&taken, ".tmp").exists());
     }
 
-    const V0: &str = r#"
-columns = 3
-enabled = ["cyber.docker", "cyber.vitals"]
-theme = "matrix"
-mascot = "robo"
-
-[apps."cyber.vitals"]
-warn = 70
-"#;
-
     #[test]
-    fn v0_migrates_theme_and_drops_mascot() {
-        let t = Tmp::new("v0");
-        std::fs::write(t.file(), V0).unwrap();
-
-        let cfg = Config::load_from(&t.file());
-        assert_eq!(cfg.version, CURRENT_VERSION);
-        assert_eq!(cfg.pages[0].columns, 3);
-        assert_eq!(cfg.apps["cyber.docker"]["theme"].as_str(), Some("matrix"));
-        assert_eq!(cfg.apps["cyber.vitals"]["theme"].as_str(), Some("matrix"));
-        assert_eq!(cfg.apps["cyber.vitals"]["warn"].as_integer(), Some(70));
-
-        // migrated file saved with the version, without `mascot`; original kept in .bak
-        let new = std::fs::read_to_string(t.file()).unwrap();
-        assert!(new.contains(&format!("version = {CURRENT_VERSION}")));
-        assert!(!new.contains("mascot"));
-        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".bak")).unwrap(), V0);
-    }
-
-    #[test]
-    fn v0_does_not_overwrite_the_apps_own_theme() {
-        let t = Tmp::new("v0-own");
-        std::fs::write(
-            t.file(),
-            "theme = \"matrix\"\n[apps.\"cyber.docker\"]\ntheme = \"neon\"\n",
-        )
-        .unwrap();
-
-        let cfg = Config::load_from(&t.file());
-        assert_eq!(cfg.apps["cyber.docker"]["theme"].as_str(), Some("neon"));
-        assert_eq!(cfg.apps["cyber.vitals"]["theme"].as_str(), Some("matrix"));
-    }
-
-    #[test]
-    fn v1_gets_positions_from_the_old_packing() {
+    fn too_old_version_is_set_aside_and_defaults_are_used() {
         let t = Tmp::new("v1");
-        std::fs::write(
-            t.file(),
-            "version = 1\ncolumns = 3\nenabled = [\"cyber.docker\", \"cyber.vitals\"]\n\
-             [layout.\"cyber.docker\"]\nw = 2\nh = 1\n[layout.\"cyber.vitals\"]\nw = 1\nh = 2\n\
-             [layout.\"other\"]\nw = 2\nh = 1\n",
-        )
-        .unwrap();
+        let v1 = "version = 1\ncolumns = 3\nenabled = [\"cyber.docker\"]\n";
+        std::fs::write(t.file(), v1).unwrap();
 
-        let cfg = Config::load_from(&t.file());
-        assert_eq!(cfg.version, CURRENT_VERSION);
-        assert_eq!(cfg.layout["cyber.docker"], Rect::new(0, 0, 2, 1));
-        assert_eq!(cfg.layout["cyber.vitals"], Rect::new(2, 0, 1, 2));
-        assert_eq!(cfg.layout["other"], Rect::new(0, 0, 2, 1));
-        assert_eq!(cfg.pages[0].rows, 2);
-        assert!(with_suffix(&t.file(), ".bak").exists());
+        let mut cfg = Config::load_from(&t.file());
+        assert!(cfg.state == SaveState::Broken);
+        assert_eq!(cfg.enabled, Config::default().enabled);
+        // the original stays until the first save, which moves it aside
+        assert_eq!(std::fs::read_to_string(t.file()).unwrap(), v1);
+        cfg.save_to(&t.file());
+        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".broken")).unwrap(), v1);
     }
 
     #[test]

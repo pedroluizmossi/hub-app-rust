@@ -15,7 +15,6 @@ export component Mascot inherits Rectangle {
     in property <string> mood: "idle";
     in property <string> reaction;
     in property <bool> moving: !Anim.calm;
-    in property <bool> aura: true;
     in property <string> voice;
     callback poked;
     property <bool> talking: voice != "" && voice == Chatter.speaker;
@@ -39,7 +38,7 @@ export component Mascot inherits Rectangle {
         y: (root.height - self.height) / 2;
 
         // neon aura: concentric rings (the software renderer has no blur)
-        if aura && mood != "sleep": Rectangle {
+        if mood != "sleep": Rectangle {
             for k in 3: Rectangle {
                 property <float> s: 1.1 - k * 0.2;
                 width: stage.width * s;
@@ -618,11 +617,10 @@ export component MascotSelect inherits Rectangle {
     }
 }
 
-// Segmented bar; `part` (e.g. Docker's share) shows on top.
+// Segmented bar.
 export component SegBar inherits Rectangle {
     in property <Colors> theme;
     in property <float> value;     // 0..100
-    in property <float> part: 0;   // 0..100
     in property <color> tint: theme.visor;
     in property <color> off: theme.muted.with-alpha(0.3);
     in property <int> segments: 20;
@@ -632,8 +630,7 @@ export component SegBar inherits Rectangle {
         spacing: 2px;
         for i in segments: Rectangle {
             property <float> lit: (i + 0.5) * 100 / segments;
-            background: lit <= part ? tint
-                : lit <= value ? tint.with-alpha(0.85)
+            background: lit <= value ? tint.with-alpha(0.85)
                 : off;
             animate background { duration: 300ms; }
         }
@@ -665,7 +662,6 @@ export component Counter inherits Rectangle {
     in property <string> label;
     in property <int> value;
     in property <color> tint;
-    in property <color> idle-ink: theme.sub;
     width: 64px;
     height: 60px;
     border-width: 1px;
@@ -677,7 +673,7 @@ export component Counter inherits Rectangle {
         spacing: 2px;
         Text {
             text: value;
-            color: value > 0 ? tint : idle-ink;
+            color: value > 0 ? tint : theme.sub;
             font-family: Skin.font-mono;
             font-size: 22px * Skin.text-scale;
             font-weight: 700;

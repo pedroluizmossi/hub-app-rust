@@ -809,10 +809,10 @@ fn state_text(a: &Agent, now: i64) -> String {
     }
 }
 
-/// `/home/me/Projects/x` → `~/Projects/x`.
+/// `/home/me/Projects/x` → `~/Projects/x` (`C:\Users\me\x` → `~\x` on Windows).
 fn short_dir(cwd: &str, home: &str) -> String {
     match cwd.strip_prefix(home) {
-        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => format!("~{rest}"),
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with(['/', '\\'])) => format!("~{rest}"),
         _ => cwd.to_string(),
     }
 }
@@ -1219,6 +1219,8 @@ mod tests {
         assert_eq!(short_dir("/home/me", "/home/me"), "~");
         assert_eq!(short_dir("/home/meg/x", "/home/me"), "/home/meg/x");
         assert_eq!(short_dir("/srv/x", ""), "/srv/x");
+        assert_eq!(short_dir(r"C:\Users\me\x", r"C:\Users\me"), r"~\x");
+        assert_eq!(short_dir(r"C:\Users\meg", r"C:\Users\me"), r"C:\Users\meg");
     }
 
     #[test]

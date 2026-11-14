@@ -124,7 +124,7 @@ impl PortsMini {
     /// The first click arms; the second, within `ARM_TTL`, asks the process to end (`os::terminate`).
     fn kill(&mut self, pid: u32, ui: &HubWindow) {
         // only pids in the current reading (no pid from outside) and never the hub itself
-        let Some(l) = self.snap.listeners.iter().find(|l| l.pid == pid && pid > 1) else { return };
+        let Some(l) = self.snap.listeners.iter().find(|l| l.pid == pid && l.mine && pid > 1) else { return };
         let name = l.process.clone();
         if pid == std::process::id() {
             self.speech.say(tr!("That's me! I won't end myself.").into());
@@ -188,10 +188,10 @@ impl PortsMini {
             return Mood::Busy;
         }
         let warn = self.host.config.borrow().bool(&self.manifest, "warn_exposed");
-        if warn && s.listeners.iter().any(|l| l.proto == "tcp" && l.pid > 0 && l.exposed()) {
+        if warn && s.listeners.iter().any(|l| l.proto == "tcp" && l.mine && l.exposed()) {
             return Mood::Busy;
         }
-        if s.listeners.iter().any(|l| l.pid > 0) { Mood::Idle } else { Mood::Sleep }
+        if s.listeners.iter().any(|l| l.mine) { Mood::Idle } else { Mood::Sleep }
     }
 
     fn visible(&self) -> Vec<&Listener> {
@@ -204,7 +204,7 @@ impl PortsMini {
             .listeners
             .iter()
             .filter(|l| show_udp || l.proto == "tcp")
-            .filter(|l| !hide_others || l.pid > 0)
+            .filter(|l| !hide_others || l.mine)
             .filter(|l| {
                 q.is_empty()
                     || l.port.to_string().contains(&q)
@@ -213,7 +213,7 @@ impl PortsMini {
             })
             .collect();
         // yours first (you can act on them), then by port
-        list.sort_by_key(|l| (l.pid == 0, l.port, l.proto.clone()));
+        list.sort_by_key(|l| (!l.mine, l.port, l.proto.clone()));
         list
     }
 
@@ -224,7 +224,7 @@ impl PortsMini {
             .into_iter()
             .map(|l| {
                 let fresh = self.fresh.iter().any(|((p, n), _)| *p == l.proto && *n == l.port);
-                row(l, armed == Some(l.pid) && l.pid > 0, fresh)
+                row(l, armed == Some(l.pid) && l.mine, fresh)
             })
             .collect();
         let same = self.rows.row_count() == rows.len()
@@ -238,7 +238,7 @@ impl PortsMini {
     fn push_header(&self, ui: &HubWindow) {
         let g = ui.global::<PortsApp>();
         let tcp: Vec<&Listener> = self.snap.listeners.iter().filter(|l| l.proto == "tcp").collect();
-        let mine = tcp.iter().filter(|l| l.pid > 0).count();
+        let mine = tcp.iter().filter(|l| l.mine).count();
         let exposed = tcp.iter().filter(|l| l.exposed()).count();
         g.set_total(tcp.len() as i32);
         g.set_mine(mine as i32);
@@ -246,7 +246,7 @@ impl PortsMini {
         g.set_ok(self.snap.ok);
         g.set_missing(self.snap.missing);
         g.set_error_text(if self.snap.missing {
-            tr!("The ss command (iproute2) was not found.").into()
+            if cfg!(windows) { tr!("The netstat command was not found.") } else { tr!("The ss command (iproute2) was not found.") }.into()
         } else {
             self.snap.error.as_str().into()
         });
@@ -295,6 +295,7 @@ fn row(l: &Listener, armed: bool, fresh: bool) -> PortRow {
         process: if l.process.is_empty() { tr!("(another user)").into() } else { l.process.clone().into() },
         cmd: l.cmd.clone().into(),
         pid: l.pid as i32,
+        mine: l.mine,
         addr_text: addr_text(l).into(),
         local: l.local_only(),
         exposed: l.exposed(),
@@ -361,10 +362,10 @@ impl MiniApp for PortsMini {
 
     fn summary(&self) -> String {
         if self.snap.missing {
-            return tr!("Ports: ss not installed").into();
+            return if cfg!(windows) { tr!("Ports: netstat not found") } else { tr!("Ports: ss not installed") }.into();
         }
         let tcp: Vec<&Listener> = self.snap.listeners.iter().filter(|l| l.proto == "tcp").collect();
-        let mine = tcp.iter().filter(|l| l.pid > 0).count();
+        let mine = tcp.iter().filter(|l| l.mine).count();
         tr!("Open ports: {} · yours: {}", tcp.len(), mine)
     }
 }

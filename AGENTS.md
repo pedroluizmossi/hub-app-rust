@@ -19,7 +19,22 @@ Tudo o que é código fica em **inglês** (convenção internacional; o projeto 
 Exceções:
 
 - **Nomes já gravados no disco ou no protocolo** (chaves de config, ids de mascote, valores
-  de opção) não mudam; pasta ou flag renomeada aceita o nome antigo (migração ou alias).
+  de opção, pastas) não mudam sem motivo forte.
+
+## Compatibilidade com versões antigas
+
+O projeto é pré-1.0 e não guarda código de compatibilidade (ele foi removido na v0.4.0):
+
+- **Sem alias nem migração de nome.** Pasta, arquivo, flag de linha de comando ou variável
+  de ambiente renomeada passa a valer só com o nome novo; não acrescente tabela de nomes
+  antigos, `rename` do lugar antigo nem leitura de reserva.
+- **Formato da config é a exceção:** mudou a estrutura, suba `CURRENT_VERSION` e escreva o
+  passo em `config::migrate` (`src/core/config.rs`). Versão abaixo de `OLDEST_VERSION` vira
+  `.broken` e o app volta ao padrão; ao apagar um passo antigo, suba `OLDEST_VERSION`.
+- **Dados dos apps** migram pelo mecanismo do produto (`[data] version` + `fn migrate`,
+  `core/appdata.rs`), que não é legado.
+- Leitores de formato de terceiros (ex.: logs antigos do Codex em
+  `providers/agents/codex.rs`) ficam: o arquivo é do usuário, não nosso.
 - **Falas das mascotes** (`lines.toml`) têm `pt`, `en` e `de` de propósito.
 
 ## Texto da interface (i18n: inglês + pt-BR)
@@ -144,7 +159,7 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
 - **Mensagem para o registro: `log::warn!`/`log::info!`/`log::debug!`, nunca `eprintln!`.**
   Vai para o arquivo (`core/logging.rs`) e para o terminal; no Windows não há console, então
   um `eprintln!` some. `println!`/`eprintln!` só nos comandos de terminal (`--help`, loja,
-  `--preview`), em que a saída é a resposta.
+  `--dirs`), em que a saída é a resposta.
 - Plugin que precisa de processos usa `uses = ["procs"]`, não `ps` (que não existe no
   Windows).
 

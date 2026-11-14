@@ -255,8 +255,9 @@ impl Hub {
         self.apply_skin();
         self.apply_system();
         self.apply_tray_choices();
+        // the Settings list has texts built in Rust: forget its fingerprint so it is redone
+        self.settings_fingerprint.replace(String::new());
         self.rebuild_lists();
-        self.rebuild_settings();
     }
 
     /// Changes the accent color (0 = the skin's own).
@@ -328,8 +329,6 @@ impl Hub {
     /// Opens the folder of themes, skins, backdrops and mascots (creating the subfolders first).
     pub(super) fn open_looks_dir(&self) {
         let root = skin::user::dir();
-        // move the old Portuguese folders first: empty new ones would block their migration
-        skin::user::migrate(&root);
         for sub in [skin::user::THEMES, skin::user::SKINS, skin::user::BACKDROPS, crate::mascot::pack::DIR] {
             if let Err(e) = std::fs::create_dir_all(root.join(sub)) {
                 log::warn!("could not create {}: {e}", root.join(sub).display());

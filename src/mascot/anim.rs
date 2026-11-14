@@ -10,7 +10,6 @@
 //! its own.
 
 use std::cell::Cell;
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -151,7 +150,7 @@ impl Animator {
             active: None,
             last: [None; 2],
             pokes: Vec::new(),
-            player: Player { rng: s as u64 | 1, ..Default::default() },
+            player: Player::default(),
         }
     }
 
@@ -205,8 +204,8 @@ impl Animator {
     }
 
     /// Like `look`, with the frame of `sprite`'s drawn animation, if it has one (see
-    /// `clips.rs`): the reaction's while it lasts; otherwise the mood's, with transitions and
-    /// variants. With "reduce motion", it stays in the base pose.
+    /// `clips.rs`): the reaction's while it lasts; otherwise the mood's, after its `enter`
+    /// transition. With "reduce motion", it stays in the base pose.
     pub fn look_with(&mut self, sprite: &Sprite, mood: Mood, now: Instant) -> Look {
         let mut look = self.look(mood, now);
         // imported: the frame comes from the time (`pack::Art::pick`); just ask for its pace
@@ -238,87 +237,41 @@ impl Animator {
     }
 }
 
-/// Which drawn animation plays now: the mood's loop, the enter or exit transition and, now
-/// and then, a variant (see `clips.rs`).
+/// Which drawn animation plays now: the mood's `enter` transition, then its loop (see
+/// `clips.rs`).
 #[derive(Default)]
 struct Player {
     /// Mood last time (to know when it changed).
     mood: Option<Mood>,
     /// Since when the mood's loop has been playing.
     loop_since: Option<Instant>,
-    /// Transition or variant playing once, and when it started.
+    /// Transition playing once, and when it started.
     once: Option<(String, Instant)>,
-    queue: VecDeque<String>,
-    next_variant: Option<Instant>,
-    rng: u64,
 }
 
 impl Player {
     fn pose<'c>(&mut self, clips: &'c Clips, mood: Mood, now: Instant) -> Option<(Grid, &'c clips::Clip)> {
         if self.mood != Some(mood) {
-            // mood changed: leave the old one, enter the new one, and the loop restarts
-            self.queue.clear();
-            self.once = None;
-            let exit = self.mood.and_then(|m| clips.get(m.as_str())).and_then(|c| c.exit.clone());
-            let enter = clips.get(mood.as_str()).and_then(|c| c.enter.clone());
-            self.queue.extend(exit.into_iter().chain(enter));
+            // mood changed: its transition plays, then the loop restarts
+            self.once = clips.get(mood.as_str()).and_then(|c| c.enter.clone()).map(|e| (e, now));
             self.mood = Some(mood);
             self.loop_since = None;
-            self.next_variant = None;
         }
-        loop {
-            if let Some((name, t0)) = &self.once {
-                let t = now.duration_since(*t0).as_millis() as u64;
-                match clips.get(name) {
-                    Some(c) if !c.done_at(t) => return Some((*c.frame_at(t), c)),
-                    // finished (or vanished in a reload): the loop restarts from the first frame
-                    _ => {
-                        self.once = None;
-                        self.loop_since = Some(now);
-                    }
+        if let Some((name, t0)) = &self.once {
+            let t = now.duration_since(*t0).as_millis() as u64;
+            match clips.get(name) {
+                Some(c) if !c.done_at(t) => return Some((*c.frame_at(t), c)),
+                // finished (or vanished in a reload): the loop restarts from the first frame
+                _ => {
+                    self.once = None;
+                    self.loop_since = Some(now);
                 }
-            }
-            match self.queue.pop_front() {
-                Some(next) => self.once = Some((next, now)),
-                None => break,
             }
         }
         let clip = clips.get(mood.as_str())?;
         let since = *self.loop_since.get_or_insert(now);
-        if !clip.variants.is_empty() {
-            let next = match self.next_variant {
-                Some(t) => t,
-                None => {
-                    let t = now + self.wait(clip.every);
-                    self.next_variant = Some(t);
-                    t
-                }
-            };
-            if now >= next {
-                let pick = clip.variants[(self.roll() % clip.variants.len() as u64) as usize].clone();
-                self.next_variant = Some(now + self.wait(clip.every));
-                self.once = Some((pick, now));
-                return self.pose(clips, mood, now);
-            }
-        }
         let t = now.duration_since(since).as_millis() as u64;
         Some((*clip.frame_at(t), clip))
-    }
-
-    /// Random wait between `min` and `max` seconds.
-    fn wait(&mut self, (min, max): (u32, u32)) -> Duration {
-        let span = (max - min) as u64 * 1000;
-        Duration::from_millis(min as u64 * 1000 + if span == 0 { 0 } else { self.roll() % (span + 1) })
-    }
-
-    /// Simple random draw (xorshift): variants need nothing more.
-    fn roll(&mut self) -> u64 {
-        let mut x = self.rng.max(1);
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.rng = x;
-        x
     }
 }
 
@@ -338,13 +291,11 @@ mod tests {
             rows[0] = mark;
             crate::mascot::clips::tests::frame(&rows)
         };
-        let (a, b, c, d, e) = (q("K..............."), q(".K.............."), q("..K............."), q("...K............"), q("....K..........."));
+        let (a, b, c) = (q("K..............."), q(".K.............."), q("..K............."));
         let src = format!(
-            "[idle]\nfps = 1\nexit = \"wake\"\nvariants = [\"scratch\"]\nevery = [5, 5]\nframes = [{a}]\n\
+            "[idle]\nfps = 1\nframes = [{a}]\n\
              [sleep]\nfps = 1\nenter = \"yawn\"\nframes = [{b}]\n\
-             [yawn]\ndurations = [300]\nframes = [{c}]\n\
-             [wake]\ndurations = [200]\nframes = [{d}]\n\
-             [scratch]\ndurations = [400]\nframes = [{e}]\n"
+             [yawn]\ndurations = [300]\nframes = [{c}]\n"
         );
         crate::mascot::clips::parse(neko, &src).unwrap()
     }
@@ -356,29 +307,15 @@ mod tests {
     #[test]
     fn transitions_on_mood_change() {
         let clips = test_clips();
-        let mut p = Player { rng: 1, ..Default::default() };
+        let mut p = Player::default();
         let t0 = Instant::now();
         assert_eq!(mark(&mut p, &clips, Mood::Idle, t0), "K...............");
-        // idle -> sleep: leaves idle (wake, 200 ms), enters sleep (yawn, 300 ms), loop
-        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1000)), "...K............");
-        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1150)), "...K............");
+        // idle -> sleep: enters sleep (yawn, 300 ms), then its loop
+        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1000)), "..K.............");
         assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1250)), "..K.............");
-        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1600)), ".K..............");
+        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1350)), ".K..............");
         // mood without an animation: the base drawing
         assert_eq!(mark(&mut p, &clips, Mood::Busy, t0 + ms(2000)), "base");
-    }
-
-    #[test]
-    fn variant_now_and_then() {
-        let clips = test_clips();
-        let mut p = Player { rng: 1, ..Default::default() };
-        let t0 = Instant::now();
-        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0), "K...............");
-        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(4900)), "K...............");
-        // every = [5, 5]: at 5 s the variant (400 ms) comes in, then back to the loop
-        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(5000)), "....K...........");
-        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(5300)), "....K...........");
-        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(5500)), "K...............");
     }
 
     #[test]

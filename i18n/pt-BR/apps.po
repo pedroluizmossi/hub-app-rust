@@ -348,6 +348,9 @@ msgstr "{} está escutando em :{} ({})"
 msgid "The ss command (iproute2) was not found."
 msgstr "O comando ss (iproute2) não foi encontrado."
 
+msgid "The netstat command was not found."
+msgstr "O comando netstat não foi encontrado."
+
 msgid "No open ports… zzz"
 msgstr "Nenhuma porta aberta… zzz"
 
@@ -380,6 +383,9 @@ msgstr "(outro usuário)"
 
 msgid "Ports: ss not installed"
 msgstr "Portas: ss não instalado"
+
+msgid "Ports: netstat not found"
+msgstr "Portas: netstat não encontrado"
 
 msgid "Open ports: {} · yours: {}"
 msgstr "Portas abertas: {} · suas: {}"

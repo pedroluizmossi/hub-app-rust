@@ -19,7 +19,6 @@ const ARM_TTL: Duration = Duration::from_secs(8);
 #[derive(Default)]
 pub(super) struct StoreState {
     statuses: Vec<Status>,
-    trust: Option<Trust>,
     status: String,
     failed: bool,
     loading: bool,
@@ -32,15 +31,9 @@ pub(super) struct StoreState {
 impl Hub {
     pub(super) fn bind_store(hub: &Rc<Self>) {
         let g = hub.ui.global::<StoreApp>();
-        let w = Rc::downgrade(hub);
-        g.on_reload(move || {
-            if let Some(h) = w.upgrade() {
-                h.store_reload();
-            }
-        });
-        let w = Rc::downgrade(hub);
-        g.on_save_source(move |index, key| {
-            if let Some(h) = w.upgrade() {
+        g.on_reload(|| with_hub(|h| h.store_reload()));
+        g.on_save_source(|index, key| {
+            with_hub(|h| {
                 {
                     let mut cfg = h.host.config.borrow_mut();
                     cfg.store_index = index.trim().to_string();
@@ -48,14 +41,9 @@ impl Hub {
                     cfg.save();
                 }
                 h.store_reload();
-            }
+            })
         });
-        let w = Rc::downgrade(hub);
-        g.on_act(move |id, verb| {
-            if let Some(h) = w.upgrade() {
-                h.store_act(&id, &verb);
-            }
-        });
+        g.on_act(|id, verb| with_hub(|h| h.store_act(&id, &verb)));
     }
 
     /// The store was opened or a reload was asked for: downloads the index in a thread.
@@ -91,12 +79,10 @@ impl Hub {
                         list.len()
                     );
                     st.statuses = list;
-                    st.trust = Some(trust);
                     st.failed = false;
                 }
                 Err(e) => {
                     st.statuses.clear();
-                    st.trust = None;
                     st.status = e;
                     st.failed = true;
                 }

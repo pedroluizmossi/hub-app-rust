@@ -78,7 +78,7 @@ app conta fatos sobre si (um problema, uma previsão, uma recuperação) e o hub
 fala e quando. Clique numa mascote para ela falar.
 
 São mais de trinta mascotes, de neko e capivara a chaleira e cogumelo, e cada app escolhe a
-sua em Configurações. Para ver uma animação: `miniutils --preview <mascote>`.
+sua em Configurações.
 
 Dá para trazer as suas, em pixel art de qualquer tamanho (16×16, 32×32, 64×64…): folhas
 PNG com os quadros lado a lado, uma por animação, em `mascots/<nome>/` na pasta de dados.
@@ -218,8 +218,6 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --tab <nome>          abre numa página do painel (pelo nome dela ou de um app nela,
                       ex.: Geral, docker), em apps (configurações) ou em store (loja)
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
---preview <mascote> [animação] [--output arquivo.gif]
-                      GIF de uma animação de mascote em todos os temas
 --import-mascot <pasta>
                       copia folhas PNG (Nome_Animação_N.png) para a pasta de mascotes
 --dirs                onde ficam os apps locais, os dados dos apps, a configuração e os registros
@@ -239,9 +237,8 @@ MINIUTILS_DEBUG=1            registra também os detalhes (foco, janela, debug()
 <details>
 <summary><b>Configuração e registros (logs)</b></summary>
 
-A configuração fica em `~/.config/miniutils/config.toml` (na primeira execução, a de
-`~/.config/cyberhub/` é copiada para lá). A linha `name = "MiniUtils"` muda o nome exibido na
-janela, na bandeja e nas notificações.
+A configuração fica em `~/.config/miniutils/config.toml`. A linha `name = "MiniUtils"` muda o
+nome exibido na janela, na bandeja e nas notificações.
 
 Avisos, erros e travamentos vão para um arquivo, além do terminal:
 

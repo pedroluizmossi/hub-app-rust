@@ -126,54 +126,12 @@ pub fn add(items: &[Rect], want: Rect, cols: u32, rows: u32) -> (Rect, u32) {
     }
 }
 
-/// Packs the apps in order, filling row by row (used to migrate the old config, which
-/// only kept width and height). Returns the positions and the rows used.
-pub fn pack(items: &[(u32, u32)], columns: u32) -> (Vec<Rect>, u32) {
-    let cols = columns.max(1) as usize;
-    let mut used: Vec<Vec<bool>> = Vec::new();
-    let mut out = Vec::with_capacity(items.len());
-    for &(w, h) in items {
-        let (w, h) = (w.clamp(1, cols as u32) as usize, h.max(1) as usize);
-        let mut row = 0;
-        'search: loop {
-            for col in 0..=cols - w {
-                let free = (row..row + h).all(|r| (col..col + w).all(|c| !used.get(r).is_some_and(|line| line[c])));
-                if free {
-                    while used.len() < row + h {
-                        used.push(vec![false; cols]);
-                    }
-                    for line in used.iter_mut().skip(row).take(h) {
-                        line[col..col + w].fill(true);
-                    }
-                    out.push(Rect::new(col as u32, row as u32, w as u32, h as u32));
-                    break 'search;
-                }
-            }
-            row += 1;
-        }
-    }
-    (out, used.len() as u32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn r(x: u32, y: u32, w: u32, h: u32) -> Rect {
         Rect::new(x, y, w, h)
-    }
-
-    #[test]
-    fn pack_side_by_side_and_stacked() {
-        assert_eq!(pack(&[(1, 1), (1, 1)], 2), (vec![r(0, 0, 1, 1), r(1, 0, 1, 1)], 1));
-        assert_eq!(pack(&[(2, 1), (2, 1)], 2), (vec![r(0, 0, 2, 1), r(0, 1, 2, 1)], 2));
-    }
-
-    #[test]
-    fn pack_fills_holes_and_limits_width() {
-        assert_eq!(pack(&[(1, 2), (1, 1), (1, 1)], 2), (vec![r(0, 0, 1, 2), r(1, 0, 1, 1), r(1, 1, 1, 1)], 2));
-        assert_eq!(pack(&[(5, 1)], 3), (vec![r(0, 0, 3, 1)], 1));
-        assert_eq!(pack(&[], 2), (vec![], 0));
     }
 
     #[test]

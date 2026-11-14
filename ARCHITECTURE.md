@@ -93,7 +93,7 @@ hub-app-rust/
     docker/ vitals/ cdplayer/ ai_usage/ ports/ todo/ agents/ (com detail.slint, a janela
                               de detalhe de uma sessão)
   src/
-    main.rs                   argumentos (--hidden, --tab, --plugin-dev, --dirs, --preview,
+    main.rs                   argumentos (--hidden, --tab, --plugin-dev, --dirs,
                               --import-mascot, comandos da loja) e event loop
     autostart.rs, autostart/  iniciar com o sistema: `.desktop` XDG no Linux, chave Run no
                               Windows (ver "Registro e iniciar com o sistema")
@@ -124,7 +124,7 @@ hub-app-rust/
                               uma ação em segundo plano para o app que a pediu)
       manifest.rs             formato do manifest.toml
       appdata.rs              pasta de dados de cada app (app-data/<id>/): [data], versão,
-                              cópia antes de migrar, tamanho, exportar, apagar, pastas antigas
+                              cópia antes de migrar, tamanho, exportar, apagar
       registry.rs             liga/desliga mini-apps e distribui eventos
       plugins.rs              plugins instalados: os três tipos, manifesto, arquivos aceitos
       chatter.rs              fatos (`Fact`), vozes e o formato dos `lines.toml`
@@ -184,7 +184,6 @@ hub-app-rust/
       clips.rs, clips/        animações quadro a quadro por mascote (`<chave>.toml`): humor
                               com entrada/saída/variações, reação, duração por quadro;
                               `MINIUTILS_CLIPS=<pasta>` lê do disco e recarrega ao salvar
-      preview.rs              `miniutils --preview <mascote> [animação]`: GIF em todos os temas
       disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
       pack.rs                 mascotes importadas: folhas PNG de qualquer tamanho em
                               `<dados>/miniutils/mascots/<chave>/` (com `sprite.toml`
@@ -397,21 +396,19 @@ app ──Fact──► hub (update/quadro) ──► Director ──► global 
 ## Configuração
 
 `~/.config/miniutils/config.toml`, versionada (`version`). Ao mudar a estrutura, suba
-`VERSAO_ATUAL` e acrescente a migração em `config::migra`; o arquivo antigo vira `.bak`.
-Arquivo de versão mais nova é só lido (nunca sobrescrito); TOML quebrado vira `.quebrado`.
+`CURRENT_VERSION` e acrescente a migração em `config::migrate`; o arquivo antigo vira `.bak`.
+Arquivo de versão mais nova é só lido (nunca sobrescrito); TOML quebrado vira `.broken`.
 A gravação é atômica (temporário ao lado + `rename`): uma queda no meio deixa o arquivo
-anterior intacto. Arquivo vazio conta como ausente, não como versão 0 a migrar.
+anterior intacto. Arquivo vazio conta como ausente. Versão anterior à 2 (`OLDEST_VERSION`) não
+migra mais: é tratada como quebrada (vira `.broken`) e o app volta ao padrão.
 
 | Versão | Mudança |
 |---|---|
-| 0 → 1 | `theme` global vira tema de cada app |
-| 1 → 2 | a grade passa a guardar posição (`x`, `y`) e ganha `rows` |
 | 2 → 3 | o CD Player entra ligado |
 | 3 → 4 | `columns` e `rows` viram a página "Geral" em `[[pages]]`, com os apps ligados |
 
 Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se faltar), `skin`,
 `nav` (`"side"`, `"right"`, `"bottom"` ou `"top"`), `reduce_motion`, `tray_icon` e `tray_theme` (`"auto"` ou a chave de uma mascote/tema; escolhidos em Aparência).
-Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copiada.
 
 ## Registro e iniciar com o sistema
 
@@ -488,8 +485,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
   desfeita no fim da chamada. Nas Configurações, cada app mostra o que guarda e quanto,
   com exportar (o banco sai por `VACUUM INTO`) e apagar (o hub para a lógica, espera ela
   soltar os arquivos, apaga e a religa). Remover pergunta se os dados ficam; os que ficam
-  aparecem em Sistema como dados de apps removidos e voltam numa reinstalação. Os dados do
-  lugar antigo (`plugins/.data/`, `~/.config/miniutils/todo.json`) vêm sozinhos ao abrir.
+  aparecem em Sistema como dados de apps removidos e voltam numa reinstalação.
 - Desenvolvimento: `miniutils --plugin-dev <pasta>` carrega o plugin direto da pasta (já
   ligado, na primeira página), recarrega ao salvar e mostra no terminal os erros da tela e
   do script.

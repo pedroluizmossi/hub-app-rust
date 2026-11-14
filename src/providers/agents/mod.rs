@@ -318,8 +318,9 @@ fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
     meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64)
 }
 
+/// Last part of a path, Unix or Windows (`C:\x\proj` → `proj`).
 fn base_name(path: &str) -> String {
-    path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_string()
+    path.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
 /// Text on a single line (titles come from the first prompt, which may have line breaks).
@@ -392,6 +393,14 @@ fn host(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_name_of_unix_and_windows_paths() {
+        assert_eq!(base_name("/home/me/proj/"), "proj");
+        assert_eq!(base_name(r"C:\Users\me\proj"), "proj");
+        assert_eq!(base_name(r"C:\Users\me\proj\"), "proj");
+        assert_eq!(base_name("ls"), "ls");
+    }
 
     #[test]
     fn command_summary_drops_arguments() {

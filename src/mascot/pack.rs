@@ -8,8 +8,6 @@
 //! └── Pink_Monster_Walk_6.png
 //! ```
 //!
-//! (The folder used to be called `mascotes/`; [`migrate`] moves it on first use.)
-//!
 //! ```toml
 //! name = "Pink Monster"
 //! fps = 8                     # default for every animation
@@ -42,8 +40,6 @@
 //! animations, runs (`run`) while calling tools and jumps (`jump`) when done.
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
@@ -58,8 +54,6 @@ use crate::tr;
 
 /// Subfolder of the appearance folder (`skin::user::dir`).
 pub const DIR: &str = "mascots";
-/// Old (Portuguese) name of `DIR`: moved to the new name by [`migrate`], read as a fallback.
-pub const OLD_DIR: &str = "mascotes";
 const SPEC: &str = "sprite.toml";
 /// Limits against odd files: frame, frames per animation, animations, file.
 const MAX_SIDE: usize = 256;
@@ -235,35 +229,6 @@ pub fn set(arts: Vec<Art>) {
 
 const EMPTY_ROW: &str = "................";
 
-/// The mascot folder to use, given `root` (`<appearance>/mascots`): moves an old
-/// `mascotes/` next to it into place first. The move happens when `mascots/` doesn't exist
-/// or is empty (the appearance screen may have created it empty); when both have content,
-/// `mascots/` wins and the old one is left alone. If the move fails, returns the old folder
-/// so the mascots still load. A `root` not named `mascots` is returned as is.
-pub fn migrate(root: &Path) -> PathBuf {
-    let Some(old) = root.parent().map(|p| p.join(OLD_DIR)) else { return root.to_path_buf() };
-    if root.file_name().is_none_or(|n| n != DIR) || !old.is_dir() {
-        return root.to_path_buf();
-    }
-    if root.exists() {
-        let empty = std::fs::read_dir(root).is_ok_and(|mut d| d.next().is_none());
-        if !empty {
-            return root.to_path_buf();
-        }
-        let _ = std::fs::remove_dir(root);
-    }
-    match std::fs::rename(&old, root) {
-        Ok(()) => {
-            log::info!("mascots: moved {} to {}", old.display(), root.display());
-            root.to_path_buf()
-        }
-        Err(e) => {
-            log::warn!("mascots: could not move {} to {} ({e}); reading the old folder", old.display(), root.display());
-            old
-        }
-    }
-}
-
 /// A folder that didn't make it in, and why.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Skipped {
@@ -273,12 +238,11 @@ pub struct Skipped {
     pub reason: String,
 }
 
-/// Reads `root` (the `mascots/` folder, migrated from `mascotes/` if needed) without
+/// Reads `root` (the `mascots/` folder) without
 /// touching the program.
 pub fn load(root: &Path) -> (Vec<Art>, Vec<Skipped>) {
-    let root = migrate(root);
     let (mut arts, mut skipped) = (Vec::new(), Vec::new());
-    let Ok(entries) = std::fs::read_dir(&root) else { return (arts, skipped) };
+    let Ok(entries) = std::fs::read_dir(root) else { return (arts, skipped) };
     let folder = root.file_name().and_then(|n| n.to_str()).unwrap_or(DIR).to_string();
     let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
     dirs.sort();
@@ -602,9 +566,8 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
 /// PNG as RGBA: width, height and pixels.
 fn read_png(path: &Path) -> Result<(usize, usize, Pixels), String> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    read_limited(path)?;
-    let file = File::open(path).map_err(|e| format!("{name}: {e}"))?;
-    let mut decoder = png::Decoder::new(BufReader::new(file));
+    // decodes the bytes whose size was checked (no second read of the file)
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(read_limited(path)?));
     // indexed palette becomes RGB(A), 16 bits become 8, and transparency (tRNS) becomes alpha
     decoder.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut reader = decoder.read_info().map_err(|e| format!("{name}: {e}"))?;
@@ -632,7 +595,6 @@ fn read_png(path: &Path) -> Result<(usize, usize, Pixels), String> {
 /// character's into `mascots/<name>/` and writes a `sprite.toml` to tweak. Doesn't overwrite
 /// a mascot that already exists. Returns one line per character (shown to the user).
 pub fn import(src: &Path, root: &Path) -> Result<Vec<String>, String> {
-    let root = migrate(root);
     let mut dirs = vec![src.to_path_buf()];
     if let Ok(entries) = std::fs::read_dir(src) {
         let mut subs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
@@ -695,7 +657,7 @@ mod tests {
 
     /// Writes a `w`×`h` RGBA PNG with `px`.
     fn png(path: &Path, w: usize, h: usize, px: &[[u8; 4]]) {
-        let file = File::create(path).unwrap();
+        let file = std::fs::File::create(path).unwrap();
         let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
         enc.set_color(png::ColorType::Rgba);
         enc.set_depth(png::BitDepth::Eight);
@@ -864,42 +826,6 @@ mod tests {
         assert!(import(&src, &root).unwrap().iter().all(|l| l.contains("already exists")));
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn old_mascotes_folder_moves_to_mascots() {
-        // nothing new yet: the old folder is renamed and its mascots load
-        let base = temp("migrate");
-        std::fs::create_dir_all(base.join(OLD_DIR).join("hero")).unwrap();
-        sheet(&base.join(OLD_DIR).join("hero/Hero_Idle_2.png"), 2, 16);
-        let (arts, skipped) = load(&base.join(DIR));
-        assert_eq!((arts.len(), skipped.len()), (1, 0));
-        assert!(base.join(DIR).join("hero/Hero_Idle_2.png").exists());
-        assert!(!base.join(OLD_DIR).exists());
-        // importing goes to the new folder too
-        assert_eq!(migrate(&base.join(DIR)), base.join(DIR));
-
-        // an empty new folder (created by "open folder") doesn't block the move
-        let base2 = temp("migrate-empty");
-        std::fs::create_dir_all(base2.join(DIR)).unwrap();
-        std::fs::create_dir_all(base2.join(OLD_DIR).join("hero")).unwrap();
-        assert_eq!(migrate(&base2.join(DIR)), base2.join(DIR));
-        assert!(base2.join(DIR).join("hero").is_dir());
-        assert!(!base2.join(OLD_DIR).exists());
-
-        // both with content: the new one wins and the old one is left alone
-        let base3 = temp("migrate-both");
-        std::fs::create_dir_all(base3.join(DIR).join("a")).unwrap();
-        std::fs::create_dir_all(base3.join(OLD_DIR).join("b")).unwrap();
-        assert_eq!(migrate(&base3.join(DIR)), base3.join(DIR));
-        assert!(base3.join(OLD_DIR).join("b").is_dir());
-        assert!(!base3.join(DIR).join("b").exists());
-
-        // a folder with another name (tests, a custom path) is not touched
-        assert_eq!(migrate(&base3.join("other")), base3.join("other"));
-        for b in [base, base2, base3] {
-            let _ = std::fs::remove_dir_all(&b);
-        }
     }
 
     #[test]

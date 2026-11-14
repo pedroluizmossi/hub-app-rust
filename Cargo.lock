@@ -3346,7 +3346,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs",
- "gif",
  "ksni",
  "libc",
  "log",

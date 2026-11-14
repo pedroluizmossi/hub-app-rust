@@ -46,9 +46,7 @@ impl List {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(self).unwrap_or_default())?;
-        std::fs::rename(tmp, path)
+        crate::core::os::write_atomic(path, serde_json::to_string_pretty(self).unwrap_or_default().as_bytes())
     }
 
     /// Adds a task; returns `false` if the text was empty.
@@ -115,7 +113,7 @@ impl TodoMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest =
             Manifest::parse(include_str!("../../miniapps/todo/manifest.toml")).expect("invalid To-do manifest");
-        // the app's data folder (`core/appdata.rs`; the old one, in the config, comes over in `migrate_legacy`)
+        // the app's data folder (`core/appdata.rs`)
         let path = appdata::dir(&manifest.id).join("todo.json");
         let rows = Rc::new(VecModel::default());
         ui.global::<TodoApp>().set_rows(ModelRc::from(rows.clone()));

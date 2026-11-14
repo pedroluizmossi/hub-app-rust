@@ -37,8 +37,6 @@ pub const KV_FILE: &str = "store.json";
 pub const DB_FILE: &str = "data.sqlite";
 /// Copies from before a migration, one per app (folder name kept: it is already on disk).
 const BACKUPS: &str = ".backups";
-/// Former name of [`BACKUPS`], moved on first use (see [`backups`]).
-const OLD_BACKUPS: &str = ".copias";
 /// Stops measuring a folder after this many files (the size shown becomes "more than").
 const MAX_ENTRIES: usize = 50_000;
 
@@ -135,26 +133,15 @@ impl DataSpec {
 
 /// The folder with every app's data: `MINIUTILS_DATA`, or `<data>/miniutils/app-data`.
 pub fn root() -> PathBuf {
-    match data_env().filter(|v| !v.is_empty()) {
+    match std::env::var_os("MINIUTILS_DATA").filter(|v| !v.is_empty()) {
         Some(d) => PathBuf::from(d),
         None => dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("miniutils").join("app-data"),
     }
 }
 
-/// `MINIUTILS_DATA`, or the former `MINIUTILS_DADOS` (still accepted).
-fn data_env() -> Option<std::ffi::OsString> {
-    std::env::var_os("MINIUTILS_DATA").or_else(|| std::env::var_os("MINIUTILS_DADOS"))
-}
-
-/// The folder of the pre-migration copies. A `.copias` folder from an older hub is renamed
-/// to `.backups` (if the rename fails, the old one keeps being used).
+/// The folder of the pre-migration copies.
 fn backups(root: &Path) -> PathBuf {
-    let new = root.join(BACKUPS);
-    let old = root.join(OLD_BACKUPS);
-    if !new.exists() && old.is_dir() && std::fs::rename(&old, &new).is_err() {
-        return old;
-    }
-    new
+    root.join(BACKUPS)
 }
 
 /// The data folder of an app.
@@ -187,7 +174,8 @@ pub fn stored_version(dir: &Path) -> Option<u32> {
 pub fn set_version(dir: &Path, version: u32) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let json = serde_json::to_vec(&Meta { version }).unwrap_or_default();
-    write_atomic(&dir.join(META), &json)
+    let path = dir.join(META);
+    crate::core::os::write_atomic(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// What the app has to do before starting.
@@ -333,114 +321,12 @@ pub fn ids(root: &Path) -> Vec<String> {
     v
 }
 
-// ---- old folders --------------------------------------------------------------------
-
-/// Brings the data from the old place: `plugins/.data/<id>.json` (script) and
-/// `plugins/.data/<id>/` (external app) and, with `todo`, the `todo.json` of the config
-/// folder. With nothing to bring, it does nothing.
-///
-/// With `MINIUTILS_DATA` (development instance, test) it moves nothing: the old files are
-/// the real ones, and the new folder may be deleted later. The To-do only comes over when
-/// the hub opens (`todo`): a hub that is already open still writes to the old place.
-pub fn migrate_legacy(todo: bool) {
-    if data_env().is_some() {
-        return;
-    }
-    let root = root();
-    let n = migrate_plugin_data(&crate::core::plugins::dir().join(".data"), &root);
-    if n > 0 {
-        log::info!("data of {n} app(s) moved from plugins/.data to {}", root.display());
-    }
-    let Some(cfg) = dirs::config_dir().filter(|_| todo) else { return };
-    let old = cfg.join("miniutils").join("todo.json");
-    let new = root.join("cyber.todo").join("todo.json");
-    if !old.is_file() {
-        return;
-    }
-    if new.exists() {
-        // both exist: the new one stays, and the old one is not deleted
-        log::warn!("To-do: {} left behind ({} already exists)", old.display(), new.display());
-        return;
-    }
-    match std::fs::create_dir_all(new.parent().unwrap_or(&root)).map_err(|e| e.to_string()).and_then(|_| move_path(&old, &new)) {
-        Ok(()) => log::info!("To-do: {} → {}", old.display(), new.display()),
-        Err(e) => log::warn!("To-do: could not move {}: {e}", old.display()),
-    }
-}
-
-/// Moves the content of `legacy` to `root`; returns how many apps came over.
-fn migrate_plugin_data(legacy: &Path, root: &Path) -> usize {
-    let Ok(rd) = std::fs::read_dir(legacy) else { return 0 };
-    let mut moved = 0;
-    for e in rd.flatten() {
-        let (path, name) = (e.path(), e.file_name().to_string_lossy().into_owned());
-        let result = if path.is_dir() {
-            // external app: the whole folder (whatever already exists at the target stays)
-            let dest = root.join(&name);
-            std::fs::create_dir_all(&dest).map_err(|e| e.to_string()).and_then(|_| {
-                for f in std::fs::read_dir(&path).map_err(|e| e.to_string())?.flatten() {
-                    let to = dest.join(f.file_name());
-                    if !to.exists() {
-                        move_path(&f.path(), &to)?;
-                    }
-                }
-                Ok(())
-            })
-        } else if let Some(id) = name.strip_suffix(".json") {
-            let to = root.join(id).join(KV_FILE);
-            if to.exists() {
-                Ok(())
-            } else {
-                std::fs::create_dir_all(root.join(id)).map_err(|e| e.to_string()).and_then(|_| move_path(&path, &to))
-            }
-        } else {
-            continue;
-        };
-        match result {
-            Ok(()) => moved += 1,
-            Err(e) => log::warn!("data of {name}: could not move it from {}: {e}", legacy.display()),
-        }
-    }
-    // removed only if empty (what could not be moved stays there)
-    let _ = remove_empty_dirs(legacy);
-    moved
-}
-
-fn remove_empty_dirs(dir: &Path) -> std::io::Result<()> {
-    for e in std::fs::read_dir(dir)?.flatten() {
-        if e.path().is_dir() {
-            let _ = remove_empty_dirs(&e.path());
-        }
-    }
-    std::fs::remove_dir(dir)
-}
-
 // ---- files --------------------------------------------------------------------------
-
-/// Whole new file: writes it alongside and swaps it in (never left half-written).
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path)).map_err(|e| format!("{}: {e}", path.display()))
-}
 
 fn remove(path: &Path) -> Result<(), String> {
     match std::fs::remove_dir_all(path) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", path.display())),
         _ => Ok(()),
-    }
-}
-
-/// `rename`, or copy and delete when the source is on another disk.
-fn move_path(from: &Path, to: &Path) -> Result<(), String> {
-    if std::fs::rename(from, to).is_ok() {
-        return Ok(());
-    }
-    if from.is_dir() {
-        copy_dir(from, to)?;
-        remove(from)
-    } else {
-        std::fs::copy(from, to).map_err(|e| format!("{}: {e}", to.display()))?;
-        std::fs::remove_file(from).map_err(|e| format!("{}: {e}", from.display()))
     }
 }
 
@@ -471,19 +357,6 @@ fn copy_tree(from: &Path, to: &Path, skip: &[PathBuf]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn old_backups_folder_is_renamed() {
-        let root = temp("old-backups");
-        std::fs::create_dir_all(root.join(".copias/a.b")).unwrap();
-        std::fs::write(root.join(".copias/a.b/x"), "1").unwrap();
-        assert_eq!(backups(&root), root.join(".backups"));
-        assert!(root.join(".backups/a.b/x").is_file() && !root.join(".copias").exists());
-        // with both present, the new one wins and the old one is left alone
-        std::fs::create_dir_all(root.join(".copias")).unwrap();
-        assert_eq!(backups(&root), root.join(".backups"));
-        assert!(root.join(".copias").is_dir());
-        let _ = std::fs::remove_dir_all(&root);
-    }
 
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("miniutils-appdata-{name}-{}", std::process::id()));
@@ -560,27 +433,6 @@ mod tests {
         assert!(bytes > 2 && !cut);
         assert!(export(&root, "io.x.none", &root).is_err());
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn brings_the_data_from_the_old_place() {
-        let base = temp("old");
-        let (legacy, root) = (base.join(".data"), base.join("app-data"));
-        std::fs::create_dir_all(legacy.join("io.x.ext")).unwrap();
-        std::fs::write(legacy.join("io.x.ext").join("folders.txt"), "~/p").unwrap();
-        std::fs::write(legacy.join("io.x.script.json"), "{\"n\":1}").unwrap();
-        // already exists at the target: not overwritten
-        std::fs::create_dir_all(root.join("io.x.there")).unwrap();
-        std::fs::write(root.join("io.x.there").join(KV_FILE), "new").unwrap();
-        std::fs::write(legacy.join("io.x.there.json"), "old").unwrap();
-        assert_eq!(migrate_plugin_data(&legacy, &root), 3);
-        assert_eq!(std::fs::read_to_string(root.join("io.x.ext").join("folders.txt")).unwrap(), "~/p");
-        assert_eq!(std::fs::read_to_string(root.join("io.x.script").join(KV_FILE)).unwrap(), "{\"n\":1}");
-        assert_eq!(std::fs::read_to_string(root.join("io.x.there").join(KV_FILE)).unwrap(), "new");
-        // what did not come over stays there
-        assert!(legacy.join("io.x.there.json").exists());
-        assert_eq!(migrate_plugin_data(&base.join("does-not-exist"), &root), 0);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

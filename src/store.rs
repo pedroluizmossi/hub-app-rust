@@ -278,32 +278,10 @@ impl Status {
 
 // ---- command line -------------------------------------------------------------------
 
-/// Portuguese names the store flags had before; still accepted, so scripts and habits
-/// keep working.
-const LEGACY_FLAGS: [(&str, &str); 12] = [
-    ("--loja", "--store"),
-    ("--instalar", "--install"),
-    ("--atualizar", "--update"),
-    ("--remover", "--remove"),
-    ("--recarregar", "--reload"),
-    ("--loja-chave", "--store-key"),
-    ("--loja-assinar", "--store-sign"),
-    ("--chave", "--key"),
-    ("--sim", "--yes"),
-    ("--apagar-dados", "--delete-data"),
-    ("--manter-dados", "--keep-data"),
-    ("--loja-entrada", "--store-entry"),
-];
-
-/// The current name of a flag (an old Portuguese name becomes the English one).
-fn canonical_flag(arg: &str) -> &str {
-    LEGACY_FLAGS.iter().find(|(old, _)| *old == arg).map_or(arg, |(_, new)| new)
-}
-
 /// Handles the store commands. `None` if `args` is not a store command; otherwise the exit
 /// code.
 pub fn run_cli(args: &[String]) -> Option<i32> {
-    let cmd = canonical_flag(args.first()?.as_str());
+    let cmd = args.first()?.as_str();
     if !matches!(
         cmd,
         "--store"
@@ -318,8 +296,6 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     ) {
         return None;
     }
-    // the apps' data where it used to be (`--remove` needs to see it)
-    appdata::migrate_legacy(false);
     // `--key <hex>` and `--yes` may come in any position
     let mut key = None;
     let mut yes = false;
@@ -328,7 +304,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     let mut pos: Vec<&str> = Vec::new();
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
-        match canonical_flag(a) {
+        match a.as_str() {
             "--key" => key = it.next().cloned(),
             "--path" => entry_opts.path = it.next().cloned(),
             "--app-version" => entry_opts.version = it.next().cloned(),
@@ -687,9 +663,9 @@ fn fetch_and_install(
     let text = std::fs::read_to_string(src.join("manifest.toml")).map_err(|err| tr!("{}: no manifest.toml ({})", e.id, err))?;
     let plugin = Plugin::parse(&text).map_err(|err| tr!("{}: invalid manifest: {}", e.id, err))?;
     check_matches(e, &plugin)?;
-    if let Some(ui) = &plugin.ui {
+    if plugin.ui.is_some() {
         // the view and the script must also open before installing
-        crate::apps::plugin::check_files(&src, ui).map_err(|err| format!("{}: {err}", e.id))?;
+        crate::apps::plugin::check_files(&src).map_err(|err| format!("{}: {err}", e.id))?;
     }
     // external app: the view opens, and there is an executable for this OS
     let binary = match &plugin.app {
@@ -964,17 +940,9 @@ mod tests {
         }
     }
 
-    /// The old Portuguese flags still work, as the English ones.
+    /// A flag that is not a store command is left to the rest of `main`.
     #[test]
-    fn legacy_portuguese_flags_are_aliases() {
-        for (old, new) in LEGACY_FLAGS {
-            assert_eq!(canonical_flag(old), new);
-            assert_eq!(canonical_flag(new), new);
-        }
-        assert_eq!(canonical_flag("--instalar"), "--install");
-        assert_eq!(canonical_flag("--apagar-dados"), "--delete-data");
-        assert_eq!(canonical_flag("registry.json"), "registry.json");
-        // not a store command: left to the rest of `main`
+    fn other_flags_are_not_store_commands() {
         assert_eq!(run_cli(&["--hidden".to_string()]), None);
     }
 

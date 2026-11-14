@@ -80,7 +80,7 @@ use crate::core::exec::Exec;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{AppRef, Host, MiniApp, Report};
 use crate::core::appdata::{self, Kind, Prep};
-use crate::core::plugins::{self, Plugin, Ui};
+use crate::core::plugins::{self, Plugin};
 use crate::core::registry::Registry;
 use crate::core::wake::Waker;
 use crate::mascot::anim::Reaction;
@@ -273,7 +273,7 @@ fn bind(ui: &HubWindow) {
 }
 
 /// Checks the screen and the script before installing (the store calls this).
-pub fn check_files(dir: &Path, _ui: &Ui) -> Result<(), String> {
+pub fn check_files(dir: &Path) -> Result<(), String> {
     check_view(dir)?;
     let script = std::fs::read_to_string(dir.join("main.rhai")).map_err(|e| format!("main.rhai: {e}"))?;
     let env = ScriptEnv { exec: Exec::new("check", &[]), net: Vec::new(), data: None, kv: true, db: None, migrate: None, back: None, catalog: Default::default() };
@@ -1028,7 +1028,7 @@ mod tests {
     fn database_example_stores_and_migrates() {
         let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugin-notes"));
         let p = Plugin::parse(&std::fs::read_to_string(dir.join("manifest.toml")).unwrap()).unwrap();
-        check_files(dir, p.ui.as_ref().unwrap()).unwrap();
+        check_files(dir).unwrap();
         let spec = p.data();
         assert!(spec.has(Kind::Sqlite) && !spec.has(Kind::Kv) && spec.version == 3);
         assert!(p.grants().contains("SQLite"));
@@ -1077,7 +1077,7 @@ mod tests {
     fn example_with_screen_and_script_works() {
         let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugin-top"));
         let p = Plugin::parse(&std::fs::read_to_string(dir.join("manifest.toml")).unwrap()).unwrap();
-        check_files(dir, p.ui.as_ref().unwrap()).unwrap();
+        check_files(dir).unwrap();
         let def = compile_view(dir, std::fs::read_to_string(dir.join("view.slint")).unwrap()).unwrap();
         let props: Vec<String> = def.properties().map(|(n, _)| n).collect();
         assert!(props.iter().any(|n| n == "rows") && props.iter().any(|n| n == "theme"), "{props:?}");

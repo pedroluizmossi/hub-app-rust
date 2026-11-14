@@ -349,9 +349,6 @@ humor e glitch continuam sendo aplicados por cima de cada quadro.
 ```toml
 [idle]
 durations = [1600, 120, 120]   # ms de cada quadro: segura uma pose, mexe rápido
-variants = ["coca", "olha"]    # de vez em quando, uma delas no lugar do loop
-every = [8, 20]                # a cada 8 a 20 s (sorteado)
-exit = "acorda"                # toca uma vez ao sair deste humor
 frames = [ ... ]
 
 [sleep]
@@ -365,9 +362,9 @@ frames = [ ... ]
 ```
 
 - Com o nome de um **humor** (`sleep`, `idle`, `happy`, `busy`, `alarm`), toca sempre que a
-  mascote está nele (repete por padrão), com `enter`, `exit` e `variants`.
+  mascote está nele (repete por padrão), depois da transição `enter`.
 - Com o nome de uma **reação** (`celebrate`, `surprised`), toca enquanto a reação dura.
-- Outros nomes são transições e variações (citadas por um humor) ou ficam disponíveis por
+- Outros nomes são transições (citadas por um humor em `enter`) ou ficam disponíveis por
   `clips::of(chave)` para quem pedir (um jogo, um palco).
 - Com "Reduzir movimento" ligado, a mascote fica na pose base.
 - Quadros de até 33 ms (30/s): enquanto uma animação com quadros curtos está na tela, o hub
@@ -380,10 +377,6 @@ citados de todos os arquivos (`arquivos_de_animacao_validos`).
 **Desenhar sem recompilar:** rode com `MINIUTILS_CLIPS=src/mascot/clips cargo run`. O app
 lê os `.toml` da pasta (todos, sem precisar registrar em `SOURCES`) e recarrega ao salvar;
 erros aparecem no terminal e o arquivo com erro fica de fora até ser corrigido.
-
-**Prévia em GIF:** `cargo run -- --preview neko sleep` grava `neko-sleep.gif` com a animação
-em todos os temas, ampliada (sem o nome da animação, todas em sequência; `--output` escolhe
-o arquivo). Funciona junto com `MINIUTILS_CLIPS`.
 
 **Desenhar num editor** (Aseprite, LibreSprite, Piskel): exporte uma folha PNG com quadros
 de 16 × 14 lado a lado e converta:

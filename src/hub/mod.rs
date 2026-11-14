@@ -216,6 +216,8 @@ impl Hub {
         hub.registry.start(&hub.ui);
         hub.open_tab(tab.as_deref().unwrap_or_default());
         hub.rebuild_lists();
+        // the screen callbacks reach the hub through `with_hub`
+        CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(&hub));
         Self::bind(&hub);
         Self::bind_store(&hub);
         hub.load_lines();
@@ -240,7 +242,6 @@ impl Hub {
     }
 
     fn start_loops(hub: &Rc<Self>) {
-        CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(hub));
         // data: each reading or report rings the waker, which schedules `update` on the UI
         // thread (several rings in a row become one update)
         hub.host.bus.waker().install(|| {
@@ -249,12 +250,7 @@ impl Hub {
         // what arrived before installing it (the setup takes a while)
         hub.update();
         // animation: only with the window visible (`set_shown` turns it on and off; `set_hovered` changes the pace)
-        let w = Rc::downgrade(hub);
-        hub.anim.start(TimerMode::Repeated, FRAME_COLD, move || {
-            if let Some(h) = w.upgrade() {
-                h.anim_tick();
-            }
-        });
+        hub.anim.start(TimerMode::Repeated, FRAME_COLD, || with_hub(Hub::anim_tick));
         if !hub.shown.get() {
             hub.anim.stop();
         }

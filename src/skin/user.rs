@@ -10,11 +10,7 @@
 //!
 //! The key is the file name. A theme or skin can start from an existing one (`base`) and
 //! change only what it wants. Commented examples in `examples/appearance/`; the format is in
-//! DESIGN.md. `MINIUTILS_APPEARANCE` (or the older `MINIUTILS_APARENCIA`) changes the folder
-//! (tests, `tools/dev-ui.sh`).
-//!
-//! Older versions used Portuguese folder names (`temas/`, `visuais/`, `fundos/`): [`migrate`]
-//! renames them on start, and while a rename fails the old folder is still read.
+//! DESIGN.md. `MINIUTILS_APPEARANCE` changes the folder (tests, `tools/dev-ui.sh`).
 //!
 //! A file with an error is left out, with the reason (Settings › Appearance and the log): a
 //! broken file does not keep the hub from opening.
@@ -34,44 +30,12 @@ pub const THEMES: &str = "themes";
 pub const SKINS: &str = "skins";
 pub const BACKDROPS: &str = "backdrops";
 
-/// Folders renamed to English: (current name, name in older versions).
-const RENAMED: [(&str, &str); 3] = [(THEMES, "temas"), (SKINS, "visuais"), (BACKDROPS, "fundos")];
-
 /// Folder that holds `themes/`, `skins/` and `backdrops/`.
 pub fn dir() -> PathBuf {
-    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
-    match var("MINIUTILS_APPEARANCE").or_else(|| var("MINIUTILS_APARENCIA")) {
+    match std::env::var_os("MINIUTILS_APPEARANCE").filter(|v| !v.is_empty()) {
         Some(d) => PathBuf::from(d),
         None => dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("miniutils"),
     }
-}
-
-/// Renames the folders of older versions (`temas/` → `themes/`…) when the new one does not
-/// exist yet. A failed rename is only logged: [`folder`] keeps reading the old one.
-pub fn migrate(root: &Path) {
-    for (new, old) in RENAMED {
-        let (to, from) = (root.join(new), root.join(old));
-        if to.exists() || !from.is_dir() {
-            continue;
-        }
-        match std::fs::rename(&from, &to) {
-            Ok(()) => log::info!("renamed {} to {}", from.display(), to.display()),
-            Err(e) => log::warn!("could not rename {} to {} ({e}); reading the old folder", from.display(), to.display()),
-        }
-    }
-}
-
-/// The folder to read for `name` (one of `THEMES`, `SKINS`, `BACKDROPS`): the current one or,
-/// if only the old one exists (the rename failed), the old one.
-fn folder(root: &Path, name: &'static str) -> (PathBuf, &'static str) {
-    let current = root.join(name);
-    if !current.exists()
-        && let Some(&(_, old)) = RENAMED.iter().find(|r| r.0 == name)
-        && root.join(old).is_dir()
-    {
-        return (root.join(old), old);
-    }
-    (current, name)
 }
 
 /// A file that did not get in, and why.
@@ -103,7 +67,6 @@ impl Loaded {
 /// Reads the folder and swaps the program's file themes, skins, backdrops and mascots.
 pub fn reload() -> Loaded {
     let root = dir();
-    migrate(&root);
     let mut loaded = load(&root);
     let (arts, skipped) = pack::load(&root.join(pack::DIR));
     loaded.mascots = arts.len();
@@ -122,7 +85,7 @@ pub fn reload() -> Loaded {
 /// refers to both.
 pub fn load(root: &Path) -> Loaded {
     let mut out = Loaded::default();
-    let (dir, shown) = folder(root, BACKDROPS);
+    let (dir, shown) = (root.join(BACKDROPS), BACKDROPS);
     for (key, path) in files(&dir) {
         let builtin = backdrop::BUILTIN.iter().any(|f| f.key == key);
         match read(&path, builtin).and_then(|t| parse_backdrop(&key, &t)) {
@@ -130,7 +93,7 @@ pub fn load(root: &Path) -> Loaded {
             Err(reason) => out.skipped.push(Skipped { file: format!("{shown}/{key}.toml"), reason }),
         }
     }
-    let (dir, shown) = folder(root, THEMES);
+    let (dir, shown) = (root.join(THEMES), THEMES);
     for (key, path) in files(&dir) {
         let builtin = themes::BUILTIN.iter().any(|t| t.key == key);
         match read(&path, builtin).and_then(|t| parse_theme(&key, &t, &out.themes)) {
@@ -138,7 +101,7 @@ pub fn load(root: &Path) -> Loaded {
             Err(reason) => out.skipped.push(Skipped { file: format!("{shown}/{key}.toml"), reason }),
         }
     }
-    let (dir, shown) = folder(root, SKINS);
+    let (dir, shown) = (root.join(SKINS), SKINS);
     for (key, path) in files(&dir) {
         let builtin = super::BUILTIN.iter().any(|s| s.key == key);
         match read(&path, builtin).and_then(|t| parse_skin(&key, &t, &out)) {
@@ -432,36 +395,6 @@ mod tests {
         assert!(reason("neon").contains("already"));
         assert!(reason("Uppercase").contains("a-z"));
         assert!(!reason("broken").is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn old_portuguese_folders_are_migrated() {
-        let dir = temp_dir("migrate");
-        for old in ["temas", "visuais", "fundos"] {
-            std::fs::create_dir_all(dir.join(old)).unwrap();
-        }
-        std::fs::write(dir.join("temas").join("ocean.toml"), "base = 'ghost'").unwrap();
-        std::fs::write(dir.join("visuais").join("mine.toml"), "app_theme = 'ocean'\nbackdrop = 'bubbles'").unwrap();
-        std::fs::write(dir.join("fundos").join("bubbles.toml"), "[[layer]]\nkind='dots'\nstep=10\nradius=1\ncolor='accent'")
-            .unwrap();
-        // before migrating (or when the rename fails), the old folders are still read
-        let l = load(&dir);
-        assert!(l.skipped.is_empty(), "{:?}", l.skipped);
-        assert_eq!((l.themes.len(), l.skins.len(), l.backdrops.len()), (1, 1, 1));
-        migrate(&dir);
-        for (new, old) in RENAMED {
-            assert!(dir.join(new).is_dir() && !dir.join(old).exists(), "{old} -> {new}");
-        }
-        assert!(dir.join(THEMES).join("ocean.toml").is_file());
-        let l = load(&dir);
-        assert_eq!((l.themes.len(), l.skins.len(), l.backdrops.len()), (1, 1, 1));
-        // the new folder already exists: the old one is left alone (and not read)
-        std::fs::create_dir_all(dir.join("temas")).unwrap();
-        std::fs::write(dir.join("temas").join("other.toml"), "base = 'ghost'").unwrap();
-        migrate(&dir);
-        assert!(dir.join("temas").join("other.toml").is_file());
-        assert_eq!(load(&dir).themes.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

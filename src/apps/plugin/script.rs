@@ -165,8 +165,7 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, path)).map_err(|e| format!("{}: {e}", path.display()))
+        crate::core::os::write_atomic(path, &json).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
 

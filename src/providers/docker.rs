@@ -236,36 +236,7 @@ pub fn parse_inspect(out: &str) -> HashMap<String, Inspect> {
 /// Docker's RFC 3339 -> Unix seconds. "0001-01-01T00:00:00Z" (never) becomes `None`.
 /// E.g. "2026-11-09T15:02:34.006791228Z", "2026-11-09T12:02:34-03:00".
 pub fn parse_time(s: &str) -> Option<i64> {
-    let (date, time) = s.trim().split_once('T')?;
-    let mut d = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
-    let (y, mo, day) = (d.next()??, d.next()??, d.next()??);
-    if y < 1970 || !(1..=12).contains(&mo) || !(1..=31).contains(&day) {
-        return None;
-    }
-    // split off the offset: "Z", "+hh:mm" or "-hh:mm"
-    let (clock, offset) = if let Some(c) = time.strip_suffix('Z') {
-        (c, 0)
-    } else {
-        let at = time.rfind(['+', '-'])?;
-        let (c, z) = time.split_at(at);
-        let (h, m) = z[1..].split_once(':')?;
-        let secs = h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60;
-        (c, if z.starts_with('-') { -secs } else { secs })
-    };
-    let clock = clock.split('.').next()?;
-    let mut t = clock.splitn(3, ':').map(|p| p.parse::<i64>().ok());
-    let (h, mi, se) = (t.next()??, t.next()??, t.next()??);
-    Some(days_from_civil(y, mo, day) * 86400 + h * 3600 + mi * 60 + se - offset)
-}
-
-/// Days since 1970-01-01 (Howard Hinnant's algorithm).
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
+    chrono::DateTime::parse_from_rfc3339(s.trim()).ok().map(|d| d.timestamp()).filter(|&t| t >= 0)
 }
 
 /// Seconds -> "40 s", "5 min", "3 h", "2 d" (short, rounded down).

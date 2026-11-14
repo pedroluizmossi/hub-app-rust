@@ -125,8 +125,8 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
         binaries: BTreeMap::new(),
     };
     // the view (and the script) must also open, as in installation
-    if let Some(ui) = &plugin.ui {
-        crate::apps::plugin::check_files(&src, ui).map_err(|e| format!("{id}: {e}"))?;
+    if plugin.ui.is_some() {
+        crate::apps::plugin::check_files(&src).map_err(|e| format!("{id}: {e}"))?;
     }
     if plugin.app.is_some() {
         crate::apps::plugin::check_view(&src).map_err(|e| format!("{id}: {e}"))?;

@@ -16,16 +16,6 @@ mod store;
 mod tray;
 mod ui;
 
-/// Old Portuguese names of the command-line flags, still accepted (not shown in `--help`).
-/// The store and `--preview` options have their own aliases (`store.rs`, `mascot/preview.rs`).
-const LEGACY_FLAGS: [(&str, &str); 3] =
-    [("--pastas", "--dirs"), ("--previa", "--preview"), ("--importar-mascote", "--import-mascot")];
-
-/// The current name of a flag: an old Portuguese name becomes the English one.
-fn canonical_flag(arg: &str) -> &str {
-    LEGACY_FLAGS.iter().find(|(old, _)| *old == arg).map_or(arg, |(_, new)| new)
-}
-
 /// Width of the option column in [`help`].
 const HELP_COLUMN: usize = 24;
 
@@ -38,7 +28,6 @@ fn help() -> String {
     out.push('\n');
     for line in [
         tr!("miniutils [--hidden] [--tab <name>] [--plugin-dev <folder>]"),
-        tr!("miniutils --preview <mascot> [animation] [--output file.gif]"),
         tr!("miniutils --import-mascot <folder>"),
         "miniutils --dirs",
         "miniutils --version",
@@ -58,7 +47,6 @@ fn help() -> String {
             tr!("--plugin-dev <folder>"),
             tr!("loads the plugin in the folder (enabled, on the 1st page) and reloads it\non save; view and script errors go to the terminal"),
         ),
-        ("--preview", tr!("GIF of a mascot animation in every theme")),
         (
             "--import-mascot",
             tr!("copies the PNG sheets (Name_Animation_N.png) in the folder and its\nsubfolders to the mascots folder, one mascot per character"),
@@ -134,7 +122,7 @@ fn main() -> anyhow::Result<()> {
     console::attach();
     // command-line output follows the system language; the window uses the config (Hub::new)
     core::i18n::set(core::i18n::Language::from_setting("auto"));
-    let args: Vec<String> = std::env::args().skip(1).map(|a| canonical_flag(&a).to_string()).collect();
+    let args: Vec<String> = std::env::args().skip(1).collect();
     // plugin store (command line): opens no window or tray
     if let Some(code) = store::run_cli(&args) {
         std::process::exit(code);
@@ -142,17 +130,6 @@ fn main() -> anyhow::Result<()> {
     // where things are (for someone adding an app by hand, or an agent about to create one)
     if args.first().is_some_and(|a| a == "--dirs") {
         println!("{}", dirs_text());
-        return Ok(());
-    }
-    // GIF preview of an animation: opens no window or tray
-    if args.first().is_some_and(|a| a == "--preview") {
-        match mascot::preview::run(&args[1..]) {
-            Ok(path) => println!("{}", path.display()),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(2);
-            }
-        }
         return Ok(());
     }
     // imported mascot (PNG sheets): copies it to the mascots folder; opens no window
@@ -234,8 +211,6 @@ fn main() -> anyhow::Result<()> {
         log::warn!("no single instance ({e})");
     }
     autostart::refresh();
-    // app data still in the old place (plugins/.data, todo.json in the config folder)
-    core::appdata::migrate_legacy(true);
 
     let result = (|| -> anyhow::Result<()> {
         let positionable = popup::select_backend()?;
@@ -264,7 +239,7 @@ mod console {
     use windows::core::w;
 
     /// A windowed app (`windows_subsystem = "windows"`) starts without a console: `--help`,
-    /// the store and `--preview` would show nothing. Here it attaches to the console of its
+    /// and the store would show nothing. Here it attaches to the console of its
     /// caller (if it was a terminal). Redirected output (`> file`, pipe) already works and
     /// is left alone.
     pub fn attach() {
@@ -316,20 +291,5 @@ mod tests {
         assert!(flags.len() >= 5, "no options found in the help: {flags:?}");
         let missing: Vec<&&str> = flags.iter().filter(|f| !readme.contains(**f)).collect();
         assert!(missing.is_empty(), "--help options missing from the README: {missing:?}");
-    }
-
-    /// The old Portuguese flags still work, but the help only shows the English ones.
-    #[test]
-    fn legacy_portuguese_flags_are_hidden_aliases() {
-        assert_eq!(canonical_flag("--pastas"), "--dirs");
-        assert_eq!(canonical_flag("--previa"), "--preview");
-        assert_eq!(canonical_flag("--importar-mascote"), "--import-mascot");
-        assert_eq!(canonical_flag("--hidden"), "--hidden");
-        assert_eq!(canonical_flag("neko"), "neko");
-        let text = help();
-        for (old, new) in LEGACY_FLAGS {
-            assert!(!text.contains(old), "{old} shown in --help");
-            assert!(text.contains(new), "{new} missing from --help");
-        }
     }
 }

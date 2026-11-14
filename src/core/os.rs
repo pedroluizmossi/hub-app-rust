@@ -91,3 +91,22 @@ pub fn log_dir() -> Option<std::path::PathBuf> {
         dirs::state_dir().or_else(dirs::data_dir).map(|d| d.join("miniutils"))
     }
 }
+
+/// Whole new file: writes `<path>.tmp`, syncs it to disk and swaps it in (`rename` is
+/// atomic). A full disk, a power cut or a killed process leave the old file intact.
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}

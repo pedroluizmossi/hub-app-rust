@@ -25,6 +25,9 @@ pub struct Listener {
     pub cmd: String,
     /// 0 = unknown.
     pub pid: u32,
+    /// Process of the current user (it can be ended). Linux: `ss` only gives the pid of
+    /// the user's own processes. Windows: `netstat` gives every pid, so the owner is compared.
+    pub mine: bool,
 }
 
 impl Listener {
@@ -104,24 +107,28 @@ pub fn collect() -> PortsSnapshot {
     }
 }
 
-/// Program name and command line of each pid, through `sysinfo`.
+/// Program name, command line and owner of each pid, through `sysinfo`.
 #[cfg(windows)]
 fn fill_processes(listeners: &mut [Listener]) {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    let mut pids: Vec<Pid> = listeners.iter().filter(|l| l.pid > 0).map(|l| Pid::from_u32(l.pid)).collect();
+    let me = sysinfo::get_current_pid().ok();
+    let mut pids: Vec<Pid> = listeners.iter().filter(|l| l.pid > 0).map(|l| Pid::from_u32(l.pid)).chain(me).collect();
     pids.sort();
     pids.dedup();
     let Ok(mut sys) = System::new() else { return };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&pids),
         true,
-        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_user(UpdateKind::Always),
     );
+    // system services and other users' processes: no owner readable, or another one
+    let my_user = me.and_then(|p| sys.process(p)).and_then(|p| p.user_id()).cloned();
     for l in listeners {
         let Some(p) = sys.process(Pid::from_u32(l.pid)) else { continue };
         let name = p.name().to_string_lossy();
         l.process = name.strip_suffix(".exe").unwrap_or(&name).to_string();
         l.cmd = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
+        l.mine = my_user.is_some() && p.user_id() == my_user.as_ref();
     }
 }
 
@@ -196,7 +203,7 @@ pub fn parse(out: &str) -> Vec<Listener> {
     }
     merged
         .into_iter()
-        .map(|((proto, port, pid, process), addrs)| Listener { proto, port, addrs, process, cmd: String::new(), pid })
+        .map(|((proto, port, pid, process), addrs)| Listener { proto, port, addrs, process, cmd: String::new(), pid, mine: pid > 0 })
         .collect()
 }
 

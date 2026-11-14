@@ -13,9 +13,6 @@
 //! durations = [900, 120, 120]    # ms of each frame (instead of `fps`)
 //! loop = true                    # repeats (default: true for a mood, false otherwise)
 //! enter = "yawn"                 # plays once when entering this mood, before the loop
-//! exit = "wake"                  # plays once when leaving it
-//! variants = ["scratch", "look"] # now and then, one of these instead of the loop
-//! every = [8, 20]                # seconds between variants (drawn from the range)
 //! frames = [
 //! """
 //! ... 14 rows of 16 characters, with the same color roles as `sprites.rs` ...
@@ -26,13 +23,12 @@
 //! When it plays:
 //! - named after a reaction (`celebrate`, `surprised`): while the reaction lasts;
 //! - named after a mood (`sleep`, `idle`, `happy`, `busy`, `alarm`): whenever the mascot is
-//!   in it, with `enter`/`exit`/`variants`;
-//! - other names: when something asks for it (transitions, variants, a game).
+//!   in it, after its `enter` transition;
+//! - other names: when something asks for it (transitions, a game).
 //!
 //! To draw without recompiling: `MINIUTILS_CLIPS=src/mascot/clips cargo run` reads the
 //! `.toml` files in that folder and reloads on save (see `watch`).
 //! To convert a PNG: `cargo run -p sprite-import -- --help`.
-//! To see it as a GIF: `miniutils --preview <mascot> <animation>`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -60,10 +56,6 @@ pub struct Clip {
     pub durations: Vec<u32>,
     pub looping: bool,
     pub enter: Option<String>,
-    pub exit: Option<String>,
-    pub variants: Vec<String>,
-    /// Seconds between variants: (minimum, maximum).
-    pub every: (u32, u32),
 }
 
 impl Clip {
@@ -219,10 +211,6 @@ struct RawClip {
     #[serde(rename = "loop")]
     looping: Option<bool>,
     enter: Option<String>,
-    exit: Option<String>,
-    #[serde(default)]
-    variants: Vec<String>,
-    every: Option<[u32; 2]>,
     frames: Vec<String>,
 }
 
@@ -256,22 +244,18 @@ pub fn parse(sprite: &Sprite, src: &str) -> Result<Clips, String> {
             }
         };
         let mood = MOODS.contains(&name.as_str());
-        if !mood && (c.enter.is_some() || c.exit.is_some() || !c.variants.is_empty()) {
-            return Err(err("enter/exit/variants only apply to a mood animation".into()));
+        if !mood && c.enter.is_some() {
+            return Err(err("enter only applies to a mood animation".into()));
         }
-        // the names it mentions must exist in the same file and play once
-        for other in c.enter.iter().chain(&c.exit).chain(&c.variants) {
+        // the transition it mentions must exist in the same file and play once
+        if let Some(other) = &c.enter {
             match raw.get(other) {
                 None => return Err(err(format!("mentions \"{other}\", which is not in this file"))),
                 Some(o) if o.looping == Some(true) || MOODS.contains(&other.as_str()) => {
-                    return Err(err(format!("\"{other}\" loops: transitions and variants play once")));
+                    return Err(err(format!("\"{other}\" loops: a transition plays once")));
                 }
                 Some(_) => {}
             }
-        }
-        let every = c.every.unwrap_or([8, 20]);
-        if every[0] == 0 || every[0] > every[1] {
-            return Err(err(format!("every = {every:?}: use [minimum, maximum] in seconds, minimum ≥ 1")));
         }
         let mut frames = Vec::new();
         for (i, text) in c.frames.iter().enumerate() {
@@ -284,9 +268,6 @@ pub fn parse(sprite: &Sprite, src: &str) -> Result<Clips, String> {
                 durations,
                 looping: c.looping.unwrap_or(mood),
                 enter: c.enter.clone(),
-                exit: c.exit.clone(),
-                variants: c.variants.clone(),
-                every: (every[0], every[1]),
             },
         );
     }
@@ -358,7 +339,7 @@ pub(crate) mod tests {
         let durations = format!("[idle]\ndurations = [100]\nframes = [{base}, {base}]");
         assert!(parse(neko, &durations).unwrap_err().contains("1 durations for 2 frames"));
         let not_mood = format!("[x]\nenter = \"y\"\nframes = [{base}]\n[y]\nframes = [{base}]");
-        assert!(parse(neko, &not_mood).unwrap_err().contains("only apply to a mood animation"));
+        assert!(parse(neko, &not_mood).unwrap_err().contains("only applies to a mood animation"));
     }
 
     #[test]

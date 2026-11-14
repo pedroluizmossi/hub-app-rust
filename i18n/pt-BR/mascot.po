@@ -1,5 +1,5 @@
-# Mascots: names of the built-in mascots and themes, imported mascot packs
-# (src/mascot/pack.rs) and the --preview subcommand (src/mascot/preview.rs).
+# Mascots: names of the built-in mascots and themes, and imported mascot packs
+# (src/mascot/pack.rs).
 
 # ---- themes (src/mascot/themes.rs) ----
 
@@ -189,23 +189,3 @@ msgstr "{}: copiada, mas não carrega: {}"
 
 msgid "{}: no sheet named like Name_Animation_N.png (at least two animations)"
 msgstr "{}: nenhuma folha no formato Nome_Animação_N.png (pelo menos duas animações)"
-
-# ---- --preview (src/mascot/preview.rs) ----
-
-msgid "usage: miniutils --preview <mascot> [animation] [--output file.gif]\n\nMakes a GIF of the animation (or of all of them, one after another) in every theme.\nWithout --output, writes <mascot>[-<animation>].gif in the current folder.\nWith MINIUTILS_CLIPS=<folder>, reads the animations from that folder instead of the built-in ones."
-msgstr "uso: miniutils --preview <mascote> [animação] [--output arquivo.gif]\n\nGera um GIF da animação (ou de todas, uma depois da outra) em todos os temas.\nSem --output, grava <mascote>[-<animação>].gif na pasta atual.\nCom MINIUTILS_CLIPS=<pasta>, lê as animações da pasta em vez das embutidas."
-
-msgid "--output needs a file name"
-msgstr "--output precisa do nome de um arquivo"
-
-msgid "unknown option: {}\n\n{}"
-msgstr "opção desconhecida: {}\n\n{}"
-
-msgid "there is no mascot \"{}\" in sprites.rs"
-msgstr "não há mascote \"{}\" em sprites.rs"
-
-msgid "the mascot \"{}\" has no animations"
-msgstr "a mascote \"{}\" não tem animações"
-
-msgid "\"{}\" has no animation \"{}\"; it has: {}"
-msgstr "\"{}\" não tem a animação \"{}\"; tem: {}"

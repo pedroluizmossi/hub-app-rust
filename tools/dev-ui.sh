@@ -26,9 +26,6 @@
 # vim) goes unnoticed: after editing, run `reload`. (2) After a reload, `find`/`click`
 # still see the old tree; `shot` shows the new one. To click on the new screen, run
 # `open --live` again. (3) The window goes back to its minimum width on reload.
-#
-# The Portuguese command names of older versions (abrir, recarregar, foto, achar, clicar,
-# fechar, --minha-config) still work.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DIR=target/dev-ui
@@ -84,22 +81,13 @@ close() {
 }
 
 cmd=${1:-}; shift || true
-# the Portuguese names of older versions
-case "$cmd" in
-    abrir) cmd=open ;;
-    recarregar) cmd=reload ;;
-    foto) cmd=shot ;;
-    achar) cmd=find ;;
-    clicar) cmd=click ;;
-    fechar) cmd=close ;;
-esac
 case "$cmd" in
 open)
     features=dev-mcp mine=
     while [ $# -gt 0 ]; do
         case "$1" in
             --live) features=dev-mcp,live-preview ;;
-            --my-config|--minha-config) mine=1 ;;
+            --my-config) mine=1 ;;
             --) shift; break ;;
             *) die "open: unknown option $1" ;;
         esac
