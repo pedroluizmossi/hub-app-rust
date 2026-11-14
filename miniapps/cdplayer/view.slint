@@ -1,20 +1,20 @@
-// Tela do mini-app CD Player: um deck com o disco girando (pixel art colorida pelo tema),
-// o display com faixa/artista e os controles do player MPRIS ativo.
+// View of the CD Player mini-app: a deck with the spinning disc (pixel art coloured by the
+// theme), the display with track/artist and the controls of the active MPRIS player.
 //
-// Responsiva, como os outros apps: o disco encolhe com a altura da célula, o texto some
-// em células estreitas e os botões de pulo só aparecem quando há largura.
+// Responsive, like the other apps: the disc shrinks with the cell height, the text goes
+// away in narrow cells and the skip buttons only show when there is room.
 import { Colors, Moods, Anim, Skin, Icons } from "../../ui/theme.slint";
 import { IconButton, TextButton } from "../../ui/widgets.slint";
 
-// Estado do mini-app, preenchido pelo Rust (src/apps/cdplayer.rs).
+// Mini-app state, filled in by Rust (src/apps/cdplayer.rs).
 export global CdPlayerApp {
     in property <Colors> theme;
-    // o barramento respondeu
+    // the bus answered
     in property <bool> ok: true;
     in property <string> error-text;
-    // "TOCANDO" | "PAUSADO" | "PARADO" | "SEM DISCO" | "SEM BARRAMENTO"
-    in property <string> state-text: "SEM DISCO";
-    // nome do player: "Firefox", "plasma-browser-integration"…
+    // "PLAYING" | "PAUSED" | "STOPPED" | "NO DISC" | "NO BUS" (translated by Rust)
+    in property <string> state-text: @tr("NO DISC");
+    // player name: "Firefox", "plasma-browser-integration"…
     in property <string> source;
     in property <string> title;
     in property <string> artist;
@@ -28,7 +28,7 @@ export global CdPlayerApp {
     in property <float> progress;
     // "1:23 / 4:30"
     in property <string> time-text;
-    // segundos do pulo, para o rótulo dos botões ("10")
+    // skip seconds, for the button labels ("10")
     in property <string> seek-label: "10";
     in property <image> disc;
     in property <string> mood: "sleep";
@@ -47,7 +47,7 @@ export component CdPlayerView inherits Rectangle {
     VerticalLayout {
         spacing: short ? 6px : 9px;
 
-        // faixa do topo: LED do estado, estado e a fonte (player) ou o erro
+        // top strip: state LED, state and the source (player) or the error
         HorizontalLayout {
             spacing: 8px;
             VerticalLayout {
@@ -87,12 +87,12 @@ export component CdPlayerView inherits Rectangle {
             }
         }
 
-        // disco + display
+        // disc + display
         HorizontalLayout {
             spacing: 12px;
             vertical-stretch: 1;
 
-            // poço do disco: o CD desenhado em Rust (pixel art) gira enquanto toca
+            // disc well: the CD drawn in Rust (pixel art) spins while playing
             Rectangle {
                 width: disc-size;
                 height: disc-size;
@@ -109,7 +109,7 @@ export component CdPlayerView inherits Rectangle {
                 }
             }
 
-            // display: faixa, artista, álbum, progresso e tempo
+            // display: track, artist, album, progress and time
             Rectangle {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
@@ -126,7 +126,7 @@ export component CdPlayerView inherits Rectangle {
                     spacing: short ? 2px : 4px;
 
                     Text {
-                        text: CdPlayerApp.title != "" ? CdPlayerApp.title : CdPlayerApp.has-player ? "faixa sem título" : "sem disco";
+                        text: CdPlayerApp.title != "" ? CdPlayerApp.title : CdPlayerApp.has-player ? @tr("untitled track") : @tr("no disc");
                         color: CdPlayerApp.has-player ? t.text : t.muted;
                         font-size: (short ? 14px : narrow ? 16px : 19px) * Skin.text-scale;
                         font-weight: 700;
@@ -148,7 +148,7 @@ export component CdPlayerView inherits Rectangle {
 
                     Rectangle { vertical-stretch: 1; min-height: 2px; }
 
-                    // barra de progresso
+                    // progress bar
                     Rectangle {
                         height: 4px;
                         background: t.muted.with-alpha(0.35);
@@ -180,7 +180,7 @@ export component CdPlayerView inherits Rectangle {
             }
         }
 
-        // controles do player
+        // player controls
         HorizontalLayout {
             spacing: 6px;
             if !narrow: TextButton {
@@ -198,10 +198,10 @@ export component CdPlayerView inherits Rectangle {
                 ink: t.text;
                 edge: t.muted;
                 enabled: CdPlayerApp.can-prev;
-                label: "Faixa anterior";
+                label: @tr("Previous track");
                 clicked => { CdPlayerApp.command("prev"); }
             }
-            // play/pause: bloco cheio no acento
+            // play/pause: solid block in the accent colour
             Rectangle {
                 width: short ? 42px : 46px;
                 height: self.width;
@@ -212,7 +212,7 @@ export component CdPlayerView inherits Rectangle {
                     icon: CdPlayerApp.playing ? Icons.pause : Icons.play;
                     ink: t.bg0;
                     edge: transparent;
-                    label: CdPlayerApp.playing ? "Pausar" : "Tocar";
+                    label: CdPlayerApp.playing ? @tr("Pause") : @tr("Play");
                     clicked => { CdPlayerApp.command("play-pause"); }
                 }
             }
@@ -223,7 +223,7 @@ export component CdPlayerView inherits Rectangle {
                 ink: t.text;
                 edge: t.muted;
                 enabled: CdPlayerApp.can-next;
-                label: "Próxima faixa";
+                label: @tr("Next track");
                 clicked => { CdPlayerApp.command("next"); }
             }
             if !narrow: TextButton {
@@ -236,7 +236,7 @@ export component CdPlayerView inherits Rectangle {
             }
             Rectangle { horizontal-stretch: 1; }
             if !narrow: TextButton {
-                text: "abrir";
+                text: @tr("open");
                 ink: CdPlayerApp.has-player ? t.visor : t.muted;
                 edge: t.visor;
                 height: btn;

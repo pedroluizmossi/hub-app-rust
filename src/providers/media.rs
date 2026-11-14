@@ -1,12 +1,12 @@
-//! Mídia: quem está tocando, o quê, e os comandos do player.
+//! Media: who is playing, what, and the player commands.
 //!
-//! A coleta lê os players a cada segundo e só devolve um snapshot quando algo mudou. Os
-//! comandos (play/pause, faixa, avançar) vão numa thread própria: o sistema pode demorar e
-//! a UI não espera.
+//! Collection reads the players every second and only returns a snapshot when something
+//! changed. Commands (play/pause, track, seek) run on their own thread: the system may be
+//! slow and the UI doesn't wait.
 //!
-//! A fonte muda por sistema, atrás da mesma interface (`MediaProvider`, `send`,
-//! `valid_service`): MPRIS pelo D-Bus no Linux (`linux.rs`), os controles de mídia do
-//! sistema no Windows (`windows.rs`).
+//! The source differs per system, behind the same interface (`MediaProvider`, `send`,
+//! `valid_service`): MPRIS over D-Bus on Linux (`linux.rs`), the system media controls on
+//! Windows (`windows.rs`).
 
 #[cfg(target_os = "linux")]
 #[path = "media/linux.rs"]
@@ -17,23 +17,25 @@ mod imp;
 
 pub use imp::{MediaProvider, send, valid_service};
 
-/// O que está tocando, num instante.
+use crate::tr;
+
+/// What is playing, at one instant.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct MediaSnapshot {
-    /// O sistema respondeu (false = D-Bus ou serviço de mídia fora do ar).
+    /// The system answered (false = D-Bus or media service down).
     pub ok: bool,
     pub error: String,
-    /// Identificador do player (serviço MPRIS no Linux, id do app no Windows); vazio =
-    /// nenhum player aberto.
+    /// Player identifier (MPRIS service on Linux, app id on Windows); empty = no player
+    /// open.
     pub player: String,
-    /// Nome amigável do player (`Identity`): "Firefox", "plasma-browser-integration"…
+    /// Friendly player name (`Identity`): "Firefox", "plasma-browser-integration"…
     pub app: String,
     /// Playing | Paused | Stopped
     pub state: String,
     pub title: String,
     pub artist: String,
     pub album: String,
-    /// Segundos.
+    /// Seconds.
     pub length: u32,
     pub position: u32,
     pub can_play: bool,
@@ -52,22 +54,22 @@ impl MediaSnapshot {
         self.state == "Paused"
     }
 
-    /// Tem um player aberto (mesmo parado).
+    /// A player is open (even if stopped).
     pub fn has_player(&self) -> bool {
         !self.player.is_empty()
     }
 
-    /// Para o tooltip da bandeja.
+    /// For the tray tooltip.
     pub fn summary(&self) -> String {
         if !self.ok {
-            return "CD Player: sem o barramento".into();
+            return tr!("CD Player: no media bus").into();
         }
         if !self.has_player() {
-            return "CD Player: sem disco".into();
+            return tr!("CD Player: no disc").into();
         }
-        let nome = if self.app.is_empty() { self.player.as_str() } else { self.app.as_str() };
+        let name = if self.app.is_empty() { self.player.as_str() } else { self.app.as_str() };
         if self.title.is_empty() {
-            return format!("CD Player: {nome} aberto");
+            return tr!("CD Player: {} open", name);
         }
         if self.artist.is_empty() {
             format!("CD Player: {}", self.title)
@@ -77,8 +79,8 @@ impl MediaSnapshot {
     }
 }
 
-/// Preferência entre players, do mais importante ao menos: está tocando, sabe a duração
-/// (dá barra e tempo), é o que já estava em uso, tem título/artista.
+/// Preference between players, most important first: is playing, knows the length (gives
+/// a bar and time), is the one already in use, has title/artist.
 pub fn usable(s: &MediaSnapshot, current: &str) -> (u8, u8, u8, u8) {
     (
         s.playing() as u8,
@@ -88,22 +90,22 @@ pub fn usable(s: &MediaSnapshot, current: &str) -> (u8, u8, u8, u8) {
     )
 }
 
-/// "3:07"; "1:02:03" quando passa de uma hora.
+/// "3:07"; "1:02:03" past one hour.
 pub fn mmss(total: u32) -> String {
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
 }
 
-/// Nome amigável de um player do Windows a partir do identificador do app
+/// Friendly name of a Windows player from the app identifier
 /// (`Spotify.exe`, `SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify`, `MSEdge`…).
 #[cfg(any(windows, test))]
 pub fn friendly_app(id: &str) -> String {
-    /// Identificadores que não dizem o nome do programa.
+    /// Identifiers that don't tell the program's name.
     const KNOWN: &[(&str, &str)] = &[("308046B0AF4A39CB", "Firefox"), ("MSEdge", "Edge")];
     if let Some((_, name)) = KNOWN.iter().find(|(k, _)| k.eq_ignore_ascii_case(id)) {
         return name.to_string();
     }
-    // app da loja: o nome vem depois do `!`
+    // Store app: the name comes after the `!`
     let name = id.rsplit('!').next().unwrap_or(id);
     let name = if name.to_ascii_lowercase().ends_with(".exe") { &name[..name.len() - 4] } else { name };
     let mut chars = name.chars();
@@ -118,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nome_do_player_no_windows() {
+    fn windows_player_name() {
         assert_eq!(friendly_app("Spotify.exe"), "Spotify");
         assert_eq!(friendly_app("chrome.EXE"), "Chrome");
         assert_eq!(friendly_app("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"), "Spotify");

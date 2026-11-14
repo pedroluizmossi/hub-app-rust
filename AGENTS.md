@@ -2,7 +2,47 @@
 
 Regras para agentes de código (Claude Code, Codex etc.). Arquitetura em
 [ARCHITECTURE.md](ARCHITECTURE.md); visuais, temas, telas, apps e mascotes em
-[DESIGN.md](DESIGN.md). Responda e comente o código em português do Brasil.
+[DESIGN.md](DESIGN.md). Responda ao usuário em português do Brasil.
+
+## Idioma: código em inglês
+
+Tudo o que é código fica em **inglês** (convenção internacional; o projeto é aberto):
+
+- identificadores: funções, tipos, campos, variáveis, módulos, propriedades e callbacks do
+  Slint, funções do Rhai, nomes de teste;
+- comentários e doc-comments (`//`, `///`, `//!`, `#`);
+- mensagens de registro (`log::*!`), erros internos (`anyhow`/`context`/`bail!`) e
+  `panic!`/`expect`;
+- nomes de arquivos, pastas, flags de linha de comando e chaves de config/manifesto;
+- mensagens de commit, nomes de branch e títulos/descrições de PR.
+
+Exceções:
+
+- **Nomes já gravados no disco ou no protocolo** (chaves de config, ids de mascote, valores
+  de opção) não mudam; pasta ou flag renomeada aceita o nome antigo (migração ou alias).
+- **Falas das mascotes** (`lines.toml`) têm `pt`, `en` e `de` de propósito.
+
+## Texto da interface (i18n: inglês + pt-BR)
+
+Texto que o usuário vê (tela, bandeja, notificação, resposta de linha de comando) é escrito
+em **inglês** e traduzido; registro (`log::*!`) não é traduzido. Detalhes em
+`src/core/i18n.rs`.
+
+- **Slint:** `text: @tr("Tasks")`; com valores, `@tr("{} of {}", a, b)`. Sem contexto
+  (`"ctx" =>`) nem plural (`| … % n`): reescreva a frase.
+- **Rust:** `tr!("Tasks")` (`&'static str`) ou `tr!("{} of {}", a, b)` (`String`). O 1º
+  argumento é um literal `"…"` numa linha; marcadores só `{}`/`{0}`, nunca `{nome}`.
+  Tabela de rótulos: `tr_noop!("Cyan")` na tabela e `i18n::tr(rótulo)` onde aparece.
+- **Manifesto dos mini-apps embutidos:** `name`, `description` e `label` em inglês; o
+  catálogo os traduz ao ler.
+- **Tradução:** `i18n/pt-BR/<área>.po` (gettext, um arquivo por área; o `ui/build.rs` junta
+  todos). O mesmo texto não pode ter duas traduções. O teste
+  `catalog_covers_every_string` reprova texto sem tradução e entrada que ninguém usa.
+- **Plugins e apps externos:** `@tr("…")` na tela e `i18n/pt-BR.po` na pasta do app (o hub
+  traduz a tela e o manifesto ao carregar); app externo recebe `lang` no `start` e usa
+  `miniutils_app::i18n::Catalog` para o resto.
+- A troca de idioma em Configurações muda a interface compilada na hora; manifestos e telas
+  de plugin, ao reiniciar.
 
 ## Compilar e validar
 
@@ -72,16 +112,16 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
 - **Ver e mexer na interface:** `tools/dev-ui.sh` (só Linux; ajuda no topo do arquivo)
   abre um MiniUtils de desenvolvimento isolado (outra instância, config e registro em
   `target/dev-ui`) com o servidor MCP do Slint (recurso `dev-mcp`), e daí tira captura
-  (`foto`, leia o PNG), acha elementos (`achar`), clica (`clicar`) e chama qualquer
-  ferramenta do MCP (`mcp`). Mudança visual: confira com `foto` antes de dizer que ficou
-  certo, e diga em que tamanho de janela/célula conferiu. Plugin: `abrir -- --plugin-dev
-  <pasta>`. Ajuste em série: `abrir --live` (recurso `live-preview`), edite o `.slint`,
-  `recarregar`, `foto`; os limites do live-preview estão no topo do script.
+  (`shot`, leia o PNG), acha elementos (`find`), clica (`click`) e chama qualquer
+  ferramenta do MCP (`mcp`). Mudança visual: confira com `shot` antes de dizer que ficou
+  certo, e diga em que tamanho de janela/célula conferiu. Plugin: `open -- --plugin-dev
+  <pasta>`. Ajuste em série: `open --live` (recurso `live-preview`), edite o `.slint`,
+  `reload`, `shot`; os limites do live-preview estão no topo do script.
 - **Bug que o usuário relata** (visual ou de clique): pergunte o sintoma exato (o que
   abre, o que acontece ao clicar) e reproduza com o `dev-ui.sh` antes de mexer. Não capture
   a tela do usuário (do desktop) sem ele pedir: pode pegar outra janela; o `dev-ui.sh` só
   captura a janela do app de desenvolvimento.
-- **Começar um app novo:** a skill `novo-app` (`.claude/skills/novo-app/`) diz qual exemplo
+- **Começar um app novo:** a skill `new-app` (`.claude/skills/new-app/`) diz qual exemplo
   copiar para cada tipo e como conferir na tela.
 - **Testes de UI sem tela** (`i-slint-backend-testing`) precisam de
   `SLINT_EMIT_DEBUG_INFO=1` na compilação, e cliques simulados em `PopupWindow` não
@@ -104,7 +144,7 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
 - **Mensagem para o registro: `log::warn!`/`log::info!`/`log::debug!`, nunca `eprintln!`.**
   Vai para o arquivo (`core/logging.rs`) e para o terminal; no Windows não há console, então
   um `eprintln!` some. `println!`/`eprintln!` só nos comandos de terminal (`--help`, loja,
-  `--previa`), em que a saída é a resposta.
+  `--preview`), em que a saída é a resposta.
 - Plugin que precisa de processos usa `uses = ["procs"]`, não `ps` (que não existe no
   Windows).
 

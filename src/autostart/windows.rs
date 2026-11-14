@@ -1,6 +1,6 @@
-//! Iniciar com o sistema no Windows: o valor "MiniUtils" em
-//! `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` (só do usuário, sem
-//! pedir administrador; aparece em Gerenciador de Tarefas › Inicializar).
+//! Start with the system on Windows: the "MiniUtils" value in
+//! `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` (per user, without
+//! asking for administrator rights; shows in Task Manager › Startup).
 
 use std::path::Path;
 
@@ -11,10 +11,10 @@ use windows::core::{PCWSTR, w};
 const RUN: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const NAME: PCWSTR = w!("MiniUtils");
 
-/// A linha de comando gravada, se há.
+/// The stored command line, if any.
 pub fn current() -> Option<String> {
     let mut size = 0u32;
-    // SAFETY: primeiro só pergunta o tamanho; depois lê num buffer desse tamanho.
+    // SAFETY: first it only asks for the size; then it reads into a buffer of that size.
     unsafe {
         if RegGetValueW(HKEY_CURRENT_USER, RUN, NAME, RRF_RT_REG_SZ, None, None, Some(&raw mut size)) != ERROR_SUCCESS {
             return None;
@@ -31,20 +31,20 @@ pub fn current() -> Option<String> {
 
 pub fn enable(exe: &Path) -> Result<(), String> {
     let wide: Vec<u16> = entry_for(exe).encode_utf16().chain(Some(0)).collect();
-    // SAFETY: `wide` termina em zero e vive até o fim da chamada; o tamanho é em bytes.
+    // SAFETY: `wide` is zero-terminated and lives until the call returns; the size is in bytes.
     let r = unsafe {
         RegSetKeyValueW(HKEY_CURRENT_USER, RUN, NAME, REG_SZ.0, Some(wide.as_ptr().cast()), (wide.len() * 2) as u32)
     };
-    r.ok().map_err(|e| format!("registro do Windows: {}", e.message()))
+    r.ok().map_err(|e| crate::tr!("Windows registry: {}", e.message()))
 }
 
 pub fn disable() -> Result<(), String> {
-    // SAFETY: apaga só o valor "MiniUtils" da chave Run do usuário.
+    // SAFETY: deletes only the "MiniUtils" value of the user's Run key.
     let r = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, NAME) };
     if r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND {
         return Ok(());
     }
-    r.ok().map_err(|e| format!("registro do Windows: {}", e.message()))
+    r.ok().map_err(|e| crate::tr!("Windows registry: {}", e.message()))
 }
 
 /// `"C:\…\miniutils.exe" --hidden`.

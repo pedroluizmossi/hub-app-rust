@@ -1,0 +1,274 @@
+# Core, command line, tray, autostart and plugins
+# (src/core/*, src/main.rs, src/tray/*, src/autostart/*)
+# "Theme", "Mascot", "Previous track", "Pause", "Play" and "Next track" are in other fragments.
+
+# Pages (src/core/config.rs)
+msgid "General"
+msgstr "Geral"
+
+msgid "Page {}"
+msgstr "Página {}"
+
+# Tray (src/core/registry.rs, src/tray/*)
+msgid "No mini-apps enabled"
+msgstr "Nenhum mini-app ligado"
+
+msgid "Show / hide"
+msgstr "Mostrar / esconder"
+
+msgid "Pin window"
+msgstr "Fixar janela"
+
+msgid "Quit"
+msgstr "Sair"
+
+# Running programs (src/core/exec.rs)
+msgid "{} is not installed"
+msgstr "{} não está instalado"
+
+msgid "{} did not respond within {} s"
+msgstr "{} não respondeu em {} s"
+
+msgid "the mini-app {} is not allowed to run \"{}\""
+msgstr "o mini-app {} não tem permissão para executar \"{}\""
+
+msgid "{} exited with {}"
+msgstr "{} saiu com {}"
+
+msgid "folder not found: {}"
+msgstr "pasta não encontrada: {}"
+
+msgid "no terminal found (set $TERMINAL)"
+msgstr "nenhum terminal encontrado (defina $TERMINAL)"
+
+msgid "argument with a special cmd character: not opening {} like that"
+msgstr "argumento com caractere especial do cmd: não abro {} assim"
+
+# App data (src/core/appdata.rs)
+msgid "key-value"
+msgstr "chave-valor"
+
+msgid "SQLite database"
+msgstr "banco SQLite"
+
+msgid "files"
+msgstr "arquivos"
+
+msgid "{} and {}"
+msgstr "{} e {}"
+
+msgid "the data is from version {}, newer than this app's ({}): update the app, or delete the data in Settings"
+msgstr "os dados são da versão {}, mais nova que a deste app ({}): atualize o app, ou apague os dados nas Configurações"
+
+msgid "there is no copy from before the migration"
+msgstr "não há cópia de antes da migração"
+
+msgid "this app has no data"
+msgstr "este app não tem dados"
+
+# Start with the system (src/autostart*)
+msgid "could not find the executable ({})"
+msgstr "não achei o executável ({})"
+
+msgid "no configuration folder"
+msgstr "sem pasta de configuração"
+
+msgid "Windows registry: {}"
+msgstr "registro do Windows: {}"
+
+# Plugins (src/core/plugins.rs)
+msgid "[permissions] exec: use the program name, not a path: {}"
+msgstr "[permissions] exec: use o nome do programa, não um caminho: {}"
+
+msgid "[permissions] net: \"{}\" is not a domain (e.g. api.example.com, without https:// or a path)"
+msgstr "[permissions] net: \"{}\" não é um domínio (ex.: api.exemplo.com, sem https:// nem caminho)"
+
+msgid "missing the [run] (simple plugin), [ui] (own view) or [app] (full-access app) section"
+msgstr "falta a seção [run] (plugin simples), [ui] (tela própria) ou [app] (app com acesso total)"
+
+msgid "use only one of the [run], [ui] or [app] sections"
+msgstr "use só uma das seções [run], [ui] ou [app]"
+
+msgid "[app] has full access: do not declare [permissions] (the store announces it as full access)"
+msgstr "[app] tem acesso total: não declare [permissions] (a loja o anuncia como acesso total)"
+
+msgid "[app] use view = \"view.slint\""
+msgstr "[app] use view = \"view.slint\""
+
+msgid "[app] every: use 1 to 3600 seconds"
+msgstr "[app] every: use de 1 a 3600 segundos"
+
+msgid "[app] missing the executable: linux = \"bin/<name>\" and/or windows = \"bin/<name>.exe\""
+msgstr "[app] falta o executável: linux = \"bin/<nome>\" e/ou windows = \"bin/<nome>.exe\""
+
+msgid "[app] {} = \"{}\": the executable goes in bin/ (e.g. bin/my-app)"
+msgstr "[app] {} = \"{}\": o executável fica em bin/ (ex.: bin/meu-app)"
+
+msgid "uses only applies to a plugin with [ui] or [app] (the script gets it in fn on_event)"
+msgstr "uses só vale para plugin com [ui] ou [app] (o script recebe em fn on_event)"
+
+msgid "[permissions] net only applies to a plugin with [ui] (the script uses http_get)"
+msgstr "[permissions] net só vale para plugin com [ui] (o script usa http_get)"
+
+msgid "[run] command is empty"
+msgstr "[run] command está vazio"
+
+msgid "[run] use the program name, not a path: {}"
+msgstr "[run] use o nome do programa, não um caminho: {}"
+
+msgid "[run] runs \"{}\", which is not in [permissions] exec"
+msgstr "[run] roda \"{}\", que não está em [permissions] exec"
+
+msgid "[run] every = {}: use 5 to 3600 seconds"
+msgstr "[run] every = {}: use de 5 a 3600 segundos"
+
+msgid "[ui] use view = \"view.slint\" and script = \"main.rhai\""
+msgstr "[ui] use view = \"view.slint\" e script = \"main.rhai\""
+
+msgid "[ui] every: use 1 to 3600 seconds"
+msgstr "[ui] every: use de 1 a 3600 segundos"
+
+msgid "[data]: a simple plugin stores no data (use [ui] or [app])"
+msgstr "[data]: o plugin simples não guarda dados (use [ui] ou [app])"
+
+msgid "[data] kinds: \"{}\" does not apply to a script (use \"kv\" and/or \"sqlite\")"
+msgstr "[data] kinds: \"{}\" não vale para script (use \"kv\" e/ou \"sqlite\")"
+
+msgid "[data] kinds: \"{}\" does not apply to an external app (it writes whatever it wants: use \"files\")"
+msgstr "[data] kinds: \"{}\" não vale para app externo (ele grava o que quiser: use \"files\")"
+
+msgid "[display] lines = {}: use 1 to 6"
+msgstr "[display] lines = {}: use de 1 a 6"
+
+msgid "[[mood]] unknown mood: {}"
+msgstr "[[mood]] humor desconhecido: {}"
+
+msgid "icon = \"{}\": there is no such mascot"
+msgstr "icon = \"{}\": não há essa mascote"
+
+msgid "invalid id: \"{}\" (e.g. io.github.someone.my-app)"
+msgstr "id inválido: \"{}\" (ex.: io.github.fulano.meu-app)"
+
+msgid "id \"{}\": the cyber. prefix belongs to the built-in apps"
+msgstr "id \"{}\": o prefixo cyber. é dos apps embutidos"
+
+msgid "runs: {}"
+msgstr "executa: {}"
+
+msgid "network: {}"
+msgstr "rede: {}"
+
+msgid "reads: {}"
+msgstr "lê: {}"
+
+msgid "runs no programs and does not use the network"
+msgstr "não executa programas nem usa a rede"
+
+msgid "stores: SQLite database"
+msgstr "guarda: banco SQLite"
+
+msgid "FULL ACCESS: runs its own program with your user's permissions"
+msgstr "ACESSO TOTAL: roda um programa próprio com as permissões do seu usuário"
+
+msgid "{} is not a regular file"
+msgstr "{} não é um arquivo comum"
+
+msgid "{} is over 1 MiB"
+msgstr "{} passa de 1 MiB"
+
+msgid "{}/ is not a folder"
+msgstr "{}/ não é uma pasta"
+
+msgid "too many files ({}; the limit is {})"
+msgstr "arquivos demais ({}; o limite é {})"
+
+msgid "the files are over 8 MiB together"
+msgstr "os arquivos passam de 8 MiB juntos"
+
+msgid "{} is over {} MiB"
+msgstr "{} passa de {} MiB"
+
+msgid "has no manifest.toml"
+msgstr "não tem manifest.toml"
+
+msgid "the id in manifest.toml is \"{}\": the folder must have that name"
+msgstr "o id do manifest.toml é \"{}\": a pasta tem de se chamar assim"
+
+# Command line: --help, --dirs, --import-mascot, --plugin-dev (src/main.rs)
+msgid "usage:"
+msgstr "uso:"
+
+msgid "miniutils [--hidden] [--tab <name>] [--plugin-dev <folder>]"
+msgstr "miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]"
+
+msgid "miniutils --preview <mascot> [animation] [--output file.gif]"
+msgstr "miniutils --preview <mascote> [animação] [--output arquivo.gif]"
+
+msgid "miniutils --import-mascot <folder>"
+msgstr "miniutils --import-mascot <pasta>"
+
+msgid "starts in the tray only (for autostart)"
+msgstr "inicia só na bandeja (para o autostart)"
+
+msgid "--tab <name>"
+msgstr "--tab <nome>"
+
+msgid "opens on a panel page (by its name or the name of an app on it,\ne.g. General, docker), on apps (settings) or on store"
+msgstr "abre numa página do painel (pelo nome dela ou de um app nela,\nex.: Geral, docker), em apps (configurações) ou em store (loja)"
+
+msgid "--plugin-dev <folder>"
+msgstr "--plugin-dev <pasta>"
+
+msgid "loads the plugin in the folder (enabled, on the 1st page) and reloads it\non save; view and script errors go to the terminal"
+msgstr "carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao\nsalvar; erros da tela e do script saem no terminal"
+
+msgid "GIF of a mascot animation in every theme"
+msgstr "GIF de uma animação de mascote em todos os temas"
+
+msgid "copies the PNG sheets (Name_Animation_N.png) in the folder and its\nsubfolders to the mascots folder, one mascot per character"
+msgstr "copia as folhas PNG (Nome_Animação_N.png) da pasta e das\nsubpastas para a pasta de mascotes, uma mascote por personagem"
+
+msgid "where the local apps, the themes/skins/backdrops/mascots,\nthe configuration and the logs are"
+msgstr "onde ficam os apps locais, os themes/skins/backdrops/mascots,\na configuração e os registros"
+
+msgid "shows the version (also in Settings › System)"
+msgstr "mostra a versão (também em Configurações › Sistema)"
+
+msgid "(no folder)"
+msgstr "(sem pasta)"
+
+msgid "local apps:"
+msgstr "apps locais:"
+
+msgid "(one app per folder, named after the id in manifest.toml)"
+msgstr "(um app por pasta, com o nome do id do manifest.toml)"
+
+msgid "app data:"
+msgstr "dados dos apps:"
+
+msgid "(one folder per app: what it stores; see [data] in APPS.md)"
+msgstr "(uma pasta por app: o que ele guarda; ver [data] no APPS.md)"
+
+msgid "appearance:"
+msgstr "aparência:"
+
+msgid "({}/, {}/ and {}/, one .toml each, examples in the repository;\n{}/, one folder of PNG sheets per mascot: --import-mascot)"
+msgstr "({}/, {}/ e {}/, um .toml cada, exemplos no repositório;\n{}/, uma pasta de folhas PNG por mascote: --import-mascot)"
+
+msgid "configuration:"
+msgstr "configuração:"
+
+msgid "logs:"
+msgstr "registros:"
+
+msgid "--import-mascot <folder>: missing the folder with the PNG sheets"
+msgstr "--import-mascot <pasta>: falta a pasta com as folhas PNG"
+
+msgid "in {}; with MiniUtils open: miniutils --reload"
+msgstr "em {}; com o MiniUtils aberto: miniutils --reload"
+
+msgid "--plugin-dev <folder>: missing the plugin folder"
+msgstr "--plugin-dev <pasta>: falta a pasta do plugin"
+
+msgid "--plugin-dev: close the MiniUtils that is already open (the plugin under development runs in an instance of its own)"
+msgstr "--plugin-dev: feche o MiniUtils que já está aberto (o plugin em desenvolvimento roda numa instância só dele)"

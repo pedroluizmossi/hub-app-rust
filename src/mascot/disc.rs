@@ -1,27 +1,28 @@
-//! O CD em pixel art: um disco de 24×24 desenhado no tema do app, com o brilho girando.
+//! The pixel-art CD: a 24×24 disc drawn in the app theme, with a spinning highlight.
 //!
-//! Igual às mascotes, o desenho é feito aqui (e não carregado do player): a capa do MPRIS
-//! é um arquivo JPEG que exigiria o decodificador de imagens do Slint, e a pixel art
-//! combina com o resto do hub. A iridescência usa as cores do tema.
+//! Like the mascots, it is drawn here (not loaded from the player): the MPRIS cover is a
+//! JPEG file that would need Slint's image decoder, and pixel art matches the rest of the
+//! hub. The iridescence uses the theme colors.
 
 use super::render::darker;
 use super::themes::Theme;
 
 pub const SIZE: usize = 24;
-/// Quadros de uma volta (22,5° cada; ~2 s a 8 quadros/s).
+/// Frames in one turn (22.5° each; ~2 s at 8 frames/s).
 pub const STEPS: u8 = 16;
 
-/// Raio externo, em pixels.
+/// Outer radius, in pixels.
 const R: f32 = 11.4;
-/// Raio do furo central.
+/// Radius of the center hole.
 const HOLE: f32 = 1.5;
 
-/// O disco num quadro. `spin` é o quadro da volta; `lit` apaga o disco sem player.
+/// The disc in one frame. `spin` is the frame within the turn; `lit = false` dims the disc
+/// when there is no player.
 pub fn pixels(theme: &Theme, spin: u8, lit: bool) -> [[u8; 4]; SIZE * SIZE] {
     let mut out = [[0u8; 4]; SIZE * SIZE];
     let c = (SIZE as f32 - 1.0) / 2.0;
     let rot = spin as f32 / STEPS as f32 * std::f32::consts::TAU;
-    // alumínio do disco: nem claro demais (some no tema claro), nem escuro
+    // the disc's aluminum: not too light (it vanishes in the light theme), not dark
     let body = mix(theme.sub, theme.text, 0.18);
 
     for y in 0..SIZE {
@@ -29,27 +30,27 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool) -> [[u8; 4]; SIZE * SIZE] {
             let (dx, dy) = (x as f32 - c, y as f32 - c);
             let r = (dx * dx + dy * dy).sqrt();
             if r > R {
-                continue; // fora do disco: transparente
+                continue; // outside the disc: transparent
             }
             let a = dy.atan2(dx);
             if r <= HOLE {
-                continue; // furo: transparente, mostra o fundo do poço
+                continue; // hole: transparent, shows the well's background
             }
             let mut color = if r <= HOLE + 0.9 {
-                // aro do furo
+                // rim of the hole
                 darker(theme.muted, 0.8)
             } else {
-                // iridescência: duas cores do tema que giram com o disco
+                // iridescence: two theme colors that turn with the disc
                 let iri = mix(theme.visor, theme.fur, 0.5 + 0.5 * (2.0 * a - rot).cos());
                 let mut c = mix(body, iri, 0.5);
-                // trilhas: anéis finos de dados
+                // tracks: thin data rings
                 if ((r - HOLE) * 1.7) as i32 % 2 == 0 {
                     c = darker(c, 0.9);
                 }
-                // brilho que gira
+                // spinning highlight
                 let spec = (a - rot).cos().max(0.0).powf(6.0);
                 c = mix(c, 0xffffff, spec * 0.7);
-                // aro externo
+                // outer rim
                 if r > R - 0.9 {
                     c = mix(c, theme.text, 0.45);
                 }
@@ -65,7 +66,7 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool) -> [[u8; 4]; SIZE * SIZE] {
     out
 }
 
-/// Quadro como imagem do Slint (ampliada com `image-rendering: pixelated`).
+/// A frame as a Slint image (scaled up with `image-rendering: pixelated`).
 pub fn image(theme: &Theme, spin: u8, lit: bool) -> slint::Image {
     let px = pixels(theme, spin, lit);
     let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(SIZE as u32, SIZE as u32);
@@ -75,8 +76,8 @@ pub fn image(theme: &Theme, spin: u8, lit: bool) -> slint::Image {
     slint::Image::from_rgba8(buffer)
 }
 
-/// Último quadro entregue à UI. O Slint redesenha quando a imagem muda, então o disco só
-/// é redesenhado quando o quadro (ou o tema) muda.
+/// Last frame handed to the UI. Slint repaints when the image changes, so the disc is only
+/// redrawn when the frame (or the theme) changes.
 #[derive(Default)]
 pub struct Cache {
     key: Option<(&'static str, u8, bool)>,
@@ -84,7 +85,7 @@ pub struct Cache {
 }
 
 impl Cache {
-    /// Redesenha se preciso; `true` quando a imagem mudou.
+    /// Redraws if needed; `true` when the image changed.
     pub fn update(&mut self, theme: &Theme, spin: u8, lit: bool) -> bool {
         let key = (theme.key, spin, lit);
         if self.key == Some(key) {
@@ -104,7 +105,7 @@ fn rgb(c: u32) -> (u8, u8, u8) {
     (((c >> 16) & 0xff) as u8, ((c >> 8) & 0xff) as u8, (c & 0xff) as u8)
 }
 
-/// Mistura `b` sobre `a`: 0 = só `a`, 1 = só `b`.
+/// Blends `b` over `a`: 0 = only `a`, 1 = only `b`.
 fn mix(a: u32, b: u32, t: f32) -> u32 {
     let t = t.clamp(0.0, 1.0);
     let (ar, ag, ab) = rgb(a);
@@ -123,29 +124,29 @@ mod tests {
     }
 
     #[test]
-    fn fora_do_disco_e_transparente_e_o_centro_e_o_furo() {
+    fn outside_is_transparent_and_center_is_the_hole() {
         let t = themes::get("neon");
         let p = pixels(t, 0, true);
         assert_eq!(px(&p, 0, 0)[3], 0);
         assert_eq!(px(&p, SIZE - 1, 0)[3], 0);
-        // centro: furo transparente (o poço do disco aparece)
+        // center: transparent hole (the disc's well shows through)
         assert_eq!(px(&p, SIZE / 2, SIZE / 2)[3], 0);
-        // meio do disco (entre o furo e o aro): opaco
+        // middle of the disc (between the hole and the rim): opaque
         assert_eq!(px(&p, SIZE / 2 + 7, SIZE / 2)[3], 255);
     }
 
     #[test]
-    fn girar_muda_os_pixels_e_o_tema_tambem() {
+    fn spinning_and_theme_change_the_pixels() {
         let t = themes::get("neon");
         assert_ne!(pixels(t, 0, true), pixels(t, 4, true));
         assert_ne!(pixels(t, 0, true), pixels(t, 0, false));
         assert_ne!(pixels(t, 0, true), pixels(themes::get("aconchego"), 0, true));
-        // mesmo quadro, mesma imagem
+        // same frame, same image
         assert_eq!(pixels(t, 3, true), pixels(t, 3, true));
     }
 
     #[test]
-    fn cache_so_redesenha_quando_muda() {
+    fn cache_redraws_only_on_change() {
         let t = themes::get("neon");
         let mut c = Cache::default();
         assert!(c.update(t, 0, true));

@@ -1,12 +1,12 @@
-//! Visuais da janela ("skins"): fundo, moldura, cabeçalho, fontes e cores da interface.
+//! Window skins: backdrop, frame, header, fonts and colors of the interface.
 //!
-//! Um visual é só uma tabela de valores; a tela (`ui/hub.slint`) lê tudo do global `Skin`.
-//! Os embutidos ficam em `BUILTIN`; os da pessoa vêm de `visuais/<chave>.toml` (ver
-//! `user.rs`). O fundo do painel é um dos fundos de `backdrop.rs`, pelo nome. O conteúdo
-//! dos apps segue o tema de cada app; com o tema "auto", o app usa o `app_theme` do visual.
+//! A skin is just a table of values; the screen (`ui/hub.slint`) reads everything from the
+//! `Skin` global. The built-in ones are in `BUILTIN`; the user's come from `skins/<key>.toml`
+//! (see `user.rs`). The panel backdrop is one of the backdrops of `backdrop.rs`, by name. The
+//! apps' content follows each app's theme; with the "auto" theme, the app uses the skin's `app_theme`.
 //!
-//! Por cima do visual, a config pode trocar a cor de destaque (`effective`) e o tamanho do
-//! texto (`apply`).
+//! On top of the skin, the config can change the accent color (`effective`) and the text
+//! size (`apply`).
 
 pub mod backdrop;
 pub mod color;
@@ -19,25 +19,25 @@ use slint::{Color, ComponentHandle};
 use crate::ui::{HubWindow, Skin as SkinGlobal};
 use color::mix;
 
-/// Estilo dos botões do cabeçalho.
+/// Style of the header buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Buttons {
-    /// Ícone de traço com borda fina.
+    /// Line icon with a thin border.
     Icon,
-    /// Texto entre colchetes: `[ fixar ]`.
+    /// Text in brackets: `[ pin ]`.
     Bracket,
-    /// Bloco claro com sombra dura e ícone em pixel.
+    /// Light block with a hard shadow and a pixel icon.
     Chunky,
 }
 
-/// Como o nome do app aparece no título.
+/// How the app name shows in the title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleStyle {
     /// `MINIUTILS`
     Upper,
     /// `MiniUtils`
     Plain,
-    /// `miniutils@bandeja:~$`
+    /// `miniutils@tray:~$`
     Prompt,
 }
 
@@ -46,17 +46,17 @@ impl TitleStyle {
         match self {
             TitleStyle::Upper => name.to_uppercase(),
             TitleStyle::Plain => name.to_string(),
-            TitleStyle::Prompt => format!("{}@bandeja:~$", name.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-")),
+            TitleStyle::Prompt => format!("{}@{}:~$", name.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-"), crate::tr!("tray")),
         }
     }
 }
 
-/// O que aparece ao lado do título.
+/// What shows next to the title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tag {
     /// `// 2 APPS · 3 × 2`
     Grid,
-    /// `boa noite · 21:57`
+    /// `good evening · 21:57`
     Greeting,
     None,
 }
@@ -64,13 +64,15 @@ pub enum Tag {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Skin {
     pub key: &'static str,
+    /// Display name in English (`tr_noop!`), shown through [`Skin::name`]. A skin read from a
+    /// file carries the user's own name here.
     pub label: &'static str,
-    /// Tema dos apps que escolheram "Acompanha a janela".
+    /// Theme of the apps that chose "Follows the window".
     pub app_theme: &'static str,
-    /// Fundo do painel: chave de um fundo de `backdrop` (embutido ou de arquivo).
+    /// Panel backdrop: key of a backdrop from `backdrop` (built-in or from a file).
     pub backdrop: &'static str,
 
-    // superfícies (0xRRGGBB)
+    // surfaces (0xRRGGBB)
     pub bg: u32,
     pub panel: u32,
     pub panel_top: Option<u32>,
@@ -82,14 +84,14 @@ pub struct Skin {
     pub field: u32,
     pub field_edge: u32,
     pub slot: u32,
-    // texto
+    // text
     pub ink: u32,
     pub sub: u32,
     pub dim: u32,
     pub panel_ink: u32,
     pub panel_sub: u32,
     pub tag_ink: u32,
-    // acentos
+    // accents
     pub accent: u32,
     pub accent_ink: u32,
     pub accent2: u32,
@@ -97,7 +99,7 @@ pub struct Skin {
     pub danger: u32,
     pub bad: u32,
 
-    // forma (pixels lógicos)
+    // shape (logical pixels)
     pub chamfer: f32,
     pub border: f32,
     pub header_h: f32,
@@ -106,18 +108,18 @@ pub struct Skin {
     pub footer_h: f32,
     pub card_alpha: f32,
 
-    // letras
+    // fonts
     pub font_ui: &'static str,
     pub font_mono: &'static str,
     pub font_title: &'static str,
 
-    // cabeçalho
+    // header
     pub title: TitleStyle,
     pub title_size: f32,
     pub title_weight: i32,
     pub title_spacing: f32,
     pub title_cursor: bool,
-    /// Ícone em pixel (quadro 8×8) e o furo dele.
+    /// Pixel icon (8×8 frame) and its cut-out.
     pub title_icon: &'static str,
     pub title_icon_cut: &'static str,
     pub tag: Tag,
@@ -159,7 +161,7 @@ pub static BUILTIN: &[Skin] = &[
     },
     Skin {
         key: "aconchego",
-        label: "Aconchego",
+        label: crate::tr_noop!("Cozy"),
         app_theme: "aconchego",
         backdrop: "papel",
         bg: 0xF4E6CC, panel: 0x8A5F40, panel_top: Some(0xA87650), edge: 0x4A3122, edge_inner: Some(0x8A5F40), line: 0x4A3122,
@@ -174,7 +176,7 @@ pub static BUILTIN: &[Skin] = &[
     },
     Skin {
         key: "noite",
-        label: "Noite chuvosa",
+        label: crate::tr_noop!("Rainy night"),
         app_theme: "noite",
         backdrop: "cidade",
         bg: 0x0C1024, panel: 0x0F1430, panel_top: None, edge: 0x2C3566, edge_inner: None, line: 0x252E5A,
@@ -186,7 +188,7 @@ pub static BUILTIN: &[Skin] = &[
         title: TitleStyle::Plain, title_size: 22.0, title_weight: 700, title_spacing: 0.0, title_cursor: false,
         title_icon: "", title_icon_cut: "", tag: Tag::Greeting, buttons: Buttons::Icon,
     },
-    // os quatro abaixo reaproveitam os fundos de cima, pintados com as cores de cada um
+    // the four below reuse the backdrops above, painted with each one's colors
     Skin {
         key: "synthwave",
         label: "Synthwave",
@@ -203,7 +205,7 @@ pub static BUILTIN: &[Skin] = &[
     },
     Skin {
         key: "gelo",
-        label: "Gelo",
+        label: crate::tr_noop!("Ice"),
         app_theme: "ghost",
         backdrop: "terminal",
         bg: 0x020B14, panel: 0x041321, panel_top: None, edge: 0x1C3B55, edge_inner: None, line: 0x123049,
@@ -245,10 +247,10 @@ pub static BUILTIN: &[Skin] = &[
     },
 ];
 
-/// Fontes que vêm no binário (ver `ui/hub.slint`): as únicas aceitas num visual de arquivo.
+/// Fonts bundled in the binary (see `ui/hub.slint`): the only ones accepted in a file skin.
 pub const FONTS: &[&str] = &[CHAKRA, MONO, PIXEL];
 
-/// Visuais lidos de arquivo (depois dos embutidos); vazam a cada recarga, como os temas.
+/// Skins read from files (after the built-in ones); leaked on each reload, like the themes.
 static EXTRA: RwLock<Vec<&'static Skin>> = RwLock::new(Vec::new());
 
 pub fn set_extra(list: Vec<Skin>) {
@@ -258,7 +260,7 @@ pub fn set_extra(list: Vec<Skin>) {
     }
 }
 
-/// Todos os visuais: os embutidos e, depois, os de arquivo.
+/// All skins: the built-in ones and then those from files.
 pub fn all() -> Vec<&'static Skin> {
     let extra = EXTRA.read().map(|e| e.clone()).unwrap_or_default();
     BUILTIN.iter().chain(extra).collect()
@@ -271,7 +273,7 @@ pub fn find(key: &str) -> Option<&'static Skin> {
     EXTRA.read().ok()?.iter().copied().find(|s| s.key == key)
 }
 
-/// O visual `key`, ou o primeiro se não existir (um visual de arquivo que sumiu).
+/// The skin `key`, or the first one if it doesn't exist (a skin file that went away).
 pub fn get(key: &str) -> &'static Skin {
     find(key).unwrap_or(&BUILTIN[0])
 }
@@ -280,20 +282,20 @@ pub fn index_of(key: &str) -> usize {
     all().iter().position(|s| s.key == key).unwrap_or(0)
 }
 
-/// Cores de destaque que a pessoa pode escolher (Configurações › Aparência). A cor é
-/// ajustada ao visual para continuar legível (`effective`).
+/// Accent colors the user can pick (Settings › Appearance): config key, label (`tr_noop!`)
+/// and color. The color is adjusted to the skin to stay readable (`effective`).
 pub const ACCENTS: &[(&str, &str, u32)] = &[
-    ("ciano", "Ciano", 0x3DF2FF),
+    ("ciano", crate::tr_noop!("Cyan"), 0x3DF2FF),
     ("magenta", "Magenta", 0xFF3DB8),
-    ("ambar", "Âmbar", 0xFFB020),
-    ("verde", "Verde", 0x4CE06A),
-    ("violeta", "Violeta", 0xA77BFF),
+    ("ambar", crate::tr_noop!("Amber"), 0xFFB020),
+    ("verde", crate::tr_noop!("Green"), 0x4CE06A),
+    ("violeta", crate::tr_noop!("Violet"), 0xA77BFF),
     ("coral", "Coral", 0xFF6F59),
-    ("azul", "Azul", 0x4D8DFF),
+    ("azul", crate::tr_noop!("Blue"), 0x4D8DFF),
 ];
 
-/// O visual com a cor de destaque da config (`""` = a do visual). O destaque vira texto e
-/// borda sobre `bg` e `surface`, então é clareado ou escurecido até 3:1 sobre os dois.
+/// The skin with the config's accent color (`""` = the skin's own). The accent becomes text
+/// and border over `bg` and `surface`, so it is lightened or darkened to 3:1 over both.
 pub fn effective(base: &Skin, accent: &str) -> Skin {
     let mut s = base.clone();
     if let Some(&(_, _, c)) = ACCENTS.iter().find(|a| a.0 == accent) {
@@ -303,11 +305,11 @@ pub fn effective(base: &Skin, accent: &str) -> Skin {
     s
 }
 
-/// Gera, a partir da lista de nomes, as cores que um arquivo de visual (ou um fundo, como
-/// `color = "accent"`) pode citar pelo nome.
+/// Generates, from the list of names, the colors a skin file (or a backdrop, as in
+/// `color = "accent"`) can refer to by name.
 macro_rules! color_fields {
     ($($f:ident),* $(,)?) => {
-        /// Cores de um visual, pelo nome (`bg`, `accent`…).
+        /// Colors of a skin, by name (`bg`, `accent`…).
         pub const COLOR_FIELDS: &[&str] = &[$(stringify!($f)),*];
         impl Skin {
             pub fn color(&self, name: &str) -> Option<u32> {
@@ -330,7 +332,7 @@ color_fields!(
     accent, accent_ink, accent2, hover, danger, bad,
 );
 
-/// Medidas de um visual, pelo nome, com o intervalo aceito num arquivo.
+/// Sizes of a skin, by name, with the range accepted in a file.
 pub const NUM_FIELDS: &[(&str, f32, f32)] = &[
     ("chamfer", 0.0, 40.0),
     ("border", 0.0, 12.0),
@@ -344,6 +346,11 @@ pub const NUM_FIELDS: &[(&str, f32, f32)] = &[
 ];
 
 impl Skin {
+    /// Name to show, in the interface language. A file skin's own name passes through.
+    pub fn name(&self) -> &'static str {
+        crate::core::i18n::tr(self.label)
+    }
+
     pub fn num_mut(&mut self, name: &str) -> Option<&mut f32> {
         Some(match name {
             "chamfer" => &mut self.chamfer,
@@ -365,20 +372,20 @@ fn rgb(c: u32) -> Color {
 }
 
 thread_local! {
-    /// O último visual aplicado ao hub (já com destaque e tamanho do texto): as outras
-    /// janelas (ex.: o detalhe de um agente) recebem o mesmo com `apply_current`.
+    /// The last skin applied to the hub (already with accent and text size): the other
+    /// windows (e.g. an agent's detail) get the same one with `apply_current`.
     static CURRENT: std::cell::RefCell<Option<(Skin, String, f32)>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Passa o visual para o hub e o guarda para as outras janelas; `name` é o nome exibido do
-/// app e `text_scale` o tamanho do texto (1,0 = o do design).
+/// Passes the skin to the hub and keeps it for the other windows; `name` is the app's shown
+/// name and `text_scale` the text size (1.0 = the design's).
 pub fn apply(ui: &HubWindow, s: &Skin, name: &str, text_scale: f32) {
     CURRENT.with(|c| *c.borrow_mut() = Some((s.clone(), name.to_string(), text_scale)));
     apply_to(ui, s, name, text_scale);
 }
 
-/// Passa o último visual aplicado ao hub para outra janela (cada janela do Slint tem os
-/// próprios globais). Antes do hub, não faz nada.
+/// Passes the last skin applied to the hub to another window (each Slint window has its
+/// own globals). Before the hub, does nothing.
 pub fn apply_current<W>(ui: &W)
 where
     W: ComponentHandle,
@@ -420,7 +427,7 @@ where
     g.set_danger(rgb(s.danger));
     g.set_danger_edge(rgb(mix(s.danger, s.bg, 0.35)));
     g.set_bad(rgb(s.bad));
-    // modo de edição: tons do acento sobre o fundo
+    // edit mode: tones of the accent over the background
     g.set_edit_bg(rgb(mix(s.accent, s.bg, 0.08)));
     g.set_edit_line(rgb(mix(s.accent, s.bg, 0.4)));
     g.set_edit_ink(rgb(mix(s.accent, s.ink, 0.3)));
@@ -469,43 +476,43 @@ mod tests {
     use crate::mascot::themes;
 
     #[test]
-    fn chaves_unicas_e_tema_e_fundo_existem() {
+    fn unique_keys_and_theme_and_backdrop_exist() {
         for (i, s) in BUILTIN.iter().enumerate() {
-            assert!(BUILTIN.iter().skip(i + 1).all(|o| o.key != s.key), "{} repetido", s.key);
-            assert!(themes::find(s.app_theme).is_some(), "{}: tema {} não existe", s.key, s.app_theme);
-            assert!(backdrop::find(s.backdrop).is_some(), "{}: fundo {} não existe", s.key, s.backdrop);
+            assert!(BUILTIN.iter().skip(i + 1).all(|o| o.key != s.key), "{} repeated", s.key);
+            assert!(themes::find(s.app_theme).is_some(), "{}: theme {} does not exist", s.key, s.app_theme);
+            assert!(backdrop::find(s.backdrop).is_some(), "{}: backdrop {} does not exist", s.key, s.backdrop);
             assert!(FONTS.contains(&s.font_ui) && FONTS.contains(&s.font_mono) && FONTS.contains(&s.font_title));
         }
     }
 
     #[test]
-    fn desconhecido_cai_no_primeiro() {
-        assert_eq!(get("nao-existe").key, BUILTIN[0].key);
+    fn unknown_falls_back_to_the_first() {
+        assert_eq!(get("does-not-exist").key, BUILTIN[0].key);
         assert_eq!(index_of("noite"), 3);
     }
 
     #[test]
-    fn titulo_segue_o_nome() {
+    fn title_follows_the_name() {
         assert_eq!(TitleStyle::Upper.format("MiniUtils"), "MINIUTILS");
-        assert_eq!(TitleStyle::Plain.format("Toca"), "Toca");
-        assert_eq!(TitleStyle::Prompt.format("Minha Casa"), "minha-casa@bandeja:~$");
+        assert_eq!(TitleStyle::Plain.format("Den"), "Den");
+        assert_eq!(TitleStyle::Prompt.format("My Home"), "my-home@tray:~$");
     }
 
     #[test]
-    fn destaque_escolhido_fica_legivel() {
-        let papel = get("aconchego");
-        // sem escolha: o do visual
-        assert_eq!(effective(papel, "").accent, papel.accent);
-        // ciano no papel claro escurece até 3:1
-        let e = effective(papel, "ciano");
+    fn chosen_accent_stays_readable() {
+        let paper = get("aconchego");
+        // no choice: the skin's own
+        assert_eq!(effective(paper, "").accent, paper.accent);
+        // cyan on light paper darkens to 3:1
+        let e = effective(paper, "ciano");
         assert!(color::contrast(e.accent, e.bg) >= 3.0 && color::contrast(e.accent, e.surface) >= 3.0);
         assert!(color::contrast(e.accent_ink, e.accent) >= 4.5);
-        // no Neon escuro, o ciano já serve
+        // on the dark Neon, cyan already works
         assert_eq!(effective(get("neon"), "ciano").accent, 0x3DF2FF);
     }
 
     #[test]
-    fn campos_pelo_nome() {
+    fn fields_by_name() {
         let mut s = get("neon").clone();
         assert_eq!(s.color("accent"), Some(0x3DF2FF));
         assert_eq!(COLOR_FIELDS.len(), 21);

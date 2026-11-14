@@ -1,24 +1,24 @@
 id = "cyber.agents"
-name = "Agentes de IA"
-description = "Sessões do Claude Code, Codex e OpenCode: quem está trabalhando, quem espera você e quem já terminou."
+name = "AI agents"
+description = "Claude Code, Codex and OpenCode sessions: who is working, who is waiting for you and who is done."
 icon = "robo"
 api = 1
 uses = ["agents"]
 
 [permissions]
-# só para retomar uma sessão parada num terminal (`codex resume <id>`, `opencode -s <id>`)
+# only to resume an idle session in a terminal (`codex resume <id>`, `opencode -s <id>`)
 exec = ["codex", "opencode"]
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "recent"
-label = "Mostrar sessões paradas há até (min)"
+label = "Show sessions idle for up to (min)"
 type = "int"
 default = 60
 min = 5
@@ -27,25 +27,25 @@ step = 5
 
 [[settings]]
 key = "notify_waiting"
-label = "Notificar quando um agente esperar por você"
+label = "Notify when an agent is waiting for you"
 type = "bool"
 default = false
 
 [[settings]]
 key = "notify_done"
-label = "Notificar quando um agente terminar"
+label = "Notify when an agent finishes"
 type = "bool"
 default = false
 
 [[settings]]
 key = "heroes"
-label = "Subagentes andando com as mascotes importadas (um diferente a cada novo)"
+label = "Subagents walk as the imported mascots (a different one for each new subagent)"
 type = "bool"
 default = true
 
 [[settings]]
 key = "mascot"
-label = "Mascote"
+label = "Mascot"
 type = "choice"
 default = "robo"
 options = ["robo", "coruja", "polvo", "neko", "hacker", "kitsune", "rato", "morcego"]

@@ -1,7 +1,7 @@
-# Falas da mascote do Docker na conversa entre mascotes. Formato: src/core/chatter.rs.
-# O que não estiver aqui vem das falas genéricas (src/hub/lines.toml).
+# Lines of the Docker mascot in the mascot chatter. Format: src/core/chatter.rs.
+# Whatever is not here comes from the generic lines (src/hub/lines.toml).
 
-# um container caiu, entrou em loop ou ficou unhealthy ({s} = nome do container)
+# a container went down, got into a restart loop or became unhealthy ({s} = container name)
 [trouble]
 pt = [
     "{s} caiu! (o_o)",
@@ -38,7 +38,7 @@ pt = ["{s} voltou! \\o/", "{s} acordou e tá rodando de novo ^_^"]
 en = ["{s} is back! \\o/", "{s} woke up and is running again ^_^"]
 de = ["{s} ist wieder da! \\o/"]
 
-# CPU, RAM ou GPU agitada: o Docker assume a culpa
+# CPU, RAM or GPU under strain: Docker takes the blame
 [reply.strain]
 about = ["CPU", "RAM", "GPU"]
 pt = [

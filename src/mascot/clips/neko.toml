@@ -1,11 +1,11 @@
-# Animações da Neko ciborgue. Formato: topo de src/mascot/clips.rs.
-# Cada quadro tem 14 linhas de 16 caracteres, com os papéis de cor de sprites.rs.
+# Cyborg Neko animations. Format: top of src/mascot/clips.rs.
+# Each frame has 14 rows of 16 characters, with the color roles of sprites.rs.
 
-# Dormindo: orelhas e topo da cabeça baixam 1 pixel e voltam, como quem respira
-# (olhos e base ficam no lugar).
-# Exemplo para testar o caminho de ponta a ponta; troque por um desenho de verdade.
+# Asleep: ears and top of the head drop 1 pixel and come back, as if breathing
+# (eyes and base stay in place).
+# An example to test the path end to end; replace it with a real drawing.
 [sleep]
-enter = "boceja"
+enter = "yawn"
 fps = 1
 frames = [
 """
@@ -42,9 +42,9 @@ KPPPPPPTTPPPPPPK
 """,
 ]
 
-# Ao entrar no sono: a boca se alarga, abre (linhas 10 e 11, longe do queixo) e fecha;
-# depois entra o loop de [sleep]. Origem: assets/mascot/neko-boceja.png (+ neko-paleta.toml).
-[boceja]
+# On falling asleep: the mouth widens, opens (rows 10 and 11, away from the chin) and closes;
+# then the [sleep] loop starts. Source: assets/mascot/neko-yawn.png (+ neko-palette.toml).
+[yawn]
 durations = [250, 600, 250]
 frames = [
 """

@@ -1,35 +1,39 @@
-//! As mascotes em pixel art (16 colunas × 14 linhas), portadas do CyberDock.
+//! The pixel-art mascots (16 columns × 14 rows), ported from CyberDock.
 //!
-//! Cada caractere é um PAPEL de cor; o tema decide a cor real (ver `render.rs`):
-//!   `.` transparente   `K` contorno   `P` cor principal   `S` sombra   `H` brilho
-//!   `M` detalhe claro  `C` visor      `E` olho  `W` brilho do olho   `B` blush
-//!   `T` boca           `F` pele       `D` hardware        `A` LED (segue o humor)
+//! Each character is a color ROLE; the theme decides the actual color (see `render.rs`):
+//!   `.` transparent    `K` outline    `P` main color      `S` shadow     `H` highlight
+//!   `M` light detail   `C` visor      `E` eye   `W` eye glint   `B` blush
+//!   `T` mouth          `F` skin       `D` hardware        `A` LED (follows the mood)
 //!
-//! As mascotes "pixel" (os 20 bichinhos da Toca, 12×12 centralizados no quadro) não usam
-//! papéis: cada letra minúscula tem a própria cor (`Pixel::pal`) e `e` é o olho, que segue
-//! o humor (fecha dormindo, fica laranja agitado, vermelho no alarme).
+//! The "pixel" mascots (the 20 critters of the Den, 12×12 centered in the frame) don't use
+//! roles: each lowercase letter has its own color (`Pixel::pal`) and `e` is the eye, which
+//! follows the mood (closed when asleep, orange when busy, red on alarm).
+//!
+//! The `key` of each mascot is its id, persisted in the config: never rename it. The
+//! `label` is the English display name (`tr_noop!`), shown through [`Sprite::name`].
 
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Sprite {
     pub key: &'static str,
+    /// English display name (an imported mascot carries its own name here).
     pub label: &'static str,
-    /// Papel usado no lugar do olho quando ele fecha.
+    /// Role used in place of the eye when it closes.
     pub eye_bg: u8,
-    /// Linha a partir da qual `P` vira sombra (só a neko usa).
+    /// Row from which `P` becomes shadow (only the neko uses it).
     pub shade_from: usize,
-    /// Cores fixas que ignoram o tema (sapo verde, chip, placas de vídeo).
+    /// Fixed colors that ignore the theme (green frog, chip, graphics cards).
     pub fur: Option<u32>,
     pub ear: Option<u32>,
-    /// Paleta própria (mascotes "pixel"); `None` = cores pelos papéis do tema.
+    /// Own palette ("pixel" mascots); `None` = colors from the theme's roles.
     pub pixel: Option<Pixel>,
     pub grid: [&'static str; 14],
 }
 
-/// Cores fixas de uma mascote "pixel".
+/// Fixed colors of a "pixel" mascot.
 pub struct Pixel {
-    /// Cor do olho com humor calmo.
+    /// Eye color in a calm mood.
     pub eye: u32,
     pub pal: &'static [(u8, u32)],
 }
@@ -41,9 +45,15 @@ impl Pixel {
 }
 
 impl Sprite {
-    /// Última linha de `grid` (o desenho base ou um quadro de animação) que contém um
-    /// olho: onde vai o traço do olho fechado. Calculada por quadro, para uma pose que
-    /// mexe a cabeça fechar o olho no lugar certo.
+    /// Name to show, in the interface language. An imported mascot's own name passes
+    /// through.
+    pub fn name(&self) -> &'static str {
+        crate::core::i18n::tr(self.label)
+    }
+
+    /// Last row of `grid` (the base drawing or an animation frame) that has an eye: where
+    /// the closed-eye stroke goes. Computed per frame, so that a pose that moves the head
+    /// closes the eye in the right place.
     pub fn closed_row(&self, grid: &[&str; 14]) -> usize {
         let eye = if self.pixel.is_some() { 'e' } else { 'E' };
         grid.iter().rposition(|r| r.contains(eye)).unwrap_or(0)
@@ -53,7 +63,7 @@ impl Sprite {
 pub static SPRITES: &[Sprite] = &[
     Sprite {
         key: "neko",
-        label: "Neko ciborgue",
+        label: crate::tr_noop!("Cyborg Neko"),
         eye_bg: b'C',
         shade_from: 11,
         fur: None,
@@ -76,10 +86,10 @@ pub static SPRITES: &[Sprite] = &[
             "..KKKKKKKKKKKK..",
         ],
     },
-    // Lumi, mariposinha de paleta própria.
+    // Lumi, a little moth with its own palette.
     Sprite {
         key: "lumi",
-        label: "Lumi, mariposinha",
+        label: crate::tr_noop!("Lumi, little moth"),
         eye_bg: b'b',
         shade_from: 99,
         fur: None,
@@ -108,7 +118,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "robo",
-        label: "Robô Unit-7",
+        label: crate::tr_noop!("Unit-7 robot"),
         eye_bg: b'C',
         shade_from: 99,
         fur: None,
@@ -133,7 +143,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "kitsune",
-        label: "Kitsune (raposa)",
+        label: crate::tr_noop!("Kitsune (fox)"),
         eye_bg: b'C',
         shade_from: 99,
         fur: None,
@@ -158,7 +168,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "usagi",
-        label: "Usagi (coelha)",
+        label: crate::tr_noop!("Usagi (rabbit)"),
         eye_bg: b'C',
         shade_from: 99,
         fur: None,
@@ -183,7 +193,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "yurei",
-        label: "Yūrei (fantasma)",
+        label: crate::tr_noop!("Yūrei (ghost)"),
         eye_bg: b'P',
         shade_from: 99,
         fur: None,
@@ -239,8 +249,8 @@ pub static SPRITES: &[Sprite] = &[
         fur: None,
         ear: None,
         pixel: None,
-        // segurança: quepe com distintivo e aba (D, visível em fundo escuro), sobrancelhas
-        // de rosto sério, colarinho com gravata e o distintivo do peito no LED (segue o humor)
+        // security guard: cap with a badge and a visor (D, visible on a dark background), stern
+        // eyebrows, collar and tie, and the chest badge on the LED (follows the mood)
         grid: [
             "...KKKKKKKKKK...",
             ".KKPPPPPPPPPPKK.",
@@ -260,7 +270,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "sapo",
-        label: "Sapo",
+        label: crate::tr_noop!("Frog"),
         eye_bg: b'M',
         shade_from: 99,
         fur: Some(0x3ddc54),
@@ -285,7 +295,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "chip",
-        label: "Microprocessador",
+        label: crate::tr_noop!("Microprocessor"),
         eye_bg: b'C',
         shade_from: 99,
         fur: Some(0x8a93a6),
@@ -310,7 +320,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "nvidia",
-        label: "GPU NVIDIA",
+        label: crate::tr_noop!("NVIDIA GPU"),
         eye_bg: b'C',
         shade_from: 99,
         fur: Some(0x76b900),
@@ -335,7 +345,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "amd",
-        label: "GPU AMD",
+        label: crate::tr_noop!("AMD GPU"),
         eye_bg: b'C',
         shade_from: 99,
         fur: Some(0xed1c24),
@@ -360,7 +370,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "disquete",
-        label: "Disquete",
+        label: crate::tr_noop!("Floppy disk"),
         eye_bg: b'M',
         shade_from: 99,
         fur: None,
@@ -385,7 +395,7 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "cd",
-        label: "Disco (CD)",
+        label: crate::tr_noop!("Disc (CD)"),
         eye_bg: b'P',
         shade_from: 99,
         fur: None,
@@ -408,15 +418,15 @@ pub static SPRITES: &[Sprite] = &[
             "................",
         ],
     },
-    // ---- os 20 bichinhos da Toca (design "Toca — 20 mascotes") ----
+    // ---- the 20 critters of the Den (from the design "Toca — 20 mascotes") ----
     Sprite {
         key: "rato",
-        label: "Rato de rede",
+        label: crate::tr_noop!("Network rat"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // rede: Rói os pacotes perdidos e avisa quando a conexão cai.
+        // network: gnaws on lost packets and warns when the connection drops.
         pixel: Some(Pixel { eye: 0x22263A, pal: &[(b'c', 0x3DF2FF), (b'g', 0xA8B0C0), (b'k', 0x22263A), (b'p', 0xFF9EC4)] }),
         grid: [
             "................",
@@ -437,12 +447,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "coruja",
-        label: "Coruja de plantão",
+        label: crate::tr_noop!("On-call owl"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // notificações: Fica acordada por você e pia baixinho quando algo chega.
+        // notifications: stays up for you and hoots softly when something arrives.
         pixel: Some(Pixel { eye: 0x1A1228, pal: &[(b'b', 0x7A5A8C), (b'k', 0x1A1228), (b'l', 0xC7A9D9), (b'o', 0xFFC46B), (b'w', 0xF5F0FF), (b'y', 0xFFC46B)] }),
         grid: [
             "................",
@@ -463,12 +473,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "polvo",
-        label: "Polvo de cabos",
+        label: crate::tr_noop!("Cable octopus"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // processos: Um tentáculo em cada tarefa rodando em segundo plano.
+        // processes: a tentacle on each task running in the background.
         pixel: Some(Pixel { eye: 0x0B2E2A, pal: &[(b'c', 0xFF3DB8), (b'k', 0x0B2E2A), (b'm', 0x1E7A6A), (b't', 0x3FD0B5)] }),
         grid: [
             "................",
@@ -489,12 +499,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "fantasma",
-        label: "Fantasminha de cache",
+        label: crate::tr_noop!("Cache ghost"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // limpeza: Assombra arquivos temporários até você deixá-lo levar.
+        // cleanup: haunts temporary files until you let it take them away.
         pixel: Some(Pixel { eye: 0x3A4A7A, pal: &[(b'k', 0x3A4A7A), (b'p', 0xFFB3D1), (b'w', 0xEAF2FF)] }),
         grid: [
             "................",
@@ -515,12 +525,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "capivara",
-        label: "Capivara zen",
+        label: crate::tr_noop!("Zen capybara"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // foco: Nada a abala. Senta do seu lado durante o pomodoro.
+        // focus: nothing shakes it. Sits by your side during the pomodoro.
         pixel: Some(Pixel { eye: 0x2E1A0E, pal: &[(b'b', 0xA86F45), (b'd', 0x5E3A22), (b'k', 0x2E1A0E), (b'o', 0xFF9A3C)] }),
         grid: [
             "................",
@@ -541,12 +551,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "tartaruga",
-        label: "Tartaruga de disco",
+        label: crate::tr_noop!("Disk turtle"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // disco / backup: Devagar e sempre: guarda cada backup no casco.
+        // disk / backup: slow and steady, keeps every backup in its shell.
         pixel: Some(Pixel { eye: 0x1B2230, pal: &[(b'g', 0x6BBF6A), (b'h', 0x3DF2FF), (b'k', 0x1B2230), (b's', 0x8A93A6)] }),
         grid: [
             "................",
@@ -567,12 +577,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "abelha",
-        label: "Abelha de bits",
+        label: crate::tr_noop!("Bit bee"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // cpu: Zune mais rápido quanto mais núcleos estão ocupados.
+        // cpu: buzzes faster the more cores are busy.
         pixel: Some(Pixel { eye: 0x2A1E05, pal: &[(b'k', 0x2A1E05), (b'w', 0xCFF4FF), (b'y', 0xFFD23F)] }),
         grid: [
             "................",
@@ -593,12 +603,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "caracol",
-        label: "Caracol de download",
+        label: crate::tr_noop!("Download snail"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // downloads: Leva o arquivo nas costas. Às vezes demora, mas chega.
+        // downloads: carries the file on its back. Sometimes slow, but it gets there.
         pixel: Some(Pixel { eye: 0x2C1A28, pal: &[(b'a', 0xFFFFFF), (b'b', 0x9EE29A), (b'k', 0x2C1A28), (b's', 0xFF8FB8)] }),
         grid: [
             "................",
@@ -619,12 +629,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "coelho",
-        label: "Coelho relógio",
+        label: crate::tr_noop!("Clock rabbit"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // lembretes: Sempre atrasado, por isso nunca deixa você se atrasar.
+        // reminders: always late, so it never lets you be late.
         pixel: Some(Pixel { eye: 0x3A3550, pal: &[(b'c', 0xFFE08A), (b'k', 0x3A3550), (b'n', 0x3A2A10), (b'p', 0xFFB3C7), (b'w', 0xF4F4F8)] }),
         grid: [
             "................",
@@ -645,12 +655,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "ourico",
-        label: "Ouriço porteiro",
+        label: crate::tr_noop!("Doorman hedgehog"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // firewall: Arrepia os espinhos para qualquer conexão estranha.
+        // firewall: bristles its spines at any strange connection.
         pixel: Some(Pixel { eye: 0x2A1A12, pal: &[(b'f', 0xF2D6B3), (b'k', 0x2A1A12), (b'n', 0x2A1A12), (b's', 0x6E5A4A)] }),
         grid: [
             "................",
@@ -671,12 +681,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "chaleira",
-        label: "Chaleira",
+        label: crate::tr_noop!("Kettle"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // pausas: Assobia quando é hora de levantar e fazer um chá.
+        // breaks: whistles when it is time to get up and make some tea.
         pixel: Some(Pixel { eye: 0x3E2A1E, pal: &[(b'k', 0x3E2A1E), (b'm', 0x7A2E1E), (b'o', 0xF9D9A8), (b't', 0xE27A5B), (b'v', 0xCFE3FF)] }),
         grid: [
             "................",
@@ -697,12 +707,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "cogumelo",
-        label: "Cogumelo soneca",
+        label: crate::tr_noop!("Sleepy mushroom"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // modo descanso: Cresce no escuro e boceja quando o PC entra em repouso.
+        // sleep mode: grows in the dark and yawns when the PC goes to sleep.
         pixel: Some(Pixel { eye: 0x3A1A1A, pal: &[(b'f', 0xF6E3C8), (b'k', 0x3A1A1A), (b'm', 0xB87A6A), (b'r', 0xE2475B), (b'w', 0xFFF3E8)] }),
         grid: [
             "................",
@@ -723,12 +733,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "gatopao",
-        label: "Gato pão",
+        label: crate::tr_noop!("Bread cat"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // afazeres: Dorme em cima da lista. Acorda quando tudo é riscado.
+        // to-dos: sleeps on top of the list. Wakes up when everything is crossed off.
         pixel: Some(Pixel { eye: 0x5A3418, pal: &[(b'k', 0x3A2210), (b'l', 0x5A3418), (b'o', 0xF2A65A), (b'p', 0xFF9EB0), (b'w', 0xFFF1DE)] }),
         grid: [
             "................",
@@ -749,12 +759,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "slime",
-        label: "Slime de RAM",
+        label: crate::tr_noop!("RAM slime"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // memória: Estica e engorda conforme a memória vai enchendo.
+        // memory: stretches and swells as memory fills up.
         pixel: Some(Pixel { eye: 0x173A12, pal: &[(b'g', 0x8BE36B), (b'k', 0x173A12), (b'm', 0x2F6B22), (b'w', 0xE9FFD9)] }),
         grid: [
             "................",
@@ -775,12 +785,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "morcego",
-        label: "Morcego noturno",
+        label: crate::tr_noop!("Night bat"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // modo escuro: Aparece ao pôr do sol e apaga as luzes da tela.
+        // dark mode: shows up at sunset and turns off the screen lights.
         pixel: Some(Pixel { eye: 0x140F2E, pal: &[(b'b', 0x6B5BD6), (b'f', 0xFFFFFF), (b'k', 0x140F2E), (b'w', 0x3A2F7A)] }),
         grid: [
             "................",
@@ -801,12 +811,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "peixe",
-        label: "Peixinho de aquário",
+        label: crate::tr_noop!("Aquarium fish"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // hidratação: Solta uma bolha a cada hora: beba um copo d’água.
+        // hydration: lets out a bubble every hour: drink a glass of water.
         pixel: Some(Pixel { eye: 0x0E2A4A, pal: &[(b'b', 0xCFF4FF), (b'f', 0x4FB3FF), (b'k', 0x0E2A4A)] }),
         grid: [
             "................",
@@ -827,12 +837,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "nuvem",
-        label: "Nuvenzinha",
+        label: crate::tr_noop!("Little cloud"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // clima: Chove quando vai chover e some quando faz sol.
+        // weather: rains when it is going to rain and disappears when it is sunny.
         pixel: Some(Pixel { eye: 0x5A6A9A, pal: &[(b'k', 0x5A6A9A), (b'm', 0x5A6A9A), (b'p', 0xFFC0D6), (b'r', 0x6FB8FF), (b'w', 0xF4F7FF)] }),
         grid: [
             "................",
@@ -853,12 +863,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "sapodj",
-        label: "Sapo DJ",
+        label: crate::tr_noop!("DJ frog"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // música: Bate o pé no ritmo do que está tocando agora.
+        // music: taps its foot to the beat of what is playing now.
         pixel: Some(Pixel { eye: 0x143A10, pal: &[(b'g', 0x6BCB5A), (b'h', 0xFF3DB8), (b'k', 0x143A10), (b'w', 0xFFFFFF)] }),
         grid: [
             "................",
@@ -879,12 +889,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "vagalume",
-        label: "Vaga-lume",
+        label: crate::tr_noop!("Firefly"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // alertas: Pisca a lanterna quando algo precisa da sua atenção.
+        // alerts: flashes its lantern when something needs your attention.
         pixel: Some(Pixel { eye: 0x10122A, pal: &[(b'b', 0x3A3F6B), (b'k', 0x10122A), (b'l', 0xFFE36B), (b'w', 0xCFE3FF)] }),
         grid: [
             "................",
@@ -905,12 +915,12 @@ pub static SPRITES: &[Sprite] = &[
     },
     Sprite {
         key: "pato",
-        label: "Pato de borracha",
+        label: crate::tr_noop!("Rubber duck"),
         eye_bg: b'.',
         shade_from: 99,
         fur: None,
         ear: None,
-        // debug / logs: Escuta você explicar o bug até a solução aparecer.
+        // debug / logs: listens to you explain the bug until the fix shows up.
         pixel: Some(Pixel { eye: 0x4A3200, pal: &[(b'k', 0x4A3200), (b'o', 0xFF8A3C), (b'w', 0xFFE88A), (b'y', 0xFFD23F)] }),
         grid: [
             "................",
@@ -931,12 +941,12 @@ pub static SPRITES: &[Sprite] = &[
     },
 ];
 
-/// Mascotes importadas (`pack.rs`), depois das embutidas. Quem troca é `pack::set`.
+/// Imported mascots (`pack.rs`), after the built-in ones. `pack::set` replaces them.
 static EXTRA: RwLock<Vec<&'static Sprite>> = RwLock::new(Vec::new());
-/// Muda a cada troca das importadas: os caches de desenhos (seletores) se refazem.
+/// Changes every time the imported ones are replaced: drawing caches (pickers) rebuild.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Troca as mascotes importadas.
+/// Replaces the imported mascots.
 pub fn set_extra(list: Vec<&'static Sprite>) {
     if let Ok(mut extra) = EXTRA.write() {
         *extra = list;
@@ -944,12 +954,12 @@ pub fn set_extra(list: Vec<&'static Sprite>) {
     GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Número da lista atual (ver `GENERATION`).
+/// Number of the current list (see `GENERATION`).
 pub fn generation() -> u64 {
     GENERATION.load(Ordering::Relaxed)
 }
 
-/// Todas as mascotes: as embutidas e, depois, as importadas. É a ordem dos seletores.
+/// Every mascot: the built-in ones, then the imported ones. This is the pickers' order.
 pub fn all() -> Vec<&'static Sprite> {
     let extra = EXTRA.read().map(|e| e.clone()).unwrap_or_default();
     SPRITES.iter().chain(extra).collect()
@@ -962,13 +972,14 @@ pub fn find(key: &str) -> Option<&'static Sprite> {
     EXTRA.read().ok()?.iter().copied().find(|s| s.key == key)
 }
 
-/// A mascote `key`, ou a primeira se não existir (uma importada que saiu da pasta).
+/// The mascot `key`, or the first one if it doesn't exist (an imported one that left the
+/// folder).
 pub fn get(key: &str) -> &'static Sprite {
     find(key).unwrap_or(&SPRITES[0])
 }
 
-/// As alternativas de uma opção são mascotes: todas são chaves de mascote (ou "auto"), e
-/// há pelo menos uma. É como o hub reconhece uma opção de mascote num manifesto.
+/// The options of a choice are mascots: all are mascot keys (or "auto"), and there is at
+/// least one. This is how the hub recognizes a mascot option in a manifest.
 pub fn is_choice(options: &[String]) -> bool {
     let sprite = |o: &String| find(o).is_some();
     options.iter().any(sprite) && options.iter().all(|o| o == "auto" || sprite(o))

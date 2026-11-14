@@ -1,25 +1,25 @@
-// Navegação entre páginas do painel: barra em pé à esquerda ou à direita (Rail), barra
-// embaixo (PageBar) ou abas no cabeçalho (TopTabs). Escolha em Aparência › Páginas.
+// Navigation between dashboard pages: an upright bar on the left or right (Rail), a bar
+// at the bottom (PageBar) or tabs in the header (TopTabs). Chosen in Appearance › Pages.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons, Moods } from "theme.slint";
 import { Icon } from "widgets.slint";
 import { PageInfo } from "models.slint";
 
-// Um item da barra de páginas: a mascote (ou um ícone) num quadro e o nome embaixo.
-// `edge` é o lado da janela em que a barra encosta ("left", "right" ou "bottom"): a marca
-// da página aberta fica desse lado, colada na borda.
+// An item of the page bar: the mascot (or an icon) in a tile and the name below.
+// `edge` is the window side the bar sits against ("left", "right" or "bottom"): the open
+// page's marker goes on that side, flush with the edge.
 component RailItem inherits Rectangle {
     in property <image> icon;
-    in property <string> icon-path;   // traço 24×24, quando não há imagem
-    in property <string> px-icon;     // pixel 7×7, para os botões "chunky"
+    in property <string> icon-path;   // 24×24 stroke, when there is no image
+    in property <string> px-icon;     // 7×7 pixel, for the "chunky" buttons
     in property <string> text;
     in property <bool> show-text: true;
     in property <bool> selected;
-    in property <bool> ghost;         // "nova página": só o contorno do quadro
+    in property <bool> ghost;         // "new page": only the tile outline
     in property <string> edge: "left";
     in property <color> badge: transparent;
     callback clicked;
-    // não estica: o espaço que sobra na barra fica entre as páginas e as configurações
+    // doesn't stretch: the bar's leftover space goes between the pages and the settings
     horizontal-stretch: 0;
     vertical-stretch: 0;
     accessible-role: tab;
@@ -32,7 +32,7 @@ component RailItem inherits Rectangle {
     property <length> tile-w: 40px;
     property <length> tile-h: 34px;
     property <length> pad: 5px;
-    property <length> mark: 3px;      // espessura da marca da página aberta
+    property <length> mark: 3px;      // thickness of the open page's marker
 
     VerticalLayout {
         padding-top: pad;
@@ -75,7 +75,7 @@ component RailItem inherits Rectangle {
                     fill: root.ink;
                     anti-alias: false;
                 }
-                // alerta da página: no canto do quadro, por cima da borda
+                // page alert: in the tile's corner, over the border
                 if badge != transparent: Rectangle {
                     x: parent.width - 6px;
                     y: -2px;
@@ -98,7 +98,7 @@ component RailItem inherits Rectangle {
         }
     }
 
-    // marca da página aberta, colada na borda da janela
+    // marker of the open page, flush with the window edge
     if selected && edge != "bottom": Rectangle {
         x: edge == "left" ? 0 : parent.width - mark;
         y: pad;
@@ -119,19 +119,19 @@ component RailItem inherits Rectangle {
     }
 }
 
-// Barra de páginas em pé, à esquerda (`edge: "left"`) ou à direita da janela: as páginas
-// em cima, rolando se não couberem; configurações embaixo.
+// Upright page bar, on the left (`edge: "left"`) or right of the window: the pages
+// on top, scrolling if they don't fit; settings at the bottom.
 export component Rail inherits Rectangle {
     in property <[PageInfo]> pages;
-    in property <int> current;          // página aberta
-    in property <bool> settings;        // as configurações estão abertas
+    in property <int> current;          // open page
+    in property <bool> settings;        // the settings are open
     in property <string> edge: "left";  // "left" | "right"
     callback selected(int);
     callback add();
     callback open-settings();
     width: 68px;
     background: Skin.panel;
-    // linha do lado do conteúdo, como a do cabeçalho
+    // line on the content side, like the header's
     Rectangle { x: edge == "left" ? parent.width - 1px : 0; width: 1px; background: Skin.line; }
 
     VerticalLayout {
@@ -160,7 +160,7 @@ export component Rail inherits Rectangle {
                     edge: root.edge;
                     icon-path: Icons.plus;
                     px-icon: Icons.px-plus;
-                    text: "Nova página";
+                    text: @tr("New page");
                     show-text: false;
                     ghost: true;
                     clicked => { root.add(); }
@@ -176,15 +176,15 @@ export component Rail inherits Rectangle {
             edge: root.edge;
             icon-path: Icons.gear;
             px-icon: Icons.px-gear;
-            text: "config";
+            text: @tr("config");
             selected: settings;
             clicked => { root.open-settings(); }
         }
     }
 }
 
-// Barra de páginas deitada, embaixo da janela: as páginas da esquerda para a direita,
-// rolando de lado se não couberem; configurações na ponta direita.
+// Horizontal page bar, at the bottom of the window: the pages from left to right,
+// scrolling sideways if they don't fit; settings at the right end.
 export component PageBar inherits Rectangle {
     in property <[PageInfo]> pages;
     in property <int> current;
@@ -222,7 +222,7 @@ export component PageBar inherits Rectangle {
                     edge: "bottom";
                     icon-path: Icons.plus;
                     px-icon: Icons.px-plus;
-                    text: "Nova página";
+                    text: @tr("New page");
                     show-text: false;
                     ghost: true;
                     clicked => { root.add(); }
@@ -239,14 +239,14 @@ export component PageBar inherits Rectangle {
             edge: "bottom";
             icon-path: Icons.gear;
             px-icon: Icons.px-gear;
-            text: "config";
+            text: @tr("config");
             selected: settings;
             clicked => { root.open-settings(); }
         }
     }
 }
 
-// Uma aba de página no cabeçalho: mascote pequena e nome; sublinhada quando aberta.
+// A page tab in the header: small mascot and name; underlined when open.
 component TopTab inherits Rectangle {
     in property <image> icon;
     in property <string> icon-path;
@@ -294,7 +294,7 @@ component TopTab inherits Rectangle {
     }
 }
 
-// Abas das páginas no cabeçalho (navegação "top"); rolam de lado se não couberem.
+// Page tabs in the header ("top" navigation); scroll sideways if they don't fit.
 export component TopTabs inherits Flickable {
     in property <[PageInfo]> pages;
     in property <int> current;
@@ -320,7 +320,7 @@ export component TopTabs inherits Flickable {
             alignment: center;
             TopTab {
                 icon-path: Icons.plus;
-                accessible-label: "Nova página";
+                accessible-label: @tr("New page");
                 clicked => { root.add(); }
             }
         }

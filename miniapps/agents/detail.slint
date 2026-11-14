@@ -1,25 +1,25 @@
-// Janela de detalhe de uma sessão de agente: o que ela está fazendo, passo a passo (o mais
-// novo em cima). Abre pelo botão "Detalhes" do cartão (src/apps/agents.rs), numa janela
-// fora do popup do hub (aparece na barra de tarefas). Como o hub, ela não tem a moldura do
-// sistema: desenha a do visual (`Frame`), arrasta pelo cabeçalho, redimensiona pelas bordas
-// e fecha pelo botão do cabeçalho ou Esc. Os globais são da janela: o Rust aplica o visual
-// (`Skin`) a ela também. O cabeçalho segue o visual; o conteúdo, o tema do app
-// (`AgentDetail.theme`), num cartão como os do painel.
+// Detail window of an agent session: what it is doing, step by step (newest on top).
+// Opened by the "Details" button of the card (src/apps/agents.rs), in a window outside
+// the hub popup (it shows in the taskbar). Like the hub, it has no system frame: it draws
+// the skin's one (`Frame`), drags by the header, resizes by the edges and closes with the
+// header button or Esc. Globals belong to the window: Rust applies the skin (`Skin`) to it
+// too. The header follows the skin; the content, the app theme (`AgentDetail.theme`), in a
+// card like the panel ones.
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "../../ui/theme.slint";
 import { TextButton, Icon, HeaderButton } from "../../ui/widgets.slint";
 import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
 
-// Um passo da conversa.
+// One step of the conversation.
 export struct AgentStep {
-    // "14:32" ("" = não sei)
+    // "14:32" ("" = unknown)
     time: string,
     // "user" | "reply" | "tool" | "error"
     kind: string,
     text: string,
 }
 
-// Estado da janela, preenchido pelo Rust (src/apps/agents.rs).
+// Window state, filled in by Rust (src/apps/agents.rs).
 export global AgentDetail {
     in property <Colors> theme;
     in property <string> title;
@@ -29,30 +29,30 @@ export global AgentDetail {
     in property <string> state;
     in property <string> state-text;
     in property <image> mascot;
-    // "" = a ferramenta não informa (a etiqueta some)
+    // "" = the tool does not report it (the chip goes away)
     in property <string> model;
     in property <string> effort;
     in property <string> branch;
-    // "entrada 950 · saída 45,3 mil · cache 1,2 mi"
+    // "input 950 · output 45.3k · cache 1.2M"
     in property <string> tokens;
-    // do mais novo ao mais antigo
+    // newest to oldest
     in property <[AgentStep]> steps;
-    // ainda sem a primeira leitura da conversa
+    // the conversation has not been read yet
     in property <bool> loading;
-    // a sessão saiu da lista (fechou ou ficou antiga)
+    // the session left the list (closed or got too old)
     in property <bool> gone;
     in property <bool> can-resume;
 
     callback open-dir();
     callback open-terminal();
     callback resume();
-    // moldura própria: fechar, arrastar pelo cabeçalho, redimensionar pela borda `dir`
+    // own frame: close, drag by the header, resize by the `dir` edge
     callback close();
     callback start-move();
     callback start-resize(string);
 }
 
-// Etiqueta: modelo, esforço, branch.
+// Chip: model, effort, branch.
 component DetailChip inherits Rectangle {
     in property <string> label;
     in property <string> text;
@@ -85,7 +85,7 @@ component DetailChip inherits Rectangle {
     }
 }
 
-// Uma linha da linha do tempo: hora, marca do tipo e o texto (que quebra).
+// One timeline row: time, type mark and the text (which wraps).
 component StepLine inherits Rectangle {
     in property <AgentStep> step;
     property <Colors> t: AgentDetail.theme;
@@ -106,7 +106,7 @@ component StepLine inherits Rectangle {
             font-size: 11px * Skin.text-scale;
             vertical-alignment: top;
         }
-        // marca do tipo: ">" pedido, ícone de terminal na ferramenta, "!" erro, quadrado na resposta
+        // type mark: ">" prompt, terminal icon for a tool, "!" error, square for a reply
         Rectangle {
             width: 14px;
             if step.kind == "user": Text {
@@ -160,15 +160,15 @@ export component AgentDetailWindow inherits Window {
     property <color> state-ink: AgentDetail.gone ? t.sub
         : AgentDetail.state == "waiting" ? t.warn
         : AgentDetail.state == "working" ? t.ok : t.sub;
-    title: AgentDetail.title == "" ? "Agente" : AgentDetail.title;
+    title: AgentDetail.title == "" ? @tr("Agent") : AgentDetail.title;
     preferred-width: 560px;
     preferred-height: 680px;
-    // cabem os três botões lado a lado (sem trocar o texto pela largura: isso realimentaria
-    // a largura mínima do layout)
+    // the three buttons fit side by side (without switching the text by width: that would
+    // feed back into the layout minimum width)
     min-width: 460px;
     min-height: 320px;
     no-frame: true;
-    // transparente: os cantos cortados (chamfer) mostram o que há atrás
+    // transparent: the cut corners (chamfer) show what is behind
     background: transparent;
     default-font-family: Skin.font-ui;
     default-font-size: 13px * Skin.text-scale;
@@ -188,7 +188,7 @@ export component AgentDetailWindow inherits Window {
     VerticalLayout {
         padding: Skin.border;
 
-        // cabeçalho: mascote da ferramenta, título e de onde é; arrasta a janela
+        // header: tool mascot, title and where it is from; drags the window
         Bar {
             TouchArea {
                 pointer-event(ev) => {
@@ -233,8 +233,8 @@ export component AgentDetailWindow inherits Window {
                     alignment: center;
                     horizontal-stretch: 0;
                     HeaderButton {
-                        text: "Fechar";
-                        short: "fechar";
+                        text: @tr("Close");
+                        short: @tr("close");
                         icon: Icons.close;
                         px-icon: Icons.px-close;
                         clicked => { AgentDetail.close(); }
@@ -243,7 +243,7 @@ export component AgentDetailWindow inherits Window {
             }
         }
 
-        // conteúdo no tema do app, num cartão afastado da borda (não invade o canto cortado)
+        // content in the app theme, in a card away from the edge (does not cross the cut corner)
         Rectangle {
             vertical-stretch: 1;
           Rectangle {
@@ -259,7 +259,7 @@ export component AgentDetailWindow inherits Window {
                 padding-bottom: 12px;
                 spacing: 10px;
 
-                // estado
+                // state
                 HorizontalLayout {
                     spacing: 8px;
                     VerticalLayout {
@@ -267,7 +267,7 @@ export component AgentDetailWindow inherits Window {
                         Rectangle { width: 10px; height: 10px; background: state-ink; }
                     }
                     Text {
-                        text: AgentDetail.gone ? "A sessão fechou ou ficou antiga demais para a lista." : AgentDetail.state-text;
+                        text: AgentDetail.gone ? @tr("The session closed or got too old for the list.") : AgentDetail.state-text;
                         color: state-ink;
                         font-size: 14px * Skin.text-scale;
                         font-weight: 700;
@@ -276,12 +276,12 @@ export component AgentDetailWindow inherits Window {
                     }
                 }
 
-                // etiquetas e tokens (o que a ferramenta informar)
+                // chips and tokens (whatever the tool reports)
                 if AgentDetail.model != "" || AgentDetail.effort != "" || AgentDetail.branch != "": HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
-                    if AgentDetail.model != "": DetailChip { label: "modelo"; text: AgentDetail.model; ink: t.visor; }
-                    if AgentDetail.effort != "": DetailChip { label: "esforço"; text: AgentDetail.effort; ink: t.fur; }
+                    if AgentDetail.model != "": DetailChip { label: @tr("model"); text: AgentDetail.model; ink: t.visor; }
+                    if AgentDetail.effort != "": DetailChip { label: @tr("effort"); text: AgentDetail.effort; ink: t.fur; }
                     if AgentDetail.branch != "": DetailChip { label: "branch"; text: AgentDetail.branch; ink: t.sub; }
                 }
                 if AgentDetail.tokens != "": Text {
@@ -294,14 +294,14 @@ export component AgentDetailWindow inherits Window {
 
                 Rectangle { height: 1px; background: t.muted.with-alpha(0.5); }
                 Text {
-                    text: "O QUE ESTÁ FAZENDO";
+                    text: @tr("WHAT IT IS DOING");
                     color: t.sub;
                     font-family: Skin.font-mono;
                     font-size: 11px * Skin.text-scale;
                     letter-spacing: 1.5px;
                 }
 
-                // passos, o mais novo em cima
+                // steps, newest on top
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
@@ -309,7 +309,7 @@ export component AgentDetailWindow inherits Window {
                         padding-right: 8px;
                         for s in AgentDetail.steps: StepLine { step: s; }
                         if AgentDetail.steps.length == 0: Text {
-                            text: AgentDetail.loading ? "Lendo a conversa…" : "Nada para mostrar desta sessão.";
+                            text: AgentDetail.loading ? @tr("Reading the conversation…") : @tr("Nothing to show for this session.");
                             color: t.sub;
                             font-size: 13px * Skin.text-scale;
                             wrap: word-wrap;
@@ -317,26 +317,26 @@ export component AgentDetailWindow inherits Window {
                     }
                 }
 
-                // ações (as mesmas do cartão)
+                // actions (the same as on the card)
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
                     TextButton {
-                        text: "Abrir pasta";
+                        text: @tr("Open folder");
                         icon: Icons.grid;
                         ink: t.visor;
                         font-size: 13px * Skin.text-scale;
                         clicked => { AgentDetail.open-dir(); }
                     }
                     TextButton {
-                        text: "Terminal na pasta";
+                        text: @tr("Terminal in folder");
                         icon: Icons.terminal;
                         ink: t.visor;
                         font-size: 13px * Skin.text-scale;
                         clicked => { AgentDetail.open-terminal(); }
                     }
                     if AgentDetail.can-resume: TextButton {
-                        text: "Retomar sessão";
+                        text: @tr("Resume session");
                         icon: Icons.play;
                         ink: t.ok;
                         font-size: 13px * Skin.text-scale;

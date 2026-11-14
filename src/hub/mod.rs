@@ -1,11 +1,11 @@
-//! O hub: liga registro, provedores, janela e bandeja.
+//! The hub: ties together registry, providers, window and tray.
 //!
-//! Este arquivo guarda o estado (`Hub`), a montagem e o que move a tela:
-//! - `update`: roda quando o barramento ou uma ação em segundo plano tocam o despertador
-//!   (`core::wake`). Sem nada chegando, nada roda.
-//! - `anim_tick`: o quadro de animação, só com a janela aberta.
+//! This file holds the state (`Hub`), the setup and what drives the screen:
+//! - `update`: runs when the bus or a background action rings the waker (`core::wake`).
+//!   With nothing arriving, nothing runs.
+//! - `anim_tick`: the animation frame, only with the window open.
 //!
-//! O resto do `impl Hub` está dividido por assunto nos módulos abaixo.
+//! The rest of `impl Hub` is split by topic into the modules below.
 
 mod appearance;
 mod bind;
@@ -33,36 +33,36 @@ use crate::mascot::{Mood, sprites, themes};
 use crate::tray::Tray;
 use crate::ui::{Anim, HubWindow};
 
-/// Depois do último tamanho novo durante um arrasto de borda, o foco ainda é ignorado este tempo.
+/// After the last new size during an edge drag, focus is still ignored for this long.
 const RESIZE_QUIET: Duration = Duration::from_millis(800);
 
-/// Intervalo do quadro de animação (mascotes, costura e luz da borda). Com o mouse sobre a
-/// janela, 8 quadros/s; fora dela, 4/s: cada quadro é desenhado na CPU.
+/// Interval of the animation frame (mascots, stitching and edge light). With the mouse over
+/// the window, 8 frames/s; outside it, 4/s: each frame is drawn on the CPU.
 const FRAME_HOT: Duration = Duration::from_millis(125);
 const FRAME_COLD: Duration = Duration::from_millis(250);
-/// Quadro mais rápido que uma animação desenhada pode pedir (30/s): só enquanto ela toca.
+/// Fastest frame a drawn animation can ask for (30/s): only while it plays.
 const FRAME_FASTEST: Duration = Duration::from_millis(33);
 
 thread_local! {
-    /// O hub da thread da UI, para quem chega de outra thread pelo event loop
-    /// (despertador, menu da bandeja). Closures `Send` não podem levar um `Rc`.
+    /// The hub of the UI thread, for whoever arrives from another thread through the event
+    /// loop (waker, tray menu). `Send` closures cannot carry an `Rc`.
     static CURRENT: RefCell<Weak<Hub>> = const { RefCell::new(Weak::new()) };
 }
 
-/// Roda `f` com o hub, se ele ainda existe (só na thread da UI).
+/// Runs `f` with the hub, if it still exists (UI thread only).
 fn with_hub(f: impl FnOnce(&Hub)) {
     if let Some(hub) = CURRENT.with(|c| c.borrow().upgrade()) {
         f(&hub);
     }
 }
 
-/// A janela do hub (só na thread da UI): para quem recebe mensagens de outras threads.
+/// The hub window (UI thread only): for whoever receives messages from other threads.
 pub fn ui_handle() -> Option<HubWindow> {
     CURRENT.with(|c| c.borrow().upgrade()).map(|h| h.ui.clone_strong())
 }
 
-/// Os plugins instalados mudaram, ou `miniutils --recarregar` (de outra thread ou
-/// instância): relê apps e aparência na thread da UI.
+/// The installed plugins changed, or the reload command (from another thread or
+/// instance): reads apps and appearance again on the UI thread.
 pub fn request_plugin_reload() {
     let _ = slint::invoke_from_event_loop(|| {
         with_hub(|h| {
@@ -72,8 +72,8 @@ pub fn request_plugin_reload() {
     });
 }
 
-/// Comando de mídia escolhido no menu da bandeja (chamado na thread do ksni): vai para o
-/// app que deu as informações de mídia, na thread da UI.
+/// Media command picked in the tray menu (called on the ksni thread): goes to the app that
+/// gave the media information, on the UI thread.
 pub fn tray_media_command(verb: &'static str) {
     let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.tray_command(verb)));
 }
@@ -84,60 +84,60 @@ pub struct Hub {
     ui: HubWindow,
     tray: RefCell<Option<Tray>>,
     shown: Cell<bool>,
-    /// Dá para posicionar a janela (X11/XWayland).
+    /// The window can be positioned (X11/XWayland).
     positionable: bool,
-    /// Quando o popup se escondeu por perder o foco (ver `toggle`).
+    /// When the popup hid because it lost focus (see `toggle`).
     focus_hidden_at: Cell<Option<Instant>>,
-    /// O popup chegou a ganhar foco desde que abriu (o winit avisa "sem foco" ao mapear).
+    /// The popup did get focus since it opened (winit reports "unfocused" when mapping).
     had_focus: Cell<bool>,
-    /// Modo fixar: perder o foco não esconde o popup.
+    /// Pin mode: losing focus does not hide the popup.
     pinned: Cell<bool>,
-    /// Último ponto da bandeja onde o popup abriu (para reabrir no mesmo lugar).
+    /// Last tray point where the popup opened (to reopen in the same place).
     last_anchor: Cell<Option<(i32, i32)>>,
-    /// Até quando ignorar a perda de foco por causa de um redimensionamento pela borda.
+    /// Until when to ignore the loss of focus because of a resize by the edge.
     resize_until: Cell<Option<Instant>>,
     frame: Cell<u32>,
-    /// Geração do fade em curso: um fade novo cancela o anterior.
+    /// Generation of the fade in progress: a new fade cancels the previous one.
     fade_gen: Rc<Cell<u32>>,
-    /// O que a bandeja mostra e quando recebeu a última atualização (ver `sync_tray`).
+    /// What the tray shows and when it got the last update (see `sync_tray`).
     last_tray: RefCell<Option<(TrayState, Instant)>>,
-    /// O mouse está sobre a janela (`CursorEntered`/`CursorLeft` do winit).
+    /// The mouse is over the window (winit's `CursorEntered`/`CursorLeft`).
     hovered: Cell<bool>,
-    /// Relógio do quadro de animação; o intervalo segue `hovered` (ver `FRAME_HOT`) e acelera
-    /// enquanto uma animação desenhada pede quadros curtos (ver `pace_frames`).
+    /// Clock of the animation frame; the interval follows `hovered` (see `FRAME_HOT`) and
+    /// speeds up while a drawn animation asks for short frames (see `pace_frames`).
     anim: Timer,
-    /// Quadro mais curto pedido pelas animações no último quadro (ms).
+    /// Shortest frame asked for by the animations in the last frame (ms).
     frame_wanted: Cell<Option<u32>>,
-    /// Arrasto em curso no modo de edição.
+    /// Drag in progress in edit mode.
     drag: RefCell<Option<Drag>>,
-    /// Tamanho (lógico) da área do painel, para desenhar o fundo; e a geração do pedido
-    /// de desenho (vários pedidos seguidos num redimensionamento viram um só).
+    /// (Logical) size of the panel area, to draw the backdrop; and the generation of the
+    /// drawing request (several requests in a row during a resize become one).
     backdrop_size: Cell<(f32, f32)>,
     backdrop: std::sync::Arc<appearance::BackdropState>,
-    /// Minuto mostrado no relógio ("21:57").
+    /// Minute shown on the clock ("21:57").
     clock: RefCell<String>,
-    /// O que a lista das Configurações mostra agora (ver `rebuild_settings`).
+    /// What the Settings list shows now (see `rebuild_settings`).
     settings_fingerprint: RefCell<String>,
-    /// Página aberta no painel (índice em `config.pages`).
+    /// Page open on the panel (index in `config.pages`).
     page: Cell<usize>,
-    /// O que a barra lateral mostra agora (ver `rebuild_pages`).
+    /// What the sidebar shows now (see `rebuild_pages`).
     pages_fingerprint: RefCell<String>,
-    /// Conversa entre mascotes (ver `chatter.rs`) e o que a caixa de diálogo mostra agora.
+    /// Conversation between mascots (see `chatter.rs`) and what the dialog box shows now.
     chatter: RefCell<chatter::Director>,
     chat_shown: Cell<Option<(u64, usize, bool)>>,
-    /// Quadros da fala sendo "digitada": só corre enquanto há conversa no ar.
+    /// Frames of the line being "typed": runs only while a conversation is on.
     chat_timer: Timer,
-    /// Tooltip adiado (ver `TOOLTIP_EVERY`): manda o texto quando o prazo vence.
+    /// Postponed tooltip (see `TOOLTIP_EVERY`): sends the text when the time is up.
     tray_later: Timer,
-    /// Tela da loja de plugins (ver `store.rs`).
+    /// Plugin store screen (see `store.rs`).
     store: RefCell<store::StoreState>,
 }
 
-/// De quanto em quanto tempo o tooltip da bandeja acompanha números que só mudam de valor
-/// ("CPU 37%"). Humor, mascote e faixa tocando mudam na hora.
+/// How often the tray tooltip follows numbers that only change value ("CPU 37%").
+/// Mood, mascot and the playing track change at once.
 const TOOLTIP_EVERY: Duration = Duration::from_secs(15);
 
-/// O que a bandeja mostra agora, para só falar com ela quando algo muda.
+/// What the tray shows now, so it is only talked to when something changes.
 #[derive(Clone, PartialEq)]
 struct TrayState {
     mood: Mood,
@@ -148,7 +148,7 @@ struct TrayState {
 }
 
 impl TrayState {
-    /// O ícone é o mesmo (só é redesenhado quando a mascote, o tema ou o humor mudam).
+    /// The icon is the same (it is only redrawn when the mascot, the theme or the mood change).
     fn same_icon(&self, other: &TrayState) -> bool {
         (self.mood, &self.sprite, self.theme) == (other.mood, &other.sprite, other.theme)
     }
@@ -158,8 +158,12 @@ impl Hub {
     pub fn new(start_hidden: bool, tab: Option<String>, positionable: bool) -> anyhow::Result<Rc<Self>> {
         let mut bus = Bus::default();
         crate::providers::spawn_all(&mut bus);
-        let host = Rc::new(Host::new(Config::load(), bus));
+        let config = Config::load();
+        // before the apps parse their manifests, which are translated on load
+        crate::core::i18n::set(crate::core::i18n::Language::from_setting(&config.language));
+        let host = Rc::new(Host::new(config, bus));
         let ui = HubWindow::new()?;
+        crate::core::i18n::apply_to_ui();
 
         let registry = Registry::new(host.clone());
         registry.add(crate::apps::docker::DockerMini::create(host.clone(), &ui) as AppRef, None);
@@ -169,7 +173,7 @@ impl Hub {
         registry.add(crate::apps::ports::PortsMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::todo::TodoMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::agents::AgentsMini::create(host.clone(), &ui) as AppRef, None);
-        // plugins da comunidade instalados (ver `store.rs`)
+        // installed community plugins (see `store.rs`)
         crate::apps::plugin::sync(&host, &ui, &registry, true);
 
         let hub = Rc::new(Hub {
@@ -205,7 +209,7 @@ impl Hub {
         });
         hub.ui.set_max_columns(layout::MAX_COLS as i32);
         hub.ui.set_max_rows(layout::MAX_ROWS as i32);
-        // temas, visuais e fundos de arquivo antes do primeiro desenho
+        // file themes, skins and backdrops before the first drawing
         hub.load_looks();
         hub.apply_skin();
         hub.apply_system();
@@ -216,14 +220,14 @@ impl Hub {
         Self::bind_store(&hub);
         hub.load_lines();
 
-        // bandeja: enquanto não houver painel (subindo, ou GNOME sem AppIndicator), a
-        // janela fica aberta; o ícone aparece sozinho quando o painel surgir
+        // tray: while there is no panel (starting up, or GNOME without AppIndicator), the
+        // window stays open; the icon shows up by itself when the panel appears
         match Tray::spawn(hub.ui.as_weak(), sprites::get("neko"), themes::get("neon"), Mood::Sleep) {
             Ok(t) => *hub.tray.borrow_mut() = Some(t),
-            Err(e) => log::warn!("sem bandeja do sistema ({e}); a janela fica aberta"),
+            Err(e) => log::warn!("no system tray ({e}); the window stays open"),
         }
 
-        // tamanho lembrado da última vez (lógico: o Slint converte pela escala da tela)
+        // size remembered from last time (logical: Slint converts by the screen scale)
         if let Some((w, h)) = hub.host.config.borrow().window {
             hub.ui.window().set_size(slint::LogicalSize::new(w.max(360) as f32, h.max(280) as f32));
         }
@@ -237,14 +241,14 @@ impl Hub {
 
     fn start_loops(hub: &Rc<Self>) {
         CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(hub));
-        // dados: cada leitura ou recado toca o despertador, que agenda `update` na thread
-        // da UI (vários toques seguidos viram uma atualização)
+        // data: each reading or report rings the waker, which schedules `update` on the UI
+        // thread (several rings in a row become one update)
         hub.host.bus.waker().install(|| {
             let _ = slint::invoke_from_event_loop(|| with_hub(Hub::update));
         });
-        // o que chegou antes de instalar (a montagem leva um tempo)
+        // what arrived before installing it (the setup takes a while)
         hub.update();
-        // animação: só com a janela visível (`set_shown` liga e desliga; `set_hovered` muda o ritmo)
+        // animation: only with the window visible (`set_shown` turns it on and off; `set_hovered` changes the pace)
         let w = Rc::downgrade(hub);
         hub.anim.start(TimerMode::Repeated, FRAME_COLD, move || {
             if let Some(h) = w.upgrade() {
@@ -256,16 +260,16 @@ impl Hub {
         }
     }
 
-    /// Chegaram leituras dos provedores ou recados das ações: entrega aos apps e atualiza
-    /// o que depende deles.
+    /// Readings from the providers or reports from the actions arrived: hands them to the apps
+    /// and updates what depends on them.
     fn update(&self) {
-        // antes de esvaziar: o que chegar daqui em diante toca de novo
+        // before draining: whatever arrives from now on rings again
         self.host.bus.waker().take();
         let events = self.host.bus.drain();
         if !events.is_empty() {
             self.registry.dispatch(&events, &self.ui);
         }
-        // resultado das ações em segundo plano (docker stop, comando do player…)
+        // result of the background actions (docker stop, player command…)
         let reports = self.host.drain_reports();
         if !reports.is_empty() {
             self.registry.deliver(&reports, &self.ui);
@@ -273,21 +277,21 @@ impl Hub {
         self.refresh_derived();
     }
 
-    /// Atualiza o que depende do estado dos apps: formulário das Configurações, humor das
-    /// páginas, bandeja e conversa. Barato quando nada mudou (cada parte compara antes).
+    /// Updates what depends on the apps' state: Settings form, page moods, tray and
+    /// conversation. Cheap when nothing changed (each part compares first).
     fn refresh_derived(&self) {
         if self.host.settings_dirty.replace(false) {
             self.rebuild_settings();
         }
-        // a barra lateral mostra o humor de cada página
+        // the sidebar shows the mood of each page
         self.rebuild_pages(false);
         self.sync_tray();
-        // conversa entre mascotes: fatos novos e a fala que está sendo "digitada"
+        // conversation between mascots: new facts and the line being "typed"
         self.chat_tick();
     }
 
-    /// Relê a pasta dos plugins (instalou, atualizou, removeu, ou o botão Recarregar das
-    /// configurações): apps novos entram, mudados recarregam, removidos saem.
+    /// Reads the plugins folder again (installed, updated, removed, or the Reload button of
+    /// the settings): new apps come in, changed ones reload, removed ones leave.
     fn reload_plugins(&self) {
         if crate::apps::plugin::sync(&self.host, &self.ui, &self.registry, false) {
             self.rebuild_lists();
@@ -295,11 +299,11 @@ impl Hub {
             self.rebuild_pages(true);
             self.refresh_derived();
         }
-        // contagem e pastas recusadas, mesmo sem app novo (ex.: renomeou a pasta errada)
+        // count and refused folders, even without a new app (e.g. renamed the wrong folder)
         self.apply_apps_dir();
     }
 
-    /// Comando de mídia do menu da bandeja: vai ao app que deu as informações de mídia.
+    /// Media command from the tray menu: goes to the app that gave the media information.
     fn tray_command(&self, verb: &str) {
         let owner = self.registry.enabled().into_iter().find(|a| a.borrow().tray_media().is_some());
         if let Some(app) = owner {
@@ -308,7 +312,7 @@ impl Hub {
         self.refresh_derived();
     }
 
-    /// A bandeja mostra a mascote (e o tema) do app em pior estado, ou a escolhida na config.
+    /// The tray shows the mascot (and theme) of the app in the worst state, or the one chosen in the config.
     fn tray_state(&self) -> TrayState {
         let enabled = self.registry.enabled();
         let worst = Registry::worst_of(&enabled);
@@ -337,8 +341,8 @@ impl Hub {
         }
     }
 
-    /// Leva o estado à bandeja só quando ele muda. Falar com ela custa: é uma chamada
-    /// D-Bus bloqueante na thread da UI, e o painel relê o item a cada sinal.
+    /// Takes the state to the tray only when it changes. Talking to it is costly: it is a
+    /// blocking D-Bus call on the UI thread, and the panel rereads the item on every signal.
     fn sync_tray(&self) {
         let now = self.tray_state();
         let mut last = self.last_tray.borrow_mut();
@@ -349,13 +353,13 @@ impl Hub {
                     return;
                 }
                 let same_icon = old.same_icon(&now);
-                // só o texto mudou ("CPU 37%" -> "CPU 41%", a cada leitura): pode esperar
+                // only the text changed ("CPU 37%" -> "CPU 41%", on every reading): it can wait
                 let urgent = !same_icon || old.media != now.media || sent.elapsed() >= TOOLTIP_EVERY;
                 (same_icon, urgent)
             }
         };
         if !urgent {
-            // só o texto mudou: manda quando o prazo vencer, mesmo que nada mais chegue
+            // only the text changed: send it when the time is up, even if nothing else arrives
             if !self.tray_later.running() {
                 let left = last.as_ref().map_or(Duration::ZERO, |(_, sent)| TOOLTIP_EVERY.saturating_sub(sent.elapsed()));
                 self.tray_later.start(TimerMode::SingleShot, left, || with_hub(Hub::sync_tray));
@@ -364,15 +368,15 @@ impl Hub {
         }
         self.tray_later.stop();
         if let Some(tray) = self.tray.borrow().as_ref() {
-            // o ícone só é redesenhado quando a mascote, o tema ou o humor mudam
+            // the icon is only redrawn when the mascot, the theme or the mood change
             let icon = (!same_icon).then(|| (sprites::get(&now.sprite), themes::get(now.theme), now.mood));
             tray.update(icon, now.tooltip.clone(), now.media.clone());
         }
         *last = Some((now, Instant::now()));
     }
 
-    /// Um quadro: mascotes, relógio e o que um clique numa tela pode ter mudado (os
-    /// apps tratam os próprios cliques; o hub confere humor, bandeja e conversa aqui).
+    /// One frame: mascots, clock and what a click on a screen may have changed (the apps
+    /// handle their own clicks; the hub checks mood, tray and conversation here).
     fn anim_tick(&self) {
         if !self.shown.get() {
             return;
@@ -381,11 +385,11 @@ impl Hub {
         let f = self.frame.get().wrapping_add(1) % 600;
         self.frame.set(f);
         self.ui.global::<Anim>().set_frame(f as i32);
-        // relógio do fundo animado (ms; volta a zero a cada hora, um salto que mal se vê)
+        // clock of the animated backdrop (ms; back to zero every hour, a jump barely seen)
         static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
         let ms = START.get_or_init(Instant::now).elapsed().as_millis() % 3_600_000;
         self.ui.global::<Anim>().set_time(ms as i32);
-        // no painel, só os apps da página aberta estão visíveis e animam
+        // on the panel, only the apps of the open page are visible and animate
         if self.ui.get_current() == "panel" {
             let ids = self.host.config.borrow().page_apps(self.current_page());
             for app in ids.iter().filter_map(|id| self.registry.find(id)) {
@@ -397,8 +401,8 @@ impl Hub {
         self.refresh_derived();
     }
 
-    /// Ritmo do quadro: 8/s com o mouse na janela, 4/s fora, e mais rápido (até 30/s) só
-    /// enquanto uma animação desenhada na tela tem quadros mais curtos que isso.
+    /// Frame pace: 8/s with the mouse on the window, 4/s outside, and faster (up to 30/s)
+    /// only while an animation drawn on the screen has shorter frames than that.
     fn pace_frames(&self) {
         let base = if self.hovered.get() { FRAME_HOT } else { FRAME_COLD };
         let interval = match self.frame_wanted.get() {

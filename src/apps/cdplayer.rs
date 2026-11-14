@@ -1,4 +1,4 @@
-//! Mini-app CD Player: o player MPRIS ativo, com disco girando, faixa e comandos.
+//! CD Player mini-app: the active MPRIS player, with a spinning disc, track and controls.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,11 +11,12 @@ use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp, Report, TrayMedia};
 use crate::mascot::{Mood, disc, render};
 use crate::providers::media::{self, MediaSnapshot};
+use crate::tr;
 use crate::ui::{CdPlayerApp, HubWindow};
 
-/// Quadro de giro entre leituras (o `tick` da UI avança).
+/// Spin frames between readings (the UI `tick` advances them).
 const SPIN_LIMIT: u8 = disc::STEPS;
-/// Quanto tempo a falha de um comando fica no topo.
+/// How long a failed command stays at the top.
 const ERROR_TTL: Duration = Duration::from_secs(8);
 
 pub struct CdPlayerMini {
@@ -23,16 +24,17 @@ pub struct CdPlayerMini {
     manifest: Manifest,
     snap: MediaSnapshot,
     mood: Mood,
-    /// Último quadro do disco entregue à UI.
+    /// Last disc frame handed to the UI.
     disc: disc::Cache,
-    /// Quadro atual da volta.
+    /// Current frame of the turn.
     spin: u8,
-    /// Pulo dos botões de avançar/voltar, em segundos (da config).
+    /// Jump of the forward/back buttons, in seconds (from the config).
     seek_step: u32,
-    /// Faixa já anunciada (não notifica de novo o que já tocava ao ligar o app).
+    /// Track already announced (doesn't notify again what was already playing when the app
+    /// was turned on).
     announced: Option<String>,
     baseline: bool,
-    /// Falha do último comando, mostrada no topo por `ERROR_TTL`.
+    /// Failure of the last command, shown at the top for `ERROR_TTL`.
     error: String,
     error_at: Option<Instant>,
 }
@@ -40,7 +42,7 @@ pub struct CdPlayerMini {
 impl CdPlayerMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest = Manifest::parse(include_str!("../../miniapps/cdplayer/manifest.toml"))
-            .expect("manifesto do CD Player inválido");
+            .expect("invalid CD Player manifest");
         let app = Rc::new(RefCell::new(CdPlayerMini {
             host,
             manifest,
@@ -68,7 +70,7 @@ impl CdPlayerMini {
         });
     }
 
-    /// Comando do player numa thread: o D-Bus pode demorar e a UI não espera.
+    /// Player command on a thread: D-Bus may take a while and the UI doesn't wait.
     fn command(&self, verb: &str) {
         if !media::valid_service(&self.snap.player) {
             return;
@@ -78,14 +80,14 @@ impl CdPlayerMini {
             (self.snap.player.clone(), self.host.bus.poker(Topic::Media), self.host.reporter(&self.manifest));
         let verb = verb.to_string();
         let failed = reporter.clone();
-        let spawned = std::thread::Builder::new().name("mpris-comando".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("mpris-command".into()).spawn(move || {
             let result = media::send(&player, &verb, step);
             poker.poke();
-            // a falha chega ao app por `on_report`
+            // the failure reaches the app through `on_report`
             reporter.result(&verb, &result);
         });
         if let Err(e) = spawned {
-            failed.error(format!("sem thread para o comando: {e}"));
+            failed.error(tr!("No thread for the command: {}", e));
         }
     }
 
@@ -103,7 +105,7 @@ impl CdPlayerMini {
                     (true, false) => snap.album.clone(),
                     (true, true) => snap.app.clone(),
                 };
-                self.host.notifier.borrow_mut().send("cd:faixa", &format!("▶ {}", snap.title), &body, false);
+                self.host.notifier.borrow_mut().send("cd:track", &format!("▶ {}", snap.title), &body, false);
                 self.announced = Some(key);
             }
         }
@@ -124,21 +126,21 @@ impl CdPlayerMini {
 
     fn state_text(&self) -> &'static str {
         if !self.snap.ok {
-            // antes da primeira leitura o snapshot ainda não tem erro: é "sem disco", não falha
-            return if self.snap.error.is_empty() { "SEM DISCO" } else { "SEM BARRAMENTO" };
+            // before the first reading the snapshot has no error yet: it's "no disc", not a failure
+            return if self.snap.error.is_empty() { tr!("NO DISC") } else { tr!("NO BUS") };
         }
         if !self.snap.has_player() {
-            "SEM DISCO"
+            tr!("NO DISC")
         } else if self.snap.playing() {
-            "TOCANDO"
+            tr!("PLAYING")
         } else if self.snap.paused() {
-            "PAUSADO"
+            tr!("PAUSED")
         } else {
-            "PARADO"
+            tr!("STOPPED")
         }
     }
 
-    /// Posição limitada ao tamanho da faixa (alguns players erram para mais).
+    /// Position capped at the track length (some players overshoot).
     fn progress(&self) -> f32 {
         if self.snap.length == 0 {
             return 0.0;
@@ -165,8 +167,8 @@ impl CdPlayerMini {
         let g = ui.global::<CdPlayerApp>();
         g.set_theme(render::colors(theme));
         g.set_ok(self.snap.ok);
-        let erro = if self.error.is_empty() { self.snap.error.clone() } else { self.error.clone() };
-        g.set_error_text(erro.into());
+        let error = if self.error.is_empty() { self.snap.error.clone() } else { self.error.clone() };
+        g.set_error_text(error.into());
         g.set_state_text(self.state_text().into());
         g.set_source(if self.snap.app.is_empty() { self.snap.player.clone() } else { self.snap.app.clone() }.into());
         g.set_title(self.snap.title.clone().into());
@@ -181,7 +183,7 @@ impl CdPlayerMini {
         g.set_time_text(self.time_text().into());
         g.set_seek_label(self.seek_step.to_string().into());
         g.set_mood(self.mood.as_str().into());
-        // o disco só é redesenhado quando o quadro, o tema ou o estado mudam
+        // the disc is only redrawn when the frame, the theme or the state change
         let lit = self.snap.ok && self.snap.has_player();
         self.disc.update(theme, self.spin(), lit);
         g.set_disc(self.disc.image());
@@ -219,7 +221,7 @@ impl MiniApp for CdPlayerMini {
     }
 
     fn on_report(&mut self, report: &Report, ui: &HubWindow) {
-        // um comando que deu certo aparece na próxima leitura do player
+        // a command that worked shows up in the player's next reading
         if let Report::Error(msg) = report {
             self.error = msg.clone();
             self.error_at = Some(Instant::now());
@@ -228,7 +230,7 @@ impl MiniApp for CdPlayerMini {
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
-        // a falha de um comando some sozinha
+        // a failed command's message goes away on its own
         if self.error_at.is_some_and(|t| t.elapsed() >= ERROR_TTL) {
             self.error.clear();
             self.error_at = None;
@@ -301,37 +303,37 @@ mod tests {
         }
     }
 
-    /// Host de verdade, sem tocar em disco nem abrir threads.
+    /// A real host, without touching the disk or starting threads.
     fn test_host() -> Rc<Host> {
         Rc::new(Host::new(crate::core::config::Config::default(), crate::core::bus::Bus::default()))
     }
 
     #[test]
-    fn estados_e_humor() {
+    fn states_and_mood() {
         let mut a = app();
-        assert_eq!(a.state_text(), "SEM DISCO");
+        assert_eq!(a.state_text(), "NO DISC");
         assert_eq!(a.compute_mood(), Mood::Sleep);
         assert_eq!(a.progress(), 0.0);
 
         a.snap = MediaSnapshot { ok: true, state: "Playing".into(), player: "org.mpris.MediaPlayer2.x".into(), ..Default::default() };
-        assert_eq!(a.state_text(), "TOCANDO");
+        assert_eq!(a.state_text(), "PLAYING");
         assert_eq!(a.compute_mood(), Mood::Happy);
 
         a.snap.state = "Paused".into();
-        assert_eq!(a.state_text(), "PAUSADO");
+        assert_eq!(a.state_text(), "PAUSED");
         assert_eq!(a.compute_mood(), Mood::Idle);
 
         a.snap.ok = false;
-        a.snap.error = "barramento caiu".into();
-        assert_eq!(a.state_text(), "SEM BARRAMENTO");
+        a.snap.error = "bus went down".into();
+        assert_eq!(a.state_text(), "NO BUS");
         assert_eq!(a.compute_mood(), Mood::Sleep);
-        // sem erro ainda é a primeira leitura: sem disco, não falha
+        // no error yet means the first reading: no disc, not a failure
         a.snap.error.clear();
-        assert_eq!(a.state_text(), "SEM DISCO");
+        assert_eq!(a.state_text(), "NO DISC");
     }
 
     #[test]
-    fn tempo_e_progresso() {
+    fn time_and_progress() {
         let mut a = app();
         a.snap = MediaSnapshot {
             ok: true,
@@ -343,54 +345,54 @@ mod tests {
         };
         assert_eq!(a.progress(), 42.0 / 180.0);
         assert_eq!(a.time_text(), "0:42 / 3:00");
-        // posição além do fim (player errado) não enche a barra
+        // a position past the end (buggy player) doesn't overfill the bar
         a.snap.position = 300;
         assert_eq!(a.progress(), 1.0);
-        // sem duração conhecida
+        // no known length
         a.snap.length = 0;
         assert_eq!(a.progress(), 0.0);
         assert_eq!(a.time_text(), "5:00");
     }
 
     #[test]
-    fn primeira_faixa_vira_referencia_e_leituras_nao_apagam_erro() {
+    fn first_track_becomes_the_reference_and_readings_keep_the_error() {
         let mut a = app();
         a.host.config.borrow_mut().set("cyber.cd", "notify_track", toml::Value::Boolean(true));
         let snap = MediaSnapshot {
             ok: true,
             player: "org.mpris.MediaPlayer2.x".into(),
             state: "Playing".into(),
-            title: "Faixa atual".into(),
+            title: "Current track".into(),
             ..Default::default()
         };
-        a.error = "comando falhou".into();
+        a.error = "command failed".into();
         let at = Instant::now();
         a.error_at = Some(at);
         a.ingest(snap.clone());
-        assert_eq!(a.announced.as_deref(), Some("org.mpris.MediaPlayer2.x|Faixa atual"));
+        assert_eq!(a.announced.as_deref(), Some("org.mpris.MediaPlayer2.x|Current track"));
         a.ingest(MediaSnapshot { position: 1, ..snap });
-        assert_eq!(a.announced.as_deref(), Some("org.mpris.MediaPlayer2.x|Faixa atual"));
-        assert_eq!(a.error, "comando falhou");
+        assert_eq!(a.announced.as_deref(), Some("org.mpris.MediaPlayer2.x|Current track"));
+        assert_eq!(a.error, "command failed");
         assert_eq!(a.error_at, Some(at));
     }
 
     #[test]
-    fn menu_da_bandeja_respeita_configuracao_e_capacidades() {
+    fn tray_menu_follows_config_and_capabilities() {
         let mut a = app();
         assert!(a.tray_media().is_none());
         a.host.config.borrow_mut().set("cyber.cd", "tray_controls", toml::Value::Boolean(true));
         a.snap = MediaSnapshot {
             ok: true,
             player: "org.mpris.MediaPlayer2.x".into(),
-            title: "Música".into(),
-            artist: "Artista".into(),
+            title: "Song".into(),
+            artist: "Artist".into(),
             state: "Playing".into(),
             can_pause: true,
             can_next: true,
             ..Default::default()
         };
         let media = a.tray_media().unwrap();
-        assert_eq!(media.summary, "CD Player: Música — Artista");
+        assert_eq!(media.summary, "CD Player: Song — Artist");
         assert!(media.playing && media.can_play_pause && media.can_next);
         assert!(!media.can_previous);
         a.snap.state = "Paused".into();

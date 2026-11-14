@@ -1,6 +1,6 @@
-// Loja de plugins (src/hub/store.rs): de onde vem o índice, a lista com o estado de cada
-// plugin e as ações. Instalar, atualizar e remover pedem um segundo clique, que mostra o
-// que o plugin vai executar.
+// Plugin store (src/hub/store.rs): where the index comes from, the list with each plugin's
+// state, and the actions. Install, update and remove ask for a second click, which shows
+// what the plugin will run.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons } from "theme.slint";
 import { Icon, TextButton } from "widgets.slint";
@@ -9,41 +9,41 @@ export struct StoreRow {
     id: string,
     name: string,
     version: string,
-    // "autor · licença"
+    // "author · license"
     byline: string,
     description: string,
-    // "executa: ps · rede: api.x.com · lê: sys" (ou "não executa programas nem usa a rede")
+    // "runs: ps · network: api.x.com · reads: sys" (or "runs no programs and uses no network")
     permissions: string,
-    // "não instalado", "instalado 0.1.0", "atualização: 0.1.0 → 0.2.0"
+    // "not installed", "installed 0.1.0", "update: 0.1.0 → 0.2.0"
     state: string,
     installed: bool,
     update: bool,
-    // "ATENÇÃO, permissão nova: who" numa atualização
+    // "WARNING, new permission: who" on an update
     warning: string,
-    // ação esperando o segundo clique: "" | "install" | "update" | "remove"
+    // action waiting for the second click: "" | "install" | "update" | "remove"
     armed: string,
-    // texto do segundo clique ("Confirmar: instalar e permitir uptime")
+    // text of the second click ("Confirm: install and allow uptime")
     confirm: string,
     busy: bool,
-    // dados guardados do plugin ("1,2 MB"; "" = nenhum): ao remover, escolhe se apaga
+    // the plugin's stored data ("1.2 MB"; "" = none): on removal, choose whether to delete it
     data: string,
 }
 
 export global StoreApp {
-    // índice (registry.json: caminho ou https://) e a chave pública que o assina
+    // index (registry.json: path or https://) and the public key that signs it
     in-out property <string> index;
     in-out property <string> key;
     in property <[StoreRow]> rows;
-    // situação: "assinatura conferida · 2 plugins", ou o erro
+    // status: "signature verified · 2 plugins", or the error
     in property <string> status;
     in property <bool> failed;
     in property <bool> loading;
     callback reload();
-    callback save-source(string /* índice */, string /* chave */);
+    callback save-source(string /* index */, string /* key */);
     callback act(string /* id */, string /* install | update | remove | remove-purge */);
 }
 
-// Campo de texto de uma linha, nas cores da janela.
+// Single-line text field, in the window's colors.
 component Field inherits Rectangle {
     in property <string> label;
     in property <string> placeholder;
@@ -116,10 +116,10 @@ component PluginRow inherits Rectangle {
         HorizontalLayout {
             alignment: end;
             spacing: 8px;
-            if item.busy: Text { text: "trabalhando…"; color: Skin.dim; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
-            // com dados guardados, o segundo clique escolhe: manter ou apagar os dados
+            if item.busy: Text { text: @tr("working…"); color: Skin.dim; font-size: 12px * Skin.text-scale; vertical-alignment: center; }
+            // with stored data, the second click chooses: keep or delete the data
             if !item.busy && item.installed && item.armed == "remove" && item.data != "": TextButton {
-                text: "Remover e apagar os dados";
+                text: @tr("Remove and delete the data");
                 icon: Icons.close;
                 ink: Skin.danger;
                 edge: Skin.danger-edge;
@@ -127,7 +127,7 @@ component PluginRow inherits Rectangle {
                 clicked => { StoreApp.act(item.id, "remove-purge"); }
             }
             if !item.busy && item.installed: TextButton {
-                text: item.armed != "remove" ? "Remover" : item.data != "" ? "Remover e manter os dados" : "Confirmar remoção";
+                text: item.armed != "remove" ? @tr("Remove") : item.data != "" ? @tr("Remove and keep the data") : @tr("Confirm removal");
                 icon: Icons.close;
                 ink: Skin.danger;
                 edge: Skin.danger-edge;
@@ -135,14 +135,14 @@ component PluginRow inherits Rectangle {
                 clicked => { StoreApp.act(item.id, "remove"); }
             }
             if !item.busy && item.update: TextButton {
-                text: item.armed == "update" ? "Confirmar atualização" : "Atualizar";
+                text: item.armed == "update" ? @tr("Confirm update") : @tr("Update");
                 icon: Icons.refresh;
                 ink: Skin.accent;
                 font-size: 13px * Skin.text-scale;
                 clicked => { StoreApp.act(item.id, "update"); }
             }
             if !item.busy && !item.installed: TextButton {
-                text: item.armed == "install" ? "Confirmar instalação" : "Instalar";
+                text: item.armed == "install" ? @tr("Confirm install") : @tr("Install");
                 icon: Icons.plus;
                 ink: Skin.accent;
                 font-size: 13px * Skin.text-scale;
@@ -161,7 +161,7 @@ export component StoreView inherits ScrollView {
         padding-bottom: 16px;
         spacing: 12px;
 
-        // de onde vem a loja
+        // where the store comes from
         Rectangle {
             background: Skin.surface;
             border-width: 1px;
@@ -169,29 +169,29 @@ export component StoreView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 8px;
-                Text { text: "Índice da loja"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
+                Text { text: @tr("Store index"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                 Text {
-                    text: "Um registry.json (endereço https:// ou caminho) e a chave pública de quem o assina. Apague os dois campos e salve para voltar à loja oficial do MiniUtils.";
+                    text: @tr("A registry.json (https:// address or path) and the public key of whoever signs it. Clear both fields and save to go back to the official MiniUtils store.");
                     color: Skin.sub;
                     font-size: 13px * Skin.text-scale;
                     wrap: word-wrap;
                 }
                 index := Field {
-                    label: "Índice";
+                    label: @tr("Index");
                     placeholder: "https://…/registry.json";
                     text: StoreApp.index;
                     accepted => { StoreApp.save-source(index.text, key.text); }
                 }
                 key := Field {
-                    label: "Chave pública";
-                    placeholder: "chave pública (64 caracteres hex)";
+                    label: @tr("Public key");
+                    placeholder: @tr("public key (64 hex characters)");
                     text: StoreApp.key;
                     accepted => { StoreApp.save-source(index.text, key.text); }
                 }
                 HorizontalLayout {
                     spacing: 10px;
                     Text {
-                        text: StoreApp.loading ? "carregando…" : StoreApp.status;
+                        text: StoreApp.loading ? @tr("loading…") : StoreApp.status;
                         color: StoreApp.failed ? Skin.danger : Skin.sub;
                         font-family: Skin.font-mono;
                         font-size: 12px * Skin.text-scale;
@@ -200,7 +200,7 @@ export component StoreView inherits ScrollView {
                         vertical-alignment: center;
                     }
                     TextButton {
-                        text: "Salvar e carregar";
+                        text: @tr("Save and load");
                         icon: Icons.refresh;
                         ink: Skin.accent;
                         font-size: 13px * Skin.text-scale;
@@ -213,7 +213,7 @@ export component StoreView inherits ScrollView {
         for r in StoreApp.rows: PluginRow { item: r; }
 
         if StoreApp.rows.length == 0 && !StoreApp.loading: Text {
-            text: "Nenhum plugin para mostrar.";
+            text: @tr("No plugins to show.");
             color: Skin.dim;
             font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;

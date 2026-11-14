@@ -1,4 +1,4 @@
-//! Registro dos mini-apps: liga, desliga e entrega leituras dos provedores.
+//! Registry of the mini-apps: enables, disables and delivers provider readings to them.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,7 +11,7 @@ use crate::ui::HubWindow;
 
 pub struct Registry {
     host: Rc<Host>,
-    /// Apps conhecidos. Plugins entram e saem com o hub rodando (ver `add`/`remove`).
+    /// Known apps. Plugins come and go while the hub runs (see `add`/`remove`).
     apps: RefCell<Vec<AppRef>>,
 }
 
@@ -20,8 +20,8 @@ impl Registry {
         Registry { host, apps: RefCell::new(Vec::new()) }
     }
 
-    /// Acrescenta um app (ou troca o de mesmo id). Se ele já estava ligado na config
-    /// (um plugin reinstalado), é ligado agora.
+    /// Adds an app (or replaces the one with the same id). If it was already enabled in the
+    /// config (a reinstalled plugin), it is enabled now.
     pub fn add(&self, app: AppRef, ui: Option<&HubWindow>) {
         let id = app.borrow().manifest().id.clone();
         self.remove(&id, ui);
@@ -32,8 +32,8 @@ impl Registry {
             }
     }
 
-    /// Tira um app (plugin removido ou atualizado): desliga antes, se estava ligado. A
-    /// config continua lembrando dele (posição, opções) para quando voltar.
+    /// Takes an app out (plugin removed or updated): disables it first if it was enabled.
+    /// The config still remembers it (position, options) for when it comes back.
     pub fn remove(&self, id: &str, ui: Option<&HubWindow>) -> bool {
         let Some(app) = self.find(id) else { return false };
         if let Some(ui) = ui
@@ -52,7 +52,7 @@ impl Registry {
         self.apps.borrow().iter().find(|a| a.borrow().manifest().id == id).cloned()
     }
 
-    /// Apps ligados, na ordem das abas (a ordem da config).
+    /// Enabled apps, in tab order (the config's order).
     pub fn enabled(&self) -> Vec<AppRef> {
         let cfg = self.host.config.borrow();
         cfg.enabled.iter().filter_map(|id| self.find(id)).collect()
@@ -62,7 +62,7 @@ impl Registry {
         self.host.config.borrow().is_enabled(id)
     }
 
-    /// Liga os apps marcados na config (na inicialização).
+    /// Enables the apps marked in the config (at startup).
     pub fn start(&self, ui: &HubWindow) {
         for app in self.enabled() {
             self.activate(&app, ui);
@@ -106,7 +106,7 @@ impl Registry {
         }
     }
 
-    /// Entrega cada leitura só aos apps ligados que assinam aquele provedor.
+    /// Delivers each reading only to the enabled apps subscribed to that provider.
     pub fn dispatch(&self, events: &[Event], ui: &HubWindow) {
         for ev in events {
             let topic = ev.topic();
@@ -119,12 +119,12 @@ impl Registry {
         }
     }
 
-    /// Fatos novos de todos os apps ligados, para a conversa entre mascotes.
+    /// New facts from every enabled app, for the mascot chatter.
     pub fn take_facts(&self) -> Vec<Fact> {
         self.enabled().iter().flat_map(|app| app.borrow_mut().take_facts()).collect()
     }
 
-    /// Falas próprias de cada app (id, conteúdo do `lines.toml`), ligado ou não.
+    /// Each app's own lines (id, content of `lines.toml`), enabled or not.
     pub fn lines(&self) -> Vec<(String, &'static str)> {
         self.apps.borrow().iter().map(|a| {
             let a = a.borrow();
@@ -132,12 +132,12 @@ impl Registry {
         }).collect()
     }
 
-    /// Mascotes que podem falar, dos apps `ids` (os da página aberta).
+    /// Mascots that may speak, from apps `ids` (those of the open page).
     pub fn voices(&self, ids: &[String]) -> Vec<Voice> {
         ids.iter().filter_map(|id| self.find(id)).flat_map(|app| app.borrow().voices()).collect()
     }
 
-    /// Entrega o resultado das ações em segundo plano ao app que as pediu (se ainda ligado).
+    /// Delivers the results of background actions to the app that asked (if still enabled).
     pub fn deliver(&self, reports: &[(String, Report)], ui: &HubWindow) {
         for (id, report) in reports {
             if !self.is_enabled(id) {
@@ -149,7 +149,7 @@ impl Registry {
         }
     }
 
-    /// O app em pior estado entre `apps` (o primeiro, em caso de empate).
+    /// The app in the worst state among `apps` (the first one on a tie).
     pub fn worst_of(apps: &[AppRef]) -> Option<AppRef> {
         let mut best: Option<(Mood, &AppRef)> = None;
         for app in apps {
@@ -161,14 +161,14 @@ impl Registry {
         best.map(|(_, a)| a.clone())
     }
 
-    /// O pior humor entre `apps`.
+    /// The worst mood among `apps`.
     pub fn mood_of(apps: &[AppRef]) -> Mood {
         apps.iter().map(|a| a.borrow().mood()).fold(Mood::Sleep, Mood::worst)
     }
 
-    /// Uma linha por app, para o tooltip da bandeja.
+    /// One line per app, for the tray tooltip.
     pub fn summary_of(apps: &[AppRef]) -> String {
         let lines: Vec<String> = apps.iter().map(|a| a.borrow().summary()).collect();
-        if lines.is_empty() { "Nenhum mini-app ligado".into() } else { lines.join("\n") }
+        if lines.is_empty() { crate::tr!("No mini-apps enabled").into() } else { lines.join("\n") }
     }
 }

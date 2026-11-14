@@ -1,4 +1,4 @@
-// Painel: a grade de mini-apps, com o modo de edição (arrastar e redimensionar).
+// Dashboard: the mini-app grid, with edit mode (drag and resize).
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons } from "theme.slint";
 import { Icon } from "widgets.slint";
@@ -13,7 +13,7 @@ import { Chatter, SpeechBox } from "chatter.slint";
 import { PluginView, PluginApps } from "plugin.slint";
 import { GridCell, Ghost } from "models.slint";
 
-// Alça de redimensionar (barra ou canto) no modo de edição.
+// Resize handle (bar or corner) in edit mode.
 component Handle inherits TouchArea {
     in property <string> mode;      // "r" | "b" | "rb"
     callback begin(length, length);
@@ -42,19 +42,19 @@ component Handle inherits TouchArea {
     }
 }
 
-// Grade com os apps ligados. A altura de uma linha é a altura visível dividida pelas
-// linhas, com um mínimo; passando disso, o painel rola.
+// Grid with the enabled apps. A row's height is the visible height divided by the
+// rows, with a minimum; beyond that, the dashboard scrolls.
 export component Dashboard inherits ScrollView {
     in property <[GridCell]> cells;
     in property <int> columns;
     in property <int> rows;
     in property <bool> editing;
     in property <Ghost> ghost;
-    // começo, meio e fim de um arrasto (célula sob o ponteiro)
+    // start, middle and end of a drag (cell under the pointer)
     callback edit-begin(string /* id */, string /* "move" | "r" | "b" | "rb" */, int, int);
     callback edit-drag(int, int);
     callback edit-end();
-    // setas no modo de edição: mover (ou redimensionar com Shift)
+    // arrows in edit mode: move (or resize with Shift)
     callback edit-key(string, int, int, bool);
 
     property <length> pad: 12px;
@@ -64,7 +64,7 @@ export component Dashboard inherits ScrollView {
     content-width: self.visible-width;
     content-height: 2 * pad + rows * rh + max(rows - 1, 0) * gap;
 
-    // célula da grade sob um ponto do conteúdo
+    // grid cell under a point of the content
     pure function col-at(px: length) -> int {
         return clamp(floor((px - pad + gap / 2) / (cw + gap)), 0, columns - 1);
     }
@@ -75,13 +75,13 @@ export component Dashboard inherits ScrollView {
     if cells.length == 0 && !editing: Text {
         width: root.visible-width;
         height: root.visible-height;
-        text: "Nenhum app ligado. Na engrenagem, abra as Configurações.";
+        text: @tr("No apps enabled. Open Settings from the gear.");
         color: Skin.dim;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
-    // células vazias da grade, para mirar
+    // empty grid cells, to aim at
     if editing: Rectangle {
         for i in columns * rows: Rectangle {
             x: pad + mod(i, columns) * (cw + gap);
@@ -94,7 +94,7 @@ export component Dashboard inherits ScrollView {
         }
     }
 
-    // o app recebe o tamanho exato da célula e se adapta a ele
+    // the app gets the exact cell size and adapts to it
     for c in cells: cell := Rectangle {
         property <bool> active: ghost.visible && ghost.id == c.id;
         property <color> accent: active ? Skin.accent : c.theme.fur;
@@ -143,7 +143,7 @@ export component Dashboard inherits ScrollView {
             width: parent.width - 28px;
             height: parent.height - 28px;
         }
-        // plugins da comunidade: todos na mesma tela genérica (ui/plugin.slint)
+        // community plugins: all in the same generic screen (ui/plugin.slint)
         for p in PluginApps.cards: Rectangle {
             x: 0;
             y: 0;
@@ -166,20 +166,20 @@ export component Dashboard inherits ScrollView {
             height: parent.height - 24px;
         }
 
-        // conversa entre mascotes: a fala sai na caixa do app de quem fala
+        // chatter between mascots: the line shows in the speaker's app box
         if Chatter.app == c.id && !editing: SpeechBox {
             x: 10px;
             y: parent.height - self.height - 10px;
             width: parent.width - 20px;
         }
 
-        // modo de edição: véu, contorno, barra de arrasto e alças
+        // edit mode: veil, outline, drag bar and handles
         if editing: Rectangle {
             background: c.theme.bg1.with-alpha(0.64);
             border-width: 2px;
             border-color: accent;
 
-            // bloqueia cliques no app por baixo
+            // blocks clicks on the app underneath
             TouchArea { }
 
             fs := FocusScope {
@@ -229,7 +229,7 @@ export component Dashboard inherits ScrollView {
                 grip := TouchArea {
                     mouse-cursor: self.pressed ? grabbing : grab;
                     accessible-role: button;
-                    accessible-label: "Mover " + c.name + ". Setas movem, Shift mais setas redimensiona";
+                    accessible-label: @tr("Move {}. Arrows move, Shift plus arrows resize", c.name);
                     pointer-event(ev) => {
                         if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
                             fs.focus();
@@ -283,7 +283,7 @@ export component Dashboard inherits ScrollView {
         }
     }
 
-    // prévia do arrasto: ciano se cabe, vermelho se não
+    // drag preview: cyan if it fits, red if not
     if editing && ghost.visible: Rectangle {
         x: pad + ghost.col * (cw + gap);
         y: pad + ghost.row * (rh + gap);
@@ -293,7 +293,7 @@ export component Dashboard inherits ScrollView {
         border-color: ghost.ok ? Skin.accent : Skin.bad;
         background: ghost.ok ? Skin.accent.with-alpha(0.1) : Skin.bad.with-alpha(0.12);
         Text {
-            text: ghost.ok ? ghost.w + "×" + ghost.h : "sem espaço";
+            text: ghost.ok ? ghost.w + "×" + ghost.h : @tr("no room");
             color: ghost.ok ? Skin.accent : Skin.bad;
             font-family: Skin.font-mono;
             font-size: 16px * Skin.text-scale;

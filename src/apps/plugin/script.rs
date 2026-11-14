@@ -1,5 +1,5 @@
-//! Script dos plugins com tela (`main.rhai`): roda numa thread só dele e conversa com a
-//! tela por mensagens (`ScriptIn`/`ScriptOut`). A API está na doc de `apps/plugin`.
+//! Script of plugins with a screen (`main.rhai`): runs on a thread of its own and talks to
+//! the screen through messages (`ScriptIn`/`ScriptOut`). The API is in the docs of `apps/plugin`.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -15,11 +15,12 @@ use crate::apps::external::FromApp;
 use crate::core::bus::Event;
 use crate::core::chatter::FactKind;
 use crate::core::exec::Exec;
+use crate::tr;
 
-/// Prazo de um `run()` do script.
+/// Time limit of a script `run()`.
 const RUN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Valor que o script manda para a tela (sem `Rc`: atravessa threads).
+/// Value the script sends to the screen (no `Rc`: it crosses threads).
 #[derive(Debug, Clone)]
 pub(super) enum PValue {
     Str(String),
@@ -27,7 +28,7 @@ pub(super) enum PValue {
     Bool(bool),
     List(Vec<PValue>),
     Map(Vec<(String, PValue)>),
-    /// Imagem lida do disco (só o app externo manda).
+    /// Image read from disk (only external apps send it).
     Image(PathBuf),
 }
 
@@ -48,7 +49,7 @@ impl PValue {
         }
     }
 
-    /// Do JSON de um app externo (`null` vira texto vazio).
+    /// From an external app's JSON (`null` becomes empty text).
     fn from_json(v: &serde_json::Value) -> PValue {
         use serde_json::Value as J;
         match v {
@@ -61,7 +62,7 @@ impl PValue {
         }
     }
 
-    /// Para a tela (na thread da UI).
+    /// For the screen (on the UI thread).
     pub(super) fn to_value(&self) -> Value {
         match self {
             PValue::Str(s) => Value::String(s.as_str().into()),
@@ -74,63 +75,65 @@ impl PValue {
     }
 }
 
-/// Do script para a UI.
+/// From the script to the UI.
 #[derive(Debug, Clone)]
 pub(super) enum ScriptOut {
     Set(String, PValue),
     Mood(String),
     Summary(String),
     Notify(String, String),
-    /// Fato para a conversa entre mascotes: tipo, assunto e número.
+    /// Fact for the chat between mascots: kind, subject and number.
     Fact(FactKind, String, Option<f32>),
-    /// Erro na célula (texto vazio = o app externo diz que passou).
+    /// Error in the cell (empty text = the external app says it's over).
     Error(String),
-    /// O processo do app externo saiu sem o host pedir.
+    /// The external app's process exited without the host asking.
     Exited(String),
-    /// A migração dos dados terminou: a versão nova, ou o erro (o host devolve a cópia).
+    /// The data migration finished: the new version, or the error (the host restores the copy).
     Migrated(Result<u32, String>),
 }
 
-/// Da UI (ou de uma tarefa assíncrona) para o script.
+/// From the UI (or an async task) to the script.
 pub(super) enum ScriptIn {
     Tick,
     Action(String, String),
     Settings(rhai::Map),
-    /// Leitura de um provedor que o plugin assina (`uses`): nome do tópico e dados.
+    /// Reading from a provider the plugin subscribes to (`uses`): topic name and data.
     Event(String, rhai::Dynamic),
-    /// Um `run_async`/`http_get_async` terminou: nome da função a chamar e o resultado.
+    /// A `run_async`/`http_get_async` finished: name of the function to call and the result.
     Done(String, rhai::Map),
-    /// Desligou: a thread do script termina.
+    /// Turned off: the script thread ends.
     Stop,
 }
 
-/// Prazo e tamanho máximo de um `http_get`.
+/// Time limit and maximum size of an `http_get`.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const HTTP_MAX: usize = 1 << 20;
-/// Tarefas assíncronas (`run_async`, `http_get_async`) ao mesmo tempo, por plugin.
+/// Async tasks (`run_async`, `http_get_async`) at the same time, per plugin.
 const MAX_ASYNC: usize = 4;
-/// Tamanho máximo dos dados gravados (`store_set`), em JSON.
+/// Maximum size of the stored data (`store_set`), as JSON.
 const STORE_MAX: usize = 1 << 20;
 
-/// O que o script do plugin pode usar do host.
+/// What the plugin's script may use from the host.
 #[derive(Clone)]
 pub(super) struct ScriptEnv {
     pub(super) exec: Exec,
-    /// Domínios de `[permissions] net`.
+    /// Domains of `[permissions] net`.
     pub(super) net: Vec<String>,
-    /// Arquivo dos dados (`store_get`/`store_set`); `None` = só na memória.
+    /// Data file (`store_get`/`store_set`); `None` = in memory only.
     pub(super) data: Option<PathBuf>,
-    /// O app declarou `kv` (sem isso, `store_set` é erro).
+    /// The app declared `kv` (without it, `store_set` is an error).
     pub(super) kv: bool,
-    /// O banco, se o app declarou `sqlite` (`db.rs`).
+    /// The database, if the app declared `sqlite` (`db.rs`).
     pub(super) db: Option<DbSpec>,
-    /// Migrar os dados de uma versão para outra antes de `start()` (`fn migrate(de, para)`).
+    /// Migrate the data from one version to another before `start()` (`fn migrate(from, to)`).
     pub(super) migrate: Option<(u32, u32)>,
-    /// Canal de volta para as tarefas assíncronas (`None` = sem elas).
+    /// Channel back for async tasks (`None` = none).
     pub(super) back: Option<Sender<ScriptIn>>,
+    /// The plugin's own catalog (`i18n/<lang>.po`) for `tr()`; empty = English.
+    pub(super) catalog: Arc<crate::core::i18n::Catalog>,
 }
 
-/// Os dados que o script grava, carregados do arquivo e gravados de volta pelo host.
+/// The data the script stores, loaded from the file and written back by the host.
 #[derive(Default)]
 pub(super) struct Store {
     data: rhai::Map,
@@ -148,7 +151,7 @@ impl Store {
         Store { data, dirty: false }
     }
 
-    /// Grava se mudou (arquivo temporário e `rename`: nunca fica pela metade).
+    /// Writes if it changed (temporary file and `rename`: never left half-written).
     fn save(&mut self, path: Option<&Path>) -> Result<(), String> {
         if !self.dirty {
             return Ok(());
@@ -157,7 +160,7 @@ impl Store {
         let Some(path) = path else { return Ok(()) };
         let json = serde_json::to_vec(&dyn_to_json(&self.data.clone().into())).map_err(|e| e.to_string())?;
         if json.len() > STORE_MAX {
-            return Err(format!("store_set: os dados passam de {} KiB; não foram gravados", STORE_MAX >> 10));
+            return Err(tr!("store_set: the data is over {} KiB; it wasn't saved", STORE_MAX >> 10));
         }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -167,7 +170,7 @@ impl Store {
     }
 }
 
-/// JSON → valor do Rhai (números inteiros ficam inteiros).
+/// JSON → Rhai value (whole numbers stay integers).
 pub(super) fn json_to_dyn(v: serde_json::Value) -> rhai::Dynamic {
     use serde_json::Value as J;
     match v {
@@ -183,7 +186,7 @@ pub(super) fn json_to_dyn(v: serde_json::Value) -> rhai::Dynamic {
     }
 }
 
-/// Valor do Rhai → JSON (o que não tem equivalente vira texto).
+/// Rhai value → JSON (whatever has no equivalent becomes text).
 pub(super) fn dyn_to_json(d: &rhai::Dynamic) -> serde_json::Value {
     use serde_json::Value as J;
     if d.is_unit() {
@@ -203,7 +206,7 @@ pub(super) fn dyn_to_json(d: &rhai::Dynamic) -> serde_json::Value {
     }
 }
 
-/// Os dados de uma leitura de provedor, como o script recebe em `on_event`.
+/// The data of a provider reading, as the script gets it in `on_event`.
 pub(super) fn event_data(ev: &Event) -> serde_json::Value {
     let v = match ev {
         Event::Sys(s) => serde_json::to_value(s),
@@ -218,22 +221,22 @@ pub(super) fn event_data(ev: &Event) -> serde_json::Value {
     v.unwrap_or(serde_json::Value::Null)
 }
 
-/// `url` é https, na porta padrão, sem usuário, e o domínio está em `allowed`.
+/// `url` is https, on the default port, without a user, and its domain is in `allowed`.
 fn check_url(url: &reqwest::Url, allowed: &[String]) -> Result<(), String> {
     if url.scheme() != "https" {
-        return Err(format!("{url}: só https://"));
+        return Err(tr!("{}: https:// only", url));
     }
     if !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
-        return Err(format!("{url}: sem usuário nem porta no endereço"));
+        return Err(tr!("{}: no user or port in the address", url));
     }
     let host = url.host_str().unwrap_or_default();
     if !allowed.iter().any(|h| h == host) {
-        return Err(format!("{host} não está em [permissions] net"));
+        return Err(tr!("{} is not in [permissions] net", host));
     }
     Ok(())
 }
 
-/// GET com prazo e limite de tamanho; redirecionamento só para domínio permitido.
+/// GET with a time and size limit; redirects only to an allowed domain.
 fn http_get(url: &str, allowed: &[String]) -> Result<(u16, String), String> {
     use std::io::Read;
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("{url}: {e}"))?;
@@ -244,9 +247,9 @@ fn http_get(url: &str, allowed: &[String]) -> Result<(u16, String), String> {
         .user_agent(concat!("miniutils/", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::custom(move |a| {
             if a.previous().len() >= 5 {
-                a.error("redirecionamentos demais")
+                a.error(tr!("too many redirects"))
             } else if let Err(e) = check_url(a.url(), &hosts) {
-                a.error(format!("redirecionou para fora do permitido: {e}"))
+                a.error(tr!("redirected outside what is allowed: {}", e))
             } else {
                 a.follow()
             }
@@ -258,12 +261,12 @@ fn http_get(url: &str, allowed: &[String]) -> Result<(u16, String), String> {
     let mut body = Vec::new();
     resp.take(HTTP_MAX as u64 + 1).read_to_end(&mut body).map_err(|e| format!("{url}: {e}"))?;
     if body.len() > HTTP_MAX {
-        return Err(format!("{url}: a resposta passa de 1 MiB"));
+        return Err(tr!("{}: the response is over 1 MiB", url));
     }
     Ok((status, String::from_utf8_lossy(&body).into_owned()))
 }
 
-/// Resultado de `run`: #{ ok, out, err }.
+/// Result of `run`: #{ ok, out, err }.
 fn run_result(exec: &Exec, cmd: &rhai::Array) -> rhai::Map {
     let argv: Vec<String> = cmd.iter().map(|d| d.to_string()).collect();
     let result = match argv.split_first() {
@@ -271,7 +274,7 @@ fn run_result(exec: &Exec, cmd: &rhai::Array) -> rhai::Map {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             exec.run_blocking(prog, &args, RUN_TIMEOUT).map_err(|e| e.to_string())
         }
-        None => Err("run([]): comando vazio".into()),
+        None => Err(tr!("run([]): empty command").into()),
     };
     let mut m = rhai::Map::new();
     m.insert("ok".into(), result.is_ok().into());
@@ -280,7 +283,7 @@ fn run_result(exec: &Exec, cmd: &rhai::Array) -> rhai::Map {
     m
 }
 
-/// Resultado de `http_get`: #{ ok, status, body, err } (`ok` = respondeu com 2xx).
+/// Result of `http_get`: #{ ok, status, body, err } (`ok` = answered with 2xx).
 fn http_result(url: &str, allowed: &[String]) -> rhai::Map {
     let r = http_get(url, allowed);
     let mut m = rhai::Map::new();
@@ -292,8 +295,8 @@ fn http_result(url: &str, allowed: &[String]) -> rhai::Map {
     m
 }
 
-/// Roda `job` numa thread e manda o resultado à função `cb` do script. `false` se não
-/// deu (limite de tarefas, ou sem canal de volta).
+/// Runs `job` on a thread and sends the result to the script's function `cb`. `false` if it
+/// couldn't (task limit, or no channel back).
 fn spawn_async(env: &ScriptEnv, pending: &Arc<AtomicUsize>, cb: String, job: impl FnOnce() -> rhai::Map + Send + 'static) -> bool {
     let Some(back) = env.back.clone() else { return false };
     if pending.fetch_add(1, Ordering::SeqCst) >= MAX_ASYNC {
@@ -312,16 +315,16 @@ fn spawn_async(env: &ScriptEnv, pending: &Arc<AtomicUsize>, cb: String, job: imp
     spawned.is_ok()
 }
 
-/// Um fato para a conversa ("strain", "CPU", 93), do script ou do app externo.
+/// A fact for the chat ("strain", "CPU", 93), from the script or the external app.
 fn fact_out(kind: &str, subject: &str, value: Option<f32>) -> Result<ScriptOut, String> {
     let k = FactKind::ALL
         .into_iter()
         .find(|k| k.key() == kind && *k != FactKind::Idle)
-        .ok_or_else(|| format!("fact: tipo \"{kind}\" desconhecido (trouble, strain, forecast, recovered, poked)"))?;
+        .ok_or_else(|| tr!("fact: unknown kind \"{}\" (trouble, strain, forecast, recovered, poked)", kind))?;
     Ok(ScriptOut::Fact(k, subject.to_string(), value))
 }
 
-/// Mensagem do app externo → o que a UI aplica (o mesmo que o script manda).
+/// Message from the external app → what the UI applies (the same as the script sends).
 pub(super) fn from_app(msg: FromApp) -> ScriptOut {
     match msg {
         FromApp::Set { prop, value } => ScriptOut::Set(prop, PValue::from_json(&value)),
@@ -337,8 +340,8 @@ pub(super) fn from_app(msg: FromApp) -> ScriptOut {
     }
 }
 
-/// O interpretador com a API do host e os limites (um script em loop não trava nada:
-/// estoura o limite de operações e vira erro na tela).
+/// The interpreter with the host API and the limits (a script in a loop hangs nothing: it
+/// blows the operation limit and becomes an error on screen).
 pub(super) fn engine(
     out: Arc<Mutex<Vec<ScriptOut>>>,
     env: ScriptEnv,
@@ -365,6 +368,17 @@ pub(super) fn engine(
     e.register_fn("mood", move |m: &str| p(ScriptOut::Mood(m.to_string())));
     let p = push.clone();
     e.register_fn("summary", move |s: &str| p(ScriptOut::Summary(s.to_string())));
+    // texts the script builds, in the interface language: tr("Up for {}", [x]) with the
+    // plugin's i18n/<lang>.po (like @tr in the view); lang() is "en" or "pt-BR"
+    let cat = env.catalog.clone();
+    e.register_fn("tr", move |s: &str| cat.get(s).unwrap_or(s).to_string());
+    let cat = env.catalog.clone();
+    e.register_fn("tr", move |s: &str, args: rhai::Array| {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let refs: Vec<&dyn std::fmt::Display> = args.iter().map(|a| a as &dyn std::fmt::Display).collect();
+        crate::core::i18n::format(cat.get(s).unwrap_or(s), &refs)
+    });
+    e.register_fn("lang", || crate::core::i18n::current().tag().to_string());
     let p = push.clone();
     e.register_fn("notify", move |t: &str, b: &str| p(ScriptOut::Notify(t.to_string(), b.to_string())));
     let p = push.clone();
@@ -375,7 +389,7 @@ pub(super) fn engine(
         settings.lock().ok().and_then(|m| m.get(key).cloned()).unwrap_or(rhai::Dynamic::UNIT)
     });
 
-    // conversa entre mascotes: fact("strain", "CPU", 93)
+    // chat between mascots: fact("strain", "CPU", 93)
     type Res<T> = Result<T, Box<rhai::EvalAltResult>>;
     let fact = move |kind: &str, subject: &str, value: Option<f32>| -> Res<()> {
         push(fact_out(kind, subject, value)?);
@@ -387,7 +401,7 @@ pub(super) fn engine(
     e.register_fn("fact", move |k: &str, s: &str, v: i64| f(k, s, Some(v as f32)));
     e.register_fn("fact", move |k: &str, s: &str, v: f64| fact(k, s, Some(v as f32)));
 
-    // dados guardados entre execuções (`kv` no [data]; sem [data], o script tem)
+    // data kept between runs (`kv` in [data]; without [data], the script has it)
     let st = store.clone();
     e.register_fn("store_get", move |key: &str| -> rhai::Dynamic {
         st.lock().ok().and_then(|s| s.data.get(key).cloned()).unwrap_or(rhai::Dynamic::UNIT)
@@ -395,7 +409,7 @@ pub(super) fn engine(
     let kv = env.kv;
     e.register_fn("store_set", move |key: &str, value: rhai::Dynamic| -> Res<()> {
         if !kv {
-            return Err("store_set: este app não declarou kv no [data] do manifest.toml".into());
+            return Err(tr!("store_set: this app didn't declare kv in the [data] of manifest.toml").into());
         }
         if let Ok(mut s) = store.lock() {
             if value.is_unit() {
@@ -408,9 +422,9 @@ pub(super) fn engine(
         Ok(())
     });
 
-    // banco SQLite (`sqlite` no [data]; ver db.rs)
+    // SQLite database (`sqlite` in [data]; see db.rs)
     fn lock(db: &Mutex<Db>) -> Result<std::sync::MutexGuard<'_, Db>, Box<rhai::EvalAltResult>> {
-        db.lock().map_err(|_| "banco: travado".into())
+        db.lock().map_err(|_| tr!("database: locked").into())
     }
     let d = db.clone();
     e.register_fn("db_batch", move |sql: &str| -> Res<()> { lock(&d)?.batch(sql).map_err(Into::into) });
@@ -428,7 +442,7 @@ pub(super) fn engine(
     });
     e.register_fn("to_json", |value: rhai::Dynamic| dyn_to_json(&value).to_string());
 
-    // programas da allowlist e domínios de [permissions] net
+    // allowlisted programs and domains of [permissions] net
     let pending = Arc::new(AtomicUsize::new(0));
     let ex = env.exec.clone();
     e.register_fn("run", move |cmd: rhai::Array| run_result(&ex, &cmd));
@@ -446,10 +460,10 @@ pub(super) fn engine(
     e
 }
 
-/// O laço da thread do script: roda o topo do arquivo, a migração dos dados (se o host
-/// pediu), `start()`, e depois atende os pedidos até `Stop` (ou o canal fechar). Cada leva
-/// de mensagens vai para a UI por `deliver`; os dados gravados com `store_set` vão para o
-/// disco depois de cada chamada, e uma transação do banco esquecida aberta é desfeita.
+/// The loop of the script thread: runs the top of the file, the data migration (if the host
+/// asked), `start()`, and then serves requests until `Stop` (or the channel closes). Each
+/// batch of messages goes to the UI through `deliver`; data stored with `store_set` goes to
+/// disk after each call, and a database transaction left open is rolled back.
 pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, rx: Receiver<ScriptIn>, deliver: impl Fn(Vec<ScriptOut>)) {
     let out = Arc::new(Mutex::new(Vec::new()));
     let shared_settings = Arc::new(Mutex::new(settings.clone()));
@@ -502,8 +516,8 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
         let opts = rhai::CallFnOptions::new().eval_ast(false).rewind_scope(true).bind_this_ptr(this);
         engine.call_fn_with_options::<rhai::Dynamic>(opts, &mut scope, &ast, name, args).map(|_| ())
     };
-    // dados de uma versão antiga: fn migrate(de, para) antes de tudo. Falhou: fecha o banco
-    // e não grava nada (o host devolve a cópia de antes) e o app não começa.
+    // data from an old version: fn migrate(from, to) before anything. If it fails: close the
+    // database and save nothing (the host restores the copy from before) and the app doesn't start.
     if let Some((from, to)) = migrate {
         let r = call("migrate", vec![(from as rhai::INT).into(), (to as rhai::INT).into()], &mut this);
         let open_tx = db.lock().ok().and_then(|mut d| d.end_call());
@@ -531,7 +545,7 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
             ScriptIn::Action(n, a) => call("action", vec![n.into(), a.into()], &mut this),
             ScriptIn::Event(topic, data) => call("on_event", vec![topic.into(), data], &mut this),
             ScriptIn::Done(cb, result) if has(&cb, 1) => call(&cb, vec![result.into()], &mut this),
-            ScriptIn::Done(cb, _) => Err(format!("falta fn {cb}(result) para receber o resultado").into()),
+            ScriptIn::Done(cb, _) => Err(tr!("missing fn {}(result) to receive the result", cb).into()),
             ScriptIn::Settings(m) => {
                 if let Ok(mut s) = shared_settings.lock() {
                     *s = m.clone();
@@ -551,33 +565,33 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
-    #[cfg(unix)] // só o teste do `run_async` (que é só Unix) usa
+    #[cfg(unix)] // only the `run_async` test (which is Unix-only) uses it
     use std::time::Instant;
 
     fn env(exec: &[&str], data: Option<PathBuf>) -> ScriptEnv {
         let exec: Vec<String> = exec.iter().map(|s| s.to_string()).collect();
-        ScriptEnv { exec: Exec::new("t", &exec), net: vec!["api.exemplo.com".into()], data, kv: true, db: None, migrate: None, back: None }
+        ScriptEnv { exec: Exec::new("t", &exec), net: vec!["api.example.com".into()], data, kv: true, db: None, migrate: None, back: None, catalog: Default::default() }
     }
 
-    fn rodar_com(script: &str, env: ScriptEnv, entradas: Vec<ScriptIn>) -> Vec<ScriptOut> {
+    fn run_with(script: &str, env: ScriptEnv, inputs: Vec<ScriptIn>) -> Vec<ScriptOut> {
         let (tx, rx) = channel();
-        for e in entradas {
+        for e in inputs {
             tx.send(e).unwrap();
         }
         drop(tx);
-        let saida = Arc::new(Mutex::new(Vec::new()));
-        let s = saida.clone();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let s = output.clone();
         script_loop(script.into(), env, rhai::Map::new(), rx, move |b| s.lock().unwrap().extend(b));
-        
-        saida.lock().unwrap().clone()
+
+        output.lock().unwrap().clone()
     }
 
-    fn rodar(script: &str, entradas: Vec<ScriptIn>) -> Vec<ScriptOut> {
-        rodar_com(script, env(&["echo"], None), entradas)
+    fn run(script: &str, inputs: Vec<ScriptIn>) -> Vec<ScriptOut> {
+        run_with(script, env(&["echo"], None), inputs)
     }
 
     #[test]
-    fn mensagens_do_app_externo_viram_as_do_script() {
+    fn external_app_messages_become_script_ones() {
         let set = from_app(FromApp::Set { prop: "n".into(), value: serde_json::json!({"a": [1, true]}) });
         assert!(matches!(&set, ScriptOut::Set(p, PValue::Map(m)) if p == "n" && matches!(&m[0].1, PValue::List(l) if l.len() == 2)));
         assert!(matches!(from_app(FromApp::Image { prop: "g".into(), path: "/x.png".into() }), ScriptOut::Set(_, PValue::Image(_))));
@@ -585,59 +599,59 @@ mod tests {
             from_app(FromApp::Fact { kind: "strain".into(), subject: "CPU".into(), value: Some(93.0) }),
             ScriptOut::Fact(FactKind::Strain, s, Some(_)) if s == "CPU"
         ));
-        // tipo de fato desconhecido vira erro na célula, não pânico
-        assert!(matches!(from_app(FromApp::Fact { kind: "x".into(), subject: String::new(), value: None }), ScriptOut::Error(e) if e.contains("desconhecido")));
+        // an unknown fact kind becomes an error in the cell, not a panic
+        assert!(matches!(from_app(FromApp::Fact { kind: "x".into(), subject: String::new(), value: None }), ScriptOut::Error(e) if e.contains("unknown")));
     }
 
     #[test]
-    fn script_usa_o_banco_e_migra_antes_de_comecar() {
+    fn script_uses_the_database_and_migrates_before_starting() {
         let dir = std::env::temp_dir().join(format!("miniutils-script-db-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let com = |migrate: Option<(u32, u32)>| {
+        let with = |migrate: Option<(u32, u32)>| {
             let mut e = env(&[], None);
             e.db = Some(DbSpec { path: dir.join("data.sqlite"), max_bytes: 1 << 20 });
             e.migrate = migrate;
             e
         };
         let s = r#"
-            fn migrate(de, para) {
-                if de == 1 { db_batch("ALTER TABLE notas ADD COLUMN feita INTEGER DEFAULT 0"); }
-                if para == 9 { throw "não sei ir para a 9"; }
+            fn migrate(from, to) {
+                if from == 1 { db_batch("ALTER TABLE notes ADD COLUMN done INTEGER DEFAULT 0"); }
+                if to == 9 { throw "can't go to 9"; }
             }
             fn start() {
-                db_batch("CREATE TABLE IF NOT EXISTS notas(texto TEXT)");
-                db_exec("INSERT INTO notas(texto) VALUES (?)", ["oi"]);
-                let rows = db_query("SELECT count(*) AS n FROM notas");
+                db_batch("CREATE TABLE IF NOT EXISTS notes(text TEXT)");
+                db_exec("INSERT INTO notes(text) VALUES (?)", ["hi"]);
+                let rows = db_query("SELECT count(*) AS n FROM notes");
                 ui("n", rows[0].n);
             }
         "#;
-        let out = format!("{:?}", rodar_com(s, com(None), vec![]));
+        let out = format!("{:?}", run_with(s, with(None), vec![]));
         assert!(out.contains(r#"Set("n", Num(1.0))"#), "{out}");
-        // versão 1 → 2: a migração roda antes do start e o banco continua
-        let out = format!("{:?}", rodar_com(s, com(Some((1, 2))), vec![]));
+        // version 1 → 2: the migration runs before start and the database carries on
+        let out = format!("{:?}", run_with(s, with(Some((1, 2))), vec![]));
         assert!(out.contains("Migrated(Ok(2))") && out.contains(r#"Set("n", Num(2.0))"#), "{out}");
-        // a migração falha: nada de start
-        let out = format!("{:?}", rodar_com(s, com(Some((2, 9))), vec![]));
-        assert!(out.contains("Migrated(Err(") && out.contains("não sei ir") && !out.contains(r#"Set("n""#), "{out}");
+        // the migration fails: no start
+        let out = format!("{:?}", run_with(s, with(Some((2, 9))), vec![]));
+        assert!(out.contains("Migrated(Err(") && out.contains("can't go to") && !out.contains(r#"Set("n""#), "{out}");
         let _ = std::fs::remove_dir_all(&dir);
-        // sem declarar: banco e kv viram erro na tela
-        let mut sem = env(&[], None);
-        sem.kv = false;
-        let out = format!("{:?}", rodar_com(r#"fn start() { store_set("a", 1); }"#, sem, vec![]));
-        assert!(out.contains("não declarou kv"), "{out}");
-        let out = format!("{:?}", rodar(r#"fn start() { db_exec("SELECT 1"); }"#, vec![]));
+        // undeclared: database and kv become errors on screen
+        let mut undeclared = env(&[], None);
+        undeclared.kv = false;
+        let out = format!("{:?}", run_with(r#"fn start() { store_set("a", 1); }"#, undeclared, vec![]));
+        assert!(out.contains("didn't declare kv"), "{out}");
+        let out = format!("{:?}", run(r#"fn start() { db_exec("SELECT 1"); }"#, vec![]));
         assert!(out.contains("[data]"), "{out}");
     }
 
     #[test]
-    fn script_recebe_provedores_guarda_dados_e_conta_fatos() {
-        let arq = std::env::temp_dir().join(format!("miniutils-dados-{}/.data/a.b.json", std::process::id()));
-        let _ = std::fs::remove_dir_all(arq.parent().unwrap().parent().unwrap());
+    fn script_gets_providers_keeps_data_and_tells_facts() {
+        let file = std::env::temp_dir().join(format!("miniutils-data-{}/.data/a.b.json", std::process::id()));
+        let _ = std::fs::remove_dir_all(file.parent().unwrap().parent().unwrap());
         let s = r#"
-            fn start() { let n = store_get("vezes"); if n == () { n = 0; } store_set("vezes", n + 1); ui("vezes", n + 1); }
+            fn start() { let n = store_get("times"); if n == () { n = 0; } store_set("times", n + 1); ui("times", n + 1); }
             fn on_event(topic, data) {
                 ui("cpu", data.cpu);
-                ui("disco", data.disks[0].mount);
+                ui("disk", data.disks[0].mount);
                 if data.cpu > 90.0 { fact("strain", "CPU", data.cpu); }
                 let j = parse_json(`{"a": [1, 2.5, "x"], "b": null}`);
                 ui("json", to_json(j.a));
@@ -649,97 +663,97 @@ mod tests {
             ..Default::default()
         };
         let ev = ScriptIn::Event("sys".into(), json_to_dyn(event_data(&Event::Sys(sys))));
-        let out = format!("{:?}", rodar_com(s, env(&[], Some(arq.clone())), vec![ev]));
+        let out = format!("{:?}", run_with(s, env(&[], Some(file.clone())), vec![ev]));
         assert!(!out.contains("Error("), "{out}");
-        assert!(out.contains(r#"Set("vezes", Num(1.0))"#), "{out}");
+        assert!(out.contains(r#"Set("times", Num(1.0))"#), "{out}");
         assert!(out.contains(r#"Set("cpu", Num(93.0))"#), "{out}");
-        assert!(out.contains(r#"Set("disco", Str("/"))"#), "{out}");
+        assert!(out.contains(r#"Set("disk", Str("/"))"#), "{out}");
         assert!(out.contains(r#"Fact(Strain, "CPU", Some(93.0))"#), "{out}");
         assert!(out.contains(r#"Set("json", Str("[1,2.5,\"x\"]"))"#), "{out}");
-        // os dados sobrevivem: a segunda vez lê o que a primeira gravou
-        let out = format!("{:?}", rodar_com(s, env(&[], Some(arq.clone())), vec![]));
-        assert!(out.contains(r#"Set("vezes", Num(2.0))"#), "{out}");
-        let _ = std::fs::remove_dir_all(arq.parent().unwrap().parent().unwrap());
-        // tipo de fato que não existe vira erro na tela
-        assert!(format!("{:?}", rodar(r#"fn start() { fact("fofoca", "x"); }"#, vec![])).contains("desconhecido"));
+        // the data survives: the second time reads what the first one wrote
+        let out = format!("{:?}", run_with(s, env(&[], Some(file.clone())), vec![]));
+        assert!(out.contains(r#"Set("times", Num(2.0))"#), "{out}");
+        let _ = std::fs::remove_dir_all(file.parent().unwrap().parent().unwrap());
+        // a fact kind that doesn't exist becomes an error on screen
+        assert!(format!("{:?}", run(r#"fn start() { fact("gossip", "x"); }"#, vec![])).contains("unknown"));
     }
 
     #[test]
-    #[cfg(unix)] // roda o `echo`, que no Windows não é um programa (é comando do cmd)
-    fn run_async_responde_sem_travar_o_script() {
+    #[cfg(unix)] // runs `echo`, which on Windows isn't a program (it's a cmd command)
+    fn run_async_answers_without_blocking_the_script() {
         let (tx, rx) = channel();
         let mut e = env(&["echo"], None);
         e.back = Some(tx.clone());
         let s = r#"
-            fn start() { ui("pediu", run_async(["echo", "oi"], "fim")); ui("negado", run_async(["rm"], "fim")); }
-            fn fim(r) { let o = r.out; o.trim(); ui("eco:" + r.ok, o); }
+            fn start() { ui("asked", run_async(["echo", "hi"], "done")); ui("denied", run_async(["rm"], "done")); }
+            fn done(r) { let o = r.out; o.trim(); ui("echo:" + r.ok, o); }
         "#;
-        let saida = Arc::new(Mutex::new(Vec::new()));
-        let sd = saida.clone();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let sd = output.clone();
         let t = std::thread::spawn(move || script_loop(s.into(), e, rhai::Map::new(), rx, move |b| sd.lock().unwrap().extend(b)));
-        let fim = Instant::now() + Duration::from_secs(10);
-        let tem = |txt: &str| format!("{:?}", saida.lock().unwrap()).contains(txt);
-        while !(tem("eco:true") && tem("eco:false")) && Instant::now() < fim {
+        let until = Instant::now() + Duration::from_secs(10);
+        let has = |txt: &str| format!("{:?}", output.lock().unwrap()).contains(txt);
+        while !(has("echo:true") && has("echo:false")) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(20));
         }
         tx.send(ScriptIn::Stop).unwrap();
         t.join().unwrap();
-        let out = format!("{:?}", saida.lock().unwrap());
-        assert!(out.contains(r#"Set("pediu", Bool(true))"#), "{out}");
-        assert!(out.contains(r#"Set("eco:true", Str("oi"))"#), "{out}");
-        // o programa fora da allowlist roda "assíncrono" também, e falha
-        assert!(out.contains(r#"Set("eco:false", Str(""))"#), "{out}");
+        let out = format!("{:?}", output.lock().unwrap());
+        assert!(out.contains(r#"Set("asked", Bool(true))"#), "{out}");
+        assert!(out.contains(r#"Set("echo:true", Str("hi"))"#), "{out}");
+        // the program outside the allowlist also runs "asynchronously", and fails
+        assert!(out.contains(r#"Set("echo:false", Str(""))"#), "{out}");
     }
 
     #[test]
-    fn http_so_https_e_nos_dominios_do_manifesto() {
-        let net = vec!["api.exemplo.com".to_string()];
+    fn http_only_https_and_manifest_domains() {
+        let net = vec!["api.example.com".to_string()];
         let url = |u: &str| reqwest::Url::parse(u).unwrap();
-        assert!(check_url(&url("https://api.exemplo.com/v1?x=1"), &net).is_ok());
-        assert!(check_url(&url("http://api.exemplo.com/"), &net).unwrap_err().contains("https"));
-        assert!(check_url(&url("https://outro.com/"), &net).unwrap_err().contains("net"));
-        assert!(check_url(&url("https://exemplo.com/"), &net).is_err(), "subdomínio não vale pelo domínio");
-        assert!(check_url(&url("https://u:s@api.exemplo.com/"), &net).is_err());
-        assert!(check_url(&url("https://api.exemplo.com:8443/"), &net).is_err());
-        // recusado antes de qualquer conexão
-        let out = format!("{:?}", rodar(r#"fn start() { let r = http_get("https://evil.com/"); ui("r", r.ok); ui("e", r.err); }"#, vec![]));
-        assert!(out.contains(r#"Set("r", Bool(false))"#) && out.contains("evil.com não está em [permissions] net"), "{out}");
+        assert!(check_url(&url("https://api.example.com/v1?x=1"), &net).is_ok());
+        assert!(check_url(&url("http://api.example.com/"), &net).unwrap_err().contains("https"));
+        assert!(check_url(&url("https://other.com/"), &net).unwrap_err().contains("net"));
+        assert!(check_url(&url("https://example.com/"), &net).is_err(), "the parent domain doesn't count for the subdomain");
+        assert!(check_url(&url("https://u:s@api.example.com/"), &net).is_err());
+        assert!(check_url(&url("https://api.example.com:8443/"), &net).is_err());
+        // refused before any connection
+        let out = format!("{:?}", run(r#"fn start() { let r = http_get("https://evil.com/"); ui("r", r.ok); ui("e", r.err); }"#, vec![]));
+        assert!(out.contains(r#"Set("r", Bool(false))"#) && out.contains("evil.com is not in [permissions] net"), "{out}");
     }
 
     #[test]
-    fn script_guarda_estado_e_fala_com_a_tela() {
+    fn script_keeps_state_and_talks_to_the_screen() {
         let s = r#"
-            fn start() { this.n = 0; ui("titulo", "oi"); }
+            fn start() { this.n = 0; ui("title", "hi"); }
             fn tick() { this.n += 1; ui("n", this.n); if this.n == 2 { mood("happy"); } }
-            fn action(name, arg) { ui("ultimo", name + ":" + arg); }
+            fn action(name, arg) { ui("last", name + ":" + arg); }
         "#;
-        let out = rodar(s, vec![ScriptIn::Tick, ScriptIn::Tick, ScriptIn::Action("clicou".into(), "x".into())]);
+        let out = run(s, vec![ScriptIn::Tick, ScriptIn::Tick, ScriptIn::Action("clicked".into(), "x".into())]);
         let txt = format!("{out:?}");
-        assert!(txt.contains(r#"Set("titulo", Str("oi"))"#), "{txt}");
+        assert!(txt.contains(r#"Set("title", Str("hi"))"#), "{txt}");
         assert!(txt.contains(r#"Set("n", Num(2.0))"#), "{txt}");
         assert!(txt.contains(r#"Mood("happy")"#), "{txt}");
-        assert!(txt.contains(r#"Set("ultimo", Str("clicou:x"))"#), "{txt}");
+        assert!(txt.contains(r#"Set("last", Str("clicked:x"))"#), "{txt}");
     }
 
     #[test]
-    #[cfg(unix)] // roda o `echo`, que no Windows não é um programa (é comando do cmd)
-    fn script_so_roda_o_que_o_manifesto_permite_e_nao_trava() {
+    #[cfg(unix)] // runs `echo`, which on Windows isn't a program (it's a cmd command)
+    fn script_only_runs_what_the_manifest_allows_and_does_not_hang() {
         let s = r#"
             fn start() {
-                let ok = run(["echo", "ola"]);
-                let eco = ok.out;
-                eco.trim();
-                ui("eco", eco);
-                let nao = run(["rm", "-rf", "/tmp/nada"]);
-                ui("negado", nao.ok);
+                let ok = run(["echo", "hello"]);
+                let echo = ok.out;
+                echo.trim();
+                ui("echo", echo);
+                let no = run(["rm", "-rf", "/tmp/nothing"]);
+                ui("denied", no.ok);
                 loop { }
             }
         "#;
-        let out = rodar(s, vec![]);
+        let out = run(s, vec![]);
         let txt = format!("{out:?}");
-        assert!(txt.contains(r#"Set("eco", Str("ola"))"#), "{txt}");
-        assert!(txt.contains(r#"Set("negado", Bool(false))"#), "{txt}");
-        // o laço infinito estoura o limite de operações e vira erro, não trava o teste
+        assert!(txt.contains(r#"Set("echo", Str("hello"))"#), "{txt}");
+        assert!(txt.contains(r#"Set("denied", Bool(false))"#), "{txt}");
+        // the infinite loop blows the operation limit and becomes an error, it doesn't hang the test
         assert!(txt.contains("Error("), "{txt}");
     }
 }

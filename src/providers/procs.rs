@@ -1,11 +1,11 @@
-//! Processos que mais usam CPU e memória (para plugins: `uses = ["procs"]`).
+//! Processes using the most CPU and memory (for plugins: `uses = ["procs"]`).
 //!
-//! Existe para os plugins não dependerem do `ps`, que não há no Windows. O que eles
-//! recebem (`ProcsSnapshot`) é igual nos dois sistemas; a coleta muda: `/proc` no Linux
-//! (`linux.rs`), o crate `sysinfo` no Windows (`windows.rs`).
+//! It exists so plugins don't depend on `ps`, which Windows doesn't have. What they receive
+//! (`ProcsSnapshot`) is the same on both systems; the collection differs: `/proc` on Linux
+//! (`linux.rs`), the `sysinfo` crate on Windows (`windows.rs`).
 //!
-//! CPU e memória são em % da máquina toda (0 a 100), como o `cpu` do provedor `sys`: um
-//! processo que ocupa um núcleo inteiro numa máquina de 8 núcleos aparece com 12,5%.
+//! CPU and memory are in % of the whole machine (0 to 100), like the `cpu` of the `sys`
+//! provider: a process using one full core on an 8-core machine shows up as 12.5%.
 
 #[cfg(target_os = "linux")]
 #[path = "procs/linux.rs"]
@@ -16,35 +16,35 @@ mod imp;
 
 pub use imp::ProcsProvider;
 
-/// Quantos processos vão em cada lista.
+/// How many processes go in each list.
 pub const TOP: usize = 10;
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct ProcsSnapshot {
-    /// Os que mais usam CPU, do maior para o menor (até `TOP`). Na primeira leitura todos
-    /// estão em 0: o uso é medido entre duas leituras.
+    /// The heaviest CPU users, largest first (up to `TOP`). On the first reading they are
+    /// all at 0: usage is measured between two readings.
     pub by_cpu: Vec<Proc>,
-    /// Os que mais usam memória, do maior para o menor (até `TOP`).
+    /// The heaviest memory users, largest first (up to `TOP`).
     pub by_mem: Vec<Proc>,
-    /// Quantos processos havia (com memória própria; sem as threads do kernel).
+    /// How many processes there were (with their own memory; no kernel threads).
     pub count: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct Proc {
     pub pid: u32,
-    /// Nome curto do programa ("firefox", sem caminho nem ".exe").
+    /// Short program name ("firefox", without path or ".exe").
     pub name: String,
-    /// % da CPU da máquina toda desde a leitura anterior.
+    /// % of the whole machine's CPU since the previous reading.
     pub cpu: f32,
-    /// % da memória da máquina.
+    /// % of the machine's memory.
     pub mem: f32,
-    /// Memória residente em bytes.
+    /// Resident memory in bytes.
     pub mem_bytes: u64,
 }
 
-/// Monta o snapshot a partir de todos os processos lidos: as duas listas, ordenadas e
-/// cortadas em `TOP` (empate: o de menor pid primeiro, para a lista não pular à toa).
+/// Builds the snapshot from every process read: both lists, sorted and cut at `TOP` (ties:
+/// lowest pid first, so the list doesn't jump around for nothing).
 pub fn snapshot(all: Vec<Proc>) -> ProcsSnapshot {
     let count = all.len();
     let top = |key: fn(&Proc) -> f32| {
@@ -56,8 +56,8 @@ pub fn snapshot(all: Vec<Proc>) -> ProcsSnapshot {
     ProcsSnapshot { by_cpu: top(|p| p.cpu), by_mem: top(|p| p.mem), count }
 }
 
-/// Nome para mostrar no Windows: sem pasta e sem ".exe" (o nome vem como "chrome.exe").
-/// O Linux não precisa: o `comm` já é curto (e pode ter "/", como em "kworker/0:1").
+/// Display name on Windows: no folder and no ".exe" (the name comes as "chrome.exe").
+/// Linux doesn't need it: `comm` is already short (and may contain "/", as in "kworker/0:1").
 #[cfg(any(windows, test))]
 pub fn short_name(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
@@ -76,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn ordena_e_corta_as_duas_listas() {
+    fn sorts_and_cuts_both_lists() {
         let all: Vec<Proc> = (1..=15).map(|i| p(i, i as f32, (16 - i) as f32)).collect();
         let s = snapshot(all);
         assert_eq!(s.count, 15);
@@ -87,14 +87,14 @@ mod tests {
     }
 
     #[test]
-    fn empate_fica_pelo_pid() {
+    fn ties_are_ordered_by_pid() {
         let s = snapshot(vec![p(9, 0.0, 0.0), p(3, 0.0, 0.0), p(5, 0.0, 0.0)]);
         let pids: Vec<u32> = s.by_cpu.iter().map(|p| p.pid).collect();
         assert_eq!(pids, [3, 5, 9]);
     }
 
     #[test]
-    fn nome_curto() {
+    fn short_names() {
         assert_eq!(short_name("chrome.exe"), "chrome");
         assert_eq!(short_name("C:\\Windows\\explorer.EXE"), "explorer");
         assert_eq!(short_name("/usr/bin/firefox"), "firefox");

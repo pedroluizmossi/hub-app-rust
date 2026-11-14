@@ -1,9 +1,12 @@
-# Top processos (plugin de exemplo do MiniUtils)
+# Top processes (MiniUtils example plugin)
 
-Os processos que mais usam CPU ou memória, iguais no Linux e no Windows. Exemplo de plugin
-**com tela e script próprios**: `view.slint` (a tela) e `main.rhai` (a lógica).
+The processes using the most CPU or memory, the same on Linux and Windows. An example of a
+plugin **with its own view and script**: `view.slint` (the view) and `main.rhai` (the
+logic).
 
-- Permissões: não executa nada. Os processos chegam do provedor `procs` do hub
-  (`uses = ["procs"]`), em `fn on_event`.
-- O robô fica ocupado quando um processo passa de 50% de CPU.
-- Os tipos de app e o que cada um pode: [APPS.md](../../APPS.md).
+- Permissions: runs nothing. The processes come from the hub's `procs` provider
+  (`uses = ["procs"]`), in `fn on_event`.
+- The robot gets busy when a process goes over 50% CPU.
+- Translation: the view's texts are English `@tr("…")`; [`i18n/pt-BR.po`](i18n/pt-BR.po)
+  translates them and the manifest's name and description.
+- App types and what each one can do: [APPS.md](../../APPS.md).

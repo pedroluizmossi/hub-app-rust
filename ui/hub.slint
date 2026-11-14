@@ -1,6 +1,6 @@
-// Janela do hub: moldura e cabeçalho no visual escolhido (ver Skin) e o painel com os
-// mini-apps numa grade, cada um com o próprio tema. O botão de layout liga o modo de
-// edição (arrastar pelo topo, puxar as bordas); a engrenagem abre as configurações.
+// Hub window: frame and header in the chosen skin (see Skin) and the dashboard with the
+// mini-apps on a grid, each with its own theme. The layout button turns on edit mode
+// (drag by the top, pull the edges); the gear opens the settings.
 import { Colors, Anim, Skin, Icons } from "theme.slint";
 import { TextButton, Stepper, HeaderButton } from "widgets.slint";
 import { DockerApp, ContainerRow } from "../miniapps/docker/view.slint";
@@ -31,9 +31,9 @@ import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
 export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
-// janelas além do hub: cada uma tem os próprios globais (o Rust aplica o visual a elas)
+// windows besides the hub: each has its own globals (Rust applies the skin to them)
 export { AgentDetailWindow }
-// structs que o Rust preenche (definidas em models.slint)
+// structs Rust fills in (defined in models.slint)
 export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow }
 
 export component HubWindow inherits Window {
@@ -42,73 +42,74 @@ export component HubWindow inherits Window {
     preferred-height: 640px;
     min-width: 400px;
     min-height: 300px;
-    // popup de bandeja: sem moldura e por cima das outras janelas
+    // tray popup: no frame and above the other windows
     no-frame: true;
     always-on-top: true;
-    // transparente: os cantos cortados mostram o que há atrás
+    // transparent: the cut corners show what is behind
     background: transparent;
     default-font-family: Skin.font-ui;
     default-font-size: 13px * Skin.text-scale;
 
-    in property <[AppInfo]> apps;          // todos os apps (configurações)
-    in property <[GridCell]> cells;        // apps ligados, posicionados na grade
+    in property <[AppInfo]> apps;          // all apps (settings)
+    in property <[GridCell]> cells;        // enabled apps, positioned on the grid
     in property <int> columns: 2;
     in property <int> rows: 1;
-    // limites da grade (`layout::MAX_COLS` / `MAX_ROWS`)
+    // grid limits (`layout::MAX_COLS` / `MAX_ROWS`)
     in property <int> max-columns: 6;
     in property <int> max-rows: 6;
     in property <string> grid-tag;         // "// 2 APPS · 3 × 2"
-    in-out property <string> current: "panel";   // "panel" | "apps" (configurações)
+    in-out property <string> current: "panel";   // "panel" | "apps" (settings)
     in-out property <bool> editing: false;
     in property <Ghost> ghost;
-    // a grade comporta mais ou menos colunas/linhas sem tirar ninguém
+    // the grid can take more or fewer columns/rows without removing anyone
     in property <bool> cols-down-ok;
     in property <bool> cols-up-ok;
     in property <bool> rows-down-ok;
     in property <bool> rows-up-ok;
-    // nome exibido (`name` na config)
+    // displayed name (`name` in the config)
     in property <string> app-name: "MiniUtils";
-    // visual da janela: opções (rótulos) e a escolhida
+    // window skin: options (labels) and the chosen one
     in property <[string]> skins;
     in property <int> skin-index;
-    // ícone da bandeja: mascote e tema (índice 0 = automático)
+    // tray icon: mascot and theme (index 0 = automatic)
     in property <[string]> tray-icons;
-    in property <[image]> tray-icon-images;  // desenhos das opções (a primeira, "Automático", sem)
+    in property <[image]> tray-icon-images;  // drawings of the options (the first, "Automatic", has none)
     in property <int> tray-icon-index;
     in property <[string]> tray-themes;
     in property <int> tray-theme-index;
-    // páginas do painel (barra lateral) e a aberta
+    // dashboard pages (sidebar) and the open one
     in property <[PageInfo]> pages;
     in property <int> page;
     in property <[string]> page-names;
-    in property <[string]> mascots;          // rótulos das mascotes (ícone das páginas)
-    in property <[image]> mascot-images;     // o desenho de cada uma, na mesma ordem
-    // onde ficam as páginas (`nav` da config): "side" (barra à esquerda), "right",
-    // "bottom" ou "top" (abas no cabeçalho); `nav-index` é a mesma escolha na Aparência
+    in property <[string]> mascots;          // mascot labels (page icons)
+    in property <[image]> mascot-images;     // the drawing of each, in the same order
+    // where the pages go (`nav` in the config): "side" (bar on the left), "right",
+    // "bottom" or "top" (tabs in the header); `nav-index` is the same choice in Appearance
     in property <string> nav: "side";
     in property <int> nav-index: 0;
     property <bool> nav-top: nav == "top";
     in property <bool> reduce-motion: false;
     in property <int> chatter-index: 1;
+    in property <int> language-index;
     in property <bool> autostart: false;
     in property <string> version;
     in property <string> log-dir;
-    // dados dos apps (src/hub/data.rs): os de apps removidos e o aviso do último pedido
+    // app data (src/hub/data.rs): that of removed apps and the notice of the last request
     in property <[DataRow]> orphan-data;
     in property <string> data-note-app;
     in property <string> data-note;
     in property <bool> data-note-bad;
     callback export-data(string);
     callback delete-data(string);
-    // apps locais: a pasta, o resumo ("2 apps locais · 1 da loja") e as pastas recusadas
+    // local apps: the folder, the summary ("2 local apps · 1 from the store") and the rejected folders
     in property <string> apps-dir;
     in property <string> apps-summary;
     in property <string> apps-skipped;
-    // fundo desenhado pelo Rust para o tamanho da área do painel, e o que anima por cima
+    // background drawn by Rust for the size of the dashboard area, and what animates over it
     in property <image> backdrop;
     in property <[AmbientItem]> ambient;
     in property <bool> ambient-on: true;
-    // aparência: cor de destaque, tamanho do texto e a pasta de temas/visuais/fundos
+    // appearance: accent color, text size and the themes/skins/backgrounds folder
     in property <[string]> accents;
     in property <int> accent-index;
     in property <[string]> text-sizes;
@@ -116,16 +117,16 @@ export component HubWindow inherits Window {
     in property <string> looks-dir;
     in property <string> looks-summary;
     in property <string> looks-skipped;
-    // relógio e saudação ("boa noite · 21:57"), para os visuais que mostram
+    // clock and greeting ("good evening · 21:57"), for the skins that show them
     in property <string> clock;
     in property <string> greeting;
 
-    // modo fixar (ligado pelo alfinete ou pela bandeja)
+    // pinned mode (turned on by the pin or the tray)
     in-out property <bool> pinned: false;
 
     callback select-tab(string);
     callback toggle-pin();
-    callback grid-size(int /* colunas */, int /* linhas */);
+    callback grid-size(int /* columns */, int /* rows */);
     callback edit-begin(string, string, int, int);
     callback edit-drag(int, int);
     callback edit-end();
@@ -135,11 +136,11 @@ export component HubWindow inherits Window {
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
     callback hide-window();
-    // começou a arrastar uma borda/canto ("n", "se", …)
+    // started dragging an edge/corner ("n", "se", …)
     callback start-resize(string);
-    // vindo do ícone da bandeja: mostra/esconde a janela junto do ponto clicado (x, y)
+    // from the tray icon: shows/hides the window next to the clicked point (x, y)
     callback toggle-requested(int, int);
-    // outra instância pediu para abrir: aba ("apps", "panel" ou vazio = manter a atual)
+    // another instance asked to open: tab ("apps", "panel" or empty = keep the current one)
     callback show-requested(string);
     callback quit();
     callback skin-chosen(int);
@@ -148,6 +149,7 @@ export component HubWindow inherits Window {
     callback nav-chosen(int);
     callback reduce-motion-toggled();
     callback chatter-chosen(int);
+    callback language-chosen(int);
     callback autostart-toggled();
     callback open-logs();
     callback open-apps-dir();
@@ -164,10 +166,10 @@ export component HubWindow inherits Window {
     callback page-icon-chosen(int, int);
     callback page-moved(int, int);
     callback app-page-chosen(string, int);
-    // a área do painel mudou de tamanho (pixels lógicos): o Rust redesenha o fundo
+    // the dashboard area changed size (logical pixels): Rust redraws the background
     callback backdrop-resized(float, float);
 
-    // Esc: nas configurações volta ao painel; na edição, conclui; no painel fecha o popup
+    // Esc: in settings goes back to the dashboard; in edit mode, finishes; on the dashboard closes the popup
     FocusScope {
         key-pressed(e) => {
             if e.text == Key.Escape {
@@ -191,7 +193,7 @@ export component HubWindow inherits Window {
         VerticalLayout {
             padding: Skin.border;
 
-            // cabeçalho do painel
+            // dashboard header
             if current == "panel" && !editing: Bar {
                 HorizontalLayout {
                     padding-left: 16px;
@@ -222,8 +224,8 @@ export component HubWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             HeaderButton {
-                                text: "Manter aberto";
-                                short: pinned ? "fixado" : "fixar";
+                                text: @tr("Keep open");
+                                short: pinned ? @tr("pinned") : @tr("pin");
                                 icon: Icons.pin;
                                 px-icon: Icons.px-pin;
                                 active: pinned;
@@ -233,8 +235,8 @@ export component HubWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             HeaderButton {
-                                text: "Mudar layout";
-                                short: "layout";
+                                text: @tr("Change layout");
+                                short: @tr("layout");
                                 icon: Icons.grid;
                                 px-icon: Icons.px-grid;
                                 clicked => { root.editing = true; }
@@ -243,8 +245,8 @@ export component HubWindow inherits Window {
                         if nav-top: VerticalLayout {
                             alignment: center;
                             HeaderButton {
-                                text: "Configurações";
-                                short: "config";
+                                text: @tr("Settings");
+                                short: @tr("config");
                                 icon: Icons.gear;
                                 px-icon: Icons.px-gear;
                                 clicked => { root.select-tab("apps"); }
@@ -254,7 +256,7 @@ export component HubWindow inherits Window {
                 }
             }
 
-            // cabeçalho do modo de edição
+            // edit mode header
             if current == "panel" && editing: Bar {
                 background: Skin.edit-bg;
                 line: Skin.accent;
@@ -264,7 +266,7 @@ export component HubWindow inherits Window {
                     padding-right: 12px;
                     spacing: 14px;
                     Text {
-                        text: "MODO DE EDIÇÃO";
+                        text: @tr("EDIT MODE");
                         color: Skin.accent;
                         font-family: Skin.font-title;
                         font-size: 16px * Skin.text-scale;
@@ -273,7 +275,7 @@ export component HubWindow inherits Window {
                         vertical-alignment: center;
                     }
                     Text {
-                        text: "arraste pelo topo · puxe as bordas";
+                        text: @tr("drag by the top · pull the edges");
                         color: Skin.edit-sub;
                         font-family: Skin.font-mono;
                         font-size: 11px * Skin.text-scale;
@@ -284,7 +286,7 @@ export component HubWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: center;
-                        Text { text: "Colunas"; color: Skin.edit-ink; font-size: 13px * Skin.text-scale; vertical-alignment: center; }
+                        Text { text: @tr("Columns"); color: Skin.edit-ink; font-size: 13px * Skin.text-scale; vertical-alignment: center; }
                         VerticalLayout {
                             alignment: center;
                             Stepper {
@@ -305,7 +307,7 @@ export component HubWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: center;
-                        Text { text: "Linhas"; color: Skin.edit-ink; font-size: 13px * Skin.text-scale; vertical-alignment: center; }
+                        Text { text: @tr("Rows"); color: Skin.edit-ink; font-size: 13px * Skin.text-scale; vertical-alignment: center; }
                         VerticalLayout {
                             alignment: center;
                             Stepper {
@@ -327,7 +329,7 @@ export component HubWindow inherits Window {
                         alignment: center;
                         TextButton {
                             height: 34px;
-                            text: "Configurações";
+                            text: @tr("Settings");
                             icon: Icons.gear;
                             ink: Skin.edit-ink;
                             edge: Skin.edit-line;
@@ -340,7 +342,7 @@ export component HubWindow inherits Window {
                         alignment: center;
                         TextButton {
                             height: 34px;
-                            text: "Concluir";
+                            text: @tr("Done");
                             ink: Skin.accent-ink;
                             fill: Skin.accent;
                             font-weight: 700;
@@ -354,14 +356,14 @@ export component HubWindow inherits Window {
                 }
             }
 
-            // cabeçalho das configurações
+            // settings header
             if current == "apps": Bar {
                 HorizontalLayout {
                     padding-left: 16px;
                     padding-right: 12px;
                     spacing: 8px;
                     Text {
-                        text: "Configurações";
+                        text: @tr("Settings");
                         color: Skin.panel-ink;
                         font-family: Skin.font-title;
                         font-size: 20px * Skin.text-scale;
@@ -373,8 +375,8 @@ export component HubWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         HeaderButton {
-                            text: "Loja de plugins";
-                            short: "loja";
+                            text: @tr("Plugin store");
+                            short: @tr("store");
                             icon: Icons.plus;
                             show-text: true;
                             clicked => { root.select-tab("store"); }
@@ -383,8 +385,8 @@ export component HubWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         HeaderButton {
-                            text: "Encerrar " + app-name;
-                            short: "sair";
+                            text: @tr("Quit {}", app-name);
+                            short: @tr("quit");
                             px-icon: Icons.px-close;
                             show-text: true;
                             danger: true;
@@ -394,8 +396,8 @@ export component HubWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         HeaderButton {
-                            text: "Fechar";
-                            short: "fechar";
+                            text: @tr("Close");
+                            short: @tr("close");
                             icon: Icons.close;
                             show-text: true;
                             clicked => { root.select-tab("panel"); }
@@ -404,14 +406,14 @@ export component HubWindow inherits Window {
                 }
             }
 
-            // cabeçalho da loja
+            // store header
             if current == "store": Bar {
                 HorizontalLayout {
                     padding-left: 16px;
                     padding-right: 12px;
                     spacing: 8px;
                     Text {
-                        text: "Loja de plugins";
+                        text: @tr("Plugin store");
                         color: Skin.panel-ink;
                         font-family: Skin.font-title;
                         font-size: 20px * Skin.text-scale;
@@ -423,8 +425,8 @@ export component HubWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         HeaderButton {
-                            text: "Voltar";
-                            short: "voltar";
+                            text: @tr("Back");
+                            short: @tr("back");
                             icon: Icons.close;
                             show-text: true;
                             clicked => { root.select-tab("apps"); }
@@ -433,7 +435,7 @@ export component HubWindow inherits Window {
                 }
             }
 
-            // barra de páginas (à esquerda ou à direita) e, ao lado, o painel ou as configurações
+            // page bar (left or right) and, next to it, the dashboard or the settings
             HorizontalLayout {
             vertical-stretch: 1;
             if nav == "side": Rail {
@@ -446,7 +448,7 @@ export component HubWindow inherits Window {
                 open-settings => { root.select-tab(current == "panel" ? "apps" : "panel"); }
             }
 
-            // painel, sobre o fundo do visual
+            // dashboard, over the skin's background
             if current == "panel": area := Rectangle {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
@@ -498,6 +500,8 @@ export component HubWindow inherits Window {
                 reduce-motion-toggled => { root.reduce-motion-toggled(); }
                 chatter-index: chatter-index;
                 chatter-chosen(i) => { root.chatter-chosen(i); }
+                language-index: language-index;
+                language-chosen(i) => { root.language-chosen(i); }
                 autostart: autostart;
                 autostart-toggled => { root.autostart-toggled(); }
                 version: version;
@@ -564,7 +568,7 @@ export component HubWindow inherits Window {
             }
             }
 
-            // barra de páginas embaixo (acima do rodapé do visual, se houver)
+            // page bar at the bottom (above the skin's footer, if any)
             if nav == "bottom": PageBar {
                 pages: pages;
                 current: page;
@@ -574,7 +578,7 @@ export component HubWindow inherits Window {
                 open-settings => { root.select-tab(current == "panel" ? "apps" : "panel"); }
             }
 
-            // rodapé: barra de status (Terminal) ou faixa de madeira (Aconchego)
+            // footer: status bar (Terminal) or wood strip (Cozy)
             if Skin.footer-h > 0: Rectangle {
                 height: Skin.footer-h;
                 background: Skin.panel;
@@ -583,8 +587,8 @@ export component HubWindow inherits Window {
                     padding-left: 14px;
                     padding-right: 14px;
                     Text {
-                        text: "-- " + (current == "apps" ? "CONFIG" : editing ? "EDITAR" : "NORMAL") + " -- · "
-                            + cells.length + (cells.length == 1 ? " app" : " apps") + " · grade " + columns + "×" + rows;
+                        text: "-- " + (current == "apps" ? @tr("CONFIG") : editing ? @tr("EDIT") : @tr("NORMAL")) + " -- · "
+                            + (cells.length == 1 ? @tr("1 app") : @tr("{} apps", cells.length)) + " · " + @tr("grid {}×{}", columns, rows);
                         color: Skin.sub;
                         font-family: Skin.font-mono;
                         font-size: 12px * Skin.text-scale;

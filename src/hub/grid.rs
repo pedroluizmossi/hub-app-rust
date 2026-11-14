@@ -1,4 +1,4 @@
-//! Grade do painel e o modo de edição (mover e redimensionar os apps).
+//! Panel grid and the edit mode (moving and resizing the apps).
 
 use slint::{ModelRc, VecModel};
 
@@ -8,20 +8,20 @@ use crate::core::miniapp::AppRef;
 use crate::mascot::render;
 use crate::ui::{Ghost, GridCell};
 
-/// Um app sendo movido ou redimensionado no modo de edição.
+/// An app being moved or resized in edit mode.
 pub(super) struct Drag {
     id: String,
-    /// "move", "r" (largura), "b" (altura) ou "rb" (as duas).
+    /// "move", "r" (width), "b" (height) or "rb" (both).
     mode: String,
-    /// Célula agarrada dentro do app (ao mover).
+    /// Cell grabbed inside the app (when moving).
     off: (i32, i32),
-    /// Onde ele iria parar e se os outros acham lugar.
+    /// Where it would land and whether the others find room.
     target: Rect,
     ok: bool,
 }
 
 impl Hub {
-    /// Posiciona os apps ligados na grade (cada um onde a config diz).
+    /// Places the enabled apps on the grid (each where the config says).
     pub(super) fn rebuild_grid(&self) {
         {
             let mut cfg = self.host.config.borrow_mut();
@@ -65,7 +65,7 @@ impl Hub {
         self.ui.set_cells(ModelRc::new(VecModel::from(cells)));
     }
 
-    /// Grava um novo arranjo da grade (já validado por `layout::settle`).
+    /// Saves a new grid arrangement (already validated by `layout::settle`).
     pub(super) fn apply_layout(&self, cols: u32, rows: u32, rects: Vec<Rect>) {
         let page = self.current_page();
         {
@@ -81,7 +81,7 @@ impl Hub {
         self.rebuild_grid();
     }
 
-    /// Mostra (ou esconde) a prévia do arrasto.
+    /// Shows (or hides) the drag preview.
     pub(super) fn set_ghost(&self, drag: Option<&Drag>) {
         self.ui.set_ghost(match drag {
             Some(d) => Ghost {
@@ -97,7 +97,7 @@ impl Hub {
         });
     }
 
-    /// Grade e app (índice e retângulo) para os cálculos do modo de edição.
+    /// Grid and app (index and rectangle) for the edit mode calculations.
     pub(super) fn grid_of(&self, id: &str) -> Option<(u32, u32, Vec<Rect>, usize)> {
         let page = self.current_page();
         let cfg = self.host.config.borrow();
@@ -150,7 +150,7 @@ impl Hub {
         }
     }
 
-    /// Setas: move uma célula; com Shift, muda o tamanho.
+    /// Arrows: move one cell; with Shift, change the size.
     pub(super) fn edit_key(&self, id: &str, dx: i32, dy: i32, resize: bool) {
         let Some((cols, rows, rects, i)) = self.grid_of(id) else { return };
         let r = rects[i];
@@ -168,7 +168,7 @@ impl Hub {
         }
     }
 
-    /// Colunas e linhas da grade; recusa se algum app ficaria sem lugar.
+    /// Columns and rows of the grid; refused if some app would be left without room.
     pub(super) fn grid_size(&self, cols: i32, rows: i32) {
         if !(1..=layout::MAX_COLS as i32).contains(&cols) || !(1..=layout::MAX_ROWS as i32).contains(&rows) {
             return;

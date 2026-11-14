@@ -1,0 +1,359 @@
+# Hub window (ui/*.slint)
+
+# ui/plugin.slint
+msgid "Refresh"
+msgstr "Atualizar"
+
+# ui/dashboard.slint
+msgid "No apps enabled. Open Settings from the gear."
+msgstr "Nenhum app ligado. Na engrenagem, abra as Configurações."
+
+msgid "Move {}. Arrows move, Shift plus arrows resize"
+msgstr "Mover {}. Setas movem, Shift mais setas redimensiona"
+
+msgid "no room"
+msgstr "sem espaço"
+
+# ui/hub.slint
+msgid "Keep open"
+msgstr "Manter aberto"
+
+msgid "pinned"
+msgstr "fixado"
+
+msgid "pin"
+msgstr "fixar"
+
+msgid "Change layout"
+msgstr "Mudar layout"
+
+msgid "layout"
+msgstr "layout"
+
+msgid "Settings"
+msgstr "Configurações"
+
+msgid "config"
+msgstr "config"
+
+msgid "EDIT MODE"
+msgstr "MODO DE EDIÇÃO"
+
+msgid "drag by the top · pull the edges"
+msgstr "arraste pelo topo · puxe as bordas"
+
+msgid "Columns"
+msgstr "Colunas"
+
+msgid "Rows"
+msgstr "Linhas"
+
+msgid "Done"
+msgstr "Concluir"
+
+msgid "Plugin store"
+msgstr "Loja de plugins"
+
+msgid "store"
+msgstr "loja"
+
+msgid "Quit {}"
+msgstr "Encerrar {}"
+
+msgid "quit"
+msgstr "sair"
+
+msgid "Close"
+msgstr "Fechar"
+
+msgid "close"
+msgstr "fechar"
+
+msgid "Back"
+msgstr "Voltar"
+
+msgid "back"
+msgstr "voltar"
+
+msgid "CONFIG"
+msgstr "CONFIG"
+
+msgid "EDIT"
+msgstr "EDITAR"
+
+msgid "NORMAL"
+msgstr "NORMAL"
+
+msgid "1 app"
+msgstr "1 app"
+
+msgid "{} apps"
+msgstr "{} apps"
+
+msgid "grid {}×{}"
+msgstr "grade {}×{}"
+
+# ui/nav.slint
+msgid "New page"
+msgstr "Nova página"
+
+# ui/store.slint
+msgid "working…"
+msgstr "trabalhando…"
+
+msgid "Remove and delete the data"
+msgstr "Remover e apagar os dados"
+
+msgid "Remove"
+msgstr "Remover"
+
+msgid "Remove and keep the data"
+msgstr "Remover e manter os dados"
+
+msgid "Confirm removal"
+msgstr "Confirmar remoção"
+
+msgid "Confirm update"
+msgstr "Confirmar atualização"
+
+msgid "Update"
+msgstr "Atualizar"
+
+msgid "Confirm install"
+msgstr "Confirmar instalação"
+
+msgid "Install"
+msgstr "Instalar"
+
+msgid "Store index"
+msgstr "Índice da loja"
+
+msgid "A registry.json (https:// address or path) and the public key of whoever signs it. Clear both fields and save to go back to the official MiniUtils store."
+msgstr "Um registry.json (endereço https:// ou caminho) e a chave pública de quem o assina. Apague os dois campos e salve para voltar à loja oficial do MiniUtils."
+
+msgid "Index"
+msgstr "Índice"
+
+msgid "Public key"
+msgstr "Chave pública"
+
+msgid "public key (64 hex characters)"
+msgstr "chave pública (64 caracteres hex)"
+
+msgid "loading…"
+msgstr "carregando…"
+
+msgid "Save and load"
+msgstr "Salvar e carregar"
+
+msgid "No plugins to show."
+msgstr "Nenhum plugin para mostrar."
+
+# ui/widgets.slint
+msgid "Increase"
+msgstr "Aumentar"
+
+msgid "Decrease"
+msgstr "Diminuir"
+
+msgid "search…"
+msgstr "buscar…"
+
+# ui/settings.slint
+msgid "Dashboard"
+msgstr "Painel"
+
+msgid "The grid is arranged right on the dashboard: in Change layout, drag the apps by the top and pull the edges to resize them."
+msgstr "A grade se arruma direto no painel: em Mudar layout, arraste os apps pelo topo e puxe as bordas para mudar o tamanho."
+
+msgid "Appearance"
+msgstr "Aparência"
+
+msgid "Window skin"
+msgstr "Visual da janela"
+
+msgid "Background, frame, fonts and colors. Apps with the “Follows the window” theme change along."
+msgstr "Fundo, moldura, fontes e cores. Apps com o tema “Acompanha a janela” mudam junto."
+
+msgid "Accent color"
+msgstr "Cor de destaque"
+
+msgid "Buttons, focus and the dashboard background. Adjusted to the skin to stay readable."
+msgstr "Botões, foco e o fundo do painel. Ajustada ao visual para continuar legível."
+
+msgid "Text size"
+msgstr "Tamanho do texto"
+
+msgid "Text of the window and the built-in apps (plugins follow if they use theme.text-scale)."
+msgstr "Letras da janela e dos apps embutidos (plugins seguem se usarem theme.text-scale)."
+
+msgid "Animated background"
+msgstr "Fundo animado"
+
+msgid "Rain, stars and a scan line behind the dashboard. Also off with Reduce motion."
+msgstr "Chuva, estrelas e varredura no fundo do painel. Desligado também com Reduzir movimento."
+
+msgid "Pages"
+msgstr "Páginas"
+
+msgid "Where the pages show up: in a bar on the left, on the right or at the bottom, or as tabs in the header."
+msgstr "Onde as páginas aparecem: numa barra à esquerda, à direita ou embaixo, ou como abas no cabeçalho."
+
+msgid "Bar on the left"
+msgstr "Barra à esquerda"
+
+msgid "Bar on the right"
+msgstr "Barra à direita"
+
+msgid "Bar at the bottom"
+msgstr "Barra embaixo"
+
+msgid "Tabs on top"
+msgstr "Abas em cima"
+
+msgid "Reduce motion"
+msgstr "Reduzir movimento"
+
+msgid "Mascots without bounces or shakes, and without celebrations or surprises."
+msgstr "Mascotes sem pulos nem tremores, e sem comemorações nem surpresas."
+
+msgid "Mascot chatter"
+msgstr "Mascotes conversam"
+
+msgid "The mascots comment on what happens in the apps and, when all is calm, make small talk. Click a mascot to make it speak."
+msgstr "As mascotes comentam o que acontece nos apps e, com tudo calmo, puxam papo. Clique numa mascote para ela falar."
+
+msgid "Never"
+msgstr "Nunca"
+
+msgid "Sometimes"
+msgstr "Às vezes"
+
+msgid "A lot"
+msgstr "Bastante"
+
+msgid "Tray icon"
+msgstr "Ícone da bandeja"
+
+msgid "Mascot shown in the tray. On automatic, it is the one of the app in the worst state."
+msgstr "Mascote mostrada na bandeja. No automático, é a do app em pior estado."
+
+msgid "Icon colors"
+msgstr "Cores do ícone"
+
+msgid "Theme of the mascot in the tray. On automatic, it follows the theme of the app shown."
+msgstr "Tema da mascote na bandeja. No automático, segue o tema do app mostrado."
+
+msgid "Your themes, skins and backgrounds"
+msgstr "Temas, visuais e fundos seus"
+
+msgid ".toml files in themes/, skins/ and backdrops/ in this folder (examples in examples/appearance). After changing them, click Reload."
+msgstr "Arquivos .toml em themes/, skins/ e backdrops/ desta pasta (exemplos em examples/appearance). Depois de mudar, clique em Recarregar."
+
+msgid "Open folder"
+msgstr "Abrir pasta"
+
+msgid "Reload"
+msgstr "Recarregar"
+
+msgid "System"
+msgstr "Sistema"
+
+msgid "Start with the system"
+msgstr "Iniciar com o sistema"
+
+msgid "Opens only in the tray when you log in."
+msgstr "Abre só na bandeja ao entrar na sessão."
+
+msgid "Version {}"
+msgstr "Versão {}"
+
+msgid "No folder for the logs."
+msgstr "Sem pasta para os registros."
+
+msgid "Logs (warnings and errors): {}"
+msgstr "Registros (avisos e erros): {}"
+
+msgid "Open logs"
+msgstr "Abrir registros"
+
+msgid "Local apps"
+msgstr "Apps locais"
+
+msgid "One app per folder, named after the id in manifest.toml. After adding or changing an app, click Reload."
+msgstr "Um app por pasta, com o nome do id do manifest.toml. Depois de pôr ou mudar um app, clique em Recarregar."
+
+msgid "Data of removed apps"
+msgstr "Dados de apps removidos"
+
+msgid "Kept when the app was removed. Reinstalling the same app brings them back."
+msgstr "Ficaram guardados ao remover. Reinstalar o mesmo app os traz de volta."
+
+msgid "Export"
+msgstr "Exportar"
+
+msgid "Confirm"
+msgstr "Confirmar"
+
+msgid "Delete"
+msgstr "Apagar"
+
+msgid "Confirm: delete the data of {}"
+msgstr "Confirmar: apagar os dados de {}"
+
+msgid "Delete the data of {}"
+msgstr "Apagar os dados de {}"
+
+msgid "Each page has its own grid and shows in the page bar. To move an app to another page, open its options below."
+msgstr "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo."
+
+msgid "Name of page {}"
+msgstr "Nome da página {}"
+
+msgid "Icon of page {}"
+msgstr "Ícone da página {}"
+
+msgid "Move {} up"
+msgstr "Subir {}"
+
+msgid "Move {} down"
+msgstr "Descer {}"
+
+msgid "Delete {} (its apps go to the previous page)"
+msgstr "Apagar {} (os apps vão para a página anterior)"
+
+msgid "Close options of {}"
+msgstr "Fechar opções de {}"
+
+msgid "Open options of {}"
+msgstr "Abrir opções de {}"
+
+msgid "1 option · click to open"
+msgstr "1 opção · clique para abrir"
+
+msgid "{} options · click to open"
+msgstr "{} opções · clique para abrir"
+
+msgid "Enable {}"
+msgstr "Ativar {}"
+
+msgid "Page"
+msgstr "Página"
+
+msgid "Page of {}"
+msgstr "Página de {}"
+
+msgid "Data"
+msgstr "Dados"
+
+msgid "Click again to delete: the app starts over from scratch."
+msgstr "Clique de novo para apagar: o app volta a começar do zero."
+
+msgid "Export the data of {}"
+msgstr "Exportar os dados de {}"
+
+msgid "Delete data"
+msgstr "Apagar dados"
+
+msgid "Mascots and themes from CyberDock · Interface built with Slint (slint.dev)"
+msgstr "Mascotes e temas do CyberDock · Interface feita com Slint (slint.dev)"

@@ -1,8 +1,9 @@
-# Tempo ligado (plugin de exemplo do MiniUtils)
+# Uptime (MiniUtils example plugin)
 
-Mostra há quanto tempo o computador está ligado, lendo `uptime -p` a cada 30 segundos.
+Shows how long the computer has been on, reading `uptime -p` every 30 seconds.
 
-- Permissões: executa só o programa `uptime`.
-- Instalar: `miniutils --instalar io.github.exemplo.uptime <índice>`
-- Remover: `miniutils --remover io.github.exemplo.uptime`
-- Os tipos de app e o que cada um pode: [APPS.md](../../APPS.md).
+- Permissions: runs only the `uptime` program.
+- Install: `miniutils --install io.github.exemplo.uptime <index>`
+- Remove: `miniutils --remove io.github.exemplo.uptime`
+- Translation: [`i18n/pt-BR.po`](i18n/pt-BR.po) translates the manifest's texts.
+- App types and what each one can do: [APPS.md](../../APPS.md).

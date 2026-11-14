@@ -1,4 +1,4 @@
-//! Mascotes das fontes de IA, na mesma grade e formato dos Sinais vitais.
+//! Mascots of the AI sources, on the same grid and format as Vitals.
 use crate::mascot::sprites::{Pixel, Sprite};
 
 pub static MASCOTS: &[Sprite] = &[
@@ -111,8 +111,8 @@ pub fn get(name: &str) -> Option<&'static Sprite> {
     MASCOTS.iter().find(|sprite| sprite.key == key)
 }
 
-/// Cores do botão de terminal de uma mascote: o corpo (a cor da paleta que mais aparece
-/// no desenho) e o contorno (a cor `k`).
+/// Colors of a mascot's terminal button: the body (the palette color used most in the
+/// drawing) and the outline (color `k`).
 pub fn button_colors(sprite: &Sprite) -> Option<(u32, u32)> {
     let px = sprite.pixel.as_ref()?;
     let count = |c: u8| sprite.grid.iter().map(|row| row.bytes().filter(|&b| b == c).count()).sum::<usize>();
@@ -126,7 +126,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn botao_tem_a_cor_do_corpo() {
+    fn button_has_the_body_color() {
         let claude = get("Claude").and_then(button_colors).unwrap();
         assert_eq!(claude, (0xd97757, 0x422a2a));
         assert!(MASCOTS.iter().all(|s| button_colors(s).is_some()));
@@ -134,7 +134,7 @@ mod tests {
     use crate::mascot::{anim::Look, render, themes, Mood};
 
     #[test]
-    fn todas_tem_olhos_animaveis_e_grade_valida() {
+    fn all_have_animated_eyes_and_a_valid_grid() {
         let theme = themes::get("neon");
         for sprite in MASCOTS {
             assert!(sprite.grid.iter().all(|row| row.len() == 16));
@@ -143,8 +143,8 @@ mod tests {
             let awake = render::render_look(sprite, theme, &look);
             let blink = render::render_look(sprite, theme, &Look { blink: true, ..look });
             let alarm = render::render_look(sprite, theme, &Look { mood: Mood::Alarm, ..look });
-            assert_ne!(awake, blink, "{} não pisca", sprite.key);
-            assert_ne!(awake, alarm, "{} não reage ao alerta", sprite.key);
+            assert_ne!(awake, blink, "{} doesn't blink", sprite.key);
+            assert_ne!(awake, alarm, "{} doesn't react to the alarm", sprite.key);
         }
     }
 }

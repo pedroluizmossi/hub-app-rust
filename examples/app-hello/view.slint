@@ -1,5 +1,6 @@
-// Tela do app externo de exemplo. O host preenche theme, mascot e mood; o resto vem do
-// executável, com {"type":"set","prop":"…","value":…}.
+// View of the example external app. The host fills theme, mascot and mood; the rest comes
+// from the executable, with {"type":"set","prop":"…","value":…}. Texts use @tr("…"): the hub
+// translates them from i18n/<language>.po when it loads the view.
 import { Theme } from "miniutils.slint";
 
 component Button inherits Rectangle {
@@ -19,7 +20,7 @@ export component Main inherits Rectangle {
     in property <Theme> theme;
     in property <image> mascot;
     in property <string> mood;
-    in property <string> status: "iniciando…";
+    in property <string> status: @tr("starting…");
     in property <string> home: "";
     in property <string> cpu: "–";
     in property <int> count;
@@ -40,7 +41,7 @@ export component Main inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 1;
-                Text { text: "Olá, app externo"; color: theme.text; font-family: theme.font-title; font-size: 17px; font-weight: 700; }
+                Text { text: @tr("Hello, external app"); color: theme.text; font-family: theme.font-title; font-size: 17px; font-weight: 700; }
                 Text { text: status; color: theme.sub; font-size: 12px; overflow: elide; }
             }
             Text { text: clock; color: theme.sub; font-family: theme.font-mono; font-size: 12px; vertical-alignment: center; }
@@ -52,16 +53,16 @@ export component Main inherits Rectangle {
         }
         if home != "": HorizontalLayout {
             spacing: 10px;
-            Text { text: "Pasta"; color: theme.sub; font-size: 13px; width: 64px; }
+            Text { text: @tr("Folder"); color: theme.sub; font-size: 13px; width: 64px; }
             Text { text: home; color: theme.text; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
         }
         HorizontalLayout {
             spacing: 10px;
             alignment: start;
-            Text { text: "Cliques"; color: theme.sub; font-size: 13px; width: 64px; vertical-alignment: center; }
+            Text { text: @tr("Clicks"); color: theme.sub; font-size: 13px; width: 64px; vertical-alignment: center; }
             Text { text: count; color: theme.text; font-family: theme.font-mono; font-size: 13px; width: 40px; vertical-alignment: center; }
-            Button { theme: theme; label: "Contar"; clicked => { root.action("count", ""); } }
-            Button { theme: theme; label: "Zerar"; clicked => { root.action("reset", ""); } }
+            Button { theme: theme; label: @tr("Count"); clicked => { root.action("count", ""); } }
+            Button { theme: theme; label: @tr("Reset"); clicked => { root.action("reset", ""); } }
         }
         Rectangle { vertical-stretch: 1; }
     }

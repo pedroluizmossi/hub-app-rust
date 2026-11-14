@@ -1,16 +1,19 @@
-# Olá, app externo (exemplo do MiniUtils)
+# Hello, external app (MiniUtils example)
 
-Exemplo de **app externo**: a lógica é um executável próprio (`src/main.rs`, em Rust), que o
-hub inicia ao ligar o app e com quem conversa por JSON, uma mensagem por linha, na entrada e
-na saída padrão. A tela é o `view.slint`, como num plugin com tela.
+An example of an **external app**: the logic is an executable of its own (`src/main.rs`, in
+Rust), which the hub starts when the app is turned on and talks to in JSON, one message per
+line, on standard input and output. The view is `view.slint`, as in a plugin with a view.
 
-- **Acesso total:** roda com as permissões do seu usuário. Este exemplo lê a pasta pessoal e
-  grava o contador em `estado.json`, na pasta de dados que o hub dá (`MINIUTILS_APP_DATA`).
-- Lê o provedor `sys` (CPU) e fica ocupado acima de 80%.
-- Formato do manifesto: topo de `src/core/plugins.rs`. Protocolo: topo de
-  `src/apps/external.rs`.
+- **Full access:** it runs with your user's permissions. This example reads the home folder
+  and writes the counter to `state.json`, in the data folder the hub gives it
+  (`MINIUTILS_APP_DATA`).
+- It reads the `sys` provider (CPU) and gets busy above 80%.
+- **Translation:** texts are written in English. [`i18n/pt-BR.po`](i18n/pt-BR.po) translates
+  the manifest and the view's `@tr("…")` (the hub does that), and the messages the app sends
+  itself: `start` brings `lang`, and the app reads the same file (it runs in its own folder).
+- Manifest format: top of `src/core/plugins.rs`. Protocol: top of `src/apps/external.rs`.
 
-## Desenvolver
+## Develop
 
 ```sh
 cargo build -p app-hello
@@ -19,14 +22,14 @@ ln -sf ../../../target/debug/app-hello examples/app-hello/bin/app-hello
 cargo run -- --plugin-dev examples/app-hello
 ```
 
-No modo dev, o link em `bin/` vale, e cada `cargo build -p app-hello` reinicia o app no
-hub. O que o app escreve com `eprintln!` aparece no terminal do hub. No Windows, copie
-`target\debug\app-hello.exe` para `bin\app-hello.exe` (criar link pede privilégio).
+In dev mode the link in `bin/` works, and each `cargo build -p app-hello` restarts the app in
+the hub. What the app writes with `eprintln!` shows up in the hub's terminal. On Windows,
+copy `target\debug\app-hello.exe` to `bin\app-hello.exe` (creating a link needs privileges).
 
-## Publicar na loja
+## Publish in the store
 
-O executável não vai no repositório: o índice da loja aponta, por sistema, o endereço do
-binário e o SHA-256 dele, e anuncia `"full_access": true`:
+The executable does not go in the repository: the store index gives, per OS, the address of
+the binary and its SHA-256, and announces `"full_access": true`:
 
 ```json
 {
@@ -40,7 +43,7 @@ binário e o SHA-256 dele, e anuncia `"full_access": true`:
 }
 ```
 
-A instalação baixa o binário deste sistema, confere o hash e mostra o aviso de acesso total
-antes de instalar.
+Installation downloads the binary for this OS, checks the hash and shows the full-access
+warning before installing.
 
-Os tipos de app e quando usar cada um: [APPS.md](../../APPS.md).
+App types and when to use each one: [APPS.md](../../APPS.md).

@@ -1,0 +1,16 @@
+# MiniUtils example app theme. The key is the file name ("ocean").
+# Copy it to <data>/miniutils/themes/ (miniutils --dirs shows where) and click
+# Settings › Appearance › Reload. Format: DESIGN.md › "Temas, visuais e fundos por arquivo".
+label = "Ocean (blue / coral)"
+base = "ghost"        # whatever is not here comes from this theme
+
+# mascot
+fur = "#ff7f50"       # fur, and the app's accent (chips, buttons)
+visor = "#7fdbff"     # visor, and the secondary accent
+outline = "#03141f"
+# app card
+bg0 = "#08243a"
+bg1 = "#03121f"
+text = "#e6f7ff"
+sub = "#9cc3d9"
+muted = "#3d6680"

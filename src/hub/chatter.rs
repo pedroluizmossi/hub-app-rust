@@ -1,19 +1,19 @@
-//! Diretor da conversa entre mascotes.
+//! Director of the conversation between mascots.
 //!
-//! Recebe os fatos dos apps (`MiniApp::take_facts`), monta uma conversa curta (quem conta e
-//! quem responde) com as falas dos `lines.toml` e toca uma fala de cada vez, na caixa de
-//! diálogo do app de quem fala. O diretor não conhece nenhum app: o que cada um diz vem do
-//! `lines.toml` dele, e o que faltar vem das falas genéricas (`lines.toml` ao lado deste
-//! arquivo). Formato das falas: `src/core/chatter.rs`.
+//! Takes the facts from the apps (`MiniApp::take_facts`), builds a short conversation (who
+//! tells and who answers) from the lines in the `lines.toml` files and plays one line at a
+//! time, in the dialog box of the speaker's app. The director knows no app: what each one
+//! says comes from its own `lines.toml`, and whatever is missing comes from the generic
+//! lines (`lines.toml` next to this file). Format of the lines: `src/core/chatter.rs`.
 //!
-//! Só conversa com a janela aberta no painel e com a opção "Mascotes conversam" ligada.
-//! Quem responde é sempre uma mascote da página aberta; quem conta pode estar em outra
-//! página (só alarmes e recuperações), e aí a fala aparece no app de quem responde, com o
-//! nome da página. Com tudo calmo por um tempo, sai um papo à toa.
+//! Talks only with the window open on the panel and the "mascots chat" option on. The one
+//! who answers is always a mascot of the open page; the one who tells may be on another
+//! page (only alarms and recoveries), and then the line shows in the answerer's app, with
+//! the page name. When everything has been calm for a while, some idle small talk comes up.
 //!
-//! Para não virar falatório: um intervalo entre conversas puxadas por fatos, um tempo
-//! antes de repetir o mesmo assunto, e cutucadas com um intervalo curto próprio. Fato que
-//! não dá para mostrar é descartado (fatos são mudanças, não ficam velhos esperando).
+//! To keep it from turning into chatter: a cooldown between fact-driven conversations, a
+//! wait before repeating the same topic, and pokes with their own short cooldown. A fact
+//! that cannot be shown is dropped (facts are changes; they don't wait around going stale).
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -25,27 +25,27 @@ use crate::core::chatter::{Fact, FactKind, Lang, Lines, Say, Voice};
 use crate::mascot::render;
 use crate::ui::Chatter;
 
-/// Falas genéricas: o que um app não declarou no próprio `lines.toml`.
+/// Generic lines: what an app did not declare in its own `lines.toml`.
 const GENERIC: &str = include_str!("lines.toml");
 
-/// Intervalo dos quadros enquanto uma fala está no ar.
+/// Frame interval while a line is on screen.
 const CHAT_FRAME: Duration = Duration::from_millis(100);
-/// Letras por segundo ao "digitar" a fala.
+/// Letters per second when "typing" the line.
 const TYPE_RATE: f32 = 28.0;
-/// Quanto a fala fica na tela depois de digitada: base + um tanto por letra (até o teto).
+/// How long the line stays on screen after being typed: base + a bit per letter (up to the cap).
 const HOLD_BASE: Duration = Duration::from_millis(1800);
 const HOLD_PER_CHAR: Duration = Duration::from_millis(40);
 const HOLD_MAX: Duration = Duration::from_millis(5500);
-/// Pausa entre uma fala e a próxima.
+/// Pause between one line and the next.
 const GAP: Duration = Duration::from_millis(350);
-/// Intervalo mínimo entre conversas de cutucada.
+/// Minimum interval between poke conversations.
 const POKE_COOLDOWN: Duration = Duration::from_secs(10);
-/// Quantas falas ditas o diretor lembra para não repetir (ver `pick_text`).
+/// How many spoken lines the director remembers so as not to repeat them (see `pick_text`).
 const RECENT: usize = 32;
-/// Tempo antes de comentar de novo o mesmo assunto (app + assunto + tipo).
+/// Time before commenting on the same topic again (app + subject + kind).
 const TOPIC_COOLDOWN: Duration = Duration::from_secs(600);
 
-/// Quanto as mascotes conversam (opção `chatter` da config).
+/// How much the mascots chat (`chatter` config option).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pace {
     Off,
@@ -64,7 +64,7 @@ impl Pace {
         }
     }
 
-    /// Intervalo mínimo entre conversas puxadas por fatos (alarmes furam a fila).
+    /// Minimum interval between fact-driven conversations (alarms jump the queue).
     fn talk_cooldown(self) -> Duration {
         match self {
             Pace::Lots => Duration::from_secs(45),
@@ -72,7 +72,7 @@ impl Pace {
         }
     }
 
-    /// Quanto tempo calmo até um papo à toa (sorteado entre os dois).
+    /// How long it must be calm before idle small talk (drawn between the two).
     fn idle_range(self) -> (u64, u64) {
         match self {
             Pace::Lots => (120, 240),
@@ -81,32 +81,32 @@ impl Pace {
     }
 }
 
-/// Uma fala pronta.
+/// A ready line.
 #[derive(Clone)]
 pub struct Line {
     pub voice: Voice,
     pub text: String,
-    /// Quem ouve (vira o olhar para quem fala).
+    /// Who listens (turns to look at the speaker).
     pub listener: Option<Voice>,
-    /// Em qual app a caixa de diálogo aparece: o de quem fala, ou o de quem responde
-    /// quando quem fala está em outra página.
+    /// Which app the dialog box shows in: the speaker's, or the answerer's when the speaker
+    /// is on another page.
     pub show_in: String,
 }
 
-/// O que a caixa de diálogo mostra agora.
+/// What the dialog box shows now.
 pub struct View {
-    /// Muda a cada fala nova (para trocar retrato e nome só quando precisa).
+    /// Changes with every new line (so portrait and name are swapped only when needed).
     pub seq: u64,
     pub line: Line,
-    /// Parte já "digitada".
+    /// Part already "typed".
     pub typed: String,
-    /// Terminou de digitar.
+    /// Finished typing.
     pub done: bool,
 }
 
 pub struct Director {
     generic: Lines,
-    /// Falas de cada app (id -> falas).
+    /// Lines of each app (id -> lines).
     lines: HashMap<String, Lines>,
     queue: VecDeque<Line>,
     current: Option<(Line, Instant)>,
@@ -115,12 +115,11 @@ pub struct Director {
     last_talk: Option<Instant>,
     last_poke: Option<Instant>,
     topics: HashMap<String, Instant>,
-    /// Desde quando está tudo calmo (sem conversa e com o painel à vista).
+    /// Since when everything has been calm (no conversation, with the panel in view).
     quiet_since: Option<Instant>,
-    /// Calma necessária para o próximo papo à toa (sorteada).
+    /// Calm needed before the next idle small talk (drawn at random).
     idle_wait: Duration,
-    /// Últimas falas ditas (o modelo, antes de preencher as lacunas), da mais antiga para
-    /// a mais nova.
+    /// Last lines spoken (the template, before filling the blanks), from oldest to newest.
     recent: VecDeque<String>,
     rng: u64,
 }
@@ -151,20 +150,20 @@ impl Director {
         }
     }
 
-    /// Falas próprias de um app (o `lines.toml` dele).
+    /// An app's own lines (its `lines.toml`).
     pub fn add_lines(&mut self, app: &str, lines: Lines) {
         self.lines.insert(app.to_string(), lines);
     }
 
-    /// Avança a conversa. `voices` são as mascotes da página aberta; `visible` diz se dá
-    /// para mostrar alguma coisa (janela aberta no painel).
+    /// Advances the conversation. `voices` are the mascots of the open page; `visible` says
+    /// whether anything can be shown (window open on the panel).
     pub fn step(&mut self, now: Instant, facts: Vec<Fact>, voices: &[Voice], visible: bool, pace: Pace) {
         if !visible || pace == Pace::Off {
             self.clear();
             self.quiet_since = None;
             return;
         }
-        // trocou de página no meio da conversa: a caixa não está mais na tela
+        // page changed in the middle of the conversation: the box is no longer on screen
         let on_page = |app: &str| voices.iter().any(|v| v.app == app);
         let gone = self.current.as_ref().is_some_and(|(l, _)| !on_page(&l.show_in))
             || self.queue.iter().any(|l| !on_page(&l.show_in));
@@ -181,7 +180,7 @@ impl Director {
                 self.idle_wait = Duration::from_secs(lo + self.next() % (hi - lo + 1));
             }
         }
-        // fim da fala atual: pausa e depois a próxima
+        // end of the current line: pause, then the next one
         if let Some((line, started)) = &self.current
             && now >= *started + line_time(&line.text) {
                 self.current = None;
@@ -193,18 +192,18 @@ impl Director {
                 self.current = Some((line, now));
                 self.gap_until = None;
             }
-        // conversa no ar conta como "não calmo"
+        // a conversation on screen counts as "not calm"
         if self.current.is_some() || !self.queue.is_empty() {
             self.quiet_since = Some(now);
         }
     }
 
-    /// Há conversa no ar (uma fala ou outras na fila): a tela precisa de quadros.
+    /// A conversation is on (a line, or others queued): the screen needs frames.
     pub fn busy(&self) -> bool {
         self.current.is_some() || !self.queue.is_empty()
     }
 
-    /// O que mostrar agora (nada entre falas).
+    /// What to show now (nothing between lines).
     pub fn view(&self, now: Instant) -> Option<View> {
         let (line, started) = self.current.as_ref()?;
         let total = line.text.chars().count();
@@ -217,7 +216,7 @@ impl Director {
         })
     }
 
-    /// Pula para a próxima fala (clique na caixa).
+    /// Skips to the next line (click on the box).
     pub fn skip(&mut self, now: Instant) {
         if self.current.take().is_some() {
             self.gap_until = Some(now + GAP);
@@ -230,7 +229,7 @@ impl Director {
         self.gap_until = None;
     }
 
-    /// Escolhe o fato mais importante que pode virar conversa e enfileira as falas.
+    /// Picks the most important fact that can become a conversation and queues its lines.
     fn start(&mut self, now: Instant, facts: Vec<Fact>, voices: &[Voice], pace: Pace) -> bool {
         let rank = |k: FactKind| match k {
             FactKind::Poked => 0,
@@ -244,7 +243,7 @@ impl Director {
         facts.sort_by_key(|f| rank(f.kind));
         let cooled = |t: Option<Instant>, d: Duration| t.is_none_or(|t| now.duration_since(t) >= d);
         for fact in facts {
-            // de outra página, só alarme e recuperação (o resto não vale interromper)
+            // from another page, only alarm and recovery (the rest is not worth interrupting for)
             let remote = !voices.iter().any(|v| v.app == fact.voice.app);
             if remote && !matches!(fact.kind, FactKind::Trouble | FactKind::Recovered) {
                 continue;
@@ -252,7 +251,7 @@ impl Director {
             let topic = format!("{}:{}:{:?}", fact.voice.app, fact.subject, fact.kind);
             let ok = match fact.kind {
                 FactKind::Poked => cooled(self.last_poke, POKE_COOLDOWN),
-                // alarme fura o intervalo entre conversas (mas não repete o assunto)
+                // an alarm skips the cooldown between conversations (but does not repeat the topic)
                 FactKind::Trouble => cooled(self.topics.get(&topic).copied(), TOPIC_COOLDOWN),
                 _ => {
                     cooled(self.last_talk, pace.talk_cooldown())
@@ -278,7 +277,7 @@ impl Director {
         false
     }
 
-    /// Papo à toa: uma mascote da página puxa assunto e outra responde.
+    /// Idle small talk: a mascot of the page starts a topic and another answers.
     fn idle(&mut self, now: Instant, voices: &[Voice], pace: Pace) -> bool {
         let cooled = self.last_talk.is_none_or(|t| now.duration_since(t) >= pace.talk_cooldown());
         let Some(a) = (if cooled { self.pick(voices).cloned() } else { None }) else { return false };
@@ -291,12 +290,12 @@ impl Director {
         true
     }
 
-    /// Quem responde e as falas preenchidas. Vazio se não dá para montar a conversa.
+    /// Who answers, and the filled-in lines. Empty if the conversation cannot be built.
     pub fn compose(&mut self, kind: FactKind, a: &Voice, subject: &str, value: Option<f32>, voices: &[Voice]) -> Vec<Line> {
         let subject = if subject.is_empty() { a.name.clone() } else { subject.to_string() };
         let remote = !voices.iter().any(|v| v.app == a.app);
         let b = self.responder(kind, a, &subject, voices);
-        // de outra página, a fala só aparece se alguém daqui responder (é na caixa dele)
+        // from another page, the line only shows if someone here answers (it goes in their box)
         if remote && b.is_none() {
             return Vec::new();
         }
@@ -325,9 +324,9 @@ impl Director {
         out
     }
 
-    /// Quem responde: uma mascote da página que não seja quem conta. Primeiro as que têm
-    /// resposta própria para o caso (o Docker assumindo a culpa pela CPU), depois as de
-    /// outro app, por último as do mesmo app.
+    /// Who answers: a mascot of the page other than the teller. First the ones with their
+    /// own reply for the case (Docker taking the blame for the CPU), then those of another
+    /// app, last those of the same app.
     fn responder(&mut self, kind: FactKind, a: &Voice, subject: &str, voices: &[Voice]) -> Option<Voice> {
         let others: Vec<&Voice> = voices.iter().filter(|v| !v.same(a)).collect();
         let own_reply: Vec<&Voice> = others
@@ -340,7 +339,7 @@ impl Director {
         self.pick(&pool).map(|v| (*v).clone())
     }
 
-    /// O que quem conta diz: do app dele, se tiver fala usável; senão, a genérica.
+    /// What the teller says: from its app, if it has a usable line; otherwise the generic one.
     fn own_say(&self, kind: FactKind, app: &str, ctx: Ctx) -> Say {
         self.lines
             .get(app)
@@ -351,8 +350,8 @@ impl Director {
             .unwrap_or_default()
     }
 
-    /// O que quem responde diz: a resposta própria do app dele (se servir para o assunto),
-    /// a resposta que o app de quem conta sugere (`answer`), ou a genérica.
+    /// What the answerer says: its app's own reply (if it fits the subject), the reply the
+    /// teller's app suggests (`answer`), or the generic one.
     fn answer_say(&self, kind: FactKind, a_app: &str, b_app: &str, subject: &str, ctx: Ctx) -> Say {
         let own = self.lines.get(b_app).and_then(|l| l.reply(kind)).filter(|r| r.fits(subject)).cloned();
         let suggested = self.lines.get(a_app).and_then(|l| l.own(kind)).and_then(|e| e.answer.clone());
@@ -363,20 +362,25 @@ impl Director {
             .unwrap_or_default()
     }
 
-    /// Idioma da conversa inteira: português na maioria, inglês às vezes, alemão de vez
-    /// em quando. Só sai um idioma que sirva para as duas falas; senão, português.
+    /// Language of the whole conversation: mostly the interface language, sometimes the other
+    /// one, German now and then. Only a language that suits both lines is picked; otherwise Portuguese.
     fn lang(&mut self, a: &Say, b: Option<&Say>, ctx: Ctx) -> Lang {
         let roll = self.next() % 100;
-        let lang = if roll < 55 { Lang::Pt } else if roll < 90 { Lang::En } else { Lang::De };
+        // the interface language most of the time, the other one sometimes, German rarely
+        let (first, second) = match crate::core::i18n::current() {
+            crate::core::i18n::Language::PtBr => (Lang::Pt, Lang::En),
+            crate::core::i18n::Language::En => (Lang::En, Lang::Pt),
+        };
+        let lang = if roll < 55 { first } else if roll < 90 { second } else { Lang::De };
         if usable(a, lang, ctx) && b.is_none_or(|b| usable(b, lang, ctx)) { lang } else { Lang::Pt }
     }
 
-    /// Sorteia uma variante sem repetir as últimas ditas: primeiro entre as que não saíram
-    /// há pouco; se todas saíram, entre a metade dita há mais tempo (com duas variantes,
-    /// elas se alternam; com uma só, não há o que fazer).
+    /// Draws a variant without repeating the last ones spoken: first among those not said
+    /// recently; if all were, among the half said longest ago (with two variants they
+    /// alternate; with only one, nothing can be done).
     fn pick_text(&mut self, say: &Say, lang: Lang, ctx: Ctx) -> Option<String> {
         let options: Vec<&String> = say.variants(lang).iter().filter(|t| ctx.allows(t)).collect();
-        // posição na memória: quanto maior, mais recente; `None` = não saiu há pouco
+        // position in memory: the higher, the more recent; `None` = not said recently
         let said = |t: &String| self.recent.iter().rposition(|r| r == t);
         let fresh: Vec<&String> = options.iter().copied().filter(|t| said(t).is_none()).collect();
         let pool = if fresh.is_empty() {
@@ -404,7 +408,7 @@ impl Director {
         items.get(i)
     }
 
-    /// xorshift64: basta para sortear falas.
+    /// xorshift64: enough for drawing lines.
     fn next(&mut self) -> u64 {
         let mut x = self.rng;
         x ^= x << 13;
@@ -415,7 +419,7 @@ impl Director {
     }
 }
 
-/// O que a conversa tem para preencher as lacunas.
+/// What the conversation has to fill the blanks.
 #[derive(Clone, Copy)]
 struct Ctx {
     value: Option<f32>,
@@ -423,18 +427,18 @@ struct Ctx {
 }
 
 impl Ctx {
-    /// A variante só usa lacunas que dá para preencher.
+    /// The variant uses only blanks that can be filled.
     fn allows(self, t: &str) -> bool {
         (self.value.is_some() || !t.contains("{v}")) && (self.has_b || !t.contains("{b}"))
     }
 }
 
-/// Tem alguma variante usável neste idioma.
+/// Has some usable variant in this language.
 fn usable(say: &Say, lang: Lang, ctx: Ctx) -> bool {
     say.variants(lang).iter().any(|t| ctx.allows(t))
 }
 
-/// Quanto uma fala ocupa: digitar + ficar na tela.
+/// How long a line takes: typing + staying on screen.
 fn line_time(text: &str) -> Duration {
     let n = text.chars().count();
     let typing = Duration::from_secs_f32(n as f32 / TYPE_RATE);
@@ -446,23 +450,23 @@ fn voice_id(v: &Voice) -> String {
 }
 
 impl Hub {
-    /// Carrega as falas de cada app (chamado uma vez, na montagem).
+    /// Loads the lines of each app (called once, at setup).
     pub(super) fn load_lines(&self) {
         let mut d = self.chatter.borrow_mut();
         for (app, src) in self.registry.lines() {
             match Lines::parse(src) {
                 Ok(lines) => {
                     for p in lines.problems() {
-                        log::warn!("falas de {app}: {p}");
+                        log::warn!("lines of {app}: {p}");
                     }
                     d.add_lines(&app, lines);
                 }
-                Err(e) => log::warn!("falas de {app} inválidas: {e}"),
+                Err(e) => log::warn!("invalid lines of {app}: {e}"),
             }
         }
     }
 
-    /// Recolhe os fatos dos apps, avança a conversa e leva a fala atual à tela.
+    /// Collects the apps' facts, advances the conversation and puts the current line on screen.
     pub(super) fn chat_tick(&self) {
         let facts = self.registry.take_facts();
         let pace = Pace::from_key(&self.host.config.borrow().chatter);
@@ -479,8 +483,8 @@ impl Hub {
             d.step(now, facts, &voices, visible, pace);
             (d.view(now), d.busy())
         };
-        // a fala é "digitada" a 28 letras/s: com conversa no ar, quadros a cada 100 ms; sem
-        // ela, o quadro de animação basta para puxar o próximo papo
+        // the line is "typed" at 28 letters/s: with a conversation on, frames every 100 ms;
+        // without one, the animation frame is enough to start the next talk
         if !busy {
             self.chat_timer.stop();
         } else if !self.chat_timer.running() {
@@ -499,7 +503,7 @@ impl Hub {
         };
         if g.get_seq() != v.seq as i32 {
             let voice = &v.line.voice;
-            // quem fala está em outra página: o nome leva a página junto
+            // the speaker is on another page: the name carries the page along
             let remote = voice.app != v.line.show_in;
             let name = if remote {
                 let cfg = self.host.config.borrow();
@@ -523,7 +527,7 @@ impl Hub {
         g.set_app(v.line.show_in.into());
     }
 
-    /// Clique na caixa de diálogo: pula a fala.
+    /// Click on the dialog box: skips the line.
     pub(super) fn chat_skip(&self) {
         self.chatter.borrow_mut().skip(Instant::now());
         self.chat_tick();
@@ -547,7 +551,7 @@ mod tests {
         Fact { kind, voice: v, subject: subject.into(), value }
     }
 
-    /// Diretor com as falas de verdade dos apps.
+    /// Director with the apps' real lines.
     fn director(seed: u64) -> Director {
         let mut d = Director::with_seed(seed);
         d.add_lines(DOCKER, Lines::parse(include_str!("../../miniapps/docker/lines.toml")).unwrap());
@@ -556,7 +560,7 @@ mod tests {
         d
     }
 
-    /// Roda a conversa por `secs` e devolve quem falou, na ordem.
+    /// Runs the conversation for `secs` and returns who spoke, in order.
     fn run(d: &mut Director, t: &mut Instant, voices: &[Voice], secs: u64) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
         for _ in 0..secs * 10 {
@@ -571,9 +575,9 @@ mod tests {
     }
 
     #[test]
-    fn falas_genericas_e_dos_apps_estao_certas() {
+    fn generic_and_app_lines_are_valid() {
         for (name, src) in [
-            ("genéricas", GENERIC),
+            ("generic", GENERIC),
             ("docker", include_str!("../../miniapps/docker/lines.toml")),
             ("vitals", include_str!("../../miniapps/vitals/lines.toml")),
             ("ai_usage", include_str!("../../miniapps/ai_usage/lines.toml")),
@@ -581,37 +585,37 @@ mod tests {
             let lines = Lines::parse(src).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(lines.problems(), Vec::<String>::new(), "{name}");
         }
-        // as genéricas cobrem todos os casos, dos dois lados
+        // the generic lines cover every case, on both sides
         let g = Lines::parse(GENERIC).unwrap();
         for k in FactKind::ALL {
-            assert!(g.own(k).is_some() && g.reply(k).is_some(), "genéricas sem {}", k.key());
+            assert!(g.own(k).is_some() && g.reply(k).is_some(), "generic lines lack {}", k.key());
         }
     }
 
     #[test]
-    fn cutucada_vira_conversa_entre_apps() {
+    fn poke_becomes_a_conversation_between_apps() {
         let cpu = voice(VITALS, "CPU");
         let docker = voice(DOCKER, "Docker");
         let voices = [cpu.clone(), docker.clone()];
         let mut d = director(7);
         let mut t = Instant::now();
         d.step(t, vec![fact(FactKind::Poked, cpu.clone(), "", None)], &voices, true, Pace::Some);
-        let first = d.view(t).expect("a primeira fala começa na hora");
+        let first = d.view(t).expect("the first line starts at once");
         assert_eq!(first.line.voice.name, "CPU");
         assert_eq!(first.line.listener.as_ref().map(|l| l.name.as_str()), Some("Docker"));
         let mut names = vec!["CPU".to_string()];
         names.extend(run(&mut d, &mut t, &voices, 20).into_iter().filter(|n| n != "CPU"));
         assert_eq!(names, ["CPU", "Docker"]);
-        assert!(d.view(t).is_none(), "a conversa termina");
+        assert!(d.view(t).is_none(), "the conversation ends");
     }
 
     #[test]
-    fn nao_repete_a_mesma_fala_em_seguida() {
+    fn does_not_repeat_the_same_line_in_a_row() {
         let ctx = Ctx { value: None, has_b: true };
-        let say = |n: usize| Say { pt: (0..n).map(|i| format!("fala {i}")).collect(), ..Default::default() };
+        let say = |n: usize| Say { pt: (0..n).map(|i| format!("line {i}")).collect(), ..Default::default() };
         for seed in 1..10 {
-            // quatro variantes: as quatro saem antes de qualquer repetição, e depois
-            // nunca a mesma duas vezes seguidas (nem com só uma no meio)
+            // four variants: all four come out before any repetition, and after that
+            // never the same twice in a row (not even with only one in between)
             let mut d = Director::with_seed(seed);
             let four = say(4);
             let said: Vec<String> = (0..40).map(|_| d.pick_text(&four, Lang::Pt, ctx).unwrap()).collect();
@@ -620,7 +624,7 @@ mod tests {
             first.dedup();
             assert_eq!(first.len(), 4, "{said:?}");
             assert!(said.windows(3).all(|w| w[0] != w[1] && w[0] != w[2]), "{said:?}");
-            // duas variantes se alternam; uma só continua saindo
+            // two variants alternate; a single one keeps coming out
             let two = say(2);
             let said: Vec<String> = (0..10).map(|_| d.pick_text(&two, Lang::Pt, ctx).unwrap()).collect();
             assert!(said.windows(2).all(|w| w[0] != w[1]), "{said:?}");
@@ -630,33 +634,33 @@ mod tests {
     }
 
     #[test]
-    fn docker_assume_a_culpa_so_pela_cpu() {
+    fn docker_takes_the_blame_only_for_the_cpu() {
         let cpu = voice(VITALS, "CPU");
-        let disk = voice(VITALS, "DISCO");
+        let disk = voice(VITALS, "DISK");
         let voices = [cpu.clone(), disk.clone(), voice(DOCKER, "Docker"), voice(AI, "Claude")];
         for seed in 1..20 {
             let mut d = director(seed);
             let lines = d.compose(FactKind::Strain, &cpu, "CPU", Some(91.0), &voices);
             assert_eq!(lines.len(), 2);
-            assert_eq!(lines[1].voice.app, DOCKER, "quem tem resposta própria responde");
-            // o disco cheio não é culpa do Docker: responde qualquer um de outro app
-            let lines = d.compose(FactKind::Strain, &disk, "DISCO", Some(91.0), &voices);
+            assert_eq!(lines[1].voice.app, DOCKER, "the one with its own reply answers");
+            // a full disk is not Docker's fault: anyone from another app answers
+            let lines = d.compose(FactKind::Strain, &disk, "DISK", Some(91.0), &voices);
             assert_ne!(lines[1].voice.app, VITALS);
             assert!(lines.iter().all(|l| !l.text.contains('{')));
         }
     }
 
     #[test]
-    fn falas_do_app_tem_preferencia_e_sem_numero_cai_na_que_nao_usa() {
+    fn app_lines_win_and_without_a_number_fall_back_to_one_without_it() {
         let claude = voice(AI, "Claude");
         let cpu = voice(VITALS, "CPU");
         for seed in 1..30 {
             let mut d = director(seed);
-            // sozinho na página: só a primeira fala, sem número e sem `{b}`
+            // alone on the page: only the first line, with no number and no `{b}`
             let lines = d.compose(FactKind::Trouble, &claude, "Claude", None, std::slice::from_ref(&claude));
             assert_eq!(lines.len(), 1);
             assert!(!lines[0].text.contains('%') && !lines[0].text.contains('{'), "{}", lines[0].text);
-            // a resposta ao alarme da IA é a que o app de IA sugere (`trouble.answer`)
+            // the answer to the AI alarm is the one the AI app suggests (`trouble.answer`)
             let lines = d.compose(FactKind::Trouble, &claude, "Claude", Some(95.0), &[claude.clone(), cpu.clone()]);
             let ai = Lines::parse(include_str!("../../miniapps/ai_usage/lines.toml")).unwrap();
             let answer = ai.trouble.unwrap().answer.unwrap();
@@ -666,33 +670,33 @@ mod tests {
     }
 
     #[test]
-    fn alarme_de_outra_pagina_aparece_no_app_de_quem_responde() {
-        let web = voice(DOCKER, "Docker"); // o Docker está em outra página
+    fn alarm_from_another_page_shows_in_the_answerers_app() {
+        let web = voice(DOCKER, "Docker"); // Docker is on another page
         let cpu = voice(VITALS, "CPU");
         let voices = [cpu.clone()];
         let mut d = director(5);
         let t = Instant::now();
         d.step(t, vec![fact(FactKind::Trouble, web.clone(), "postgres", None)], &voices, true, Pace::Some);
-        let v = d.view(t).expect("alarme de outra página entra");
+        let v = d.view(t).expect("an alarm from another page gets in");
         assert_eq!(v.line.voice.app, DOCKER);
-        assert_eq!(v.line.show_in, VITALS, "a caixa aparece onde dá para ver");
-        // cutucada ou agitação de outra página não interrompem
+        assert_eq!(v.line.show_in, VITALS, "the box shows where it can be seen");
+        // a poke or strain from another page does not interrupt
         let mut d = director(5);
         d.step(t, vec![fact(FactKind::Strain, web, "postgres", Some(80.0))], &voices, true, Pace::Some);
         assert!(d.view(t).is_none());
     }
 
     #[test]
-    fn papo_a_toa_depois_de_um_tempo_calmo() {
+    fn idle_talk_after_a_calm_while() {
         let voices = [voice(VITALS, "CPU"), voice(DOCKER, "Docker")];
         let mut d = director(11);
         let mut t = Instant::now();
-        // começo calmo: nada antes do tempo mínimo
+        // calm start: nothing before the minimum time
         assert!(run(&mut d, &mut t, &voices, 100).is_empty());
-        // até o máximo do sorteio sai um papo, com as duas mascotes
+        // by the maximum of the draw a talk comes out, with both mascots
         let names = run(&mut d, &mut t, &voices, 600);
         assert_eq!(names.len(), 2, "{names:?}");
-        // desligado: nunca
+        // off: never
         let mut d = director(11);
         for _ in 0..7000 {
             t += Duration::from_millis(100);
@@ -702,27 +706,27 @@ mod tests {
     }
 
     #[test]
-    fn nao_repete_assunto_nem_fala_escondido() {
+    fn does_not_repeat_a_topic_nor_talk_while_hidden() {
         let cpu = voice(VITALS, "CPU");
         let voices = [cpu.clone(), voice(DOCKER, "Docker")];
         let trouble = || vec![fact(FactKind::Trouble, cpu.clone(), "CPU", Some(99.0))];
         let mut d = director(3);
         let mut t = Instant::now();
-        // janela fechada: descarta
+        // window closed: dropped
         d.step(t, trouble(), &voices, false, Pace::Some);
         assert!(d.view(t).is_none());
         d.step(t, trouble(), &voices, true, Pace::Some);
         assert!(d.view(t).is_some());
-        // deixa a conversa inteira terminar
+        // let the whole conversation finish
         run(&mut d, &mut t, &voices, 30);
         assert!(d.view(t).is_none());
-        // o mesmo alarme logo depois não puxa outra conversa
+        // the same alarm right after does not start another conversation
         d.step(t, trouble(), &voices, true, Pace::Some);
         assert!(d.view(t).is_none());
-        // cutucada de app fora da página também não
+        // nor does a poke from an app off the page
         d.step(t, vec![fact(FactKind::Poked, voice("cyber.cd", "CD"), "", None)], &voices, true, Pace::Some);
         assert!(d.view(t).is_none());
-        // mas uma cutucada na página, sim
+        // but a poke on the page does
         d.step(t, vec![fact(FactKind::Poked, cpu.clone(), "", None)], &voices, true, Pace::Some);
         assert!(d.view(t).is_some());
     }

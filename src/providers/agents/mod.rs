@@ -1,21 +1,21 @@
-//! Agentes rodando nos codificadores de IA.
+//! Agents running in the AI coding tools.
 //!
-//! Cada ferramenta tem a sua fonte (`claude.rs`, `codex.rs`, `opencode.rs`), que sabe onde
-//! ela guarda o estado e o que dá para tirar de lá. Todas implementam `Source` e devolvem
-//! `Agent`: o básico (estado, título, pasta) é obrigatório; o resto fica em `Details`, com
-//! campos opcionais que cada fonte preenche até onde a ferramenta informa. A tela mostra o
-//! que vier: uma ferramenta com menos informação só tem menos linhas.
+//! Each tool has its own source (`claude.rs`, `codex.rs`, `opencode.rs`), which knows where
+//! it keeps its state and what can be taken from there. They all implement `Source` and
+//! return `Agent`: the basics (state, title, folder) are required; the rest goes in
+//! `Details`, with optional fields each source fills as far as the tool reports. The screen
+//! shows whatever comes: a tool with less information just has fewer lines.
 //!
-//! As fontes só leem o que as ferramentas já gravam no disco; não mudam nada nelas. Esses
-//! formatos são internos e mudam entre versões: cada fonte falha sozinha (vira um erro
-//! curto na tela) sem derrubar as outras.
+//! Sources only read what the tools already write to disk; they change nothing there.
+//! Those formats are internal and change between versions: each source fails on its own
+//! (it becomes a short error on screen) without taking the others down.
 //!
-//! Da ação em curso só sai um resumo curto (nome da ferramenta, arquivo, programa): nunca
-//! o comando inteiro nem o conteúdo, que podem ter segredos.
+//! Only a short summary of the current action comes out (tool name, file, program): never
+//! the full command or the content, which may hold secrets.
 //!
-//! A linha do tempo de uma sessão (`Timeline`) só é lida para a sessão que a pessoa abriu
-//! na janela de detalhe (`watch`): pedidos e respostas, cortados, e as chamadas de
-//! ferramenta no mesmo resumo curto. Ela não vai para os plugins (`serde(skip)`).
+//! A session's timeline (`Timeline`) is only read for the session the user opened in the
+//! detail window (`watch`): prompts and replies, clipped, and tool calls in the same short
+//! summary. It doesn't go to plugins (`serde(skip)`).
 
 mod claude;
 mod codex;
@@ -29,20 +29,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 
-/// Sessões paradas há mais que isto nem saem do provedor (o app filtra mais pela opção).
+use crate::tr;
+
+/// Sessions stopped for longer than this don't even leave the provider (the app filters
+/// further by its option).
 const RECENT: Duration = Duration::from_secs(24 * 3600);
-/// "Trabalhando" sem nenhuma escrita há tanto tempo: a ferramenta caiu no meio do turno.
+/// "Working" with no write for this long: the tool died mid-turn.
 const STALE: Duration = Duration::from_secs(30 * 60);
-/// Quanto do fim de um log é lido para achar o último turno e a última ferramenta.
+/// How much of the end of a log is read to find the last turn and the last tool.
 const TAIL: u64 = 256 * 1024;
-/// Máximo de sessões por ferramenta (subagentes entram na conta no Codex e no OpenCode).
+/// Maximum sessions per tool (subagents count in Codex and OpenCode).
 const LIMIT: usize = 40;
-/// Quanto do fim do log a linha do tempo lê: mais que `TAIL`, porque resultados de
-/// ferramenta e imagens ocupam a maior parte (só uma sessão é lida, e só quando muda).
+/// How much of the end of the log the timeline reads: more than `TAIL`, because tool
+/// results and images take most of it (only one session is read, and only when it changes).
 const TIMELINE_TAIL: u64 = 2 * 1024 * 1024;
-/// Passos guardados na linha do tempo (os mais recentes).
+/// Steps kept in the timeline (the most recent ones).
 const STEPS: usize = 80;
-/// Pedidos e respostas na linha do tempo: só o começo.
+/// Prompts and replies in the timeline: only the beginning.
 const STEP_TEXT: usize = 400;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
@@ -66,15 +69,15 @@ impl Tool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
-    /// No meio de um turno.
+    /// In the middle of a turn.
     Working,
-    /// Parado esperando o usuário (permissão, pergunta). Só o Claude informa.
+    /// Stopped waiting for the user (permission, question). Only Claude reports it.
     Waiting,
-    /// Terminou o turno; aguarda o próximo pedido.
+    /// Finished the turn; waiting for the next prompt.
     Idle,
 }
 
-/// Tokens gastos numa sessão, somados de todas as respostas.
+/// Tokens spent in a session, summed over every reply.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Tokens {
     pub input: u64,
@@ -83,71 +86,72 @@ pub struct Tokens {
     pub cache_write: u64,
 }
 
-/// O que uma ferramenta sabe a mais sobre uma sessão. Tudo opcional ("" ou `None` = a
-/// ferramenta não informa, ou a fonte dela ainda não lê).
+/// What a tool knows beyond the basics about a session. All optional ("" or `None` = the
+/// tool doesn't report it, or its source doesn't read it yet).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Details {
-    /// Último pedido do usuário (texto dele: só aparece quando ele abre a linha).
+    /// The user's last prompt (their text: only shown when they open the row).
     pub last_prompt: String,
     pub model: String,
-    /// Esforço de raciocínio da última resposta ("high", "medium"…).
+    /// Reasoning effort of the last reply ("high", "medium"…).
     pub effort: String,
-    /// Branch do git na pasta da sessão.
+    /// Git branch in the session's folder.
     pub branch: String,
     pub tokens: Option<Tokens>,
-    /// Último turno fechado: duração em ms e quantas mensagens a conversa tinha.
+    /// Last closed turn: duration in ms and how many messages the conversation had.
     pub last_turn: Option<(i64, u32)>,
-    /// Por que a última resposta parou ("end_turn", "tool_use", "max_tokens"…).
+    /// Why the last reply stopped ("end_turn", "tool_use", "max_tokens"…).
     pub stop_reason: String,
-    /// Subagente: o tipo dele ("Explore", "web-fetch"…).
+    /// Subagent: its type ("Explore", "web-fetch"…).
     pub kind: String,
-    /// Subagente: a quantos disparos está da sessão do usuário (1 = direto dela).
+    /// Subagent: how many spawns away from the user's session it is (1 = directly from it).
     pub depth: Option<u32>,
-    /// Última escrita no registro da conversa (ms desde 1970; 0 = não sei). O Claude
-    /// grava a cada chamada de ferramenta e a cada resultado: escrevendo seguido, está
-    /// chamando ferramentas; calado, pensando (ou numa ferramenta demorada).
+    /// Last write to the conversation log (ms since 1970; 0 = unknown). Claude writes on
+    /// every tool call and every result: writing steadily, it is calling tools; quiet, it is
+    /// thinking (or in a slow tool).
     pub wrote_ms: i64,
 }
 
-/// Uma sessão de agente.
+/// An agent session.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Agent {
     pub tool: Tool,
-    /// Id da sessão na ferramenta (estável enquanto ela existir).
+    /// Session id in the tool (stable while it exists).
     pub id: String,
     pub title: String,
-    /// Pasta em que roda.
+    /// Folder it runs in.
     pub cwd: String,
     pub state: State,
-    /// Desde quando está nesse estado (ms desde 1970; 0 = não sei).
+    /// Since when it is in this state (ms since 1970; 0 = unknown).
     pub since_ms: i64,
-    /// O que espera do usuário, ou como o último turno acabou ("" = nada a dizer).
+    /// What it expects from the user, or how the last turn ended ("" = nothing to say).
     pub detail: String,
-    /// Resumo da última ferramenta usada no turno em curso ("" = não sei ou parado).
+    /// Summary of the last tool used in the current turn ("" = unknown or stopped).
     pub action: String,
-    /// Subagente: o id da sessão que o disparou (da mesma ferramenta).
+    /// Subagent: id of the session that spawned it (same tool).
     pub parent: Option<String>,
     pub details: Details,
-    /// Onde a ferramenta grava a conversa (transcript, log ou banco): a linha do tempo lê
-    /// dali. Caminho local, não vai para os plugins.
+    /// Where the tool writes the conversation (transcript, log or database): the timeline
+    /// reads from there. Local path, not sent to plugins.
     #[serde(skip)]
     pub log: Option<PathBuf>,
 }
 
-/// O que é um passo da linha do tempo.
+/// What a timeline step is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepKind {
-    /// Pedido do usuário.
+    /// User prompt.
     User,
-    /// Texto da resposta do agente.
+    /// Text of the agent's reply.
     Reply,
-    /// Chamada de ferramenta (só o resumo, como em `Agent::action`).
+    /// Tool call (only the summary, as in `Agent::action`).
     Tool,
-    /// Ferramenta que falhou ou turno interrompido.
+    /// A tool that failed or an interrupted turn.
     Error,
 }
 
-/// Um passo da conversa: quando (ms desde 1970; 0 = não sei), o que e o texto já cortado.
+/// One step of the conversation: when (ms since 1970; 0 = unknown), what, and the text,
+/// already clipped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Step {
     pub at_ms: i64,
@@ -155,7 +159,7 @@ pub struct Step {
     pub text: String,
 }
 
-/// Os últimos passos da sessão aberta na janela de detalhe, do mais antigo ao mais novo.
+/// The last steps of the session open in the detail window, oldest to newest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeline {
     pub tool: Tool,
@@ -166,26 +170,26 @@ pub struct Timeline {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AgentsSnapshot {
     pub agents: Vec<Agent>,
-    /// Ferramentas instaladas (com pasta de estado) nesta máquina.
+    /// Tools installed (with a state folder) on this machine.
     pub found: Vec<Tool>,
-    /// Fontes que não deu para ler.
+    /// Sources that couldn't be read.
     pub errors: Vec<(Tool, String)>,
-    /// Linha do tempo da sessão observada (`watch`), se ela está na lista.
+    /// Timeline of the watched session (`watch`), if it is in the list.
     #[serde(skip)]
     pub timeline: Option<Timeline>,
 }
 
-/// Sessão aberta na janela de detalhe: o provedor lê a linha do tempo só dela.
+/// Session open in the detail window: the provider reads the timeline of that one only.
 static WATCH: Mutex<Option<(Tool, String)>> = Mutex::new(None);
 
-/// Passa a observar a sessão (ou nenhuma, com `None`).
+/// Starts watching the session (or none, with `None`).
 pub fn watch(key: Option<(Tool, String)>) {
     if let Ok(mut w) = WATCH.lock() {
         *w = key;
     }
 }
 
-/// Alguma sessão está aberta na janela de detalhe (o provedor lê no ritmo da janela aberta).
+/// Some session is open in the detail window (the provider reads at the open-window pace).
 pub fn watching() -> bool {
     WATCH.lock().is_ok_and(|w| w.is_some())
 }
@@ -194,23 +198,23 @@ fn watched() -> Option<(Tool, String)> {
     WATCH.lock().ok().and_then(|w| w.clone())
 }
 
-/// A fonte de uma ferramenta: onde ela guarda o estado e como ler as sessões de lá.
+/// A tool's source: where it keeps its state and how to read the sessions from there.
 ///
-/// Para acrescentar uma ferramenta: um módulo com um tipo que implementa isto, um caso em
-/// `Tool` e uma linha em `AgentsProvider::default`. O que ela não souber fica vazio em
-/// `Details`; não precisa de mais nada para aparecer na tela.
+/// To add a tool: a module with a type implementing this, a case in `Tool` and a line in
+/// `AgentsProvider::default`. Whatever it doesn't know stays empty in `Details`; nothing
+/// else is needed for it to show up on screen.
 trait Source: Send {
     fn tool(&self) -> Tool;
-    /// Pasta de estado da ferramenta (se existe, ela está instalada).
+    /// The tool's state folder (if it exists, the tool is installed).
     fn home(&self) -> Option<PathBuf>;
-    /// As sessões abertas ou recentes. `now` em ms desde 1970.
+    /// Open or recent sessions. `now` in ms since 1970.
     fn collect(&mut self, home: &Path, now: i64) -> Result<Vec<Agent>, String>;
 }
 
 pub struct AgentsProvider {
     sources: Vec<Box<dyn Source>>,
-    /// Última linha do tempo lida: de que arquivo, (tamanho, mtime) dele e os passos. Só
-    /// relê quando o arquivo muda.
+    /// Last timeline read: from which file, its (size, mtime) and the steps. Only re-read
+    /// when the file changes.
     timeline: Option<(PathBuf, (u64, i64), Vec<Step>)>,
 }
 
@@ -243,7 +247,7 @@ impl AgentsProvider {
         snap
     }
 
-    /// Linha do tempo da sessão observada, se ela está em `agents`.
+    /// Timeline of the watched session, if it is in `agents`.
     fn timeline_of(&mut self, agents: &[Agent]) -> Option<Timeline> {
         let Some((tool, id)) = watched() else {
             self.timeline = None;
@@ -252,7 +256,7 @@ impl AgentsProvider {
         let a = agents.iter().find(|a| a.tool == tool && a.id == id)?;
         let path = a.log.clone()?;
         let steps = match tool {
-            // banco: a consulta é pequena e o arquivo principal nem muda a cada escrita (WAL)
+            // database: the query is small and the main file doesn't even change on every write (WAL)
             Tool::OpenCode => opencode::timeline(&path, &id),
             Tool::Claude | Tool::Codex => {
                 let meta = std::fs::metadata(&path).ok()?;
@@ -261,7 +265,7 @@ impl AgentsProvider {
                     Some((p, s, steps)) if *p == path && *s == stamp => steps.clone(),
                     _ => {
                         let text = read_last(&path, meta.len(), TIMELINE_TAIL)?;
-                        // começo cortado no meio de uma linha: ela fica de fora
+                        // start cut in the middle of a line: that line is left out
                         let text =
                             if meta.len() > TIMELINE_TAIL { text.split_once('\n').map_or("", |(_, r)| r) } else { &text };
                         let steps = if tool == Tool::Claude {
@@ -279,7 +283,7 @@ impl AgentsProvider {
     }
 }
 
-/// Acrescenta um passo com o texto numa linha só e cortado; texto vazio não entra.
+/// Adds a step with the text on a single line and clipped; empty text is skipped.
 fn push_step(steps: &mut Vec<Step>, at_ms: i64, kind: StepKind, text: &str) {
     let text = clip(text, STEP_TEXT);
     if text.is_empty() {
@@ -288,7 +292,7 @@ fn push_step(steps: &mut Vec<Step>, at_ms: i64, kind: StepKind, text: &str) {
     steps.push(Step { at_ms, kind, text });
 }
 
-/// Só os `STEPS` passos mais recentes.
+/// Only the `STEPS` most recent steps.
 fn last_steps(mut steps: Vec<Step>) -> Vec<Step> {
     if steps.len() > STEPS {
         steps.drain(..steps.len() - STEPS);
@@ -296,12 +300,12 @@ fn last_steps(mut steps: Vec<Step>) -> Vec<Step> {
     steps
 }
 
-/// Hora ISO 8601 (`2026-11-11T13:57:13.069Z`) em ms desde 1970; 0 se não der para ler.
+/// ISO 8601 time (`2026-11-11T13:57:13.069Z`) in ms since 1970; 0 if unreadable.
 fn iso_ms(v: &Value) -> i64 {
     v.as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map_or(0, |t| t.timestamp_millis())
 }
 
-/// Pasta de estado: a variável de ambiente da ferramenta, ou `rel` na pasta pessoal.
+/// State folder: the tool's environment variable, or `rel` in the home folder.
 fn home_dir(env: &str, rel: &str) -> Option<PathBuf> {
     std::env::var_os(env).map(PathBuf::from).or_else(|| dirs::home_dir().map(|h| h.join(rel)))
 }
@@ -318,31 +322,31 @@ fn base_name(path: &str) -> String {
     path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_string()
 }
 
-/// Texto de uma linha só (títulos vêm do primeiro pedido, que pode ter quebras).
+/// Text on a single line (titles come from the first prompt, which may have line breaks).
 fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Uma linha só, cortada em `max` letras, com reticências.
+/// A single line, clipped to `max` characters, with an ellipsis.
 pub fn clip(s: &str, max: usize) -> String {
     let s = one_line(s);
     if s.chars().count() <= max { s } else { s.chars().take(max.saturating_sub(1)).chain(['…']).collect() }
 }
 
-/// Abre um banco de outra ferramenta só para leitura, sem esperar muito por um bloqueio.
+/// Opens another tool's database read-only, without waiting long for a lock.
 fn open(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-        .map_err(|_| "não consegui abrir o banco")?;
-    conn.busy_timeout(Duration::from_millis(300)).map_err(|_| "não consegui abrir o banco")?;
+        .map_err(|_| tr!("could not open the database"))?;
+    conn.busy_timeout(Duration::from_millis(300)).map_err(|_| tr!("could not open the database"))?;
     Ok(conn)
 }
 
-/// Os últimos `TAIL` bytes de um arquivo de `len` bytes.
+/// The last `TAIL` bytes of a file of `len` bytes.
 fn read_tail(path: &Path, len: u64) -> Option<String> {
     read_last(path, len, TAIL)
 }
 
-/// Os últimos `n` bytes de um arquivo de `len` bytes.
+/// The last `n` bytes of a file of `len` bytes.
 fn read_last(path: &Path, len: u64, n: u64) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     file.seek(SeekFrom::Start(len.saturating_sub(n))).ok()?;
@@ -351,8 +355,8 @@ fn read_last(path: &Path, len: u64, n: u64) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
-/// Um comando de shell reduzido ao programa e, se for uma palavra simples, ao subcomando:
-/// `FOO=1 cargo test --all` → `cargo test`. O resto (argumentos, URLs, tokens) fica de fora.
+/// A shell command reduced to the program and, if it is a plain word, the subcommand:
+/// `FOO=1 cargo test --all` → `cargo test`. The rest (arguments, URLs, tokens) is left out.
 fn short_cmd(cmd: &str) -> String {
     let plain = |w: &str| {
         w.len() <= 24 && !w.starts_with('-') && w.chars().all(|c| c.is_ascii_alphanumeric() || "_./:-".contains(c))
@@ -365,8 +369,8 @@ fn short_cmd(cmd: &str) -> String {
     }
 }
 
-/// Resumo de uma chamada de ferramenta a partir do nome e dos argumentos: a descrição que
-/// o próprio agente deu, o arquivo, o programa.
+/// Summary of a tool call from its name and arguments: the description the agent itself
+/// gave, the file, the program.
 fn describe(name: &str, input: &Value) -> String {
     let text = |key: &str| input[key].as_str().filter(|s| !s.trim().is_empty());
     let arg = text("description")
@@ -379,7 +383,7 @@ fn describe(name: &str, input: &Value) -> String {
     if arg.is_empty() { name.to_string() } else { format!("{name}: {arg}") }
 }
 
-/// `https://exemplo.com/a?b` → `exemplo.com`.
+/// `https://example.com/a?b` → `example.com`.
 fn host(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
     clip(rest.split(['/', '?', '#']).next().unwrap_or_default(), 40)
@@ -390,7 +394,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resumo_do_comando_nao_leva_argumentos() {
+    fn command_summary_drops_arguments() {
         assert_eq!(short_cmd("cargo test --all"), "cargo test");
         assert_eq!(short_cmd("A=1 B=2 /usr/bin/git push origin main"), "git push");
         assert_eq!(short_cmd("curl -H 'Authorization: Bearer x' https://a.b"), "curl");
@@ -401,21 +405,21 @@ mod tests {
     }
 
     #[test]
-    fn resumo_da_chamada() {
+    fn call_summary() {
         assert_eq!(describe("TaskStop", &serde_json::json!({})), "TaskStop");
         assert_eq!(describe("WebFetch", &serde_json::json!({"url":"https://a.b/c?token=x"})), "WebFetch: a.b");
         assert_eq!(describe("bash", &serde_json::json!({"command":"npm run build"})), "bash: npm run");
-        assert_eq!(describe("Edit", &serde_json::json!({"file_path":"/home/u/p/src/bus.rs","old_string":"segredo"})), "Edit: bus.rs");
-        assert_eq!(clip("um  texto\ncomprido", 9), "um texto…");
+        assert_eq!(describe("Edit", &serde_json::json!({"file_path":"/home/u/p/src/bus.rs","old_string":"secret"})), "Edit: bus.rs");
+        assert_eq!(clip("a  long\ntext", 9), "a long t…");
     }
 
     #[test]
-    fn passos_cortados_e_so_os_ultimos() {
+    fn steps_are_clipped_and_only_the_last_kept() {
         let mut steps = Vec::new();
         push_step(&mut steps, 1, StepKind::User, "  \n ");
-        assert!(steps.is_empty(), "texto vazio não vira passo");
+        assert!(steps.is_empty(), "empty text does not become a step");
         for i in 0..STEPS + 5 {
-            push_step(&mut steps, i as i64, StepKind::Reply, "oi");
+            push_step(&mut steps, i as i64, StepKind::Reply, "hi");
         }
         let steps = last_steps(steps);
         assert_eq!(steps.len(), STEPS);

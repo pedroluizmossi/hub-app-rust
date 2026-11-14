@@ -1,16 +1,16 @@
-//! Converte um PNG em quadros de animação para `src/mascot/clips/<mascote>.toml`.
+//! Converts a PNG into mascot animation frames for `src/mascot/clips/<mascot>.toml`.
 //!
-//! As mascotes não guardam cores, e sim papéis (`K` contorno, `P` cor principal, `E` olho…):
-//! o tema do app decide a cor de cada papel. Por isso a conversão precisa de uma paleta que
-//! diga qual cor do PNG vira qual papel. Sem paleta (ou com cor faltando), o programa lista
-//! as cores do PNG num modelo pronto para preencher.
+//! Mascots don't store colors but roles (`K` outline, `P` main color, `E` eye…): the app's
+//! theme decides the color of each role. So the conversion needs a palette saying which PNG
+//! color becomes which role. Without a palette (or with a color missing), the program lists
+//! the PNG's colors in a template ready to fill in.
 //!
-//! Uso:
-//!   cargo run -p sprite-import -- quadros.png > paleta.toml        # modelo com as cores
-//!   cargo run -p sprite-import -- quadros.png --paleta neko.toml --nome sleep --fps 2
+//! Usage:
+//!   cargo run -p sprite-import -- frames.png > palette.toml        # template with the colors
+//!   cargo run -p sprite-import -- frames.png --palette neko.toml --name sleep --fps 2
 //!
-//! O PNG é uma folha de quadros de 16×14 lado a lado (ou em grade, lidos linha por linha).
-//! Quadros totalmente transparentes no fim da folha são ignorados.
+//! The PNG is a sheet of 16×14 frames side by side (or in a grid, read row by row).
+//! Fully transparent frames at the end of the sheet are ignored.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -18,26 +18,26 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// Tamanho do quadro das mascotes (ver `src/mascot/render.rs`).
+/// Size of a mascot frame (see `src/mascot/render.rs`).
 const W: usize = 16;
 const H: usize = 14;
 
 const HELP: &str = "\
-sprite-import: PNG -> quadros de animação das mascotes (src/mascot/clips/<mascote>.toml)
+sprite-import: PNG -> mascot animation frames (src/mascot/clips/<mascot>.toml)
 
-uso: sprite-import <arquivo.png> [opções]
+usage: sprite-import <file.png> [options]
 
-  --paleta <arq.toml>   cor -> papel, ex.: \"#1a1c2c\" = \"K\". Sem ela, sai um modelo com
-                        as cores do PNG: salve com > paleta.toml e troque os ?
-  --nome <nome>         nome da animação (padrão: o nome do PNG). Toca sozinha se for um
-                        humor (sleep, idle, happy, busy, alarm) ou uma reação (celebrate, surprised)
-  --fps <n>             quadros por segundo, 1 a 30 (padrão: 4)
-  --loop / --sem-loop   repete ou toca uma vez (padrão: humor repete, o resto toca uma vez)
+  --palette <file.toml> color -> role, e.g. \"#1a1c2c\" = \"K\". Without it, prints a template
+                        with the PNG's colors: save it with > palette.toml and replace the ?
+  --name <name>         animation name (default: the PNG's name). It plays by itself if it is
+                        a mood (sleep, idle, happy, busy, alarm) or a reaction (celebrate, surprised)
+  --fps <n>             frames per second, 1 to 30 (default: 4)
+  --loop / --no-loop    repeats or plays once (default: a mood repeats, the rest plays once)
 
-Papéis das mascotes comuns: . transparente, K contorno, P principal, S sombra, H brilho,
-M detalhe claro, C visor, E olho, W brilho do olho, B blush, T boca, F pele, D hardware,
-A LED. Mascotes \"pixel\" usam as letras da própria paleta (ver sprites.rs) e e para o olho.
-O resultado sai na saída padrão: cole no .toml da mascote.";
+Roles of the common mascots: . transparent, K outline, P main, S shadow, H highlight,
+M light detail, C visor, E eye, W eye highlight, B blush, T mouth, F skin, D hardware,
+A LED. \"pixel\" mascots use the letters of their own palette (see sprites.rs) and e for the eye.
+The result goes to standard output: paste it into the mascot's .toml.";
 
 struct Args {
     png: PathBuf,
@@ -49,6 +49,7 @@ struct Args {
 
 fn main() -> ExitCode {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    // `--ajuda`: the Portuguese name of older versions
     if raw.is_empty() || raw.iter().any(|a| matches!(a.as_str(), "-h" | "--help" | "--ajuda")) {
         println!("{HELP}");
         return ExitCode::SUCCESS;
@@ -77,24 +78,25 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
     let (mut palette, mut name, mut fps, mut looping) = (None, None, 4, None);
     let mut it = raw.into_iter();
     while let Some(a) = it.next() {
-        let mut value = |flag: &str| it.next().ok_or(format!("{flag} precisa de um valor"));
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        // the Portuguese names of older versions still work
         match a.as_str() {
-            "--paleta" => palette = Some(PathBuf::from(value("--paleta")?)),
-            "--nome" => name = Some(value("--nome")?),
-            "--fps" => fps = value("--fps")?.parse().map_err(|_| "--fps precisa de um número")?,
+            "--palette" | "--paleta" => palette = Some(PathBuf::from(value("--palette")?)),
+            "--name" | "--nome" => name = Some(value("--name")?),
+            "--fps" => fps = value("--fps")?.parse().map_err(|_| "--fps needs a number")?,
             "--loop" => looping = Some(true),
-            "--sem-loop" => looping = Some(false),
-            s if s.starts_with('-') => return Err(format!("opção desconhecida: {s}")),
+            "--no-loop" | "--sem-loop" => looping = Some(false),
+            s if s.starts_with('-') => return Err(format!("unknown option: {s}")),
             s => png = Some(PathBuf::from(s)),
         }
     }
-    let png = png.ok_or("faltou o arquivo PNG")?;
+    let png = png.ok_or("the PNG file is missing")?;
     if !(1..=30).contains(&fps) {
-        return Err(format!("--fps {fps} fora de 1..30"));
+        return Err(format!("--fps {fps} out of 1..30"));
     }
     let name = name.unwrap_or_else(|| png.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        return Err(format!("nome de animação inválido: {name:?} (use letras, números, _ e -)"));
+        return Err(format!("invalid animation name: {name:?} (use letters, digits, _ and -)"));
     }
     Ok(Args { png, palette, name, fps, looping })
 }
@@ -105,13 +107,13 @@ fn run(args: &Args) -> Result<String, String> {
     let colors = count_colors(&frames);
     let palette = match &args.palette {
         Some(p) => read_palette(p)?,
-        // sem paleta: o modelo vai para a saída padrão (`> paleta.toml` e preencher)
+        // no palette: the template goes to standard output (`> palette.toml` and fill it in)
         None => return Ok(template(&colors, &HashMap::new())),
     };
     let missing: Vec<_> = colors.keys().filter(|c| !palette.contains_key(*c)).collect();
     if !missing.is_empty() {
         return Err(format!(
-            "{} cor(es) do PNG sem papel na paleta. Complete o arquivo:\n\n{}",
+            "{} PNG color(s) with no role in the palette. Complete the file:\n\n{}",
             missing.len(),
             template(&colors, &palette)
         ));
@@ -120,7 +122,7 @@ fn run(args: &Args) -> Result<String, String> {
     Ok(clip_toml(&args.name, args.fps, args.looping, &grids))
 }
 
-/// Imagem em RGBA8.
+/// An RGBA8 image.
 struct Image {
     w: usize,
     h: usize,
@@ -130,10 +132,10 @@ struct Image {
 fn read_png(path: &Path) -> Result<Image, String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut decoder = png::Decoder::new(BufReader::new(file));
-    // paleta indexada vira RGB(A), 16 bits vira 8, e a transparência (tRNS) vira alfa
+    // an indexed palette becomes RGB(A), 16 bits become 8, and transparency (tRNS) becomes alpha
     decoder.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut reader = decoder.read_info().map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut buf = vec![0; reader.output_buffer_size().ok_or("PNG grande demais")?];
+    let mut buf = vec![0; reader.output_buffer_size().ok_or("PNG too large")?];
     let info = reader.next_frame(&mut buf).map_err(|e| format!("{}: {e}", path.display()))?;
     let (w, h) = (info.width as usize, info.height as usize);
     let data = &buf[..info.buffer_size()];
@@ -142,19 +144,19 @@ fn read_png(path: &Path) -> Result<Image, String> {
         png::ColorType::Rgb => data.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2], 255]).collect(),
         png::ColorType::GrayscaleAlpha => data.as_chunks::<2>().0.iter().map(|c| [c[0], c[0], c[0], c[1]]).collect(),
         png::ColorType::Grayscale => data.iter().map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err("PNG indexado não convertido (versão do png inesperada)".into()),
+        png::ColorType::Indexed => return Err("indexed PNG not converted (unexpected png version)".into()),
     };
     Ok(Image { w, h, px })
 }
 
-/// Um quadro de 16×14: cor `#rrggbb` de cada pixel, `None` = transparente.
+/// A 16×14 frame: the `#rrggbb` color of each pixel, `None` = transparent.
 type Frame = Vec<Option<String>>;
 
-/// Corta a folha em quadros de 16×14, linha por linha; descarta os vazios do fim.
+/// Cuts the sheet into 16×14 frames, row by row; drops the empty ones at the end.
 fn split(img: &Image) -> Result<Vec<Frame>, String> {
     if !img.w.is_multiple_of(W) || !img.h.is_multiple_of(H) {
         return Err(format!(
-            "a imagem tem {}×{}: precisa ser feita de quadros de {W}×{H} (largura múltipla de {W}, altura de {H})",
+            "the image is {}×{}: it must be made of {W}×{H} frames (width a multiple of {W}, height of {H})",
             img.w, img.h
         ));
     }
@@ -165,7 +167,7 @@ fn split(img: &Image) -> Result<Vec<Frame>, String> {
             for y in 0..H {
                 for x in 0..W {
                     let p = img.px[(fy * H + y) * img.w + fx * W + x];
-                    // meio-transparente conta como transparente: pixel art não tem meio-termo
+                    // half-transparent counts as transparent: pixel art has no in-between
                     f.push((p[3] >= 128).then(|| format!("#{:02x}{:02x}{:02x}", p[0], p[1], p[2])));
                 }
             }
@@ -176,12 +178,12 @@ fn split(img: &Image) -> Result<Vec<Frame>, String> {
         frames.pop();
     }
     if frames.is_empty() {
-        return Err("a imagem está toda transparente".into());
+        return Err("the image is fully transparent".into());
     }
     Ok(frames)
 }
 
-/// Quantos pixels de cada cor, somando todos os quadros.
+/// How many pixels of each color, over all frames.
 fn count_colors(frames: &[Frame]) -> BTreeMap<String, usize> {
     let mut n = BTreeMap::new();
     for c in frames.iter().flatten().flatten() {
@@ -190,7 +192,7 @@ fn count_colors(frames: &[Frame]) -> BTreeMap<String, usize> {
     n
 }
 
-/// Lê a paleta: uma tabela `"#rrggbb" = "K"` (um caractere por papel).
+/// Reads the palette: a `"#rrggbb" = "K"` table (one character per role).
 fn read_palette(path: &Path) -> Result<HashMap<String, char>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let table: toml::Table = text.parse().map_err(|e| format!("{}: {e}", path.display()))?;
@@ -198,7 +200,7 @@ fn read_palette(path: &Path) -> Result<HashMap<String, char>, String> {
     for (color, role) in table {
         let color = color.to_ascii_lowercase();
         if color.len() != 7 || !color.starts_with('#') || !color[1..].chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(format!("{}: cor inválida {color:?} (use \"#rrggbb\")", path.display()));
+            return Err(format!("{}: invalid color {color:?} (use \"#rrggbb\")", path.display()));
         }
         let role = role.as_str().unwrap_or_default();
         let mut chars = role.chars();
@@ -206,15 +208,15 @@ fn read_palette(path: &Path) -> Result<HashMap<String, char>, String> {
             (Some(c), None) if c.is_ascii_graphic() && c != '"' => {
                 out.insert(color, c);
             }
-            _ => return Err(format!("{}: {color} precisa de um papel de 1 caractere, veio {role:?}", path.display())),
+            _ => return Err(format!("{}: {color} needs a 1-character role, got {role:?}", path.display())),
         }
     }
     Ok(out)
 }
 
-/// Modelo de paleta com todas as cores do PNG (as que já têm papel vêm preenchidas).
+/// Palette template with every color of the PNG (the ones that already have a role come filled in).
 fn template(colors: &BTreeMap<String, usize>, known: &HashMap<String, char>) -> String {
-    let mut out = String::from("# cor = papel (troque o ?). Papéis: K P S H M C E W B T F D A, ou as letras de uma mascote \"pixel\"\n");
+    let mut out = String::from("# color = role (replace the ?). Roles: K P S H M C E W B T F D A, or the letters of a \"pixel\" mascot\n");
     for (color, n) in colors {
         let role = known.get(color).copied().unwrap_or('?');
         out.push_str(&format!("\"{color}\" = \"{role}\"   # {n} pixel(s)\n"));
@@ -229,7 +231,7 @@ fn to_grid(frame: &Frame, palette: &HashMap<String, char>) -> Vec<String> {
         .collect()
 }
 
-/// A animação no formato de `src/mascot/clips/<mascote>.toml`.
+/// The animation in the format of `src/mascot/clips/<mascot>.toml`.
 fn clip_toml(name: &str, fps: u32, looping: Option<bool>, grids: &[Vec<String>]) -> String {
     let mut out = format!("[{name}]\nfps = {fps}\n");
     if let Some(l) = looping {
@@ -247,7 +249,7 @@ fn clip_toml(name: &str, fps: u32, looping: Option<bool>, grids: &[Vec<String>])
 mod tests {
     use super::*;
 
-    /// Folha com dois quadros: o 1º com um pixel preto no canto, o 2º com um vermelho.
+    /// A sheet with two frames: the 1st with a black pixel in the corner, the 2nd with a red one.
     fn sheet() -> Image {
         let (w, h) = (W * 2, H);
         let mut px = vec![[0, 0, 0, 0]; w * h];
@@ -257,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn converte_folha_em_quadros() {
+    fn converts_sheet_into_frames() {
         let frames = split(&sheet()).unwrap();
         assert_eq!(frames.len(), 2);
         let palette = HashMap::from([("#000000".to_string(), 'K'), ("#ff0000".to_string(), 'P')]);
@@ -268,22 +270,22 @@ mod tests {
         assert_eq!(b[0], format!(".P{}", ".".repeat(W - 2)));
         let toml = clip_toml("sleep", 2, None, &[a, b]);
         assert!(toml.starts_with("[sleep]\nfps = 2\nframes = [\n\"\"\"\nK..."));
-        // o que sai é TOML válido, no formato que o app lê
+        // the output is valid TOML, in the format the app reads
         let parsed: toml::Table = toml.parse().unwrap();
         assert_eq!(parsed["sleep"]["frames"].as_array().unwrap().len(), 2);
     }
 
     #[test]
-    fn descarta_quadros_vazios_do_fim_e_recusa_tamanho_errado() {
+    fn drops_empty_trailing_frames_and_refuses_wrong_size() {
         let mut img = sheet();
         img.px[W + 1] = [0, 0, 0, 0];
         assert_eq!(split(&img).unwrap().len(), 1);
-        let torta = Image { w: 15, h: 14, px: vec![[0; 4]; 15 * 14] };
-        assert!(split(&torta).unwrap_err().contains("16×14"));
+        let crooked = Image { w: 15, h: 14, px: vec![[0; 4]; 15 * 14] };
+        assert!(split(&crooked).unwrap_err().contains("16×14"));
     }
 
     #[test]
-    fn lista_cores_sem_papel() {
+    fn lists_colors_without_a_role() {
         let colors = count_colors(&split(&sheet()).unwrap());
         let t = template(&colors, &HashMap::from([("#000000".to_string(), 'K')]));
         assert!(t.contains("\"#000000\" = \"K\"   # 1 pixel(s)"));
@@ -291,10 +293,16 @@ mod tests {
     }
 
     #[test]
-    fn le_png_de_verdade() {
+    fn old_portuguese_flags_still_work() {
+        let a = parse_args(["x.png", "--nome", "idle", "--paleta", "p.toml", "--sem-loop"].map(String::from).to_vec()).unwrap();
+        assert_eq!((a.name.as_str(), a.palette, a.looping), ("idle", Some(PathBuf::from("p.toml")), Some(false)));
+    }
+
+    #[test]
+    fn reads_a_real_png() {
         let dir = std::env::temp_dir().join(format!("sprite-import-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("quadro.png");
+        let path = dir.join("frame.png");
         let img = sheet();
         {
             let file = File::create(&path).unwrap();

@@ -1,6 +1,6 @@
-//! Versão do app, para o `--version`, o registro e o rodapé das Configurações.
+//! App version, for `--version`, the log and the Settings footer.
 
-/// A `version` do Cargo.toml (a tag de lançamento é `v` + ela).
+/// The `version` of Cargo.toml (the release tag is `v` + it).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// "0.1.0 (Linux x86_64)".
@@ -19,7 +19,7 @@ fn os_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn linha_da_versao() {
+    fn version_line() {
         let l = super::version_line();
         assert!(l.starts_with(env!("CARGO_PKG_VERSION")));
         assert!(l.contains(std::env::consts::ARCH));

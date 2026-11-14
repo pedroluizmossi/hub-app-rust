@@ -1,5 +1,5 @@
-# Integração contínua: compila e testa nos dois sistemas suportados. O app é nativo em
-# Linux e Windows: uma mudança só entra se passar nos dois (ver "Plataformas" no AGENTS.md).
+# Continuous integration: builds and tests on both supported systems. The app is native on
+# Linux and Windows: a change only goes in if it passes on both (see "Plataformas" in AGENTS.md).
 name: CI
 
 on:
@@ -7,7 +7,7 @@ on:
     branches: [master]
   pull_request:
 
-# um push novo no mesmo branch cancela a rodada anterior
+# a new push to the same branch cancels the previous run
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -32,16 +32,16 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      # winit (X11/Wayland) e fontes: só o Linux precisa de pacotes do sistema
-      - name: Dependências do sistema (Linux)
+      # winit (X11/Wayland) and fonts: only Linux needs system packages
+      - name: System dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
-      # `--locked`: falha se o Cargo.lock estiver desatualizado, em vez de resolver de novo
+      # `--locked`: fails if Cargo.lock is out of date, instead of resolving again
       - name: cargo check
         run: cargo check --workspace --all-targets --locked
-      # aviso do clippy reprova: o código entra limpo nos dois sistemas
+      # a clippy warning fails the build: code goes in clean on both systems
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test

@@ -1,4 +1,4 @@
-//! Mini-apps embutidos (fase 1: compilados junto com o hub).
+//! Built-in mini-apps (phase 1: compiled together with the hub).
 pub mod agents;
 pub mod ai_usage;
 pub mod cdplayer;

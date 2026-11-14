@@ -1,24 +1,24 @@
-//! Pedaços pequenos que mudam de um sistema para o outro e não têm módulo próprio:
-//! encerrar um processo, saber se ele existe, criar arquivo que só o dono lê.
+//! Small pieces that differ between systems and have no module of their own: ending a
+//! process, checking whether it exists, creating a file only the owner can read.
 //!
-//! Regra do projeto (ver "Plataformas" no AGENTS.md): chamada de sistema fica aqui ou num
-//! módulo `linux.rs` / `windows.rs`; o resto do código usa só a função comum.
+//! Project rule (see "Platforms" in AGENTS.md): system calls live here or in a
+//! `linux.rs` / `windows.rs` module; the rest of the code uses only the common function.
 
 use std::fs::OpenOptions;
 
-/// Por que não deu para encerrar um processo.
+/// Why a process could not be ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KillError {
-    /// O processo é de outro usuário (ou do sistema).
+    /// The process belongs to another user (or to the system).
     Denied,
     Other(String),
 }
 
-/// Pede para o processo `pid` encerrar. No Linux é um SIGTERM (o programa pode fechar com
-/// calma); o Windows não tem equivalente para programas sem janela, então encerra na hora.
+/// Asks process `pid` to end. On Linux it is a SIGTERM (the program can close calmly);
+/// Windows has no equivalent for windowless programs, so it ends it at once.
 #[cfg(unix)]
 pub fn terminate(pid: u32) -> Result<(), KillError> {
-    // SAFETY: `kill` só envia um sinal a um processo; o kernel recusa se não for do usuário.
+    // SAFETY: `kill` only sends a signal to a process; the kernel refuses if it is not the user's.
     if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } == 0 {
         return Ok(());
     }
@@ -31,7 +31,7 @@ pub fn terminate(pid: u32) -> Result<(), KillError> {
     use windows::Win32::Foundation::{CloseHandle, E_ACCESSDENIED};
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
     let denied = |e: windows::core::Error| if e.code() == E_ACCESSDENIED { KillError::Denied } else { KillError::Other(e.message()) };
-    // SAFETY: o identificador aberto aqui é fechado logo abaixo e não sai da função.
+    // SAFETY: the handle opened here is closed right below and does not leave the function.
     unsafe {
         let handle = OpenProcess(PROCESS_TERMINATE, false, pid).map_err(denied)?;
         let result = TerminateProcess(handle, 1).map_err(denied);
@@ -40,14 +40,14 @@ pub fn terminate(pid: u32) -> Result<(), KillError> {
     }
 }
 
-/// O processo `pid` existe e ainda não saiu. (No Linux quem precisa disso lê o `/proc`.)
+/// Process `pid` exists and has not exited yet. (On Linux, whoever needs this reads `/proc`.)
 #[cfg(windows)]
 pub fn alive(pid: u32) -> bool {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    /// Código de saída de quem ainda está rodando (`STILL_ACTIVE`).
+    /// Exit code of a process that is still running (`STILL_ACTIVE`).
     const STILL_ACTIVE: u32 = 259;
-    // SAFETY: o identificador aberto aqui é fechado logo abaixo e não sai da função.
+    // SAFETY: the handle opened here is closed right below and does not leave the function.
     unsafe {
         let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
         let mut code = 0u32;
@@ -57,8 +57,8 @@ pub fn alive(pid: u32) -> bool {
     }
 }
 
-/// Arquivo novo que só o dono lê e escreve (chaves, credenciais). No Windows não muda
-/// nada: a pasta do usuário já é só dele pelas permissões do sistema.
+/// New file only the owner can read and write (keys, credentials). On Windows it changes
+/// nothing: the user folder is already private through the system permissions.
 pub fn owner_only(options: &mut OpenOptions) -> &mut OpenOptions {
     #[cfg(unix)]
     {
@@ -68,8 +68,8 @@ pub fn owner_only(options: &mut OpenOptions) -> &mut OpenOptions {
     options
 }
 
-/// Pasta de dados no padrão XDG (`~/.local/share`). Ferramentas de terminal vindas do
-/// Linux (OpenCode) usam esse caminho também no Windows, em vez do `%APPDATA%`.
+/// XDG data folder (`~/.local/share`). Terminal tools that come from Linux (OpenCode) use
+/// this path on Windows too, instead of `%APPDATA%`.
 pub fn xdg_data_dir() -> Option<std::path::PathBuf> {
     if cfg!(windows) {
         std::env::var_os("XDG_DATA_HOME")
@@ -81,9 +81,9 @@ pub fn xdg_data_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Pasta dos arquivos de registro (`core::logging`): `~/.local/state/miniutils` no Linux
-/// (XDG_STATE_HOME, onde ficam registros e histórico) e `%LOCALAPPDATA%\miniutils\logs`
-/// no Windows (fora do perfil que viaja entre máquinas).
+/// Folder of the log files (`core::logging`): `~/.local/state/miniutils` on Linux
+/// (XDG_STATE_HOME, where logs and history go) and `%LOCALAPPDATA%\miniutils\logs` on
+/// Windows (outside the roaming profile).
 pub fn log_dir() -> Option<std::path::PathBuf> {
     if cfg!(windows) {
         dirs::data_local_dir().map(|d| d.join("miniutils").join("logs"))

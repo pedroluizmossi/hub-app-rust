@@ -1,6 +1,6 @@
 id = "cyber.docker"
 name = "Docker"
-description = "Containers e stacks com ações rápidas; a mascote reage quando algo cai."
+description = "Containers and stacks with quick actions; the mascot reacts when something goes down."
 icon = "neko"
 api = 1
 uses = ["docker"]
@@ -10,39 +10,39 @@ exec = ["docker"]
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "hide_stopped"
-label = "Esconder containers parados"
+label = "Hide stopped containers"
 type = "bool"
 default = false
 
 [[settings]]
 key = "sort"
-label = "Ordenar lista por"
+label = "Sort list by"
 type = "choice"
 default = "estado"
 options = ["estado", "nome", "cpu", "ram"]
 
 [[settings]]
 key = "notify"
-label = "Notificar quando um container cair"
+label = "Notify when a container goes down"
 type = "bool"
 default = true
 
 [[settings]]
 key = "notify_recovery"
-label = "Notificar quando ele voltar"
+label = "Notify when it comes back"
 type = "bool"
 default = false
 
 [[settings]]
 key = "busy_cpu"
-label = "Mascote agitada com CPU de um container acima de (%)"
+label = "Restless mascot when a container's CPU is above (%)"
 type = "int"
 default = 60
 min = 10
@@ -51,7 +51,7 @@ step = 10
 
 [[settings]]
 key = "mascot"
-label = "Mascote"
+label = "Mascot"
 type = "choice"
 default = "neko"
 options = ["neko", "polvo", "pato", "coruja", "robo", "kitsune", "usagi", "yurei", "hacker"]

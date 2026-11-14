@@ -1,0 +1,233 @@
+# Hub (src/hub) and skins (src/skin): texts built in Rust for the window.
+
+# Appearance (src/hub/appearance.rs)
+msgid "Skin's own"
+msgstr "Do visual"
+
+msgid "no apps in the folder"
+msgstr "nenhum app na pasta"
+
+msgid "local apps: {} · from the store: {}"
+msgstr "apps locais: {} · da loja: {}"
+
+msgid "{}/ skipped: {}"
+msgstr "{}/ ignorada: {}"
+
+msgid "good morning"
+msgstr "bom dia"
+
+msgid "good afternoon"
+msgstr "boa tarde"
+
+msgid "good evening"
+msgstr "boa noite"
+
+# App settings (src/hub/settings.rs)
+msgid "Follows the window"
+msgstr "Acompanha a janela"
+
+# App data (src/hub/data.rs)
+msgid "data"
+msgstr "dados"
+
+msgid "over {}"
+msgstr "mais de {}"
+
+msgid "empty"
+msgstr "vazio"
+
+msgid "database up to {} MB"
+msgstr "banco até {} MB"
+
+msgid "exporting…"
+msgstr "exportando…"
+
+msgid "exported to {}"
+msgstr "exportado para {}"
+
+msgid "export failed: {}"
+msgstr "não exportou: {}"
+
+msgid "no thread to export: {}"
+msgstr "sem thread para exportar: {}"
+
+msgid "deleting…"
+msgstr "apagando…"
+
+msgid "the app did not stop in time; try again"
+msgstr "o app não parou a tempo; tente de novo"
+
+msgid "data deleted"
+msgstr "dados apagados"
+
+msgid "delete failed: {}"
+msgstr "não apagou: {}"
+
+# Plugin store (src/hub/store.rs)
+msgid "no thread for the store: {}"
+msgstr "sem thread para a loja: {}"
+
+msgid "signature verified"
+msgstr "assinatura conferida"
+
+msgid "local index, not signed"
+msgstr "índice local, sem assinatura"
+
+msgid "{} installed"
+msgstr "{} instalado"
+
+msgid "{} and enabled on the panel"
+msgstr "{} e ligado no painel"
+
+msgid "not installed"
+msgstr "não instalado"
+
+msgid "update: {} → {}"
+msgstr "atualização: {} → {}"
+
+msgid "installed {}"
+msgstr "instalado {}"
+
+msgid "Click again to install with FULL ACCESS: the app runs with your user's permissions."
+msgstr "Clique de novo para instalar com ACESSO TOTAL: o app roda com as permissões do seu usuário."
+
+msgid "Click again to install. The plugin asks for: {}."
+msgstr "Clique de novo para instalar. O plugin pede: {}."
+
+msgid "Click again to update and also allow: {}."
+msgstr "Clique de novo para atualizar e permitir também: {}."
+
+msgid "Click again to update (no new permission)."
+msgstr "Clique de novo para atualizar (sem permissão nova)."
+
+msgid "{} has {} of stored data. Keep: it stays for when you reinstall (and shows in Settings › System). Delete: it is all gone."
+msgstr "{} tem {} de dados guardados. Manter: ficam para quando você reinstalar (e aparecem em Configurações › Sistema). Apagar: some tudo."
+
+msgid "Click again to remove {}."
+msgstr "Clique de novo para remover {}."
+
+msgid "no author"
+msgstr "sem autor"
+
+msgid "WARNING: the new version asks for new permissions: {}"
+msgstr "ATENÇÃO: a versão nova pede permissão nova: {}"
+
+msgid "WARNING: app with full access. It reads and writes your files, uses the network and runs other programs. Install only if you trust the author."
+msgstr "ATENÇÃO: app com acesso total. Lê e grava seus arquivos, usa a rede e roda outros programas. Instale só se confia no autor."
+
+# Skins and accents (src/skin/mod.rs)
+msgid "tray"
+msgstr "bandeja"
+
+msgid "Cozy"
+msgstr "Aconchego"
+
+msgid "Rainy night"
+msgstr "Noite chuvosa"
+
+msgid "Ice"
+msgstr "Gelo"
+
+msgid "Cyan"
+msgstr "Ciano"
+
+msgid "Amber"
+msgstr "Âmbar"
+
+msgid "Green"
+msgstr "Verde"
+
+msgid "Violet"
+msgstr "Violeta"
+
+msgid "Blue"
+msgstr "Azul"
+
+# Backdrops (src/skin/backdrop.rs)
+msgid "Neon grid"
+msgstr "Grade neon"
+
+msgid "CRT (scanlines)"
+msgstr "Tubo (varredura)"
+
+msgid "Dotted paper"
+msgstr "Papel pontilhado"
+
+msgid "Rainy city"
+msgstr "Cidade chuvosa"
+
+msgid "color \"{}\": use #RRGGBB or a skin color ({})"
+msgstr "cor \"{}\": use #RRGGBB ou uma cor do visual ({})"
+
+msgid "alpha {} outside 0 to 1"
+msgstr "alpha {} fora de 0 a 1"
+
+msgid "{} {} is less than {}"
+msgstr "{} {} é menor que {}"
+
+msgid "count {} is over 200"
+msgstr "count {} passa de 200"
+
+# The user's themes, skins and backdrops (src/skin/user.rs)
+msgid "Themes: {} · skins: {} · backdrops: {} · mascots: {}"
+msgstr "Temas: {} · visuais: {} · fundos: {} · mascotes: {}"
+
+msgid "the file name (the key) may only have a-z, 0-9, - and _ (up to 32)"
+msgstr "o nome do arquivo (a chave) só pode ter a-z, 0-9, - e _ (até 32)"
+
+msgid "there is already a built-in one called \"{}\": choose another name"
+msgstr "já existe um embutido chamado \"{}\": escolha outro nome"
+
+msgid "file too large (64 KiB at most)"
+msgstr "arquivo grande demais (máximo 64 KiB)"
+
+msgid "{}: expected a text in quotes"
+msgstr "{}: esperava um texto entre aspas"
+
+msgid "{}: expected a color \"#RRGGBB\""
+msgstr "{}: esperava uma cor \"#RRGGBB\""
+
+msgid "label: 1 to 40 characters"
+msgstr "label: de 1 a 40 caracteres"
+
+msgid "base: there is no theme \"{}\""
+msgstr "base: não há tema \"{}\""
+
+msgid "unknown field \"{}\" (colors: {})"
+msgstr "campo desconhecido \"{}\" (cores: {})"
+
+msgid "base: there is no skin \"{}\""
+msgstr "base: não há visual \"{}\""
+
+msgid "{}: use one of {}"
+msgstr "{}: use um de {}"
+
+msgid "app_theme: there is no theme \"{}\""
+msgstr "app_theme: não há tema \"{}\""
+
+msgid "backdrop: there is no backdrop \"{}\""
+msgstr "backdrop: não há fundo \"{}\""
+
+msgid "title_weight: a number from 100 to 900"
+msgstr "title_weight: um número de 100 a 900"
+
+msgid "title_cursor: true or false"
+msgstr "title_cursor: true ou false"
+
+msgid "{}: a short SVG path (letters, numbers, space, . , -)"
+msgstr "{}: um caminho SVG curto (letras, números, espaço, . , -)"
+
+msgid "{}: a number"
+msgstr "{}: um número"
+
+msgid "{}: from {} to {}"
+msgstr "{}: de {} a {}"
+
+msgid "unknown field \"{}\" (see DESIGN.md › Skins from files)"
+msgstr "campo desconhecido \"{}\" (veja DESIGN.md › Visuais por arquivo)"
+
+msgid "1 to 32 layers ([[layer]])"
+msgstr "de 1 a 32 camadas ([[layer]])"
+
+msgid "layer {}: {}"
+msgstr "camada {}: {}"

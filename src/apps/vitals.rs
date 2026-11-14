@@ -1,5 +1,5 @@
-//! Mini-app Sinais vitais: CPU, RAM, GPU, disco e rede, cada um com uma mascote, e
-//! avisos quando algo fica alto por um tempo (não em picos).
+//! Vital signs mini-app: CPU, RAM, GPU, disk and network, each with a mascot, and
+//! warnings when something stays high for a while (not on spikes).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -10,6 +10,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::core::bus::Event;
 use crate::core::chatter::{self, Fact, FactKind, Voice};
+use crate::core::i18n;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
 use crate::mascot::anim::{Animator, Reaction};
@@ -17,34 +18,36 @@ use crate::mascot::{Mood, render, sprites};
 use crate::providers::docker::format_bytes;
 use crate::providers::gpu::GpuSnapshot;
 use crate::providers::sys::SysSnapshot;
+use crate::{tr, tr_noop};
 use crate::ui::{HubWindow, VitalCard, VitalsApp};
 
-const HISTORY: usize = 30; // ~1 minuto com leituras a cada 2 s
+const HISTORY: usize = 30; // ~1 minute with readings every 2 s
 const CPU: usize = 0;
 const RAM: usize = 1;
 const GPU: usize = 2;
 const DISK: usize = 3;
 const NET: usize = 4;
 const N: usize = 5;
-const TITLES: [&str; N] = ["CPU", "RAM", "GPU", "DISCO", "REDE"];
+/// Card titles (translated where shown, with [`title`]).
+const TITLES: [&str; N] = ["CPU", "RAM", "GPU", tr_noop!("DISK"), tr_noop!("NETWORK")];
 const MASCOT_KEYS: [&str; N] = ["cpu_mascot", "ram_mascot", "gpu_mascot", "disk_mascot", "net_mascot"];
 
-/// Disco a partir do qual avisa (e a folga para avisar de novo).
+/// Disk usage from which it warns (and the slack to warn again).
 const DISK_FULL: f32 = 90.0;
-/// Quanto tempo algo precisa ficar alto para virar aviso.
+/// How long something must stay high to become a warning.
 const HOLD_CPU: Duration = Duration::from_secs(120);
 const HOLD_RAM: Duration = Duration::from_secs(60);
 const HOLD_TEMP: Duration = Duration::from_secs(30);
-/// Abaixo do limite menos isto, o aviso "rearma".
+/// Below the threshold minus this, the warning "re-arms".
 const SLACK: f32 = 10.0;
-/// Escala mínima do gráfico da rede (bytes/s): abaixo disso a barra não enche.
+/// Minimum scale of the network chart (bytes/s): below it the bar doesn't fill.
 const NET_FLOOR: f64 = 128.0 * 1024.0;
 
 #[derive(Default, Clone)]
 struct Vital {
     available: bool,
     value: f32,
-    /// Texto grande ("37%", "↓ 2.5M/s").
+    /// Big text ("37%", "↓ 2.5M/s").
     value_text: String,
     detail: String,
     temp: f32,
@@ -53,7 +56,7 @@ struct Vital {
     history: VecDeque<f32>,
 }
 
-/// Uma condição que só avisa depois de durar `hold`, uma vez, até voltar ao normal.
+/// A condition that only warns after lasting `hold`, once, until it goes back to normal.
 #[derive(Default)]
 struct Watch {
     since: Option<Instant>,
@@ -61,8 +64,8 @@ struct Watch {
 }
 
 impl Watch {
-    /// `high`: passou do limite; `clear`: voltou abaixo da folga (rearma o aviso).
-    /// Devolve `true` uma única vez, quando ficou alto por `hold` seguidos.
+    /// `high`: past the threshold; `clear`: back below the slack (re-arms the warning).
+    /// Returns `true` only once, when it has been high for `hold` in a row.
     fn check(&mut self, high: bool, clear: bool, now: Instant, hold: Duration) -> bool {
         if clear {
             *self = Watch::default();
@@ -95,26 +98,26 @@ pub struct VitalsMini {
     manifest: Manifest,
     vitals: [Vital; N],
     gpu_vendor: &'static str,
-    /// Rede em bytes/s (↓ + ↑), para a escala do gráfico.
+    /// Network in bytes/s (↓ + ↑), for the chart scale.
     net_history: VecDeque<f64>,
-    /// Swap em uso (0..1), para o humor da RAM.
+    /// Swap in use (0..1), for the RAM mood.
     swap_frac: f32,
     watches: Watches,
     cards: Rc<VecModel<VitalCard>>,
-    /// Último quadro de cada mascote: só troca a imagem quando os pixels mudam.
+    /// Last frame of each mascot: the image is only swapped when the pixels change.
     mascots: [render::Cache; N],
-    /// Piscada e reações de cada mascote (cada uma no seu ritmo).
+    /// Blinking and reactions of each mascot (each at its own pace).
     anims: [Animator; N],
-    /// Reação mostrada agora em cada cartão.
+    /// Reaction shown now on each card.
     reactions: [Option<Reaction>; N],
-    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    /// Facts for the chat between mascots, until the hub collects them.
     facts: Vec<Fact>,
 }
 
 impl VitalsMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest = Manifest::parse(include_str!("../../miniapps/vitals/manifest.toml"))
-            .expect("manifesto dos Sinais vitais inválido");
+            .expect("invalid Vital signs manifest");
         let cards = Rc::new(VecModel::from(vec![VitalCard::default(); N]));
         ui.global::<VitalsApp>().set_cards(ModelRc::from(cards.clone()));
         let app = Rc::new(RefCell::new(VitalsMini {
@@ -132,7 +135,7 @@ impl VitalsMini {
             facts: Vec::new(),
         }));
 
-        // easter egg: cutucar a mascote algumas vezes
+        // easter egg: poke the mascot a few times
         let a = Rc::downgrade(&app);
         ui.global::<VitalsApp>().on_mascot_poked(move |i| {
             let Some(a) = a.upgrade() else { return };
@@ -152,7 +155,7 @@ impl VitalsMini {
         app
     }
 
-    /// Redesenha a mascote `i` agora; `true` se a imagem ou a reação mudou.
+    /// Redraws mascot `i` now; `true` if the image or the reaction changed.
     fn refresh_mascot(&mut self, i: usize) -> bool {
         let key = self.mascot_of(i);
         let theme = self.host.theme_for(&self.manifest);
@@ -162,11 +165,11 @@ impl VitalsMini {
         self.mascots[i].update_look(sprite, theme, &look) || reaction_changed
     }
 
-    /// A mascote do cartão `i`, para a conversa entre mascotes.
+    /// The mascot of card `i`, for the chat between mascots.
     fn voice(&self, i: usize) -> Voice {
         Voice {
             app: self.manifest.id.clone(),
-            name: TITLES[i].to_string(),
+            name: title(i).to_string(),
             sprite: sprites::get(&self.mascot_of(i)),
             theme: self.host.theme_for(&self.manifest),
             mood: self.vitals[i].mood,
@@ -188,37 +191,37 @@ impl VitalsMini {
         let size = |b: u64| format_bytes(b as f64);
         let rate = |b: f64| format!("{}/s", format_bytes(b));
 
-        // CPU: frequência e carga média, em vez do número de núcleos
+        // CPU: frequency and load average, instead of the number of cores
         let cpu = &mut self.vitals[CPU];
         cpu.available = true;
         cpu.value = s.cpu;
         cpu.temp = s.cpu_temp;
         let (l1, l5, l15) = s.load;
-        let load = format!("carga {l1:.1} {l5:.1} {l15:.1}");
+        let load = tr!("load {} {} {}", format!("{l1:.1}"), format!("{l5:.1}"), format!("{l15:.1}"));
         cpu.detail = if s.cpu_mhz > 0.0 { format!("{:.1} GHz · {load}", s.cpu_mhz / 1000.0) } else { load };
 
-        // RAM: quanto está livre de fato e o swap (swap subindo = falta de memória)
+        // RAM: how much is actually free, and the swap (swap going up = short on memory)
         let ram = &mut self.vitals[RAM];
         ram.available = s.mem_total > 0;
         ram.value = pct(s.mem_used, s.mem_total);
-        let free = format!("{} livres de {}", size(s.mem_total.saturating_sub(s.mem_used)), size(s.mem_total));
+        let free = tr!("{} free of {}", size(s.mem_total.saturating_sub(s.mem_used)), size(s.mem_total));
         ram.detail = if s.swap_total > 0 {
             format!("{free} · swap {} / {}", size(s.swap_used), size(s.swap_total))
         } else {
-            format!("{free} · sem swap")
+            format!("{free} · {}", tr!("no swap"))
         };
         self.swap_frac = if s.swap_total > 0 { s.swap_used as f32 / s.swap_total as f32 } else { 0.0 };
 
-        // Disco: a partição mais cheia manda; o detalhe mostra leitura/escrita e as partições
+        // Disk: the fullest partition rules; the detail shows read/write and the partitions
         let disk = &mut self.vitals[DISK];
         disk.available = !s.disks.is_empty();
         let mut by_use: Vec<_> = s.disks.iter().collect();
         by_use.sort_by(|a, b| b.percent().total_cmp(&a.percent()));
         disk.value = by_use.first().map_or(0.0, |d| d.percent());
         let parts: Vec<String> = by_use.iter().map(|d| format!("{} {:.0}%", d.mount, d.percent())).collect();
-        disk.detail = format!("lê {} · grava {} · {}", rate(s.disk_read), rate(s.disk_write), parts.join(" · "));
+        disk.detail = tr!("read {} · write {} · {}", rate(s.disk_read), rate(s.disk_write), parts.join(" · "));
 
-        // Rede: cartão próprio, com escala pelo pico do último minuto
+        // Network: its own card, scaled by the peak of the last minute
         let total = s.net_rx + s.net_tx;
         self.net_history.push_back(total);
         while self.net_history.len() > HISTORY {
@@ -229,14 +232,14 @@ impl VitalsMini {
         net.available = !s.net_iface.is_empty();
         net.value = (total / scale * 100.0).clamp(0.0, 100.0) as f32;
         net.value_text = format!("↓ {}", rate(s.net_rx));
-        let kind = if s.net_wireless { "Wi-Fi" } else { "cabo" };
+        let kind = if s.net_wireless { "Wi-Fi" } else { tr!("wired") };
         let ip = if s.net_ip.is_empty() { String::new() } else { format!(" · {}", s.net_ip) };
         net.detail = if net.available {
             format!("↑ {} · {kind} {}{ip}", rate(s.net_tx), s.net_iface)
         } else {
-            "sem conexão".into()
+            tr!("no connection").into()
         };
-        // o gráfico da rede é redesenhado inteiro na escala atual
+        // the network chart is redrawn entirely at the current scale
         net.history = self.net_history.iter().map(|v| (v / scale * 100.0) as f32).collect();
 
         for i in [CPU, RAM, DISK] {
@@ -271,7 +274,7 @@ impl VitalsMini {
         }
     }
 
-    /// Avisos sustentados: CPU e RAM altas por um tempo, partição quase cheia, temperatura crítica.
+    /// Sustained warnings: CPU and RAM high for a while, a partition almost full, critical temperature.
     fn check_alerts(&mut self, s: &SysSnapshot) {
         let (on, alarm, critical) = {
             let cfg = self.host.config.borrow();
@@ -288,28 +291,28 @@ impl VitalsMini {
 
         let cpu = self.vitals[CPU].value;
         if w.cpu.check(cpu >= alarm, cpu < alarm - SLACK, now, HOLD_CPU) {
-            out.push(("vitals:cpu".into(), format!("CPU em {cpu:.0}% há 2 minutos"), "Veja quem está pesando no monitor do sistema.".into()));
+            out.push(("vitals:cpu".into(), tr!("CPU at {}% for 2 minutes", format!("{cpu:.0}")), tr!("See what is weighing it down in the system monitor.").into()));
         }
         let ram = self.vitals[RAM].value;
         if w.ram.check(ram >= alarm, ram < alarm - SLACK, now, HOLD_RAM) {
-            out.push(("vitals:ram".into(), format!("Memória em {ram:.0}%"), self.vitals[RAM].detail.clone()));
+            out.push(("vitals:ram".into(), tr!("Memory at {}%", format!("{ram:.0}")), self.vitals[RAM].detail.clone()));
         }
         let t = s.cpu_temp;
         if w.cpu_temp.check(t >= critical, t < critical - SLACK, now, HOLD_TEMP) {
-            out.push(("vitals:cpu-temp".into(), format!("CPU a {t:.0} °C"), "Temperatura crítica há 30 segundos.".into()));
+            out.push(("vitals:cpu-temp".into(), tr!("CPU at {} °C", format!("{t:.0}")), tr!("Critical temperature for 30 seconds.").into()));
         }
         let t = self.vitals[GPU].temp;
         if self.vitals[GPU].available && w.gpu_temp.check(t >= critical, t < critical - SLACK, now, HOLD_TEMP) {
-            out.push(("vitals:gpu-temp".into(), format!("GPU a {t:.0} °C"), "Temperatura crítica há 30 segundos.".into()));
+            out.push(("vitals:gpu-temp".into(), tr!("GPU at {} °C", format!("{t:.0}")), tr!("Critical temperature for 30 seconds.").into()));
         }
-        // partição cheia avisa na hora (não oscila como CPU)
+        // a full partition warns right away (it doesn't swing like the CPU)
         w.disks.retain(|mount, _| s.disks.iter().any(|d| &d.mount == mount));
         for d in &s.disks {
             let p = d.percent();
             let watch = w.disks.entry(d.mount.clone()).or_default();
             if watch.check(p >= DISK_FULL, p < DISK_FULL - 2.0, now, Duration::ZERO) {
-                let livre = format_bytes(d.total.saturating_sub(d.used) as f64);
-                out.push((format!("vitals:disk:{}", d.mount), format!("{} com {p:.0}% ocupado", d.mount), format!("Restam {livre}.")));
+                let free = format_bytes(d.total.saturating_sub(d.used) as f64);
+                out.push((format!("vitals:disk:{}", d.mount), tr!("{} is {}% full", d.mount, format!("{p:.0}")), tr!("{} left.", free)));
             }
         }
 
@@ -319,7 +322,7 @@ impl VitalsMini {
         }
     }
 
-    /// Recalcula o humor de cada cartão pelos limites da configuração.
+    /// Recomputes the mood of each card from the thresholds in the config.
     fn update_moods(&mut self) {
         let (warn, alarm, hot, critical) = {
             let cfg = self.host.config.borrow();
@@ -335,17 +338,17 @@ impl VitalsMini {
         let before: [Mood; N] = std::array::from_fn(|i| self.vitals[i].mood);
         for (i, v) in self.vitals.iter_mut().enumerate() {
             if i == NET {
-                // rede não preocupa: dorme parada, fica contente quando tem tráfego
+                // the network isn't a worry: sleeps when idle, happy when there's traffic
                 v.mood = if !v.available || v.value < 1.0 { Mood::Sleep } else if v.value >= 60.0 { Mood::Happy } else { Mood::Idle };
                 continue;
             }
-            // disco cheio é outra escala: só preocupa perto do fim
+            // a full disk is another scale: only a worry near the end
             let (w, a) = if i == DISK { (85.0, 95.0) } else { (warn, alarm) };
             let mut mood = Mood::from_level(v.value, w, a, v.available);
             if i == DISK && v.available && mood == Mood::Sleep {
-                mood = Mood::Idle; // disco não "dorme" por estar vazio
+                mood = Mood::Idle; // a disk doesn't "sleep" for being empty
             }
-            // swap bem usado é falta de memória, mesmo com a RAM "ok"
+            // heavy swap use means short on memory, even with the RAM "ok"
             if i == RAM && swap >= 0.5 {
                 mood = mood.worst(Mood::Busy);
             }
@@ -357,10 +360,10 @@ impl VitalsMini {
             }
             v.mood = mood;
         }
-        // conversa entre mascotes: quem piorou ou melhorou conta (a rede não preocupa)
-        for i in 0..NET {
+        // chat between mascots: whoever got worse or better speaks (the network isn't a worry)
+        for (i, &was) in before.iter().enumerate().take(NET) {
             let v = &self.vitals[i];
-            if let Some(f) = chatter::mood_fact(before[i], v.mood, self.voice(i), TITLES[i], Some(v.value)) {
+            if let Some(f) = chatter::mood_fact(was, v.mood, self.voice(i), title(i), Some(v.value)) {
                 self.facts.push(f);
             }
         }
@@ -370,8 +373,8 @@ impl VitalsMini {
         let v = &self.vitals[i];
         let show_temps = self.host.config.borrow().bool(&self.manifest, "show_temps");
         VitalCard {
-            title: TITLES[i].into(),
-            voice: Voice::id_of(&self.manifest.id, TITLES[i]).into(),
+            title: title(i).into(),
+            voice: Voice::id_of(&self.manifest.id, title(i)).into(),
             mascot: self.mascots[i].image(),
             mood: v.mood.as_str().into(),
             reaction: self.reactions[i].map_or("", Reaction::as_str).into(),
@@ -393,7 +396,12 @@ impl VitalsMini {
     }
 }
 
-/// Histórico (0..100) -> caminho SVG num quadro 1000×100.
+/// Title of card `i` in the current language.
+fn title(i: usize) -> &'static str {
+    i18n::tr(TITLES[i])
+}
+
+/// History (0..100) -> SVG path in a 1000×100 box.
 pub fn spark_path(h: &VecDeque<f32>) -> String {
     if h.len() < 2 {
         return "M 0 98 L 1000 98".into();
@@ -439,8 +447,8 @@ impl MiniApp for VitalsMini {
     }
 
     fn tick(&mut self, _frame: u32, _ui: &HubWindow) {
-        // só redesenha as mascotes que mudaram; o resto muda com as leituras.
-        // O ritmo vem do relógio de cada `Animator`, não do quadro do hub.
+        // only redraws the mascots that changed; the rest changes with the readings.
+        // The pace comes from each `Animator`'s clock, not from the hub frame.
         for i in 0..N {
             if self.refresh_mascot(i)
                 && let Some(mut c) = self.cards.row_data(i) {
@@ -458,7 +466,7 @@ impl MiniApp for VitalsMini {
     }
 
     fn mood(&self) -> Mood {
-        // no hub, sinais vitais só preocupam quando algo satura ou esquenta
+        // in the hub, vital signs are only a worry when something saturates or heats up
         let worst = self.vitals[..NET].iter().map(|v| v.mood).fold(Mood::Sleep, Mood::worst);
         if worst >= Mood::Busy { worst } else { Mood::Sleep }
     }
@@ -476,7 +484,7 @@ impl MiniApp for VitalsMini {
     }
 
     fn mascot_key(&self) -> String {
-        // a mascote do recurso em pior estado (a rede não entra)
+        // the mascot of the resource in the worst state (the network doesn't count)
         let worst = (0..NET).max_by_key(|&i| self.vitals[i].mood).unwrap_or(CPU);
         self.mascot_of(worst)
     }
@@ -496,36 +504,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn caminho_da_sparkline() {
+    fn sparkline_path() {
         let h: VecDeque<f32> = [0.0, 50.0, 100.0].into_iter().collect();
         assert_eq!(spark_path(&h), "M 0.0 98.0 L 500.0 50.0 L 1000.0 2.0");
         assert_eq!(spark_path(&VecDeque::new()), "M 0 98 L 1000 98");
     }
 
     #[test]
-    fn aviso_so_depois_de_durar_e_uma_vez() {
+    fn warns_only_after_lasting_and_once() {
         let t0 = Instant::now();
         let hold = Duration::from_secs(120);
         let mut w = Watch::default();
         assert!(!w.check(true, false, t0, hold));
         assert!(!w.check(true, false, t0 + Duration::from_secs(60), hold));
         assert!(w.check(true, false, t0 + Duration::from_secs(120), hold));
-        // continua alto: não repete
+        // still high: doesn't repeat
         assert!(!w.check(true, false, t0 + Duration::from_secs(600), hold));
     }
 
     #[test]
-    fn pico_curto_nao_avisa_e_folga_rearma() {
+    fn short_spike_does_not_warn_and_slack_rearms() {
         let t0 = Instant::now();
         let hold = Duration::from_secs(120);
         let mut w = Watch::default();
         w.check(true, false, t0, hold);
-        // caiu entre o limite e a folga: o relógio recomeça
+        // dropped between the threshold and the slack: the clock restarts
         assert!(!w.check(false, false, t0 + Duration::from_secs(100), hold));
         assert!(!w.check(true, false, t0 + Duration::from_secs(110), hold));
         assert!(!w.check(true, false, t0 + Duration::from_secs(200), hold));
         assert!(w.check(true, false, t0 + Duration::from_secs(230), hold));
-        // voltou ao normal: rearma e pode avisar de novo
+        // back to normal: re-arms and can warn again
         w.check(false, true, t0 + Duration::from_secs(300), hold);
         assert!(w.check(true, false, t0 + Duration::from_secs(300), Duration::ZERO));
     }

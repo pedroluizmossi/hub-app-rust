@@ -1,8 +1,8 @@
-//! CPU, RAM, temperatura da CPU, rede e discos.
+//! CPU, RAM, CPU temperature, network and disks.
 //!
-//! O que os apps recebem (`SysSnapshot`) é igual nos dois sistemas; a coleta
-//! (`SysProvider`) muda: `/proc` e `/sys` no Linux (`linux.rs`), o crate `sysinfo` no
-//! Windows (`windows.rs`). O que um sistema não tem fica em zero (ver cada campo).
+//! What the apps receive (`SysSnapshot`) is the same on both systems; the collection
+//! (`SysProvider`) differs: `/proc` and `/sys` on Linux (`linux.rs`), the `sysinfo` crate on
+//! Windows (`windows.rs`). Whatever a system lacks stays at zero (see each field).
 
 #[cfg(target_os = "linux")]
 #[path = "sys/linux.rs"]
@@ -15,29 +15,29 @@ pub use imp::SysProvider;
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SysSnapshot {
-    /// Uso de CPU em % desde a leitura anterior.
+    /// CPU usage in % since the previous reading.
     pub cpu: f32,
-    /// Frequência média dos núcleos em MHz (0 = desconhecida).
+    /// Average core frequency in MHz (0 = unknown).
     pub cpu_mhz: f32,
-    /// Carga média de 1, 5 e 15 minutos (o Windows não tem: fica em zero).
+    /// 1, 5 and 15 minute load average (Windows has none: stays at zero).
     pub load: (f32, f32, f32),
     pub mem_total: u64,
-    /// Total menos o disponível (`MemAvailable`, que já desconta cache).
+    /// Total minus available (`MemAvailable`, which already excludes cache).
     pub mem_used: u64,
     pub swap_total: u64,
     pub swap_used: u64,
-    /// °C; 0 = sem sensor (no Windows não é lida).
+    /// °C; 0 = no sensor (not read on Windows).
     pub cpu_temp: f32,
-    /// Bytes/s (sem loopback nem interfaces do Docker/VMs).
+    /// Bytes/s (without loopback or Docker/VM interfaces).
     pub net_rx: f64,
     pub net_tx: f64,
-    /// Interface da rota padrão ("" = sem rede), se é Wi-Fi e o IPv4 dela.
+    /// Interface of the default route ("" = no network), whether it is Wi-Fi, and its IPv4.
     pub net_iface: String,
     pub net_wireless: bool,
     pub net_ip: String,
-    /// Partições montadas de verdade (sem loop, snap, tmpfs…), uma por dispositivo.
+    /// Real mounted partitions (no loop, snap, tmpfs…), one per device.
     pub disks: Vec<Disk>,
-    /// Leitura e escrita dos discos físicos, em bytes/s.
+    /// Physical disk reads and writes, in bytes/s.
     pub disk_read: f64,
     pub disk_write: f64,
 }

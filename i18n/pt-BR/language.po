@@ -1,0 +1,9 @@
+# Language picker (ui/settings.slint)
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Language of the interface. Automatic follows the system. Some texts change only after restarting MiniUtils."
+msgstr "Idioma da interface. O automático segue o do sistema. Alguns textos só mudam depois de reiniciar o MiniUtils."
+
+msgid "Automatic"
+msgstr "Automático"

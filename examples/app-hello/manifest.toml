@@ -1,11 +1,12 @@
-# App externo de exemplo: um executável próprio (src/main.rs), com acesso total.
-# Formato: topo de src/core/plugins.rs; protocolo: topo de src/apps/external.rs.
+# Example external app: an executable of its own (src/main.rs), with full access.
+# Format: top of src/core/plugins.rs; protocol: top of src/apps/external.rs.
+# Texts (name, description, labels) are in English; i18n/pt-BR.po translates them.
 id = "io.github.pedroluizmossi.app-hello"
-name = "Olá, app externo"
-description = "Exemplo de app externo: lê a pasta pessoal, guarda um contador num arquivo e mostra a CPU. Funciona no Linux e no Windows."
+name = "Hello, external app"
+description = "Example external app: reads the home folder, keeps a counter in a file and shows the CPU. Works on Linux and Windows."
 icon = "robo"
 api = 1
-# a leitura do provedor chega ao app como {"type":"event","topic":"sys",...}
+# the provider's reading reaches the app as {"type":"event","topic":"sys",...}
 uses = ["sys"]
 
 [app]
@@ -16,6 +17,6 @@ every = 5
 
 [[settings]]
 key = "show_home"
-label = "Mostrar a pasta pessoal"
+label = "Show the home folder"
 type = "bool"
 default = true

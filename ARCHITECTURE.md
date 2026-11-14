@@ -65,9 +65,9 @@ hub-app-rust/
                               pela paleta cor -> papel; `cargo run -p sprite-import -- --help`
   tools/dev-ui.sh             MiniUtils de desenvolvimento isolado com o MCP do Slint: captura,
                               clique, live-preview (só Linux; ver AGENTS.md)
-  examples/                   plugins de exemplo (plugin-uptime, plugin-top, plugin-notas),
-                              app externo de exemplo (app-hello, em Rust), temas/visuais/fundos
-                              por arquivo (aparencia/) e a loja de teste (loja/preparar.sh)
+  examples/                   plugins de exemplo (plugin-uptime, plugin-top, plugin-notes),
+                              app externo de exemplo (app-hello, em Rust), themes/skins/backdrops
+                              por arquivo (appearance/) e a loja de teste (store/prepare.sh)
   ui/                         crate `miniutils-ui`: só a interface, compilada à parte
     Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
                               dos mini-apps); src/lib.rs reexporta os tipos gerados
@@ -93,8 +93,8 @@ hub-app-rust/
     docker/ vitals/ cdplayer/ ai_usage/ ports/ todo/ agents/ (com detail.slint, a janela
                               de detalhe de uma sessão)
   src/
-    main.rs                   argumentos (--hidden, --tab, --plugin-dev, --pastas, --previa,
-                              --importar-mascote, comandos da loja) e event loop
+    main.rs                   argumentos (--hidden, --tab, --plugin-dev, --dirs, --preview,
+                              --import-mascot, comandos da loja) e event loop
     autostart.rs, autostart/  iniciar com o sistema: `.desktop` XDG no Linux, chave Run no
                               Windows (ver "Registro e iniciar com o sistema")
     store.rs                  loja de plugins: índice assinado, instalar, atualizar, remover
@@ -174,8 +174,8 @@ hub-app-rust/
                               elementos do fundo animado (`ambient`)
       color.rs                contas de cor: mistura, contraste WCAG, leitura de `#RRGGBB`
       user.rs                 temas, visuais e fundos da pessoa, lidos de `<dados>/miniutils/`
-                              (`temas/`, `visuais/`, `fundos/`) sem recompilar; `base` herda
-                              de um existente; `MINIUTILS_APARENCIA` troca a pasta
+                              (`themes/`, `skins/`, `backdrops/`) sem recompilar; `base` herda
+                              de um existente; `MINIUTILS_APPEARANCE` troca a pasta
     mascot/
       sprites.rs              sprites: 12 por papéis de cor (16×14, inclui o CD) + 20 "pixel" (12×12)
       themes.rs               temas de cor dos apps
@@ -184,11 +184,11 @@ hub-app-rust/
       clips.rs, clips/        animações quadro a quadro por mascote (`<chave>.toml`): humor
                               com entrada/saída/variações, reação, duração por quadro;
                               `MINIUTILS_CLIPS=<pasta>` lê do disco e recarrega ao salvar
-      preview.rs              `miniutils --previa <mascote> [animação]`: GIF em todos os temas
+      preview.rs              `miniutils --preview <mascote> [animação]`: GIF em todos os temas
       disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
       pack.rs                 mascotes importadas: folhas PNG de qualquer tamanho em
-                              `<dados>/miniutils/mascotes/<chave>/` (com `sprite.toml`
-                              opcional), sem recompilar; `--importar-mascote` copia para lá
+                              `<dados>/miniutils/mascots/<chave>/` (com `sprite.toml`
+                              opcional), sem recompilar; `--import-mascot` copia para lá
       stroll.rs               subagentes andando na faixa do app Agentes com as mascotes
                               importadas: anda, para, faz uma animação, corre chamando
                               ferramenta, pula ao terminar (só números; o app desenha)
@@ -476,11 +476,11 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
   isola: um app que trava ou cai não derruba o hub. Custa um processo a mais por app
   ligado (exceção ao princípio 1, só para apps externos).
 - **Dados dos apps** (`src/core/appdata.rs`): uma pasta por app em
-  `<dados>/miniutils/app-data/<id>/` (ou `MINIUTILS_DADOS`), fora da pasta do app, para
+  `<dados>/miniutils/app-data/<id>/` (ou `MINIUTILS_DATA`), fora da pasta do app, para
   todos os tipos (o To-do também). O `[data]` do manifesto declara o que o app guarda
   (`kv`, `sqlite`, `files`), a versão do formato e a cota do banco; sem ele, o script tem
   `kv` e o app externo, `files`. O hub guarda a versão em `.miniutils.json` e, quando o app
-  sobe a versão, copia a pasta para `.copias/<id>/` antes de o app migrar (`fn migrate` no
+  sobe a versão, copia a pasta para `.backups/<id>/` antes de o app migrar (`fn migrate` no
   script; `data_version`/`migrated` no app externo) e a devolve se a migração falhar; dados
   mais novos que o app não são abertos. O banco do script (`apps/plugin/db.rs`) abre na
   primeira chamada, com `max_page_count` pela cota, `ATTACH` e `PRAGMA` de escrita
@@ -513,7 +513,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
   pela janela, o hub para o processo (no Windows, um executável rodando trava a pasta).
 - Exemplos: `examples/plugin-uptime/` (simples), `examples/plugin-top/` (tela e script),
   `examples/app-hello/` (app externo em Rust; desenvolvimento no README dele) e
-  `examples/loja/preparar.sh` (repositório, índice e chave; `--nova-versao` para testar a
+  `examples/store/prepare.sh` (repositório, índice e chave; `--new-version` para testar a
   atualização).
 - Limites conhecidos: um plugin com tela custa a compilação do `.slint` ao ligar e alguns
   MB de memória; o `tick` é de no mínimo 1 s; o script tem limite de 5 milhões de

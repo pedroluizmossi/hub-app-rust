@@ -1,16 +1,17 @@
-//! Registro do que acontece (avisos, erros, pânicos) num arquivo e no terminal.
+//! Log of what happens (warnings, errors, panics) to a file and to the terminal.
 //!
-//! O app fica na bandeja, sem terminal, e no Windows a versão final nem tem console: sem
-//! arquivo, um erro some sem rastro. Cada linha vai para os dois lugares:
-//! - o arquivo `miniutils.log` em `os::log_dir()` (`~/.local/state/miniutils/` no Linux,
-//!   `%LOCALAPPDATA%\miniutils\logs\` no Windows); passando de `MAX_SIZE`, ele vira
-//!   `miniutils.1.log` (a anterior é descartada) e um novo começa;
-//! - a saída de erro, para quem roda do terminal (no Linux, o journal também pega).
+//! The app lives in the tray, without a terminal, and on Windows the release build has no
+//! console at all: without a file, an error vanishes without a trace. Every line goes to
+//! both places:
+//! - the file `miniutils.log` in `os::log_dir()` (`~/.local/state/miniutils/` on Linux,
+//!   `%LOCALAPPDATA%\miniutils\logs\` on Windows); past `MAX_SIZE`, it becomes
+//!   `miniutils.1.log` (the previous one is discarded) and a new one starts;
+//! - standard error, for whoever runs it from a terminal (on Linux the journal gets it too).
 //!
-//! O código usa as macros do crate `log` (`log::warn!`, `log::info!`…). Do MiniUtils
-//! entra a partir de `info` (`debug` com `MINIUTILS_DEBUG=1` ou `--plugin-dev`, que assim
-//! mostra o `debug()` do script); das bibliotecas, só
-//! avisos e erros. Um pânico em qualquer thread também é registrado, com o lugar e a pilha.
+//! The code uses the macros of the `log` crate (`log::warn!`, `log::info!`…). MiniUtils
+//! itself logs from `info` up (`debug` with `MINIUTILS_DEBUG=1` or `--plugin-dev`, which
+//! thus shows the script's `debug()`); libraries, only warnings and errors. A panic in any
+//! thread is logged too, with its location and backtrace.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -19,13 +20,13 @@ use std::sync::Mutex;
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
-/// Tamanho a partir do qual o arquivo é trocado por um novo.
+/// Size from which the file is replaced by a new one.
 const MAX_SIZE: u64 = 1 << 20;
 const FILE_NAME: &str = "miniutils.log";
 const OLD_NAME: &str = "miniutils.1.log";
 
 struct Logger {
-    /// Nosso nível (`info` ou `debug`).
+    /// Our level (`info` or `debug`).
     level: LevelFilter,
     file: Mutex<Option<Sink>>,
 }
@@ -54,7 +55,7 @@ impl Sink {
         if self.size < MAX_SIZE {
             return Some(self);
         }
-        // passou do limite: fecha (o Windows não renomeia arquivo aberto) e começa outro
+        // over the limit: close it (Windows does not rename an open file) and start another
         let dir = self.dir;
         drop(self.file);
         Sink::open(&dir)
@@ -91,17 +92,17 @@ impl Log for Logger {
     }
 }
 
-/// "2026-11-11 14:03:22.120 WARN  core::config: mensagem\n" (sem o "miniutils::" do
-/// começo do módulo, que é igual em todas).
+/// "2026-11-11 14:03:22.120 WARN  core::config: message\n" (without the leading
+/// "miniutils::" of the module, which is the same on every line).
 fn format_line(time: &str, level: Level, target: &str, msg: &str) -> String {
     let prefix = concat!(env!("CARGO_CRATE_NAME"), "::");
     let target = target.strip_prefix(prefix).unwrap_or(target);
     format!("{time} {level:<5} {target}: {msg}\n")
 }
 
-/// Liga o registro e o aviso de pânico. Chamar uma vez, no começo do app (os comandos de
-/// terminal, como a loja e o `--help`, não precisam). `debug` também registra os detalhes
-/// (vale sozinho com `MINIUTILS_DEBUG=1`). Devolve onde fica o arquivo.
+/// Turns on logging and the panic hook. Call once, at the start of the app (terminal
+/// commands, such as the store and `--help`, don't need it). `debug` also logs the details
+/// (on its own with `MINIUTILS_DEBUG=1`). Returns where the file is.
 pub fn init(debug: bool) -> Option<PathBuf> {
     let debug = debug || std::env::var_os("MINIUTILS_DEBUG").is_some();
     let level = if debug { LevelFilter::Debug } else { LevelFilter::Info };
@@ -114,9 +115,9 @@ pub fn init(debug: bool) -> Option<PathBuf> {
     }
     std::panic::set_hook(Box::new(|info| {
         let thread = std::thread::current();
-        let name = thread.name().unwrap_or("sem nome");
+        let name = thread.name().unwrap_or("unnamed");
         let trace = std::backtrace::Backtrace::force_capture();
-        log::error!("pânico na thread \"{name}\": {info}\n{trace}");
+        log::error!("panic in thread \"{name}\": {info}\n{trace}");
         log::logger().flush();
     }));
     path
@@ -127,25 +128,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linha_sem_o_nome_do_crate() {
-        let l = format_line("2026-11-11 10:00:00.000", Level::Warn, "miniutils::core::config", "ops");
-        assert_eq!(l, "2026-11-11 10:00:00.000 WARN  core::config: ops\n");
+    fn line_without_the_crate_name() {
+        let l = format_line("2026-11-11 10:00:00.000", Level::Warn, "miniutils::core::config", "oops");
+        assert_eq!(l, "2026-11-11 10:00:00.000 WARN  core::config: oops\n");
         let l = format_line("t", Level::Error, "winit::window", "x");
         assert_eq!(l, "t ERROR winit::window: x\n");
     }
 
     #[test]
-    fn troca_o_arquivo_quando_enche() {
-        let dir = std::env::temp_dir().join(format!("miniutils-log-teste-{}", std::process::id()));
+    fn rotates_the_file_when_full() {
+        let dir = std::env::temp_dir().join(format!("miniutils-log-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut sink = Sink::open(&dir);
         let line = "x".repeat(1000) + "\n";
         for _ in 0..(MAX_SIZE / 1000 + 5) {
             sink = sink.and_then(|s| s.write(&line));
         }
-        assert!(dir.join(OLD_NAME).exists(), "o cheio virou o antigo");
+        assert!(dir.join(OLD_NAME).exists(), "the full file became the old one");
         let now = std::fs::metadata(dir.join(FILE_NAME)).unwrap().len();
-        assert!(now < MAX_SIZE, "o atual começou de novo");
+        assert!(now < MAX_SIZE, "the current one started over");
         drop(sink);
         std::fs::remove_dir_all(&dir).unwrap();
     }

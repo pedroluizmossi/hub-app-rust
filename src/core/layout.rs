@@ -1,15 +1,15 @@
-//! Grade do painel: cada app ocupa um retângulo de células numa grade de colunas × linhas.
+//! Panel grid: each app takes a rectangle of cells in a grid of columns × rows.
 //!
-//! No modo de edição o usuário arrasta e redimensiona um app; os outros ficam onde estão
-//! se couberem e, se não, vão para a primeira vaga livre (`settle`).
+//! In edit mode the user drags and resizes an app; the others stay where they are if they
+//! fit and, if not, go to the first free spot (`settle`).
 
 use serde::{Deserialize, Serialize};
 
-/// Limites da grade.
+/// Grid limits.
 pub const MAX_COLS: u32 = 6;
 pub const MAX_ROWS: u32 = 6;
 
-/// Posição e tamanho de um app, em células.
+/// Position and size of an app, in cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
     pub x: u32,
@@ -24,7 +24,7 @@ impl Rect {
     }
 }
 
-/// Células ocupadas de uma grade.
+/// Taken cells of a grid.
 struct Occupancy {
     cols: u32,
     rows: u32,
@@ -51,7 +51,7 @@ impl Occupancy {
         }
     }
 
-    /// Primeira vaga (linha a linha) para um app de `w`×`h`.
+    /// First free spot (row by row) for a `w`×`h` app.
     fn first_free(&self, w: u32, h: u32) -> Option<Rect> {
         if w > self.cols || h > self.rows {
             return None;
@@ -62,10 +62,10 @@ impl Occupancy {
     }
 }
 
-/// Arruma `items` numa grade `cols`×`rows`. `fixed` = (índice, retângulo) que não se
-/// move (o app que o usuário está arrastando). Os demais mantêm o lugar se couberem
-/// (empurrados para dentro da grade quando ela encolhe); os que não cabem vão, na ordem,
-/// para a primeira vaga livre. Devolve `None` se algum não couber em lugar nenhum.
+/// Arranges `items` in a `cols`×`rows` grid. `fixed` = (index, rectangle) that does not
+/// move (the app the user is dragging). The others keep their spot if they fit (pushed
+/// inside the grid when it shrinks); those that don't fit go, in order, to the first free
+/// spot. Returns `None` if any of them fits nowhere.
 pub fn settle(items: &[Rect], fixed: Option<(usize, Rect)>, cols: u32, rows: u32) -> Option<Vec<Rect>> {
     let mut occ = Occupancy::new(cols, rows);
     let mut out = items.to_vec();
@@ -98,9 +98,9 @@ pub fn settle(items: &[Rect], fixed: Option<(usize, Rect)>, cols: u32, rows: u32
     Some(out)
 }
 
-/// Acrescenta `want` ao lado de `items` (já arrumados): fica onde pediu se couber; senão
-/// vai para a primeira vaga com o mesmo tamanho, depois como 1×1; sem nenhuma, a grade
-/// ganha linhas. Devolve o lugar e o número de linhas.
+/// Adds `want` next to `items` (already arranged): it stays where asked if it fits;
+/// otherwise it goes to the first free spot with the same size, then as 1×1; with none,
+/// the grid gets more rows. Returns the spot and the number of rows.
 pub fn add(items: &[Rect], want: Rect, cols: u32, rows: u32) -> (Rect, u32) {
     let (w, h) = (want.w.clamp(1, cols), want.h.max(1));
     let mut rows = rows.max(1);
@@ -126,8 +126,8 @@ pub fn add(items: &[Rect], want: Rect, cols: u32, rows: u32) -> (Rect, u32) {
     }
 }
 
-/// Empacota os apps na ordem, preenchendo linha a linha (usado para migrar a config
-/// antiga, que só guardava largura e altura). Devolve as posições e as linhas usadas.
+/// Packs the apps in order, filling row by row (used to migrate the old config, which
+/// only kept width and height). Returns the positions and the rows used.
 pub fn pack(items: &[(u32, u32)], columns: u32) -> (Vec<Rect>, u32) {
     let cols = columns.max(1) as usize;
     let mut used: Vec<Vec<bool>> = Vec::new();
@@ -164,27 +164,27 @@ mod tests {
     }
 
     #[test]
-    fn pack_lado_a_lado_e_empilhado() {
+    fn pack_side_by_side_and_stacked() {
         assert_eq!(pack(&[(1, 1), (1, 1)], 2), (vec![r(0, 0, 1, 1), r(1, 0, 1, 1)], 1));
         assert_eq!(pack(&[(2, 1), (2, 1)], 2), (vec![r(0, 0, 2, 1), r(0, 1, 2, 1)], 2));
     }
 
     #[test]
-    fn pack_preenche_buracos_e_limita_largura() {
+    fn pack_fills_holes_and_limits_width() {
         assert_eq!(pack(&[(1, 2), (1, 1), (1, 1)], 2), (vec![r(0, 0, 1, 2), r(1, 0, 1, 1), r(1, 1, 1, 1)], 2));
         assert_eq!(pack(&[(5, 1)], 3), (vec![r(0, 0, 3, 1)], 1));
         assert_eq!(pack(&[], 2), (vec![], 0));
     }
 
     #[test]
-    fn settle_mantem_quem_cabe() {
+    fn settle_keeps_what_fits() {
         let items = [r(0, 0, 2, 1), r(0, 1, 2, 1), r(2, 0, 1, 2)];
         assert_eq!(settle(&items, None, 3, 2), Some(items.to_vec()));
     }
 
     #[test]
-    fn settle_empurra_quem_colide_para_a_vaga_livre() {
-        // docker (0,0,2,1) e vitals (2,0,1,2); mover vitals para (0,0) 1×1 empurra o docker
+    fn settle_pushes_colliding_apps_to_a_free_spot() {
+        // docker (0,0,2,1) and vitals (2,0,1,2); moving vitals to (0,0) 1×1 pushes docker
         let items = [r(0, 0, 2, 1), r(2, 0, 1, 2)];
         let out = settle(&items, Some((1, r(0, 0, 1, 1))), 3, 2).unwrap();
         assert_eq!(out[1], r(0, 0, 1, 1));
@@ -192,31 +192,31 @@ mod tests {
     }
 
     #[test]
-    fn settle_recusa_quando_nao_cabe() {
+    fn settle_refuses_when_it_does_not_fit() {
         let items = [r(0, 0, 2, 2), r(2, 0, 1, 2)];
-        // docker ocupando a grade toda: vitals não tem onde ficar
+        // docker taking the whole grid: vitals has nowhere to go
         assert_eq!(settle(&items, Some((0, r(0, 0, 3, 2))), 3, 2), None);
-        // fora da grade
+        // outside the grid
         assert_eq!(settle(&items, Some((1, r(2, 1, 1, 2))), 3, 2), None);
     }
 
     #[test]
-    fn settle_encolhe_a_grade() {
-        // de 3 para 2 colunas: o vitals da coluna 2 desce para a primeira vaga
+    fn settle_shrinks_the_grid() {
+        // from 3 to 2 columns: vitals in column 2 moves down to the first free spot
         let items = [r(0, 0, 2, 1), r(2, 0, 1, 1)];
         assert_eq!(settle(&items, None, 2, 2), Some(vec![r(0, 0, 2, 1), r(0, 1, 1, 1)]));
-        // de 2 linhas para 1 com dois apps de largura toda: não cabe
+        // from 2 rows to 1 with two full-width apps: does not fit
         assert_eq!(settle(&[r(0, 0, 2, 1), r(0, 1, 2, 1)], None, 2, 1), None);
     }
 
     #[test]
-    fn add_fica_no_lugar_usa_vaga_encolhe_ou_cresce() {
+    fn add_stays_put_uses_a_free_spot_shrinks_or_grows() {
         assert_eq!(add(&[r(0, 0, 1, 1)], r(1, 0, 1, 1), 2, 1), (r(1, 0, 1, 1), 1));
-        // lugar pedido ocupado: primeira vaga
+        // asked spot taken: first free spot
         assert_eq!(add(&[r(0, 0, 1, 1)], r(0, 0, 1, 1), 2, 1), (r(1, 0, 1, 1), 1));
-        // 2×1 não cabe ao lado; 1×1 cabe
+        // 2×1 does not fit beside it; 1×1 does
         assert_eq!(add(&[r(0, 0, 1, 1)], r(0, 0, 2, 1), 2, 1), (r(1, 0, 1, 1), 1));
-        // grade cheia: ganha uma linha
+        // full grid: gets a new row
         assert_eq!(add(&[r(0, 0, 2, 1)], r(0, 0, 2, 1), 2, 1), (r(0, 1, 2, 1), 2));
     }
 }

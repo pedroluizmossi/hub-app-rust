@@ -1,59 +1,60 @@
-//! Mini-apps dos plugins da comunidade (ver `core/plugins.rs` e `store.rs`).
+//! Mini-apps of community plugins (see `core/plugins.rs` and `store.rs`).
 //!
-//! O app externo (`[app]`, acesso total) usa a mesma tela e o mesmo estado dos plugins com
-//! tela; no lugar do script, um processo próprio (`apps/external.rs`).
+//! The external app (`[app]`, full access) uses the same screen and the same state as
+//! plugins with a screen; instead of the script, a process of its own (`apps/external.rs`).
 //!
-//! Dois tipos sem código nativo:
-//! - **simples** (`[run]`): o host roda o comando do manifesto (allowlist, sem shell) a cada
-//!   `every` segundos e mostra a saída na tela genérica (`ui/plugin.slint`);
-//! - **com tela própria** (`[ui]`): o `view.slint` do plugin é interpretado
-//!   (`slint-interpreter`) e encaixado na célula por um `ComponentContainer`; a lógica é o
-//!   `main.rhai`, que roda numa thread só dele e conversa com a tela por mensagens.
+//! Two kinds without native code:
+//! - **simple** (`[run]`): the host runs the manifest's command (allowlist, no shell) every
+//!   `every` seconds and shows the output on the generic screen (`ui/plugin.slint`);
+//! - **with its own screen** (`[ui]`): the plugin's `view.slint` is interpreted
+//!   (`slint-interpreter`) and embedded in the cell by a `ComponentContainer`; the logic is
+//!   `main.rhai`, which runs on a thread of its own and talks to the screen through messages.
 //!
-//! O script nunca toca a UI nem o disco. O que ele pode, pela API abaixo: mudar
-//! propriedades da tela, dizer o humor, rodar os programas da allowlist (com prazo),
-//! consultar os domínios de `[permissions] net`, receber as leituras dos provedores de
-//! `uses`, guardar dados (chave-valor, num arquivo que o host grava, e um banco SQLite que o
-//! host abre, os dois na pasta de dados do app: `core/appdata.rs`), mandar notificação,
-//! contar fatos para a conversa entre mascotes e ler as próprias opções.
+//! The script never touches the UI or the disk. What it can do, through the API below:
+//! change properties of the screen, set the mood, run the allowlisted programs (with a time
+//! limit), query the domains of `[permissions] net`, get the readings of the `uses`
+//! providers, store data (key-value, in a file the host writes, and an SQLite database the
+//! host opens, both in the app's data folder: `core/appdata.rs`), send notifications, tell
+//! facts for the chat between mascots and read its own options.
 //!
-//! API do script (`main.rhai`):
+//! Script API (`main.rhai`):
 //! ```text
-//! fn start()                  ao ligar          this.settings = opções do app (mapa)
-//! fn tick()                   a cada [ui] every
-//! fn action(name, arg)        a tela chamou `callback action(string, string)`
-//! fn on_event(topic, data)    leitura de um provedor de `uses` ("sys", "docker"…), em mapa;
-//!                             "procs" traz os processos mais pesados (by_cpu, by_mem e
-//!                             count), igual no Linux e no Windows: use-o em vez do `ps`
-//! fn settings()               o usuário mudou uma opção (this.settings já é a nova)
-//! ui("prop", valor)           muda uma propriedade da tela (texto, número, bool, lista, mapa)
-//! mood("happy")               humor: sleep, idle, happy, busy, alarm
-//! summary("texto")            linha do tooltip da bandeja
-//! run(["git", "status"])     roda um programa da allowlist: #{ ok, out, err } (até 30 s)
-//! run_async(["git"], "fim")   o mesmo sem esperar: chama fn fim(result) depois
-//! http_get(url)               GET https num domínio de net: #{ ok, status, body, err }
-//! http_get_async(url, "fim")  o mesmo sem esperar (até 4 tarefas ao mesmo tempo)
-//! parse_json(texto)  to_json(valor)
-//! store_get("k")  store_set("k", valor)   dados que sobrevivem a desligar (() apaga);
-//!                             kv no [data] (sem [data], o script já tem)
+//! fn start()                  on enable         this.settings = the app's options (map)
+//! fn tick()                   every [ui] every
+//! fn action(name, arg)        the screen called `callback action(string, string)`
+//! fn on_event(topic, data)    reading from a `uses` provider ("sys", "docker"…), as a map;
+//!                             "procs" brings the heaviest processes (by_cpu, by_mem and
+//!                             count), the same on Linux and Windows: use it instead of `ps`
+//! fn settings()               the user changed an option (this.settings is already the new one)
+//! ui("prop", value)           changes a property of the screen (text, number, bool, list, map)
+//! mood("happy")               mood: sleep, idle, happy, busy, alarm
+//! summary("text")             line in the tray tooltip
+//! run(["git", "status"])     runs an allowlisted program: #{ ok, out, err } (up to 30 s)
+//! run_async(["git"], "done")  the same without waiting: calls fn done(result) afterwards
+//! http_get(url)               https GET on a net domain: #{ ok, status, body, err }
+//! http_get_async(url, "done") the same without waiting (up to 4 tasks at the same time)
+//! parse_json(text)  to_json(value)
+//! store_get("k")  store_set("k", value)   data that survives turning off (() deletes);
+//!                             kv in [data] (without [data], the script already has it)
 //! db_batch(sql)  db_exec(sql, [params])  db_query(sql, [params])
-//!                             banco SQLite (sqlite no [data]; detalhes em db.rs)
-//! fn migrate(de, para)        o [data] version subiu: migre os dados antes de start()
-//!                             (erro = o host devolve a cópia de antes e o app não começa)
-//! fact("strain", "CPU", 93)   fato para a conversa: trouble, strain, forecast, recovered, poked
-//! notify("título", "texto")
-//! now()                       segundos desde 1970
+//!                             SQLite database (sqlite in [data]; details in db.rs)
+//! fn migrate(from, to)        the [data] version went up: migrate the data before start()
+//!                             (error = the host restores the copy from before and the app
+//!                             doesn't start)
+//! fact("strain", "CPU", 93)   fact for the chat: trouble, strain, forecast, recovered, poked
+//! notify("title", "text")
+//! now()                       seconds since 1970
 //! ```
-//! Estado entre chamadas fica em `this` (ex.: `this.count += 1`). O host já conta à conversa
-//! as mudanças de humor (alarme, agitado, voltou ao normal) e as cutucadas na mascote.
+//! State between calls lives in `this` (e.g. `this.count += 1`). The host already tells the
+//! chat about mood changes (alarm, busy, back to normal) and pokes on the mascot.
 //!
-//! A tela (`view.slint`) exporta `component Main`; pode importar `std-widgets.slint`,
-//! `miniutils.slint` (o `Theme`, abaixo) e as telas de `ui/` do próprio plugin; imagens só
-//! de `assets/` (`@image-url("assets/logo.png")`). O host preenche, se a tela declarar:
-//! `in property <Theme> theme` (cores do tema do app e fontes do visual: `theme.font-ui`,
-//! `font-mono`, `font-title`), `in property <image> mascot`, `in property <string> mood`.
-//! O fundo da tela é transparente e o texto já usa a fonte da interface do visual (ver
-//! `compile_view`).
+//! The screen (`view.slint`) exports `component Main`; it can import `std-widgets.slint`,
+//! `miniutils.slint` (the `Theme`, below) and the screens in the plugin's own `ui/`; images
+//! only from `assets/` (`@image-url("assets/logo.png")`). The host fills in, if the screen
+//! declares them: `in property <Theme> theme` (colors of the app's theme and fonts of the
+//! look: `theme.font-ui`, `font-mono`, `font-title`), `in property <image> mascot`,
+//! `in property <string> mood`. The screen's background is transparent and the text already
+//! uses the look's interface font (see `compile_view`).
 
 mod db;
 mod script;
@@ -84,18 +85,19 @@ use crate::core::registry::Registry;
 use crate::core::wake::Waker;
 use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, sprites};
+use crate::tr;
 use crate::ui::{HubWindow, PluginApps, PluginCard};
 use db::DbSpec;
 use script::{ScriptEnv, ScriptIn, ScriptOut, engine, event_data, from_app, json_to_dyn, script_loop};
 use view::{FONT_PROP, compile_view, theme_value};
 pub use view::check_view;
 
-// ---- conjunto de plugins carregados (thread da UI) -----------------------------------
+// ---- set of loaded plugins (UI thread) -----------------------------------------------
 
 struct Loaded {
     id: String,
     app: Rc<RefCell<PluginMini>>,
-    /// Muda quando os arquivos do plugin mudam (atualização): aí o app é recriado.
+    /// Changes when the plugin's files change (an update): then the app is recreated.
     stamp: u64,
 }
 
@@ -103,7 +105,7 @@ struct Loaded {
 struct PluginSet {
     cards: Option<Rc<VecModel<PluginCard>>>,
     loaded: Vec<Loaded>,
-    /// Modo dev: confere a pasta do plugin a cada segundo e recarrega quando muda.
+    /// Dev mode: checks the plugin folder every second and reloads when it changes.
     dev_watch: Option<Timer>,
 }
 
@@ -115,9 +117,10 @@ fn find_app(id: &str) -> Option<Rc<RefCell<PluginMini>>> {
     SET.with(|s| s.borrow().loaded.iter().find(|l| l.id == id).map(|l| l.app.clone()))
 }
 
-/// Relê a pasta dos plugins e acerta o registro: acrescenta os novos, recria os que
-/// mudaram e tira os removidos. `startup` = na montagem do hub (o registro liga os apps
-/// depois); fora dela, quem estava ligado é religado na hora. Devolve se algo mudou.
+/// Reads the plugins folder again and updates the registry: adds the new ones, recreates
+/// the changed ones and takes out the removed ones. `startup` = while the hub is being set
+/// up (the registry enables the apps afterwards); otherwise, whatever was enabled is
+/// enabled again right away. Returns whether anything changed.
 pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool) -> bool {
     let cards = SET.with(|s| s.borrow().cards.clone()).unwrap_or_else(|| {
         let cards = Rc::new(VecModel::<PluginCard>::default());
@@ -135,7 +138,7 @@ pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool)
     let live_ui = (!startup).then_some(ui);
     let mut changed = false;
 
-    // removidos (ou mudados: saem e entram de novo)
+    // removed (or changed: they leave and come back)
     let stamps: Vec<(String, u64)> = installed.iter().map(|p| (p.manifest.id.clone(), stamp(&p.dir))).collect();
     let gone: Vec<String> = SET.with(|s| {
         s.borrow()
@@ -153,14 +156,14 @@ pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool)
         }
         changed = true;
     }
-    // novos
+    // new ones
     for (plugin, (id, st)) in installed.into_iter().zip(stamps) {
         if SET.with(|s| s.borrow().loaded.iter().any(|l| l.id == id)) {
             continue;
         }
-        // o plugin em desenvolvimento já entra ligado, na primeira página
+        // the plugin under development comes in already enabled, on the first page
         if plugins::dev_dir() == Some(plugin.dir.as_path()) {
-            log::info!("plugin-dev: {id} carregado de {}", plugin.dir.display());
+            log::info!("plugin-dev: {id} loaded from {}", plugin.dir.display());
             let mut cfg = host.config.borrow_mut();
             if cfg.page_of(&id).is_none() {
                 cfg.move_to_page(&id, 0);
@@ -180,7 +183,7 @@ pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool)
     changed
 }
 
-/// Impressão dos arquivos do plugin (para notar uma atualização).
+/// Fingerprint of the plugin's files (to notice an update).
 fn stamp(dir: &Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -188,7 +191,7 @@ fn stamp(dir: &Path) -> u64 {
     for rel in plugins::files(dir).unwrap_or_default() {
         rel.hash(&mut h);
         if plugins::is_bin(&rel) {
-            // executável: tamanho e data bastam (e não lê megabytes a cada segundo)
+            // executable: size and date are enough (and it doesn't read megabytes every second)
             let meta = std::fs::metadata(dir.join(&rel)).ok();
             meta.map(|m| (m.len(), m.modified().ok())).hash(&mut h);
         } else {
@@ -198,24 +201,24 @@ fn stamp(dir: &Path) -> u64 {
     h.finish()
 }
 
-/// Modo dev: a cada segundo, se algum arquivo do plugin mudou, relê os plugins (os erros
-/// da tela e do script saem no terminal).
+/// Dev mode: every second, if any of the plugin's files changed, reads the plugins again
+/// (the screen's and the script's errors go to the terminal).
 fn watch_dev(dir: &'static Path) -> Timer {
     let timer = Timer::default();
     let last = std::cell::Cell::new(stamp(dir));
     timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
         let now = stamp(dir);
         if now != last.replace(now) {
-            log::info!("plugin-dev: arquivos mudaram, recarregando");
+            log::info!("plugin-dev: files changed, reloading");
             crate::hub::request_plugin_reload();
         }
     });
     timer
 }
 
-/// Para a lógica de um plugin (o processo do app externo, a thread do script) antes de a
-/// loja trocar ou apagar a pasta dele ou os dados (no Windows, um executável rodando trava
-/// a pasta; o script segura o banco). Ver `released` e `resume`.
+/// Stops a plugin's logic (the external app's process, the script thread) before the store
+/// replaces or deletes its folder or its data (on Windows, a running executable locks the
+/// folder; the script holds the database). See `released` and `resume`.
 pub fn suspend(id: &str) {
     if let Some(a) = find_app(id)
         && let Some(full) = &a.borrow().full
@@ -224,13 +227,14 @@ pub fn suspend(id: &str) {
     }
 }
 
-/// A lógica parada por `suspend` já soltou os arquivos.
+/// The logic stopped by `suspend` has already let go of the files.
 pub fn released(id: &str) -> bool {
     find_app(id).is_none_or(|a| a.borrow().data_released())
 }
 
-/// Depois da loja: religa um app ligado que ficou parado (a loja falhou, ou não trocou
-/// nada). Se a loja trocou o app, o novo já está rodando e nada acontece.
+/// After the store: restarts an enabled app that was left stopped (the store failed, or
+/// replaced nothing). If the store replaced the app, the new one is already running and
+/// nothing happens.
 pub fn resume(id: &str) {
     let Some(a) = find_app(id) else { return };
     let mut a = a.borrow_mut();
@@ -243,7 +247,7 @@ pub fn resume(id: &str) {
     }
 }
 
-/// Os callbacks de `PluginApps` são de todos os plugins: o id diz de qual.
+/// The `PluginApps` callbacks are shared by all plugins: the id says which one.
 fn bind(ui: &HubWindow) {
     let g = ui.global::<PluginApps>();
     let w = ui.as_weak();
@@ -268,11 +272,11 @@ fn bind(ui: &HubWindow) {
     });
 }
 
-/// Confere tela e script antes de instalar (a loja chama).
+/// Checks the screen and the script before installing (the store calls this).
 pub fn check_files(dir: &Path, _ui: &Ui) -> Result<(), String> {
     check_view(dir)?;
     let script = std::fs::read_to_string(dir.join("main.rhai")).map_err(|e| format!("main.rhai: {e}"))?;
-    let env = ScriptEnv { exec: Exec::new("check", &[]), net: Vec::new(), data: None, kv: true, db: None, migrate: None, back: None };
+    let env = ScriptEnv { exec: Exec::new("check", &[]), net: Vec::new(), data: None, kv: true, db: None, migrate: None, back: None, catalog: Default::default() };
     engine(Default::default(), env, Default::default(), Default::default(), Default::default())
         .compile(&script)
         .map_err(|e| format!("main.rhai: {e}"))?;
@@ -280,21 +284,21 @@ pub fn check_files(dir: &Path, _ui: &Ui) -> Result<(), String> {
 }
 
 
-// ---- o mini-app ---------------------------------------------------------------------
+// ---- the mini-app -------------------------------------------------------------------
 
-/// O que o host manda à lógica de um plugin com tela (script ou app externo).
+/// What the host sends to the logic of a plugin with a screen (script or external app).
 enum Input {
     Tick,
     Action(String, String),
-    /// As opções do app, num objeto JSON.
+    /// The app's options, as a JSON object.
     Settings(serde_json::Value),
-    /// Leitura de um provedor de `uses`: nome do tópico e dados.
+    /// Reading from a `uses` provider: topic name and data.
     Event(String, serde_json::Value),
-    /// A janela abriu (só o app externo recebe).
+    /// The window opened (only the external app gets it).
     Shown,
 }
 
-/// Para onde vão as entradas: a thread do script ou o processo do app externo.
+/// Where the inputs go: the script thread or the external app's process.
 enum Sink {
     Script(Sender<ScriptIn>),
     Process(external::Process),
@@ -323,8 +327,8 @@ impl Sink {
         }
     }
 
-    /// Para: a thread do script (as tarefas assíncronas dela também têm o canal, então
-    /// fechar o nosso lado não basta) ou o processo (`stop`, e encerra se não sair).
+    /// Stops: the script thread (its async tasks also hold the channel, so closing our side
+    /// isn't enough) or the process (`stop`, and kills it if it doesn't exit).
     fn stop(self) {
         match self {
             Sink::Script(tx) => {
@@ -335,21 +339,21 @@ impl Sink {
     }
 }
 
-/// O que só um plugin com tela própria (ou um app externo) tem.
+/// What only a plugin with its own screen (or an external app) has.
 struct Full {
     def: ComponentDefinition,
-    /// O `main.rhai` (`None` = app externo).
+    /// The `main.rhai` (`None` = external app).
     source: Option<String>,
-    /// A instância que está na tela agora (o container recria ao trocar de página).
+    /// The instance on screen now (the container recreates it when the page changes).
     instance: Rc<RefCell<Option<ComponentInstance>>>,
-    /// Últimos valores postos na tela, para repor numa instância nova.
+    /// Last values put on the screen, to restore on a new instance.
     values: Rc<RefCell<HashMap<String, Value>>>,
-    /// A lógica rodando (`None` = desligado, ou o processo saiu).
+    /// The running logic (`None` = off, or the process exited).
     sink: Rc<RefCell<Option<Sink>>>,
-    /// Muda a cada início: recados de um processo antigo são ignorados.
+    /// Changes on every start: messages from an old process are ignored.
     generation: Rc<Cell<u64>>,
-    /// A lógica da última vez ainda roda (thread do script ou processo): `false` quando
-    /// soltou os arquivos de dados.
+    /// The logic from last time is still running (script thread or process): `false` once
+    /// it let go of the data files.
     alive: RefCell<Option<Arc<AtomicBool>>>,
     factory: slint::ComponentFactory,
 }
@@ -379,28 +383,28 @@ pub struct PluginMini {
     waker: Waker,
     timer: Timer,
     full: Option<Full>,
-    /// Plugin simples: última saída (ou o erro) e quando chegou.
+    /// Simple plugin: last output (or the error) and when it arrived.
     last: Option<(Result<String, String>, Instant)>,
     running: bool,
-    /// Plugin com tela: erro da tela ou do script, humor e resumo que o script deu.
+    /// Plugin with a screen: error of the screen or the script, mood and summary the script gave.
     error: Option<String>,
     script_mood: Mood,
     script_summary: String,
     mood: Mood,
     face: HeaderMascot,
-    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    /// Facts for the chat between mascots, until the hub collects them.
     facts: Vec<Fact>,
-    /// Migração dos dados em curso: de que versão para qual (`core/appdata.rs`).
+    /// Data migration in progress: from which version to which (`core/appdata.rs`).
     migrating: Option<(u32, u32)>,
 }
 
 impl PluginMini {
-    #[allow(deprecated)] // ComponentFactory: experimental no Slint 1.18
+    #[allow(deprecated)] // ComponentFactory: experimental in Slint 1.18
     fn create(host: Rc<Host>, plugin: Plugin, dir: &Path, cards: Rc<VecModel<PluginCard>>, waker: Waker) -> Rc<RefCell<Self>> {
         let seed = 20 + cards.row_count() as u32;
         let mut error: Option<String> = None;
         let full = (plugin.ui.is_some() || plugin.app.is_some()).then_some(()).and_then(|_| {
-            // app externo: sem script (a lógica é o executável)
+            // external app: no script (the logic is the executable)
             let source = match plugin.ui {
                 Some(_) => std::fs::read_to_string(dir.join("main.rhai")).map(Some).map_err(|e| format!("main.rhai: {e}")),
                 None => Ok(None),
@@ -443,7 +447,7 @@ impl PluginMini {
             facts: Vec::new(),
             migrating: None,
         }));
-        // fábrica da tela: o container chama quando a célula aparece
+        // screen factory: the container calls it when the cell shows up
         {
             let mut a = app.borrow_mut();
             if let Some(full) = a.full.as_mut() {
@@ -470,7 +474,7 @@ impl PluginMini {
                 });
             }
         }
-        // o relógio do plugin: comando (simples), `tick()` (com tela) ou "tick" (app externo)
+        // the plugin's clock: command (simple), `tick()` (with a screen) or "tick" (external app)
         let every = {
             let p = &app.borrow().plugin;
             match (&p.run, &p.ui, &p.app) {
@@ -488,13 +492,13 @@ impl PluginMini {
                     a.borrow_mut().refresh_now();
                 }
             });
-            // desligado não roda nada: `enable` liga o timer
+            // when off nothing runs: `enable` starts the timer
             a.timer.stop();
         }
         app
     }
 
-    /// Roda já: o comando (simples) ou o `tick()` do script (com tela).
+    /// Runs now: the command (simple) or the script's `tick()` (with a screen).
     fn refresh_now(&mut self) {
         if let Some(full) = &self.full {
             full.send(Input::Tick);
@@ -513,8 +517,8 @@ impl PluginMini {
         });
     }
 
-    /// Botão de atualizar do cartão: um app externo que parou (ou deu erro) começa de
-    /// novo; o resto roda já.
+    /// The card's refresh button: an external app that stopped (or failed) starts again;
+    /// the rest runs now.
     fn refresh_button(&mut self) {
         let stopped = self.full.as_ref().is_some_and(|f| !f.running());
         if self.plugin.app.is_some() && (stopped || self.error.is_some()) {
@@ -525,7 +529,7 @@ impl PluginMini {
         }
     }
 
-    /// Liga a lógica de um plugin com tela: a thread do script ou o processo do app externo.
+    /// Starts the logic of a plugin with a screen: the script thread or the external app's process.
     fn start_logic(&mut self) {
         let Some(full) = &self.full else { return };
         full.stop();
@@ -533,7 +537,7 @@ impl PluginMini {
         full.generation.set(generation);
         self.error = None;
         let source = full.source.clone();
-        // a versão dos dados antes de tudo: nova = migrar (com cópia); mais nova que o app = parar
+        // the data version before anything: new = migrate (with a copy); newer than the app = stop
         let spec = self.plugin.data();
         let prep = appdata::prepare(&appdata::root(), &self.plugin.manifest.id, spec.version);
         self.migrating = match prep {
@@ -556,7 +560,7 @@ impl PluginMini {
         }
     }
 
-    /// A thread do script (plugin com tela).
+    /// The script thread (plugin with a screen).
     fn start_script(&self, source: String) -> Result<Sink, String> {
         let (tx, rx) = channel();
         let m = &self.plugin.manifest;
@@ -569,6 +573,7 @@ impl PluginMini {
             db: spec.has(Kind::Sqlite).then(|| DbSpec { path: dir.join(appdata::DB_FILE), max_bytes: spec.max_bytes() }),
             migrate: self.migrating,
             back: Some(tx.clone()),
+            catalog: Arc::new(crate::core::i18n::Catalog::of_app(&self.plugin.dir, crate::core::i18n::current())),
         };
         let alive = Arc::new(AtomicBool::new(true));
         if let Some(full) = &self.full {
@@ -583,24 +588,24 @@ impl PluginMini {
                 script_loop(source, env, settings, rx, move |batch| {
                     let id = id.clone();
                     let _ = slint::invoke_from_event_loop(move || deliver(&id, None, batch));
-                    // o hub atualiza humor e bandeja mesmo com a janela fechada
+                    // the hub updates the mood and the tray even with the window closed
                     waker.wake();
                 });
-                // o banco e o store.json fecharam junto com o laço
+                // the database and store.json closed together with the loop
                 alive.store(false, Ordering::SeqCst);
             })
-            .map_err(|e| format!("sem thread para o script: {e}"))?;
+            .map_err(|e| tr!("no thread for the script: {}", e))?;
         Ok(Sink::Script(tx))
     }
 
-    /// O processo do app externo. As mensagens dele se juntam numa leva e vão para a
-    /// thread da UI de uma vez (um app que manda muitas linhas não enche o event loop).
+    /// The external app's process. Its messages are gathered into a batch and go to the UI
+    /// thread at once (an app that sends many lines doesn't flood the event loop).
     fn start_process(&self, generation: u64) -> Result<Sink, String> {
         let m = &self.plugin.manifest;
         let program = self
             .plugin
             .binary_path()
-            .ok_or_else(|| format!("este app não tem versão para {}", plugins::this_os()))?;
+            .ok_or_else(|| tr!("this app has no version for {}", plugins::this_os()))?;
         let data_dir = appdata::dir(&m.id);
         let launch = external::Launch { id: &m.id, program: &program, dir: &self.plugin.dir, data_dir: &data_dir };
         let pending: Arc<Mutex<Vec<ScriptOut>>> = Default::default();
@@ -635,12 +640,13 @@ impl PluginMini {
             os: plugins::this_os(),
             data_dir: data_dir.to_string_lossy().into_owned(),
             data_version: self.migrating.map_or(self.plugin.data().version, |(from, _)| from),
+            lang: crate::core::i18n::current().tag(),
             settings: self.settings_json(),
         });
         Ok(Sink::Process(process))
     }
 
-    /// As opções do app, para o script ou o app externo (objeto JSON).
+    /// The app's options, for the script or the external app (JSON object).
     fn settings_json(&self) -> serde_json::Value {
         let cfg = self.host.config.borrow();
         let mut m = serde_json::Map::new();
@@ -656,7 +662,7 @@ impl PluginMini {
         serde_json::Value::Object(m)
     }
 
-    /// Aplica o que o script mandou (thread da UI).
+    /// Applies what the script sent (UI thread).
     fn apply(&mut self, batch: Vec<ScriptOut>, ui: &HubWindow) {
         let before = self.mood;
         for msg in batch {
@@ -680,7 +686,7 @@ impl PluginMini {
                 ScriptOut::Migrated(r) => self.migrated(r),
                 ScriptOut::Exited(e) => {
                     log::warn!("app {}: {e}", self.plugin.manifest.id);
-                    // saiu no meio da migração: a cópia de antes volta
+                    // exited in the middle of the migration: the copy from before is restored
                     let e = match self.migrating {
                         Some(_) => self.undo_migration(&e),
                         None => e,
@@ -696,22 +702,22 @@ impl PluginMini {
         self.push(ui);
     }
 
-    /// A lógica disse que a migração terminou (ou o script disse que falhou).
+    /// The logic said the migration finished (or the script said it failed).
     fn migrated(&mut self, r: Result<u32, String>) {
         let id = self.plugin.manifest.id.clone();
         let Some((from, to)) = self.migrating else {
-            log::warn!("app {id}: \"migrated\" sem migração pendente; ignorado");
+            log::warn!("app {id}: \"migrated\" without a pending migration; ignored");
             return;
         };
         match r {
             Ok(v) if v == to => {
                 self.migrating = None;
                 match appdata::set_version(&appdata::dir(&id), to) {
-                    Ok(()) => log::info!("app {id}: dados migrados da versão {from} para {to}"),
-                    Err(e) => self.error = Some(format!("dados migrados, mas a versão não foi gravada: {e}")),
+                    Ok(()) => log::info!("app {id}: data migrated from version {from} to {to}"),
+                    Err(e) => self.error = Some(tr!("data migrated, but the version wasn't saved: {}", e)),
                 }
             }
-            Ok(v) => log::warn!("app {id}: migrou para a versão {v}, mas o manifesto diz {to}; a migração continua pendente"),
+            Ok(v) => log::warn!("app {id}: migrated to version {v}, but the manifest says {to}; the migration is still pending"),
             Err(e) => {
                 let msg = self.undo_migration(&e);
                 self.error = Some(msg);
@@ -722,18 +728,18 @@ impl PluginMini {
         }
     }
 
-    /// Devolve a cópia de antes da migração; o texto do erro para o cartão.
+    /// Restores the copy from before the migration; returns the error text for the card.
     fn undo_migration(&mut self, why: &str) -> String {
         let (id, (from, to)) = (self.plugin.manifest.id.clone(), self.migrating.take().unwrap_or_default());
-        log::warn!("app {id}: a migração dos dados ({from} → {to}) falhou: {why}");
+        log::warn!("app {id}: the data migration ({from} → {to}) failed: {why}");
         match appdata::restore(&appdata::root(), &id) {
-            Ok(()) => format!("a migração dos dados (versão {from} → {to}) falhou e os dados voltaram como estavam: {why}"),
-            Err(e) => format!("a migração dos dados (versão {from} → {to}) falhou ({why}) e a cópia não voltou: {e}"),
+            Ok(()) => tr!("the data migration (version {} → {}) failed and the data was restored as it was: {}", from, to, why),
+            Err(e) => tr!("the data migration (version {} → {}) failed ({}) and the copy wasn't restored: {}", from, to, why, e),
         }
     }
 
-    /// Recalcula o humor: saiu do alarme, comemora; mudou de verdade, vira fato para a
-    /// conversa.
+    /// Recomputes the mood: out of alarm, it celebrates; a real change becomes a fact for
+    /// the chat.
     fn mood_changed(&mut self, before: Mood) {
         self.mood = self.compute_mood();
         if before == Mood::Alarm && self.mood != Mood::Alarm {
@@ -744,7 +750,7 @@ impl PluginMini {
         }
     }
 
-    /// A mascote do plugin na conversa entre mascotes.
+    /// The plugin's mascot in the chat between mascots.
     fn voice(&self) -> Voice {
         let m = &self.plugin.manifest;
         Voice {
@@ -756,17 +762,17 @@ impl PluginMini {
         }
     }
 
-    /// Põe um valor na tela do plugin e guarda para uma instância nova.
+    /// Puts a value on the plugin's screen and keeps it for a new instance.
     fn set_view(&self, name: &str, v: Value) {
         let Some(full) = &self.full else { return };
         if let Some(inst) = full.instance.borrow().as_ref()
             && let Err(e) = inst.set_property(name, v.clone()) {
-                log::warn!("plugin {}: propriedade {name}: {e}", self.plugin.manifest.id);
+                log::warn!("plugin {}: property {name}: {e}", self.plugin.manifest.id);
             }
         full.values.borrow_mut().insert(name.to_string(), v);
     }
 
-    /// Propriedades que o host preenche, se a tela declarar.
+    /// Properties the host fills in, if the screen declares them.
     fn push_host_props(&self) {
         let Some(full) = &self.full else { return };
         let declared: Vec<String> = full.def.properties().map(|(n, _)| n).collect();
@@ -813,7 +819,7 @@ impl PluginMini {
             Some((Err(e), _)) => e.lines().next().unwrap_or_default().to_string(),
             Some((Ok(t), _)) => {
                 let lines: Vec<&str> = t.lines().map(str::trim).filter(|l| !l.is_empty()).take(self.plugin.lines()).collect();
-                if lines.is_empty() { "(sem saída)".into() } else { lines.join("\n") }
+                if lines.is_empty() { tr!("(no output)").into() } else { lines.join("\n") }
             }
         }
     }
@@ -823,12 +829,12 @@ impl PluginMini {
             return e.clone();
         }
         let Some(run) = &self.plugin.run else { return String::new() };
-        let every = format!("a cada {} s", run.every);
+        let every = tr!("every {} s", run.every);
         match &self.last {
-            _ if self.running => format!("rodando {}…", run.command.join(" ")),
+            _ if self.running => tr!("running {}…", run.command.join(" ")),
             None => every,
-            Some((Err(_), at)) => format!("falhou há {} s · {every}", at.elapsed().as_secs()),
-            Some((Ok(_), at)) => format!("atualizado há {} s · {every}", at.elapsed().as_secs()),
+            Some((Err(_), at)) => tr!("failed {} s ago · {}", at.elapsed().as_secs(), every),
+            Some((Ok(_), at)) => tr!("updated {} s ago · {}", at.elapsed().as_secs(), every),
         }
     }
 
@@ -837,7 +843,7 @@ impl PluginMini {
         self.face.refresh(sprites::get(&key), self.host.theme_for(&self.plugin.manifest), self.mood)
     }
 
-    /// Leva o estado ao cartão (e, com tela própria, as propriedades do host à tela).
+    /// Takes the state to the card (and, with its own screen, the host's properties to the screen).
     #[allow(deprecated)]
     fn push(&mut self, _ui: &HubWindow) {
         self.refresh_mascot();
@@ -864,8 +870,8 @@ impl PluginMini {
     }
 }
 
-/// Entrega o que o script (ou o processo da geração `generation`) mandou ao app dele, na
-/// thread da UI. Recado de um processo que já foi trocado por outro é descartado.
+/// Delivers what the script (or the process of generation `generation`) sent to its app, on
+/// the UI thread. A message from a process that has since been replaced is dropped.
 fn deliver(id: &str, generation: Option<u64>, batch: Vec<ScriptOut>) {
     let Some(app) = find_app(id) else { return };
     let current = app.borrow().full.as_ref().map(|f| f.generation.get());
@@ -935,8 +941,8 @@ impl MiniApp for PluginMini {
         self.push(ui);
     }
 
-    /// Leitura de um provedor de `uses`: vai ao `on_event` do script, como mapa (ou ao app
-    /// externo, como mensagem "event").
+    /// Reading from a `uses` provider: goes to the script's `on_event`, as a map (or to the
+    /// external app, as an "event" message).
     fn on_event(&mut self, ev: &Event, _ui: &HubWindow) {
         if let Some(full) = &self.full {
             full.send(Input::Event(ev.topic().name().into(), event_data(ev)));
@@ -965,7 +971,7 @@ impl MiniApp for PluginMini {
     }
 
     fn tick(&mut self, frame: u32, ui: &HubWindow) {
-        // "atualizado há N s" anda sozinho; uma vez por segundo basta
+        // "updated N s ago" moves on its own; once a second is enough
         if self.refresh_mascot() || (self.plugin.run.is_some() && frame.is_multiple_of(8)) {
             self.push(ui);
         }
@@ -1017,21 +1023,21 @@ impl Drop for PluginMini {
 mod tests {
     use super::*;
 
-    /// O exemplo de banco: cria a tabela, guarda, marca e migra dados da versão 1.
+    /// The database example: creates the table, stores, checks and migrates data from version 1.
     #[test]
-    fn exemplo_com_banco_guarda_e_migra() {
-        let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugin-notas"));
+    fn database_example_stores_and_migrates() {
+        let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugin-notes"));
         let p = Plugin::parse(&std::fs::read_to_string(dir.join("manifest.toml")).unwrap()).unwrap();
         check_files(dir, p.ui.as_ref().unwrap()).unwrap();
         let spec = p.data();
-        assert!(spec.has(Kind::Sqlite) && !spec.has(Kind::Kv) && spec.version == 2);
-        assert!(p.grants().contains("banco SQLite"));
-        let dados = std::env::temp_dir().join(format!("miniutils-notas-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dados);
+        assert!(spec.has(Kind::Sqlite) && !spec.has(Kind::Kv) && spec.version == 3);
+        assert!(p.grants().contains("SQLite"));
+        let data = std::env::temp_dir().join(format!("miniutils-notes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
         let script = std::fs::read_to_string(dir.join("main.rhai")).unwrap();
-        let rodar = |migrate: Option<(u32, u32)>, entradas: Vec<ScriptIn>| {
+        let run = |migrate: Option<(u32, u32)>, inputs: Vec<ScriptIn>| {
             let (tx, rx) = channel();
-            for e in entradas {
+            for e in inputs {
                 tx.send(e).unwrap();
             }
             drop(tx);
@@ -1040,41 +1046,42 @@ mod tests {
                 net: Vec::new(),
                 data: None,
                 kv: false,
-                db: Some(DbSpec { path: dados.join(appdata::DB_FILE), max_bytes: spec.max_bytes() }),
+                db: Some(DbSpec { path: data.join(appdata::DB_FILE), max_bytes: spec.max_bytes() }),
                 migrate,
                 back: None,
+                catalog: Default::default(),
             };
-            let saida = Arc::new(Mutex::new(Vec::new()));
-            let s = saida.clone();
+            let output = Arc::new(Mutex::new(Vec::new()));
+            let s = output.clone();
             script_loop(script.clone(), env, rhai::Map::new(), rx, move |b| s.lock().unwrap().extend(b));
-            let txt = format!("{:?}", saida.lock().unwrap());
+            let txt = format!("{:?}", output.lock().unwrap());
             assert!(!txt.contains("Error("), "{txt}");
             txt
         };
-        let txt = rodar(None, vec![ScriptIn::Action("add".into(), "  comprar pão ".into()), ScriptIn::Action("toggle".into(), "1".into())]);
-        assert!(txt.contains(r#"Str("comprar pão")"#), "{txt}");
-        assert!(txt.contains("0 para fazer · 1 feita(s)"), "{txt}");
-        // um banco da versão 1 (sem a coluna "feita") migra antes de começar
-        let _ = std::fs::remove_dir_all(&dados);
-        std::fs::create_dir_all(&dados).unwrap();
-        rusqlite::Connection::open(dados.join(appdata::DB_FILE))
+        let txt = run(None, vec![ScriptIn::Action("add".into(), "  buy bread ".into()), ScriptIn::Action("toggle".into(), "1".into())]);
+        assert!(txt.contains(r#"Str("buy bread")"#), "{txt}");
+        assert!(txt.contains(r#"Set("todo", Num(0.0))"#) && txt.contains(r#"Set("done", Num(1.0))"#), "{txt}");
+        // a version 1 database (Portuguese names, without the "feita" column) migrates before starting
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(&data).unwrap();
+        rusqlite::Connection::open(data.join(appdata::DB_FILE))
             .unwrap()
-            .execute_batch("CREATE TABLE notas (id INTEGER PRIMARY KEY, texto TEXT NOT NULL, criada INTEGER NOT NULL); INSERT INTO notas VALUES (1, 'velha', 0);")
+            .execute_batch("CREATE TABLE notas (id INTEGER PRIMARY KEY, texto TEXT NOT NULL, criada INTEGER NOT NULL); INSERT INTO notas VALUES (1, 'old', 0);")
             .unwrap();
-        let txt = rodar(Some((1, 2)), vec![]);
-        assert!(txt.contains("Migrated(Ok(2))") && txt.contains("1 para fazer · 0 feita(s)"), "{txt}");
-        let _ = std::fs::remove_dir_all(&dados);
+        let txt = run(Some((1, 3)), vec![]);
+        assert!(txt.contains("Migrated(Ok(3))") && txt.contains(r#"Set("todo", Num(1.0))"#) && txt.contains(r#"Str("old")"#), "{txt}");
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     #[test]
-    fn exemplo_com_tela_e_script_funciona() {
+    fn example_with_screen_and_script_works() {
         let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugin-top"));
         let p = Plugin::parse(&std::fs::read_to_string(dir.join("manifest.toml")).unwrap()).unwrap();
         check_files(dir, p.ui.as_ref().unwrap()).unwrap();
         let def = compile_view(dir, std::fs::read_to_string(dir.join("view.slint")).unwrap()).unwrap();
         let props: Vec<String> = def.properties().map(|(n, _)| n).collect();
         assert!(props.iter().any(|n| n == "rows") && props.iter().any(|n| n == "theme"), "{props:?}");
-        // o script recebe os processos do provedor `procs` (aqui, uma leitura de mentira)
+        // the script gets the processes from the `procs` provider (here, a fake reading)
         assert_eq!(p.manifest.uses, [crate::core::bus::Topic::Procs]);
         let proc = |pid, name: &str, cpu, mem| crate::providers::procs::Proc { pid, name: name.into(), cpu, mem, mem_bytes: 1 };
         let snap = crate::providers::procs::snapshot(vec![proc(1, "firefox", 30.0, 12.5), proc(2, "code", 2.0, 20.0)]);
@@ -1082,8 +1089,8 @@ mod tests {
         tx.send(ScriptIn::Event("procs".into(), json_to_dyn(event_data(&Event::Procs(snap))))).unwrap();
         tx.send(ScriptIn::Action("sort".into(), "mem".into())).unwrap();
         drop(tx);
-        let saida = Arc::new(Mutex::new(Vec::new()));
-        let s = saida.clone();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let s = output.clone();
         let script = std::fs::read_to_string(dir.join("main.rhai")).unwrap();
         let e = ScriptEnv {
             exec: Exec::new("t", &p.manifest.permissions.exec),
@@ -1093,14 +1100,15 @@ mod tests {
             db: None,
             migrate: None,
             back: None,
+            catalog: Default::default(),
         };
         script_loop(script, e, rhai::Map::new(), rx, move |b| s.lock().unwrap().extend(b));
-        let txt = format!("{:?}", saida.lock().unwrap());
+        let txt = format!("{:?}", output.lock().unwrap());
         assert!(!txt.contains("Error("), "{txt}");
         assert!(txt.contains(r#"Set("rows", List([Map("#), "{txt}");
         assert!(txt.contains(r#"Set("sort", Str("mem"))"#), "{txt}");
         assert!(txt.contains(r#"Str("30%")"#) || txt.contains(r#"Str("30.0%")"#), "{txt}");
-        assert!(txt.contains("2 processos"), "{txt}");
-        assert!(txt.contains(r#"Summary("code 20.0% de memória")"#) || txt.contains(r#"Summary("code 20% de memória")"#), "{txt}");
+        assert!(txt.contains(r#"Set("count", Num(2.0))"#), "{txt}");
+        assert!(txt.contains(r#"Summary("code 20.0% memory")"#) || txt.contains(r#"Summary("code 20% memory")"#), "{txt}");
     }
 }

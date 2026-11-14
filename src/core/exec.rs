@@ -1,7 +1,7 @@
-//! Executor de comandos com allowlist por mini-app.
+//! Command executor with a per-mini-app allowlist.
 //!
-//! O mini-app só roda os programas declarados em `permissions.exec` do manifesto, e os
-//! argumentos vão direto para o processo, sem shell — nada de interpolar strings.
+//! A mini-app only runs the programs declared in `permissions.exec` of its manifest, and
+//! the arguments go straight to the process, without a shell — no string interpolation.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -11,20 +11,22 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// Limite de uma ação pedida pelo usuário (`docker stop` espera o container sair;
-/// `compose restart` numa stack grande demora).
+use crate::tr;
+
+/// Limit for an action the user asked for (`docker stop` waits for the container to exit;
+/// `compose restart` on a big stack takes a while).
 pub const ACTION_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Por que um comando não devolveu saída.
+/// Why a command returned no output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecError {
-    /// O mini-app não declarou o programa em `permissions.exec`.
+    /// The mini-app did not declare the program in `permissions.exec`.
     Denied(String),
-    /// O programa não está instalado (não está no PATH).
+    /// The program is not installed (not on the PATH).
     NotFound(String),
-    /// Não terminou no prazo e foi morto.
+    /// Did not finish in time and was killed.
     Timeout { program: String, after: Duration },
-    /// Saiu com erro: a mensagem é o stderr (ou o código de saída).
+    /// Exited with an error: the message is the stderr (or the exit code).
     Failed(String),
 }
 
@@ -33,7 +35,7 @@ impl ExecError {
         matches!(self, ExecError::NotFound(_))
     }
 
-    /// Primeira linha da mensagem, curta o bastante para a tela.
+    /// First line of the message, short enough for the screen.
     pub fn brief(&self) -> String {
         self.to_string().lines().next().unwrap_or_default().chars().take(160).collect()
     }
@@ -43,9 +45,9 @@ impl fmt::Display for ExecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExecError::Denied(msg) | ExecError::Failed(msg) => f.write_str(msg),
-            ExecError::NotFound(program) => write!(f, "{program} não está instalado"),
+            ExecError::NotFound(program) => f.write_str(&tr!("{} is not installed", program)),
             ExecError::Timeout { program, after } => {
-                write!(f, "{program} não respondeu em {} s", after.as_secs())
+                f.write_str(&tr!("{} did not respond within {} s", program, after.as_secs()))
             }
         }
     }
@@ -68,22 +70,19 @@ impl Exec {
         if self.allowed.iter().any(|p| p == program) {
             Ok(())
         } else {
-            Err(ExecError::Denied(format!(
-                "o mini-app {} não tem permissão para executar \"{program}\"",
-                self.app
-            )))
+            Err(ExecError::Denied(tr!("the mini-app {} is not allowed to run \"{}\"", self.app, program)))
         }
     }
 
-    /// Roda e espera (com prazo), na thread de quem chama: para quem já está numa thread
-    /// própria (o script de um plugin). Nunca na thread da UI.
+    /// Runs and waits (with a deadline) on the caller's thread: for callers that already
+    /// have their own thread (a plugin's script). Never on the UI thread.
     pub fn run_blocking(&self, program: &str, args: &[&str], limit: Duration) -> Result<String, ExecError> {
         self.check(program)?;
         run_timeout(program, args, limit)
     }
 
-    /// Roda em segundo plano (thread própria) e chama `done` com o stdout, ou com o erro.
-    /// O comando é morto se passar de `ACTION_TIMEOUT`.
+    /// Runs in the background (own thread) and calls `done` with the stdout, or the error.
+    /// The command is killed if it takes longer than `ACTION_TIMEOUT`.
     pub fn run_async<F>(&self, program: &str, args: &[&str], done: F)
     where
         F: FnOnce(Result<String, ExecError>) + Send + 'static,
@@ -97,20 +96,20 @@ impl Exec {
         std::thread::spawn(move || done(run_timeout(&program, &args, ACTION_TIMEOUT)));
     }
 
-    /// Abre um terminal rodando `argv` (o programa precisa estar na allowlist).
+    /// Opens a terminal running `argv` (the program must be on the allowlist).
     pub fn open_terminal(&self, title: &str, argv: &[&str]) -> anyhow::Result<()> {
         self.open_terminal_in(title, None, argv)
     }
 
-    /// Como `open_terminal`, começando na pasta `dir` (`None` = a pasta pessoal).
+    /// Like `open_terminal`, starting in folder `dir` (`None` = the home folder).
     pub fn open_terminal_in(&self, title: &str, dir: Option<&Path>, argv: &[&str]) -> anyhow::Result<()> {
-        let program = argv.first().ok_or_else(|| anyhow::anyhow!("comando vazio"))?;
+        let program = argv.first().ok_or_else(|| anyhow::anyhow!("empty command"))?;
         self.check(program)?;
-        // caminho completo: o terminal pode não ter as pastas do usuário no PATH
+        // full path: the terminal may not have the user's folders on its PATH
         let path = locate(program).ok_or_else(|| ExecError::NotFound(program.to_string()))?;
         let dir = dir.filter(|d| d.is_dir());
         let mut cmd = terminal_command(title, dir, Some((&path, &argv[1..])))?;
-        // sem pasta pedida, começa na pessoal, não na pasta de onde o app foi aberto
+        // with no folder asked for, start in the home folder, not where the app was launched
         match dir {
             Some(dir) => {
                 cmd.current_dir(dir);
@@ -127,34 +126,34 @@ impl Exec {
     }
 }
 
-/// O que um comando escreveu, tenha saído bem ou não.
+/// What a command wrote, whether it succeeded or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
-    /// "exit status: 1", para a mensagem de erro quando o stderr vem vazio.
+    /// "exit status: 1", for the error message when the stderr is empty.
     status: String,
 }
 
-/// Roda um programa e devolve o stdout; se passar de `limit`, mata e devolve `Timeout`.
-/// Uso interno do host (provedores) e base do `Exec::run_async`.
+/// Runs a program and returns its stdout; past `limit`, kills it and returns `Timeout`.
+/// For the host's own use (providers) and the base of `Exec::run_async`.
 pub fn run_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duration) -> Result<String, ExecError> {
     let out = output_timeout(program, args, limit)?;
     if out.success {
         Ok(out.stdout)
     } else {
         let err = out.stderr.trim();
-        Err(ExecError::Failed(if err.is_empty() { format!("{program} saiu com {}", out.status) } else { err.to_string() }))
+        Err(ExecError::Failed(if err.is_empty() { tr!("{} exited with {}", program, out.status) } else { err.to_string() }))
     }
 }
 
-/// Como `run_timeout`, mas devolve a saída mesmo quando o programa sai com erro (o
-/// `docker inspect` de vários ids falha se um sumiu, e os outros vêm no stdout).
+/// Like `run_timeout`, but returns the output even when the program exits with an error
+/// (`docker inspect` of several ids fails if one is gone, and the others come on stdout).
 ///
-/// O filho ganha um grupo de processos próprio (no Windows, a árvore dele): ao estourar o
-/// prazo o grupo inteiro morre, e nenhum neto fica segurando os pipes (o que prenderia as
-/// leitoras).
+/// The child gets its own process group (on Windows, its tree): when the deadline passes
+/// the whole group dies, and no grandchild keeps the pipes open (which would block the
+/// readers).
 pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duration) -> Result<Output, ExecError> {
     let mut cmd = command(program);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -167,8 +166,8 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
             _ => ExecError::Failed(format!("{program}: {e}")),
         })?;
 
-    // Uma leitora por pipe (senão um pipe cheio trava o filho); cada uma avisa quando
-    // o seu fecha, e é esse aviso que esperamos com prazo, sem ficar acordando à toa.
+    // One reader per pipe (otherwise a full pipe blocks the child); each one signals when
+    // its pipe closes, and we wait for that signal with a deadline, without busy waking.
     let (tx, rx) = mpsc::channel::<(bool, Vec<u8>)>();
     let mut readers = 0;
     let pipes: [(bool, Option<Box<dyn Read + Send>>); 2] = [
@@ -200,7 +199,7 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
             }
         }
     }
-    // pipes fechados: o filho está saindo (ou já saiu); o resto do prazo é para ele terminar
+    // pipes closed: the child is exiting (or has exited); the rest of the time is for it to finish
     let status = loop {
         if timed_out {
             break None;
@@ -223,11 +222,11 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
     })
 }
 
-/// `Command` para um programa que roda em segundo plano (provedores, ações dos apps).
+/// `Command` for a program that runs in the background (providers, app actions).
 ///
-/// No Windows faz duas coisas que o `Command::new` não faz: acha os programas que são
-/// `.cmd`/`.bat` (as CLIs instaladas pelo npm: `codex`, `claude`, `opencode`), que só
-/// rodam pelo caminho completo, e não abre uma janela de console a cada execução.
+/// On Windows it does two things `Command::new` doesn't: it finds programs that are
+/// `.cmd`/`.bat` (CLIs installed by npm: `codex`, `claude`, `opencode`), which only run by
+/// their full path, and it does not open a console window on every run.
 pub fn command(program: &str) -> Command {
     #[cfg(windows)]
     {
@@ -243,12 +242,12 @@ pub fn command(program: &str) -> Command {
     Command::new(program)
 }
 
-/// `CREATE_NO_WINDOW`: programa de console sem janela (senão ela pisca na tela).
+/// `CREATE_NO_WINDOW`: console program without a window (otherwise it flashes on screen).
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// `Command` para um executável dado pelo caminho (o de um app externo): sem procurar no
-/// PATH e, no Windows, sem janela de console.
+/// `Command` for an executable given by path (an external app's): no PATH lookup and, on
+/// Windows, no console window.
 pub fn command_path(path: &Path) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(path);
@@ -260,15 +259,15 @@ pub fn command_path(path: &Path) -> Command {
     cmd
 }
 
-/// Mata o filho e o grupo dele, e recolhe o processo.
+/// Kills the child and its group, and reaps the process.
 pub(crate) fn kill_group(child: &mut std::process::Child) {
-    // SAFETY: `kill` só envia um sinal; o pid é o do filho que ainda não recolhemos, que é
-    // líder do próprio grupo (`process_group(0)`).
+    // SAFETY: `kill` only sends a signal; the pid is the child's, not reaped yet, and it
+    // leads its own group (`process_group(0)`).
     #[cfg(unix)]
     unsafe {
         libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
     }
-    // o Windows não tem grupo para sinalizar: o `taskkill /T` encerra o filho e os netos
+    // Windows has no group to signal: `taskkill /T` ends the child and its grandchildren
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -284,7 +283,7 @@ pub(crate) fn kill_group(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-/// Abre um endereço http(s) no navegador padrão (serviço do host, fora da allowlist).
+/// Opens an http(s) address in the default browser (a host service, outside the allowlist).
 pub fn open_url(url: &str) {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return;
@@ -292,34 +291,34 @@ pub fn open_url(url: &str) {
     shell_open(OsStr::new(url));
 }
 
-/// Abre uma pasta no gerenciador de arquivos padrão (serviço do host, fora da allowlist).
-/// Só pastas que existem: nada de abrir arquivo ou endereço por este caminho.
+/// Opens a folder in the default file manager (a host service, outside the allowlist).
+/// Only existing folders: no files or addresses are opened this way.
 pub fn open_dir(dir: &Path) -> bool {
     dir.is_absolute() && dir.is_dir() && shell_open(dir.as_os_str())
 }
 
-/// Entrega um endereço ou pasta ao programa padrão do sistema.
+/// Hands an address or folder to the system's default program.
 #[cfg(not(windows))]
 fn shell_open(target: &OsStr) -> bool {
     spawn_detached(Command::new("xdg-open").arg(target).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())).is_ok()
 }
 
-/// Entrega um endereço ou pasta ao programa padrão do sistema. Pelo `ShellExecute`, e não
-/// por `cmd /c start`: assim nada do endereço é interpretado como comando.
+/// Hands an address or folder to the system's default program. Through `ShellExecute`,
+/// not `cmd /c start`: so nothing in the address is interpreted as a command.
 #[cfg(windows)]
 fn shell_open(target: &OsStr) -> bool {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::{HSTRING, PCWSTR, w};
     let target = HSTRING::from(target);
-    // SAFETY: as strings vivem até a chamada voltar; o resultado é só um código (> 32 = abriu).
+    // SAFETY: the strings live until the call returns; the result is just a code (> 32 = opened).
     let code = unsafe { ShellExecuteW(None, w!("open"), &target, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
     code.0 as isize > 32
 }
 
-/// Lança um programa que segue sozinho (navegador, terminal, gerenciador de arquivos).
-/// Uma thread espera ele sair: sem o `wait`, o processo vira zumbi até o app fechar, e o
-/// app fica dias na bandeja.
+/// Launches a program that goes on by itself (browser, terminal, file manager). A thread
+/// waits for it to exit: without the `wait`, the process stays a zombie until the app
+/// closes, and the app stays in the tray for days.
 fn spawn_detached(cmd: &mut Command) -> std::io::Result<()> {
     let mut child = cmd.spawn()?;
     let _ = std::thread::Builder::new().name("miniutils-reap".into()).spawn(move || {
@@ -328,21 +327,21 @@ fn spawn_detached(cmd: &mut Command) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Abre um terminal na pasta `dir`, com o shell do usuário (serviço do host, fora da
-/// allowlist: não roda nenhum programa escolhido pelo mini-app).
+/// Opens a terminal in folder `dir`, with the user's shell (a host service, outside the
+/// allowlist: it runs no program chosen by the mini-app).
 pub fn open_terminal_at(dir: &Path) -> anyhow::Result<()> {
-    anyhow::ensure!(dir.is_absolute() && dir.is_dir(), "pasta não encontrada: {}", dir.display());
+    anyhow::ensure!(dir.is_absolute() && dir.is_dir(), "{}", tr!("folder not found: {}", dir.display()));
     let mut cmd = terminal_command("", Some(dir), None)?;
     cmd.current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     spawn_detached(&mut cmd)?;
     Ok(())
 }
 
-/// Monta o comando que abre um terminal: em `dir` (se pedida) e rodando `run` (programa já
-/// com o caminho completo, e os argumentos) ou, sem `run`, o shell do usuário.
+/// Builds the command that opens a terminal: in `dir` (if given) and running `run` (the
+/// program, with its full path, and the arguments) or, without `run`, the user's shell.
 #[cfg(not(windows))]
 fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str])>) -> anyhow::Result<Command> {
-    let (term, prefix) = terminal().ok_or_else(|| anyhow::anyhow!("nenhum terminal encontrado (defina $TERMINAL)"))?;
+    let (term, prefix) = terminal().ok_or_else(|| anyhow::anyhow!("{}", tr!("no terminal found (set $TERMINAL)")))?;
     let mut cmd = Command::new(&term);
     if !title.is_empty() {
         if term.ends_with("konsole") {
@@ -351,7 +350,7 @@ fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str]
             cmd.args(["--title", title]);
         }
     }
-    // o konsole pode reaproveitar um processo já aberto, com outra pasta: pede a pasta nele
+    // konsole may reuse a running process, in another folder: pass it the folder
     if let (Some(dir), true) = (dir, term.ends_with("konsole")) {
         cmd.arg("--workdir").arg(dir);
     }
@@ -361,18 +360,18 @@ fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str]
     Ok(cmd)
 }
 
-/// Monta o comando que abre um terminal no Windows: o Windows Terminal (`wt`) quando
-/// existe; senão o console clássico (`conhost`). Os dois recebem o programa e os
-/// argumentos direto, sem passar pelo `cmd` — nada de interpolar strings.
+/// Builds the command that opens a terminal on Windows: Windows Terminal (`wt`) when
+/// present; otherwise the classic console (`conhost`). Both get the program and the
+/// arguments directly, without going through `cmd` — no string interpolation.
 #[cfg(windows)]
 fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str])>) -> anyhow::Result<Command> {
     let (path, args): (PathBuf, Vec<String>) = match run {
         Some((path, args)) => (path.to_path_buf(), args.iter().map(|a| a.to_string()).collect()),
         None => (default_shell(), Vec::new()),
     };
-    // um `.cmd`/`.bat` é sempre executado pelo `cmd`, que interpretaria estes caracteres
+    // a `.cmd`/`.bat` always runs through `cmd`, which would interpret these characters
     if is_batch(&path) && args.iter().any(|a| a.contains(CMD_SPECIAL)) {
-        anyhow::bail!("argumento com caractere especial do cmd: não abro {} assim", path.display());
+        anyhow::bail!("{}", tr!("argument with a special cmd character: not opening {} like that", path.display()));
     }
     let home = dirs::home_dir();
     let dir = dir.or(home.as_deref());
@@ -386,7 +385,7 @@ fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str]
             if let Some(dir) = dir {
                 cmd.arg("-d").arg(dir);
             }
-            // para o `wt`, `;` separa comandos: escapado, vira texto
+            // for `wt`, `;` separates commands: escaped, it becomes text
             cmd.arg(&path).args(args.iter().map(|a| a.replace(';', "\\;")));
             cmd
         }
@@ -402,7 +401,7 @@ fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str]
     Ok(cmd)
 }
 
-/// Caracteres que o `cmd` interpreta numa linha de comando.
+/// Characters `cmd` interprets in a command line.
 #[cfg(windows)]
 const CMD_SPECIAL: &[char] = &['&', '|', '<', '>', '^', '%', '"', '!', '(', ')', '\n', '\r'];
 
@@ -411,7 +410,7 @@ fn is_batch(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
 }
 
-/// Shell para o "abrir terminal aqui": PowerShell novo, o que vem no Windows, ou o `cmd`.
+/// Shell for "open terminal here": the new PowerShell, the one bundled with Windows, or `cmd`.
 #[cfg(windows)]
 fn default_shell() -> PathBuf {
     find("pwsh")
@@ -424,7 +423,7 @@ pub fn which(program: &str) -> bool {
     find(program).is_some()
 }
 
-/// Caminho de um programa no PATH.
+/// Path of a program on the PATH.
 pub fn find(program: &str) -> Option<PathBuf> {
     find_in(path_dirs(), program)
 }
@@ -438,25 +437,25 @@ fn find_in(dirs: Vec<PathBuf>, program: &str) -> Option<PathBuf> {
     dirs.into_iter().find_map(|d| names.iter().map(|n| d.join(n)).find(|p| p.is_file()))
 }
 
-/// Nomes de arquivo que um programa pode ter: no Linux, o próprio nome.
+/// File names a program may have: on Linux, its own name.
 #[cfg(not(windows))]
 fn file_names(program: &str) -> Vec<String> {
     vec![program.to_string()]
 }
 
-/// Nomes de arquivo que um programa pode ter: no Windows, o nome com cada extensão
-/// executável do `PATHEXT` (`docker` → `docker.exe`, `codex` → `codex.cmd`).
+/// File names a program may have: on Windows, the name with each executable extension of
+/// `PATHEXT` (`docker` → `docker.exe`, `codex` → `codex.cmd`).
 #[cfg(windows)]
 fn file_names(program: &str) -> Vec<String> {
     let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
     windows_file_names(program, &pathext)
 }
 
-/// Separado do ambiente para poder ser testado em qualquer sistema.
+/// Separate from the environment so it can be tested on any system.
 #[cfg(any(windows, test))]
 fn windows_file_names(program: &str, pathext: &str) -> Vec<String> {
     let mut names = Vec::new();
-    // já veio com extensão (`wt.exe`): esse nome primeiro
+    // already has an extension (`wt.exe`): that name first
     if Path::new(program).extension().is_some() {
         names.push(program.to_string());
     }
@@ -464,9 +463,9 @@ fn windows_file_names(program: &str, pathext: &str) -> Vec<String> {
     names
 }
 
-/// Caminho de um programa: no PATH ou nas pastas onde instaladores de CLI costumam pôr
-/// binários do usuário. Aberto pelo menu do sistema, o app pode não ter essas pastas no
-/// PATH (elas entram pelo `.bashrc`/`.zshrc`), e o terminal não acharia o programa.
+/// Path of a program: on the PATH or in the folders where CLI installers usually put user
+/// binaries. Launched from the system menu, the app may not have those folders on its PATH
+/// (they come from `.bashrc`/`.zshrc`), and the terminal would not find the program.
 fn locate(program: &str) -> Option<PathBuf> {
     let mut dirs = path_dirs();
     if let Some(home) = dirs::home_dir() {
@@ -483,7 +482,7 @@ const USER_BIN_DIRS: &[&str] = &[".local/bin", ".opencode/bin", ".cargo/bin", ".
 const USER_BIN_DIRS: &[&str] =
     &["AppData/Roaming/npm", ".local/bin", ".opencode/bin", ".cargo/bin", ".bun/bin", "AppData/Local/Volta/bin", "scoop/shims"];
 
-/// Terminais conhecidos e o argumento que separa o comando a executar.
+/// Known terminals and the argument that introduces the command to run.
 #[cfg(any(not(windows), test))]
 const KNOWN_TERMINALS: &[(&str, &[&str])] = &[
     ("konsole", &["-e"]),
@@ -501,15 +500,15 @@ const KNOWN_TERMINALS: &[(&str, &[&str])] = &[
     ("x-terminal-emulator", &["-e"]),
 ];
 
-/// Argumento que separa o comando para o terminal `term` (nome ou caminho). Terminal fora
-/// da lista recebe `-e`, o mais comum.
+/// Argument that introduces the command for terminal `term` (name or path). A terminal not
+/// on the list gets `-e`, the most common one.
 #[cfg(any(not(windows), test))]
 fn terminal_prefix(term: &str) -> &'static [&'static str] {
     let name = Path::new(term).file_name().and_then(|n| n.to_str()).unwrap_or(term);
     KNOWN_TERMINALS.iter().find(|(t, _)| *t == name).map_or(&["-e"], |(_, p)| *p)
 }
 
-/// Terminal disponível e o argumento que separa o comando a executar.
+/// Available terminal and the argument that introduces the command to run.
 #[cfg(not(windows))]
 fn terminal() -> Option<(String, &'static [&'static str])> {
     if let Ok(t) = std::env::var("TERMINAL")
@@ -525,8 +524,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bloqueia_programa_fora_da_allowlist() {
-        let e = Exec::new("teste", &["docker".into()]);
+    fn blocks_programs_outside_the_allowlist() {
+        let e = Exec::new("test", &["docker".into()]);
         assert!(e.check("docker").is_ok());
         assert!(e.check("rm").is_err());
         assert!(e.open_terminal("x", &["bash"]).is_err());
@@ -534,66 +533,66 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn devolve_saida_erro_e_programa_ausente() {
+    fn returns_output_error_and_missing_program() {
         let limit = Duration::from_secs(5);
-        assert_eq!(run_timeout("sh", &["-c", "echo oi"], limit).unwrap(), "oi\n");
+        assert_eq!(run_timeout("sh", &["-c", "echo hi"], limit).unwrap(), "hi\n");
         assert_eq!(
-            run_timeout("sh", &["-c", "echo ruim >&2; exit 3"], limit),
-            Err(ExecError::Failed("ruim".into()))
+            run_timeout("sh", &["-c", "echo bad >&2; exit 3"], limit),
+            Err(ExecError::Failed("bad".into()))
         );
-        let ausente = run_timeout("miniutils-programa-que-nao-existe", &[""; 0], limit).unwrap_err();
-        assert!(ausente.not_found());
-        assert_eq!(ausente.to_string(), "miniutils-programa-que-nao-existe não está instalado");
-        // saída com erro, mas o stdout vem junto
-        let out = output_timeout("sh", &["-c", "echo parte; exit 1"], limit).unwrap();
+        let missing = run_timeout("miniutils-program-that-does-not-exist", &[""; 0], limit).unwrap_err();
+        assert!(missing.not_found());
+        assert_eq!(missing.to_string(), "miniutils-program-that-does-not-exist is not installed");
+        // exits with an error, but the stdout comes along
+        let out = output_timeout("sh", &["-c", "echo part; exit 1"], limit).unwrap();
         assert!(!out.success);
-        assert_eq!(out.stdout, "parte\n");
+        assert_eq!(out.stdout, "part\n");
     }
 
     #[test]
     #[cfg(unix)]
-    fn mata_o_que_passa_do_prazo() {
-        let inicio = Instant::now();
-        // o `sleep` é neto (filho do sh): morre junto, senão seguraria o pipe por 30 s
-        let r = run_timeout("sh", &["-c", "sleep 30; echo tarde"], Duration::from_millis(200));
+    fn kills_what_runs_past_the_deadline() {
+        let start = Instant::now();
+        // `sleep` is a grandchild (child of sh): it dies too, otherwise it would hold the pipe for 30 s
+        let r = run_timeout("sh", &["-c", "sleep 30; echo late"], Duration::from_millis(200));
         assert!(matches!(r, Err(ExecError::Timeout { .. })), "{r:?}");
-        assert!(inicio.elapsed() < Duration::from_secs(5));
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
     #[cfg(windows)]
-    fn windows_devolve_saida_erro_e_programa_ausente() {
+    fn windows_returns_output_error_and_missing_program() {
         let limit = Duration::from_secs(10);
-        assert_eq!(run_timeout("cmd", &["/c", "echo oi"], limit).unwrap().trim(), "oi");
-        let out = output_timeout("cmd", &["/c", "echo parte& exit 1"], limit).unwrap();
+        assert_eq!(run_timeout("cmd", &["/c", "echo hi"], limit).unwrap().trim(), "hi");
+        let out = output_timeout("cmd", &["/c", "echo part& exit 1"], limit).unwrap();
         assert!(!out.success);
-        assert_eq!(out.stdout.trim(), "parte");
-        assert!(run_timeout("miniutils-programa-que-nao-existe", &[""; 0], limit).unwrap_err().not_found());
+        assert_eq!(out.stdout.trim(), "part");
+        assert!(run_timeout("miniutils-program-that-does-not-exist", &[""; 0], limit).unwrap_err().not_found());
     }
 
     #[test]
     #[cfg(windows)]
-    fn windows_mata_a_arvore_que_passa_do_prazo() {
-        let inicio = Instant::now();
-        // o `ping` é neto (filho do cmd): morre junto, senão seguraria o pipe por 30 s
+    fn windows_kills_the_tree_that_runs_past_the_deadline() {
+        let start = Instant::now();
+        // `ping` is a grandchild (child of cmd): it dies too, otherwise it would hold the pipe for 30 s
         let r = run_timeout("cmd", &["/c", "ping -n 30 127.0.0.1"], Duration::from_millis(500));
         assert!(matches!(r, Err(ExecError::Timeout { .. })), "{r:?}");
-        assert!(inicio.elapsed() < Duration::from_secs(10));
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[test]
-    fn nomes_de_programa_no_windows() {
+    fn program_names_on_windows() {
         let ext = ".COM;.EXE;.BAT;.CMD";
         assert_eq!(windows_file_names("docker", ext), ["docker.com", "docker.exe", "docker.bat", "docker.cmd"]);
-        // com extensão, o próprio nome vem primeiro
+        // with an extension, the name itself comes first
         assert_eq!(windows_file_names("wt.exe", ".EXE")[0], "wt.exe");
-        // nome com ponto que não é extensão executável ainda ganha as do PATHEXT
+        // a name with a dot that is not an executable extension still gets the PATHEXT ones
         assert!(windows_file_names("python3.12", ext).contains(&"python3.12.exe".to_string()));
         assert_eq!(windows_file_names("x", ";;"), Vec::<String>::new());
     }
 
     #[test]
-    fn terminal_de_fora_usa_o_separador_certo() {
+    fn outside_terminal_uses_the_right_separator() {
         assert_eq!(terminal_prefix("kitty"), &[] as &[&str]);
         assert_eq!(terminal_prefix("/usr/bin/gnome-terminal"), &["--"]);
         assert_eq!(terminal_prefix("wezterm"), &["start", "--"]);
@@ -602,8 +601,8 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn saida_grande_nao_trava() {
-        // mais que o buffer de um pipe (64 KiB) nos dois canais
+    fn large_output_does_not_block() {
+        // more than a pipe buffer (64 KiB) on both channels
         let out = run_timeout("sh", &["-c", "head -c 300000 /dev/zero | tr '\\0' a; head -c 300000 /dev/zero | tr '\\0' b >&2"], Duration::from_secs(10)).unwrap();
         assert_eq!(out.len(), 300000);
     }

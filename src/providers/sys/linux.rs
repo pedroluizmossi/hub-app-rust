@@ -1,4 +1,4 @@
-//! Coleta no Linux, direto de /proc e /sys.
+//! Collection on Linux, straight from /proc and /sys.
 
 use std::collections::HashSet;
 use std::fs;
@@ -69,12 +69,12 @@ impl SysProvider {
     }
 }
 
-/// Primeira linha de /proc/stat -> (ocupado, total) acumulados.
+/// First line of /proc/stat -> accumulated (busy, total).
 pub fn parse_cpu(text: &str) -> Option<(u64, u64)> {
     let line = text.lines().find(|l| l.starts_with("cpu "))?;
     let v: Vec<u64> = line.split_whitespace().skip(1).map(|x| x.parse().unwrap_or(0)).collect();
     let idle = v.get(3).copied().unwrap_or(0) + v.get(4).copied().unwrap_or(0); // idle + iowait
-    let total: u64 = v.iter().take(8).sum(); // sem guest (já contado em user)
+    let total: u64 = v.iter().take(8).sum(); // without guest (already counted in user)
     Some((total - idle, total))
 }
 
@@ -87,7 +87,7 @@ pub fn cpu_percent(prev: Option<(u64, u64)>, cur: (u64, u64)) -> f32 {
     (cur.0.saturating_sub(pb) as f32 / dt as f32 * 100.0).clamp(0.0, 100.0)
 }
 
-/// Campos de /proc/meminfo que interessam, em bytes.
+/// The /proc/meminfo fields that matter, in bytes.
 #[derive(Debug, Default, PartialEq)]
 pub struct MemInfo {
     pub total: u64,
@@ -113,13 +113,13 @@ pub fn parse_mem(text: &str) -> MemInfo {
     }
 }
 
-/// /proc/loadavg -> carga de 1, 5 e 15 min.
+/// /proc/loadavg -> 1, 5 and 15 min load.
 pub fn parse_loadavg(text: &str) -> (f32, f32, f32) {
     let mut f = text.split_whitespace().map(|x| x.parse::<f32>().unwrap_or(0.0));
     (f.next().unwrap_or(0.0), f.next().unwrap_or(0.0), f.next().unwrap_or(0.0))
 }
 
-/// Frequência média dos núcleos (cpufreq; senão /proc/cpuinfo), em MHz.
+/// Average core frequency (cpufreq; otherwise /proc/cpuinfo), in MHz.
 fn cpu_mhz() -> f32 {
     let mut khz = Vec::new();
     if let Ok(dir) = fs::read_dir("/sys/devices/system/cpu") {
@@ -147,9 +147,8 @@ fn cpu_mhz() -> f32 {
     if mhz.is_empty() { 0.0 } else { mhz.iter().sum::<f32>() / mhz.len() as f32 }
 }
 
-/// Pontos de montagem de /proc/mounts que valem mostrar: dispositivos de bloco de verdade,
-/// um por dispositivo (subvolumes btrfs do mesmo disco contam uma vez só, pelo caminho
-/// mais curto).
+/// Mount points of /proc/mounts worth showing: real block devices, one per device (btrfs
+/// subvolumes of the same disk count once, by the shortest path).
 pub fn parse_mounts(text: &str) -> Vec<String> {
     const SKIP_FS: &[&str] = &["squashfs", "iso9660", "udf", "overlay"];
     const SKIP_AT: &[&str] = &["/snap", "/var/lib/docker", "/run", "/boot/efi", "/efi"];
@@ -173,7 +172,7 @@ pub fn parse_mounts(text: &str) -> Vec<String> {
     out
 }
 
-/// Espaços e afins vêm escapados em octal em /proc/mounts (`\040`).
+/// Spaces and the like come octal-escaped in /proc/mounts (`\040`).
 fn unescape_mount(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -190,7 +189,7 @@ fn unescape_mount(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// /proc/diskstats -> bytes (lidos, gravados) acumulados dos discos físicos (sem partições).
+/// /proc/diskstats -> accumulated bytes (read, written) of the physical disks (no partitions).
 pub fn parse_diskstats(text: &str) -> (u64, u64) {
     let mut r = 0;
     let mut w = 0;
@@ -205,7 +204,7 @@ pub fn parse_diskstats(text: &str) -> (u64, u64) {
     (r, w)
 }
 
-/// `sda`, `vdb`, `nvme0n1`, `mmcblk0` sim; `sda1`, `nvme0n1p2`, `loop0`, `dm-0` não.
+/// `sda`, `vdb`, `nvme0n1`, `mmcblk0` yes; `sda1`, `nvme0n1p2`, `loop0`, `dm-0` no.
 fn is_whole_disk(name: &str) -> bool {
     let digits_after = |p: &str| name.strip_prefix(p).is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit()));
     if let Some(rest) = name.strip_prefix("nvme") {
@@ -222,7 +221,7 @@ fn is_whole_disk(name: &str) -> bool {
     })
 }
 
-/// Interface da rota padrão em /proc/net/route.
+/// Interface of the default route in /proc/net/route.
 pub fn default_iface(text: &str) -> Option<String> {
     text.lines().skip(1).find_map(|l| {
         let f: Vec<&str> = l.split_whitespace().collect();
@@ -230,11 +229,11 @@ pub fn default_iface(text: &str) -> Option<String> {
     })
 }
 
-/// IPv4 de uma interface (getifaddrs).
+/// IPv4 of an interface (getifaddrs).
 fn ipv4_of(iface: &str) -> Option<String> {
     let mut addrs: *mut libc::ifaddrs = std::ptr::null_mut();
-    // SAFETY: getifaddrs preenche a lista, que é liberada com freeifaddrs logo abaixo; só
-    // lemos os nós enquanto ela existe.
+    // SAFETY: getifaddrs fills the list, which is freed with freeifaddrs right below; we
+    // only read the nodes while it exists.
     unsafe {
         if libc::getifaddrs(&mut addrs) != 0 {
             return None;
@@ -258,7 +257,7 @@ fn ipv4_of(iface: &str) -> Option<String> {
     }
 }
 
-/// /proc/net/dev -> bytes (rx, tx) acumulados das interfaces "de verdade".
+/// /proc/net/dev -> accumulated bytes (rx, tx) of the "real" interfaces.
 pub fn parse_net(text: &str) -> (u64, u64) {
     const SKIP: &[&str] = &["lo", "docker", "veth", "br-", "virbr"];
     let mut rx = 0;
@@ -275,7 +274,7 @@ pub fn parse_net(text: &str) -> (u64, u64) {
     (rx, tx)
 }
 
-/// Temperatura da CPU pelo hwmon (Intel, AMD, Raspberry).
+/// CPU temperature through hwmon (Intel, AMD, Raspberry).
 fn cpu_temp() -> f32 {
     let Ok(dir) = fs::read_dir("/sys/class/hwmon") else { return 0.0 };
     for entry in dir.flatten() {
@@ -292,11 +291,11 @@ fn cpu_temp() -> f32 {
     0.0
 }
 
-/// (total, usado) em bytes do sistema de arquivos de `path`.
+/// (total, used) in bytes of the filesystem of `path`.
 fn disk_usage(path: &str) -> (u64, u64) {
     let c = std::ffi::CString::new(path).unwrap();
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `c` é uma string C válida e `st` aponta para memória nossa do tamanho certo.
+    // SAFETY: `c` is a valid C string and `st` points to our own memory of the right size.
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         return (0, 0);
     }
@@ -324,12 +323,12 @@ mod tests {
     }
 
     #[test]
-    fn carga() {
+    fn load() {
         assert_eq!(parse_loadavg("1.25 0.90 0.50 2/1000 1234\n"), (1.25, 0.9, 0.5));
     }
 
     #[test]
-    fn montagens_reais_uma_por_disco() {
+    fn real_mounts_one_per_disk() {
         let t = "/dev/nvme0n1p2 / btrfs rw 0 0\n\
                  /dev/nvme0n1p2 /home btrfs rw 0 0\n\
                  /dev/nvme0n1p1 /boot/efi vfat rw 0 0\n\
@@ -340,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn diskstats_so_discos_inteiros() {
+    fn diskstats_whole_disks_only() {
         let t = "   8       0 sda 10 0 100 0 20 0 200 0 0 0 0\n\
                     8       1 sda1 10 0 100 0 20 0 200 0 0 0 0\n\
                   259       0 nvme0n1 1 0 4 0 2 0 8 0 0 0 0\n\
@@ -351,14 +350,14 @@ mod tests {
     }
 
     #[test]
-    fn rota_padrao() {
+    fn default_route() {
         let t = "Iface\tDestination\tGateway\nwlp3s0\t0000A8C0\t00000000\nwlp3s0\t00000000\t0100A8C0\n";
         assert_eq!(default_iface(t), Some("wlp3s0".into()));
         assert_eq!(default_iface("Iface\tDestination\n"), None);
     }
 
     #[test]
-    fn rede_ignora_loopback_e_docker() {
+    fn network_skips_loopback_and_docker() {
         let t = "h1\nh2\n    lo: 999 0 0 0 0 0 0 0 999 0\n  eth0: 100 0 0 0 0 0 0 0 50 0\ndocker0: 7 0 0 0 0 0 0 0 7 0\n";
         assert_eq!(parse_net(t), (100, 50));
     }

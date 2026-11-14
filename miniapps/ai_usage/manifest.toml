@@ -1,6 +1,6 @@
 id = "cyber.ai_usage"
-name = "Assinaturas de IA"
-description = "Limites e créditos do Codex, Claude, Kiro e OpenCode Go."
+name = "AI subscriptions"
+description = "Limits and credits of Codex, Claude, Kiro and OpenCode Go."
 icon = "robo"
 api = 1
 uses = ["ai_usage"]
@@ -10,14 +10,14 @@ exec = ["codex", "claude", "kiro-cli", "opencode"]
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "warn"
-label = "Barra e mascote agitadas a partir de (%)"
+label = "Bar and mascot get restless from (%)"
 type = "int"
 default = 75
 min = 10
@@ -26,7 +26,7 @@ step = 5
 
 [[settings]]
 key = "alarm"
-label = "Barra e mascote em alarme a partir de (%)"
+label = "Bar and mascot in alarm from (%)"
 type = "int"
 default = 90
 min = 20
@@ -35,61 +35,61 @@ step = 5
 
 [[settings]]
 key = "alerts"
-label = "Avisar quando um limite passar do alarme"
+label = "Warn when a limit goes past the alarm"
 type = "bool"
 default = true
 
 [[settings]]
 key = "forecast"
-label = "Prever quando o limite acaba (pelo ritmo de uso)"
+label = "Predict when the limit runs out (from the usage pace)"
 type = "bool"
 default = true
 
 [[settings]]
 key = "show_codex"
-label = "Mostrar Codex"
+label = "Show Codex"
 type = "bool"
 default = true
 
 [[settings]]
 key = "show_claude"
-label = "Mostrar Claude"
+label = "Show Claude"
 type = "bool"
 default = true
 
 [[settings]]
 key = "show_kiro"
-label = "Mostrar Kiro"
+label = "Show Kiro"
 type = "bool"
 default = true
 
 [[settings]]
 key = "show_opencode"
-label = "Mostrar OpenCode Go"
+label = "Show OpenCode Go"
 type = "bool"
 default = true
 
 [[settings]]
 key = "hide_empty"
-label = "Esconder fontes sem leitura"
+label = "Hide sources with no reading"
 type = "bool"
 default = false
 
 [[settings]]
 key = "reset_relative"
-label = "Renovação em tempo restante (em vez de data)"
+label = "Show the reset as time left (instead of a date)"
 type = "bool"
 default = false
 
 [[settings]]
 key = "compact"
-label = "Modo compacto (sem status nem renovação)"
+label = "Compact mode (no status or reset)"
 type = "bool"
 default = false
 
 [[settings]]
 key = "poll"
-label = "Atualizar a cada (min)"
+label = "Refresh every (min)"
 type = "int"
 default = 3
 min = 1

@@ -1,7 +1,7 @@
-//! Desenha uma mascote num quadro RGBA 16×14 a partir de sprite + tema + humor + quadro.
+//! Draws a mascot into a 16×14 RGBA frame from sprite + theme + mood + frame.
 //!
-//! Mesmas regras de cor do `Mascot.qml` do CyberDock. A animação de piscar, LED e glitch
-//! vem do número do quadro; flutuar/pular é feito no Slint (sem redesenhar).
+//! Same color rules as CyberDock's `Mascot.qml`. Blinking, the LED and the glitch come from
+//! the frame number; floating/jumping is done in Slint (without redrawing).
 
 use super::pack;
 use super::sprites::{Pixel, Sprite};
@@ -32,12 +32,12 @@ impl Mood {
         }
     }
 
-    /// O pior dos dois humores (sleep < idle < happy < busy < alarm).
+    /// The worse of two moods (sleep < idle < happy < busy < alarm).
     pub fn worst(self, other: Mood) -> Mood {
         self.max(other)
     }
 
-    /// Humor de uma métrica 0..100: parada dorme, normal flutua, carregada pula, saturada alarma.
+    /// Mood for a 0..100 metric: idle sleeps, normal floats, loaded jumps, saturated alarms.
     pub fn from_level(value: f32, warn: f32, alarm: f32, available: bool) -> Mood {
         if !available || value < 3.0 {
             Mood::Sleep
@@ -51,7 +51,7 @@ impl Mood {
     }
 }
 
-// ---- cores ------------------------------------------------------------------
+// ---- colors -----------------------------------------------------------------
 
 fn rgb(c: u32) -> (f32, f32, f32) {
     (
@@ -99,7 +99,7 @@ fn from_hsv(h: f32, s: f32, v: f32) -> u32 {
     pack(r + m, g + m, b + m)
 }
 
-/// Como `Qt.lighter`: multiplica o brilho; se estourar, tira saturação.
+/// Like `Qt.lighter`: multiplies the brightness; past the top, it takes away saturation.
 pub fn lighter(c: u32, f: f32) -> u32 {
     let (h, mut s, mut v) = to_hsv(c);
     v *= f;
@@ -110,7 +110,7 @@ pub fn lighter(c: u32, f: f32) -> u32 {
     from_hsv(h, s, v)
 }
 
-/// Como `Qt.darker`: divide o brilho.
+/// Like `Qt.darker`: divides the brightness.
 pub fn darker(c: u32, f: f32) -> u32 {
     let (h, s, v) = to_hsv(c);
     from_hsv(h, s, v / f)
@@ -126,7 +126,7 @@ struct Painter<'a> {
     frame: u32,
     blink: bool,
     reaction: Option<Reaction>,
-    /// Linha do traço do olho fechado neste quadro.
+    /// Row of the closed-eye stroke in this frame.
     closed_row: usize,
     fur: u32,
     ear: u32,
@@ -198,7 +198,7 @@ impl Painter<'_> {
             b'D' => lighter(t.outline, 3.2),
             b'A' => self.led(),
             b'E' | b'W' => match self.eye() {
-                // olho fechado: traço na última linha do olho, fundo no resto
+                // closed eye: a stroke on the eye's last row, background on the rest
                 None if y == self.closed_row => t.outline,
                 None => return self.cell(self.s.eye_bg, y),
                 Some(_) if ch == b'W' => WHITE,
@@ -209,7 +209,7 @@ impl Painter<'_> {
     }
 }
 
-/// Cor de um pixel de mascote "pixel" (paleta própria): só o olho segue o humor/tema.
+/// Color of a pixel of a "pixel" mascot (own palette): only the eye follows mood/theme.
 fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, look: &Look) -> Option<u32> {
     let (mood, frame) = (look.mood, look.frame);
     let ch = row[x];
@@ -225,22 +225,22 @@ fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, look: &Look) -> O
         (None, Mood::Busy) => Some(if frame % 6 < 3 { theme.warn } else { darker(theme.warn, 1.35) }),
         (None, Mood::Happy | Mood::Idle) => (!look.blink).then_some(px.eye),
     };
-    // olho fechado: some na cor do vizinho (mais escura), como uma pálpebra
+    // closed eye: takes the neighbor's color (darker), like an eyelid
     open.or_else(|| {
         let side = row.get(x.wrapping_sub(1)).or(row.get(x + 1)).and_then(|c| px.color(*c))?;
         Some(darker(side, 1.4))
     })
 }
 
-/// Desenha um quadro RGBA (16×14, linha a linha) da mascote, com a piscada pelo quadro.
+/// Draws an RGBA frame (16×14, row by row) of the mascot, blinking by the frame number.
 pub fn render(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> [[u8; 4]; W * H] {
     render_look(sprite, theme, &Look::from_frame(mood, frame))
 }
 
-/// Desenha a mascote como o `Animator` mandou (piscada e reação próprias).
+/// Draws the mascot as the `Animator` said (its own blink and reaction).
 pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W * H] {
     let (mood, frame) = (look.mood, look.frame);
-    // pose da animação desenhada, se houver (ver `clips.rs`); senão, o desenho base
+    // pose of the drawn animation, if any (see `clips.rs`); otherwise the base drawing
     let grid = look.pose.as_ref().unwrap_or(&sprite.grid);
     if let Some(px) = &sprite.pixel {
         let glitch = mood == Mood::Alarm && frame % 6 < 2;
@@ -269,7 +269,7 @@ pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W *
         fur: sprite.fur.unwrap_or(theme.fur),
         ear: sprite.ear.unwrap_or(theme.ear),
     };
-    // glitch do alarme: algumas linhas deslizam 1 px para o lado
+    // alarm glitch: a few rows slide 1 px sideways
     let glitch = mood == Mood::Alarm && frame % 6 < 2;
     let mut out = [[0u8; 4]; W * H];
     for (y, row) in grid.iter().enumerate() {
@@ -286,8 +286,8 @@ pub fn render_look(sprite: &Sprite, theme: &Theme, look: &Look) -> [[u8; 4]; W *
     out
 }
 
-/// Quadro como imagem do Slint (o Slint amplia com `image-rendering: pixelated`). Uma
-/// mascote importada (`pack.rs`) sai no tamanho do PNG dela.
+/// A frame as a Slint image (Slint scales it up with `image-rendering: pixelated`). An
+/// imported mascot (`pack.rs`) comes out at the size of its PNG.
 pub fn image(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32) -> slint::Image {
     if let Some(art) = pack::art(sprite) {
         return art.image(art.pick(&Look::from_frame(mood, frame)));
@@ -303,19 +303,19 @@ fn to_image(px: &[[u8; 4]; W * H]) -> slint::Image {
     slint::Image::from_rgba8(buf)
 }
 
-/// Último quadro entregue à UI. O Slint redesenha a janela quando uma imagem muda, então
-/// só se refaz a imagem quando os pixels mudam (mascote dormindo ou parada não redesenha).
+/// Last frame handed to the UI. Slint repaints the window when an image changes, so the
+/// image is only rebuilt when the pixels change (a sleeping or still mascot doesn't repaint).
 #[derive(Default)]
 pub struct Cache {
     px: Option<Box<[[u8; 4]; W * H]>>,
-    /// O quadro de mascote importada da última vez (no lugar de `px`).
+    /// The imported mascot's frame from last time (instead of `px`).
     art: Option<(usize, pack::FrameKey)>,
     img: slint::Image,
 }
 
 impl Cache {
-    /// Atualiza para o que o `Animator` mandou desenhar. Devolve `true` se mudou; aí
-    /// `image()` tem a imagem nova.
+    /// Updates to what the `Animator` said to draw. Returns `true` if it changed; then
+    /// `image()` has the new image.
     pub fn update_look(&mut self, sprite: &Sprite, theme: &Theme, look: &Look) -> bool {
         if let Some(art) = pack::art(sprite) {
             let key = (art as *const pack::Art as usize, art.pick(look));
@@ -337,20 +337,20 @@ impl Cache {
         true
     }
 
-    /// Imagem do último quadro atualizado (barata: a imagem é compartilhada).
+    /// Image of the last updated frame (cheap: the image is shared).
     pub fn image(&self) -> slint::Image {
         self.img.clone()
     }
 }
 
-/// Quadro quadrado ampliado `scale`× em RGBA: o lado e os pixels. Base dos ícones de bandeja.
+/// Square frame scaled `scale`× in RGBA: the side and the pixels. Base of the tray icons.
 pub fn rgba_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
     if let Some(art) = pack::art(sprite) {
         return art.square(art.pick(&Look::from_frame(mood, frame)), W * scale);
     }
     let px = render(sprite, theme, mood, frame);
     let side = W * scale;
-    let top = (W - H) / 2 * scale; // centraliza as 14 linhas num quadrado de 16
+    let top = (W - H) / 2 * scale; // centers the 14 rows in a 16-wide square
     let mut data = vec![0u8; side * side * 4];
     for y in 0..H * scale {
         for x in 0..side {
@@ -361,7 +361,7 @@ pub fn rgba_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale
     (side as i32, data)
 }
 
-/// Como `rgba_square`, em ARGB32 big-endian (formato do ícone de bandeja SNI, no Linux).
+/// Like `rgba_square`, in big-endian ARGB32 (the SNI tray icon format, on Linux).
 #[cfg_attr(windows, allow(dead_code))]
 pub fn argb_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale: usize) -> (i32, Vec<u8>) {
     let (side, mut data) = rgba_square(sprite, theme, mood, frame, scale);
@@ -371,7 +371,7 @@ pub fn argb_square(sprite: &Sprite, theme: &Theme, mood: Mood, frame: u32, scale
     (side, data)
 }
 
-/// Cores do tema para a UI (cada app manda as suas).
+/// Theme colors for the UI (each app sends its own).
 pub fn colors(t: &Theme) -> crate::ui::Colors {
     crate::ui::Colors {
         fur: color(t.fur),
@@ -389,7 +389,7 @@ pub fn colors(t: &Theme) -> crate::ui::Colors {
     }
 }
 
-/// Cor do tema como `slint::Color`.
+/// A theme color as `slint::Color`.
 pub fn color(c: u32) -> slint::Color {
     slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
@@ -400,30 +400,30 @@ mod tests {
     use crate::mascot::{sprites, themes};
 
     #[test]
-    fn todas_as_mascotes_tem_16x14() {
+    fn every_mascot_is_16x14() {
         for s in sprites::SPRITES {
             for row in s.grid {
-                assert_eq!(row.len(), W, "{} tem linha com largura errada", s.key);
+                assert_eq!(row.len(), W, "{} has a row of the wrong width", s.key);
             }
         }
     }
 
     #[test]
-    fn mascotes_pixel_tem_cor_para_cada_letra() {
+    fn pixel_mascots_have_a_color_for_every_letter() {
         for s in sprites::SPRITES.iter().filter(|s| s.pixel.is_some()) {
             let px = s.pixel.as_ref().unwrap();
             for row in s.grid {
                 for ch in row.bytes().filter(|c| *c != b'.' && *c != b'e') {
-                    assert!(px.color(ch).is_some(), "{}: sem cor para '{}'", s.key, ch as char);
+                    assert!(px.color(ch).is_some(), "{}: no color for '{}'", s.key, ch as char);
                 }
             }
-            assert!(s.grid.iter().any(|r| r.contains('e')), "{} sem olho", s.key);
+            assert!(s.grid.iter().any(|r| r.contains('e')), "{} has no eye", s.key);
         }
         assert!(sprites::SPRITES.iter().any(|s| s.key == "lumi" && s.pixel.is_some()));
     }
 
     #[test]
-    fn mascote_pixel_fecha_o_olho_e_muda_no_alarme() {
+    fn pixel_mascot_closes_its_eye_and_changes_on_alarm() {
         let s = sprites::get("capivara");
         let t = themes::get("neon");
         let awake = render(s, t, Mood::Idle, 1);
@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn olho_fecha_dormindo() {
+    fn eye_closes_when_asleep() {
         let s = sprites::get("neko");
         let t = themes::get("neon");
         let awake = render(s, t, Mood::Idle, 1);
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn pior_humor() {
+    fn worst_mood() {
         assert_eq!(Mood::Idle.worst(Mood::Alarm), Mood::Alarm);
         assert_eq!(Mood::Sleep.worst(Mood::Idle), Mood::Idle);
     }

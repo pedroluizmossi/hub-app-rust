@@ -1,20 +1,23 @@
-//! Limites das assinaturas de IA por consultas diretas aos serviços.
+//! AI subscription limits, read by querying the services directly.
 //!
-//! As consultas não imprimem credenciais nem o conteúdo das respostas. Cada fonte falha
-//! independentemente; a última leitura válida é mantida e marcada como desatualizada.
+//! The queries never print credentials or response contents. Each source fails on its own;
+//! the last valid reading is kept and marked as stale.
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[path = "ai_usage_direct.rs"]
 mod direct;
 
-/// Intervalo entre leituras (s), vindo da config do app ("Atualizar a cada").
+use crate::tr;
+use direct::FailureKind;
+
+/// Interval between readings (s), from the app config ("Refresh every").
 pub static POLL_SECS: AtomicU64 = AtomicU64::new(180);
-/// Fontes ligadas na config (bit `i` = fonte `i`, na ordem de `SOURCES`). Desligada não é consultada.
+/// Sources enabled in the config (bit `i` = source `i`, in `SOURCES` order). A disabled one is not queried.
 pub static ENABLED: AtomicU8 = AtomicU8::new(0b1111);
-/// Nomes das fontes, na ordem dos cartões.
+/// Source names, in card order.
 pub const SOURCES: [&str; 4] = ["Codex", "Claude", "Kiro", "OpenCode Go"];
-/// O Kiro é consultado com menos frequência (nunca menos que isto).
+/// Kiro is queried less often (never more often than this).
 const KIRO_MIN_POLL: Duration = Duration::from_secs(900);
 const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(300);
 
@@ -45,7 +48,7 @@ pub struct UsageSnapshot {
 impl Default for UsageSnapshot {
     fn default() -> Self {
         Self { cards: SOURCES.into_iter()
-            .map(|name| UsageCard { name: name.into(), status: "Aguardando leitura".into(), ..Default::default() }).collect() }
+            .map(|name| UsageCard { name: name.into(), status: tr!("Waiting for the first reading").into(), ..Default::default() }).collect() }
     }
 }
 
@@ -74,26 +77,26 @@ impl UsageProvider {
             let a = should_read[1].then(|| scope.spawn(direct::claude));
             let k = should_read[2].then(|| scope.spawn(direct::kiro));
             let o = should_read[3].then(|| scope.spawn(direct::opencode));
-            (c.map(|t| t.join().unwrap_or_else(|_| Err("Falha na leitura".into()))),
-             a.map(|t| t.join().unwrap_or_else(|_| Err("Falha na leitura".into()))),
-             k.map(|t| t.join().unwrap_or_else(|_| Err("Falha na leitura".into()))),
-             o.map(|t| t.join().unwrap_or_else(|_| Err("Falha na leitura".into()))))
+            (c.map(|t| t.join().unwrap_or_else(|_| Err(tr!("Reading failed").into()))),
+             a.map(|t| t.join().unwrap_or_else(|_| Err(tr!("Reading failed").into()))),
+             k.map(|t| t.join().unwrap_or_else(|_| Err(tr!("Reading failed").into()))),
+             o.map(|t| t.join().unwrap_or_else(|_| Err(tr!("Reading failed").into()))))
         });
         for (idx, result) in [(0, codex), (1, claude), (2, kiro), (3, opencode)] {
             if let Some(result) = result {
                 self.last[idx] = Some(Instant::now());
                 match result {
                     Ok(mut card) => { card.updated_at = Some(now()); self.cards[idx] = card; }
-                    Err(status) => {
-                        if status.contains("Limite de consultas") { self.retry_at[idx] = Some(Instant::now() + RATE_LIMIT_BACKOFF); }
+                    Err(failure) => {
+                        if failure.kind == FailureKind::RateLimited { self.retry_at[idx] = Some(Instant::now() + RATE_LIMIT_BACKOFF); }
                         let card = &mut self.cards[idx];
-                        // Falha de autenticação pode indicar troca de conta: não exibir
-                        // como sendo da nova conta os limites da sessão anterior.
-                        if status.contains("Autenticação") || status.contains("Login") || status.contains("login") {
+                        // A login failure may mean the account changed: don't show the
+                        // previous session's limits as if they were the new account's.
+                        if failure.kind == FailureKind::Auth {
                             card.windows.clear();
                             card.updated_at = None;
                         }
-                        card.status = status;
+                        card.status = failure.msg;
                         card.stale = card.updated_at.is_some();
                     }
                 }

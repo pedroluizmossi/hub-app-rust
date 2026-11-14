@@ -1,5 +1,5 @@
-//! OpenCode: `session_v2` de `~/.local/share/opencode/opencode.db`, com `time_busy`,
-//! `time_idle` e `parent_id` (subagentes); a última ferramenta vem de `session_message`.
+//! OpenCode: `session_v2` of `~/.local/share/opencode/opencode.db`, with `time_busy`,
+//! `time_idle` and `parent_id` (subagents); the last tool comes from `session_message`.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +10,7 @@ use super::{
     Agent, Details, LIMIT, RECENT, STALE, Source, State, Step, StepKind, Tool, base_name, describe, last_steps, one_line, open,
     push_step,
 };
+use crate::tr;
 
 pub(super) struct OpenCode;
 
@@ -35,7 +36,7 @@ impl Source for OpenCode {
                  FROM session_v2 WHERE time_archived IS NULL AND time_updated >= ?1 \
                  ORDER BY time_updated DESC LIMIT ?2",
             )
-            .map_err(|_| "formato do banco não reconhecido")?;
+            .map_err(|_| tr!("unrecognized database format"))?;
         let rows = stmt
             .query_map((now - RECENT.as_millis() as i64, LIMIT as i64), |r| {
                 Ok((
@@ -49,17 +50,17 @@ impl Source for OpenCode {
                     r.get::<_, Option<String>>(7)?,
                 ))
             })
-            .map_err(|_| "não consegui ler as sessões")?;
+            .map_err(|_| tr!("could not read the sessions"))?;
         let mut agents = Vec::new();
         for (id, cwd, title, updated, busy, idle, outcome, parent) in rows.flatten() {
             let log = Some(db.clone());
             let (state, since) = state(now, updated, busy, idle);
             let detail = match (state, outcome.as_str()) {
-                (State::Idle, "failed") => "falhou",
-                (State::Idle, "interrupted") => "interrompido",
+                (State::Idle, "failed") => tr!("failed"),
+                (State::Idle, "interrupted") => tr!("interrupted"),
                 _ => "",
             };
-            // só quem trabalha: a última mensagem do agente pode ser grande
+            // only working ones: the agent's last message may be large
             let action = if state == State::Working { last_action(&conn, &id) } else { String::new() };
             agents.push(Agent {
                 tool: Tool::OpenCode,
@@ -79,7 +80,7 @@ impl Source for OpenCode {
     }
 }
 
-/// Última ferramenta chamada na sessão ("" se a última mensagem não chamou nenhuma).
+/// Last tool called in the session ("" if the last message called none).
 fn last_action(conn: &Connection, session: &str) -> String {
     conn.query_row(
         "SELECT data FROM session_message WHERE session_id = ?1 AND type = 'assistant' ORDER BY seq DESC LIMIT 1",
@@ -91,17 +92,17 @@ fn last_action(conn: &Connection, session: &str) -> String {
     .unwrap_or_default()
 }
 
-/// Última parte `tool` de uma mensagem do agente (`content: [{type, name, state: {input}}]`).
+/// Last `tool` part of an agent message (`content: [{type, name, state: {input}}]`).
 fn parse_message(data: &str) -> Option<String> {
     let v: Value = serde_json::from_str(data).ok()?;
     let call = v["content"].as_array()?.iter().rev().find(|c| c["type"] == "tool")?;
     Some(describe(call["name"].as_str()?, &call["state"]["input"]))
 }
 
-/// Mensagens lidas do banco para a linha do tempo (cada uma vira um ou mais passos).
+/// Messages read from the database for the timeline (each becomes one or more steps).
 const MESSAGES: i64 = 60;
 
-/// Linha do tempo da sessão: as últimas mensagens de `session_message`.
+/// The session's timeline: the last messages of `session_message`.
 pub(super) fn timeline(db: &Path, session: &str) -> Vec<Step> {
     let Ok(conn) = open(db) else { return Vec::new() };
     let Ok(mut stmt) = conn.prepare(
@@ -122,8 +123,8 @@ pub(super) fn timeline(db: &Path, session: &str) -> Vec<Step> {
     last_steps(steps)
 }
 
-/// Passos de uma mensagem: o pedido (`text` no topo) ou as partes da resposta (`content`:
-/// texto e ferramentas; o raciocínio fica de fora).
+/// Steps of a message: the prompt (`text` at the top) or the parts of the reply (`content`:
+/// text and tools; reasoning is left out).
 fn message_steps(steps: &mut Vec<Step>, kind: &str, data: &str) {
     let Ok(v) = serde_json::from_str::<Value>(data) else { return };
     let at = v["time"]["created"].as_i64().unwrap_or(0);
@@ -137,7 +138,7 @@ fn message_steps(steps: &mut Vec<Step>, kind: &str, data: &str) {
             Some("tool") => {
                 push_step(steps, at, StepKind::Tool, &describe(part["name"].as_str().unwrap_or("?"), &part["state"]["input"]));
                 if part["state"]["status"] == "error" {
-                    push_step(steps, at, StepKind::Error, "a ferramenta falhou");
+                    push_step(steps, at, StepKind::Error, tr!("the tool failed"));
                 }
             }
             _ => {}
@@ -145,7 +146,7 @@ fn message_steps(steps: &mut Vec<Step>, kind: &str, data: &str) {
     }
 }
 
-/// Trabalhando = ficou ocupado depois da última vez que parou (e ainda escreve).
+/// Working = became busy after the last time it stopped (and still writes).
 fn state(now: i64, updated: i64, busy: Option<i64>, idle: Option<i64>) -> (State, i64) {
     match busy {
         Some(b) if idle.is_none_or(|i| b > i) && now - updated < STALE.as_millis() as i64 => (State::Working, b),
@@ -158,45 +159,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn estado() {
+    fn state_from_times() {
         let now = 10_000_000;
-        // ocupado depois de parar: trabalhando desde então
+        // busy after stopping: working since then
         assert_eq!(state(now, now - 5, Some(900), Some(800)), (State::Working, 900));
         assert_eq!(state(now, now - 5, Some(900), None), (State::Working, 900));
-        // parou depois de ficar ocupado
+        // stopped after being busy
         assert_eq!(state(now, now - 5, Some(900), Some(950)), (State::Idle, 950));
         assert_eq!(state(now, 700, None, None), (State::Idle, 700));
-        // "ocupado" sem escrever há mais de meia hora: caiu no meio
+        // "busy" without writing for over half an hour: it died midway
         assert_eq!(state(now, now - 1_900_000, Some(900), None).0, State::Idle);
     }
 
     #[test]
-    fn ultima_ferramenta() {
+    fn last_tool() {
         let msg = r#"{"time":{"created":1},"content":[{"type":"reasoning","text":"…"},
             {"type":"tool","name":"webfetch","state":{"status":"completed","input":{"format":"markdown","url":"https://opencode.ai/docs"}}},
             {"type":"tool","name":"read","state":{"status":"running","input":{"filePath":"/home/u/p/main.rs"}}}]}"#;
         assert_eq!(parse_message(msg).as_deref(), Some("read: main.rs"));
-        assert_eq!(parse_message(r#"{"content":[{"type":"text","text":"oi"}]}"#), None);
+        assert_eq!(parse_message(r#"{"content":[{"type":"text","text":"hi"}]}"#), None);
     }
 
     #[test]
-    fn passos_de_uma_mensagem() {
+    fn steps_of_a_message() {
         let mut steps = Vec::new();
-        message_steps(&mut steps, "user", r#"{"time":{"created":5},"text":"faça o deploy","files":[]}"#);
+        message_steps(&mut steps, "user", r#"{"time":{"created":5},"text":"deploy it","files":[]}"#);
         message_steps(
             &mut steps,
             "assistant",
-            r#"{"time":{"created":6},"content":[{"type":"reasoning","text":"…"},{"type":"text","text":"Feito."},
+            r#"{"time":{"created":6},"content":[{"type":"reasoning","text":"…"},{"type":"text","text":"Done."},
                 {"type":"tool","name":"bash","state":{"status":"error","input":{"command":"kubectl apply -f x"}}}]}"#,
         );
         let got: Vec<(i64, StepKind, &str)> = steps.iter().map(|s| (s.at_ms, s.kind, s.text.as_str())).collect();
         assert_eq!(
             got,
             [
-                (5, StepKind::User, "faça o deploy"),
-                (6, StepKind::Reply, "Feito."),
+                (5, StepKind::User, "deploy it"),
+                (6, StepKind::Reply, "Done."),
                 (6, StepKind::Tool, "bash: kubectl apply"),
-                (6, StepKind::Error, "a ferramenta falhou"),
+                (6, StepKind::Error, "the tool failed"),
             ]
         );
     }

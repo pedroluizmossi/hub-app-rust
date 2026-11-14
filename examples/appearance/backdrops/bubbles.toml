@@ -1,0 +1,30 @@
+# MiniUtils example backdrop: layers painted in order over the skin's "bg" color.
+# Colors: "#RRGGBB" or a skin color by name (accent, accent2, ink, sub, surface…),
+# which then follows the skin and the chosen accent color.
+label = "Bubbles"
+
+[[layer]]                # glow from above, like light in water
+kind = "glow"
+x = 0.5                  # fractions of the area: 0 = left/top, 1 = right/bottom
+y = 0.0
+rx = 700                 # radii in pixels
+ry = 320
+fade = 0.8
+color = "accent"
+alpha = 0.10
+
+[[layer]]                # a very faint grid of dots
+kind = "dots"
+step = 28
+offset = 14
+radius = 1.2
+color = "surface_edge"
+alpha = 0.8
+
+[[layer]]                # animated: dots that light up now and then
+kind = "twinkle"
+count = 18
+color = "accent2"
+alpha = 0.6
+size = 3
+grid = 28

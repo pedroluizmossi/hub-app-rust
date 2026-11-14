@@ -1,17 +1,17 @@
 #!/bin/sh
-# Instala (ou atualiza) o MiniUtils no Linux, a partir do último Release no GitHub.
+# Installs (or updates) MiniUtils on Linux, from the latest Release on GitHub.
 #
 #   curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.sh | sh
 #
-# Só para o usuário, sem sudo:
-#   ~/.local/bin/miniutils                            o programa
-#   ~/.local/share/applications/miniutils.desktop     atalho no menu de aplicativos
-#   ~/.local/share/doc/miniutils/                     README e licenças
+# For the current user only, no sudo:
+#   ~/.local/bin/miniutils                            the program
+#   ~/.local/share/applications/miniutils.desktop     entry in the applications menu
+#   ~/.local/share/doc/miniutils/                     README and licenses
 #
-# Desinstalar (a configuração em ~/.config/miniutils fica):
+# Uninstall (the configuration in ~/.config/miniutils stays):
 #   curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.sh | sh -s -- --uninstall
 #
-# Uma versão específica: MINIUTILS_VERSION=0.2.0 (em vez da última).
+# A specific version: MINIUTILS_VERSION=0.2.0 (instead of the latest).
 
 set -eu
 
@@ -26,25 +26,25 @@ AUTOSTART="$CONFIG_DIR/autostart/miniutils.desktop"
 
 say() { printf '%s\n' "$*"; }
 fail() { printf 'erro: %s\n' "$*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || fail "precisa do comando '$1'"; }
+need() { command -v "$1" >/dev/null 2>&1 || fail "the '$1' command is needed"; }
 
 uninstall() {
     rm -f "$BIN" "$DESKTOP" "$AUTOSTART"
     rm -rf "$DOC_DIR"
-    say "MiniUtils removido. A configuração em $CONFIG_DIR/miniutils não foi apagada."
+    say "MiniUtils removed. The configuration in $CONFIG_DIR/miniutils was not deleted."
 }
 
-# Caminho entre aspas para a linha Exec do .desktop (mesma regra de src/autostart/linux.rs).
+# Quoted path for the Exec line of the .desktop file (same rule as src/autostart/linux.rs).
 quote_exec() {
     escaped=$(printf '%s' "$1" | sed -e 's/\\/\\\\\\\\/g' -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')
     printf '"%s"' "$escaped"
 }
 
 install() {
-    [ "$(uname -s)" = "Linux" ] || fail "este script é para Linux; no Windows use o install.ps1 (ver o README)"
+    [ "$(uname -s)" = "Linux" ] || fail "this script is for Linux; on Windows use install.ps1 (see the README)"
     case "$(uname -m)" in
         x86_64 | amd64) ;;
-        *) fail "só há pacote para x86_64 (esta máquina é $(uname -m))" ;;
+        *) fail "there is only a package for x86_64 (this machine is $(uname -m))" ;;
     esac
     need curl
     need tar
@@ -53,14 +53,14 @@ install() {
     if [ -n "${MINIUTILS_VERSION:-}" ]; then
         version="${MINIUTILS_VERSION#v}"
     else
-        # /releases/latest redireciona para .../releases/tag/vX.Y.Z
+        # /releases/latest redirects to .../releases/tag/vX.Y.Z
         url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") ||
-            fail "não consegui consultar o último Release"
+            fail "could not look up the latest Release"
         tag="${url##*/}"
         version="${tag#v}"
         case "$version" in
             [0-9]*) ;;
-            *) fail "nenhum Release publicado em github.com/$REPO" ;;
+            *) fail "no Release published at github.com/$REPO" ;;
         esac
     fi
 
@@ -71,15 +71,15 @@ install() {
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT INT TERM
 
-    say "Baixando MiniUtils $version..."
-    curl -fSL --progress-bar -o "$tmp/$archive" "$base/$archive" || fail "falha ao baixar $base/$archive"
-    curl -fsSL -o "$tmp/$archive.sha256" "$base/$archive.sha256" || fail "falha ao baixar a soma SHA-256"
+    say "Downloading MiniUtils $version..."
+    curl -fSL --progress-bar -o "$tmp/$archive" "$base/$archive" || fail "failed to download $base/$archive"
+    curl -fsSL -o "$tmp/$archive.sha256" "$base/$archive.sha256" || fail "failed to download the SHA-256 sum"
     (cd "$tmp" && sha256sum -c --status "$archive.sha256") ||
-        fail "a soma SHA-256 não bate: o arquivo baixado está corrompido ou foi alterado"
+        fail "the SHA-256 sum does not match: the downloaded file is corrupt or was altered"
     tar -xzf "$tmp/$archive" -C "$tmp"
 
     mkdir -p "$BIN_DIR" "$DATA_DIR/applications" "$DOC_DIR"
-    # copia ao lado e troca com mv: funciona mesmo com o MiniUtils aberto
+    # copy next to it and swap with mv: works even with MiniUtils open
     cp "$tmp/$name/miniutils" "$BIN.new"
     chmod 755 "$BIN.new"
     mv -f "$BIN.new" "$BIN"
@@ -90,7 +90,8 @@ install() {
 [Desktop Entry]
 Type=Application
 Name=MiniUtils
-Comment=Hub de mini-apps na bandeja
+Comment=Mini-app hub in the tray
+Comment[pt_BR]=Hub de mini-apps na bandeja
 Exec=$exec_line
 Terminal=false
 Categories=Utility;
@@ -99,20 +100,20 @@ EOF
         update-desktop-database "$DATA_DIR/applications" >/dev/null 2>&1 || true
     fi
 
-    say "MiniUtils $version instalado em $BIN"
-    say "Abra pelo menu de aplicativos ou rode: miniutils"
+    say "MiniUtils $version installed in $BIN"
+    say "Open it from the applications menu or run: miniutils"
 
     case ":$PATH:" in
         *":$BIN_DIR:"*) ;;
-        *) say "Aviso: $BIN_DIR não está no PATH. Para rodar 'miniutils' no terminal, adicione-o ao PATH do seu shell." ;;
+        *) say "Note: $BIN_DIR is not in PATH. To run 'miniutils' in the terminal, add it to your shell's PATH." ;;
     esac
     if command -v pgrep >/dev/null 2>&1 && pgrep -x miniutils >/dev/null 2>&1; then
-        say "O MiniUtils está aberto: feche-o (Sair, no menu da bandeja) e abra de novo para usar a versão nova."
+        say "MiniUtils is open: quit it (Quit, in the tray menu) and open it again to use the new version."
     fi
 }
 
 case "${1:-}" in
     --uninstall) uninstall ;;
     "") install ;;
-    *) fail "opção desconhecida: $1 (use --uninstall para remover)" ;;
+    *) fail "unknown option: $1 (use --uninstall to remove)" ;;
 esac

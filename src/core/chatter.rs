@@ -1,34 +1,35 @@
-//! Conversa entre mascotes: o que os apps contam e quem pode falar.
+//! Mascot chatter: what the apps report and who may speak.
 //!
-//! Um app não fala com outro. Ele só registra fatos sobre si ("a CPU esquentou", "o
-//! postgres caiu", "me cutucaram") e diz quais mascotes tem na tela. Quem transforma isso
-//! em diálogo é o diretor do hub (`src/hub/chatter.rs`).
+//! An app does not talk to another. It only records facts about itself ("the CPU got
+//! hot", "postgres went down", "someone poked me") and says which mascots it has on
+//! screen. The hub's director (`src/hub/chatter.rs`) turns that into dialogue.
 //!
-//! As falas vêm de arquivos TOML: cada app pode ter o seu (`miniapps/<app>/lines.toml`,
-//! ver `MiniApp::lines`) e o hub tem as genéricas (`src/hub/lines.toml`), usadas quando o
-//! app não declarou aquele caso. Formato:
+//! The lines come from TOML files: each app may have its own (`miniapps/<app>/lines.toml`,
+//! see `MiniApp::lines`) and the hub has the generic ones (`src/hub/lines.toml`), used when
+//! the app did not declare that case. Format:
 //!
 //! ```toml
-//! [trouble]               # o que a mascote deste app diz ao contar um alarme
+//! [trouble]               # what this app's mascot says when reporting an alarm
 //! pt = ["{s} caiu! (o_o)"]
 //! en = ["{s} went down! (o_o)"]
-//! de = ["{s} ist abgestürzt! (o_o)"]   # opcional
+//! de = ["{s} ist abgestürzt! (o_o)"]   # optional
 //!
-//! [trouble.answer]        # o que as outras respondem a esse alarme (opcional)
+//! [trouble.answer]        # what the others answer to that alarm (optional)
 //! pt = ["{s} foi tirar um cochilo? zzz"]
 //! en = ["did {s} take a nap? zzz"]
 //!
-//! [reply.strain]          # o que a mascote deste app responde quando outra fica agitada
-//! about = ["CPU", "RAM"]  # só para estes assuntos (vazio = qualquer um)
+//! [reply.strain]          # what this app's mascot answers when another gets agitated
+//! about = ["CPU", "RAM"]  # only for these subjects (empty = any)
 //! pt = ["foi mal... acho que fui eu u.u"]
 //! en = ["sorry... i think that was me u.u"]
 //! ```
 //!
-//! Casos: `trouble`, `strain`, `recovered`, `poked` e `idle` (papo à toa). Lacunas:
-//! `{a}` quem conta, `{b}` quem responde, `{s}` o assunto (vazio vira o nome de quem conta),
-//! `{v}` o número do fato. Variante com `{v}` só sai quando o fato tem número, e com `{b}`
-//! só quando alguém responde. Tom fofo, com algumas falas bravas (de palavrão); kaomoji em
-//! ASCII (a fonte pode não ter emoji); até ~60 caracteres (duas linhas da caixa de diálogo).
+//! Cases: `trouble`, `strain`, `recovered`, `poked` and `idle` (small talk). Blanks: `{a}`
+//! who reports, `{b}` who answers, `{s}` the subject (empty becomes the reporter's name),
+//! `{v}` the fact's number. A variant with `{v}` is only used when the fact has a number,
+//! and one with `{b}` only when someone answers. Cute tone, with a few grumpy (swearing)
+//! lines; ASCII kaomoji (the font may lack emoji); up to ~60 characters (two lines of the
+//! speech bubble).
 
 use serde::Deserialize;
 
@@ -36,10 +37,10 @@ use crate::mascot::Mood;
 use crate::mascot::sprites::Sprite;
 use crate::mascot::themes::Theme;
 
-/// Uma mascote que pode falar: nome mostrado na caixa de diálogo e como desenhá-la.
+/// A mascot that may speak: name shown in the speech bubble and how to draw it.
 #[derive(Clone)]
 pub struct Voice {
-    /// Id do app onde a mascote aparece (a fala sai na caixa desse app).
+    /// Id of the app where the mascot appears (the line shows in that app's box).
     pub app: String,
     /// "Docker", "CPU", "Claude".
     pub name: String,
@@ -49,8 +50,8 @@ pub struct Voice {
 }
 
 impl Voice {
-    /// Id da mascote na tela ("cyber.vitals:CPU"): o Rust passa à view, que o põe no
-    /// `Mascot` para a caixa de diálogo achar quem fala e quem ouve.
+    /// Id of the mascot on screen ("cyber.vitals:CPU"): Rust passes it to the view, which
+    /// sets it on the `Mascot` so the speech bubble finds who speaks and who listens.
     pub fn id(&self) -> String {
         Voice::id_of(&self.app, &self.name)
     }
@@ -59,27 +60,27 @@ impl Voice {
         format!("{app}:{name}")
     }
 
-    /// Mesma mascote (o diretor não põe uma mascote para responder a si mesma).
+    /// Same mascot (the director never has a mascot answer itself).
     pub fn same(&self, other: &Voice) -> bool {
         self.app == other.app && self.name == other.name
     }
 }
 
-/// O que aconteceu.
+/// What happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactKind {
-    /// Entrou em alarme (container caiu, limite estourou, temperatura crítica).
+    /// Went into alarm (container down, limit exceeded, critical temperature).
     Trouble,
-    /// Ficou agitado (uso alto, esquentando).
+    /// Got agitated (high usage, heating up).
     Strain,
-    /// Ainda não passou do limite, mas vai passar se o ritmo continuar. O número, se
-    /// houver, são os minutos que faltam.
+    /// Not over the limit yet, but will be if the pace keeps up. The number, if any, is the
+    /// minutes left.
     Forecast,
-    /// Voltou ao normal depois de agitado ou em alarme.
+    /// Back to normal after being agitated or in alarm.
     Recovered,
-    /// O usuário cutucou a mascote.
+    /// The user poked the mascot.
     Poked,
-    /// Papo à toa: tudo calmo há um tempo (quem puxa é o diretor, não um app).
+    /// Small talk: all calm for a while (started by the director, not by an app).
     Idle,
 }
 
@@ -87,7 +88,7 @@ impl FactKind {
     pub const ALL: [FactKind; 6] =
         [FactKind::Trouble, FactKind::Strain, FactKind::Forecast, FactKind::Recovered, FactKind::Poked, FactKind::Idle];
 
-    /// Nome da seção no `lines.toml`.
+    /// Name of the section in `lines.toml`.
     pub fn key(self) -> &'static str {
         match self {
             FactKind::Trouble => "trouble",
@@ -100,20 +101,20 @@ impl FactKind {
     }
 }
 
-/// Um fato contado por um app.
+/// A fact reported by an app.
 #[derive(Clone)]
 pub struct Fact {
     pub kind: FactKind,
-    /// Quem conta (a mascote do assunto).
+    /// Who reports it (the subject's mascot).
     pub voice: Voice,
-    /// Do que se trata: "CPU", "postgres", "Claude". Vazio = a própria mascote.
+    /// What it is about: "CPU", "postgres", "Claude". Empty = the mascot itself.
     pub subject: String,
-    /// Número para a frase ("92" em "CPU em 92%"), quando houver.
+    /// Number for the sentence ("92" in "CPU at 92%"), if any.
     pub value: Option<f32>,
 }
 
-/// Fato de mudança de humor: piorou para alarme ou agitado, ou voltou ao normal.
-/// `None` quando a mudança não merece comentário (ex.: dormiu, acordou).
+/// Fact for a mood change: worsened to alarm or agitated, or back to normal.
+/// `None` when the change is not worth a comment (e.g. fell asleep, woke up).
 pub fn mood_fact(before: Mood, now: Mood, voice: Voice, subject: &str, value: Option<f32>) -> Option<Fact> {
     let bad = |m: Mood| m >= Mood::Busy;
     let kind = if now == Mood::Alarm && before != Mood::Alarm {
@@ -139,7 +140,7 @@ impl Lang {
     pub const ALL: [Lang; 3] = [Lang::Pt, Lang::En, Lang::De];
 }
 
-/// Variantes de uma fala nos três idiomas (alemão opcional).
+/// Variants of a line in the three languages (German optional).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Say {
@@ -149,7 +150,7 @@ pub struct Say {
     pub en: Vec<String>,
     #[serde(default)]
     pub de: Vec<String>,
-    /// Só em `reply.*`: assuntos a que esta resposta se aplica (vazio = qualquer um).
+    /// Only in `reply.*`: subjects this answer applies to (empty = any).
     #[serde(default)]
     pub about: Vec<String>,
 }
@@ -163,13 +164,13 @@ impl Say {
         }
     }
 
-    /// Serve para o assunto `subject` (ver `about`).
+    /// Fits the subject `subject` (see `about`).
     pub fn fits(&self, subject: &str) -> bool {
         self.about.is_empty() || self.about.iter().any(|a| a == subject)
     }
 }
 
-/// Uma seção de caso: o que a mascote do app diz e, opcionalmente, o que os outros respondem.
+/// A case section: what the app's mascot says and, optionally, what the others answer.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
@@ -199,7 +200,7 @@ pub struct Replies {
     pub idle: Option<Say>,
 }
 
-/// As falas de um app (ou as genéricas do hub).
+/// The lines of an app (or the hub's generic ones).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lines {
@@ -214,7 +215,7 @@ pub struct Lines {
 }
 
 impl Lines {
-    /// Lê um `lines.toml`. Seção ou campo desconhecido é erro (pega erro de digitação).
+    /// Reads a `lines.toml`. An unknown section or field is an error (catches typos).
     pub fn parse(src: &str) -> Result<Lines, String> {
         if src.trim().is_empty() {
             return Ok(Lines::default());
@@ -222,7 +223,7 @@ impl Lines {
         toml::from_str(src).map_err(|e| e.to_string())
     }
 
-    /// O que a mascote deste app diz ao contar um fato do tipo `kind`.
+    /// What this app's mascot says when reporting a fact of kind `kind`.
     pub fn own(&self, kind: FactKind) -> Option<&Entry> {
         match kind {
             FactKind::Trouble => self.trouble.as_ref(),
@@ -234,7 +235,7 @@ impl Lines {
         }
     }
 
-    /// O que a mascote deste app responde quando outra conta um fato do tipo `kind`.
+    /// What this app's mascot answers when another reports a fact of kind `kind`.
     pub fn reply(&self, kind: FactKind) -> Option<&Say> {
         let r = &self.reply;
         match kind {
@@ -247,7 +248,7 @@ impl Lines {
         }
     }
 
-    /// Todas as falas, para conferir (nome da seção, fala).
+    /// Every line, for checking (section name, line).
     pub fn all(&self) -> Vec<(String, Say)> {
         let mut out = Vec::new();
         for k in FactKind::ALL {
@@ -264,22 +265,22 @@ impl Lines {
         out
     }
 
-    /// Problemas de um `lines.toml`: falta português ou inglês, lacuna desconhecida, fala
-    /// longa demais. Vazio = tudo certo (usado pelos testes de cada app).
+    /// Problems in a `lines.toml`: missing Portuguese or English, unknown blank, line too
+    /// long. Empty = all good (used by each app's tests).
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (section, say) in self.all() {
             if say.pt.is_empty() || say.en.is_empty() {
-                out.push(format!("[{section}] precisa de pt e en"));
+                out.push(format!("[{section}] needs pt and en"));
             }
             for lang in Lang::ALL {
                 for t in say.variants(lang) {
                     let rest = t.replace("{a}", "").replace("{b}", "").replace("{s}", "").replace("{v}", "");
                     if rest.contains('{') || rest.contains('}') {
-                        out.push(format!("[{section}] lacuna desconhecida em {t:?}"));
+                        out.push(format!("[{section}] unknown blank in {t:?}"));
                     }
                     if t.chars().count() > 60 {
-                        out.push(format!("[{section}] fala longa demais: {t:?}"));
+                        out.push(format!("[{section}] line too long: {t:?}"));
                     }
                 }
             }
@@ -293,7 +294,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_secoes_respostas_e_assuntos() {
+    fn reads_sections_answers_and_subjects() {
         let l = Lines::parse(
             r#"
             [trouble]
@@ -317,10 +318,10 @@ mod tests {
     }
 
     #[test]
-    fn erro_de_digitacao_nao_passa() {
+    fn typos_are_rejected() {
         assert!(Lines::parse("[truble]\npt = [\"x\"]").is_err());
         assert!(Lines::parse("[trouble]\npt = [\"x\"]\nes = [\"y\"]").is_err());
-        let falta_en = Lines::parse("[poked]\npt = [\"oi\"]").unwrap();
-        assert_eq!(falta_en.problems().len(), 1);
+        let missing_en = Lines::parse("[poked]\npt = [\"oi\"]").unwrap();
+        assert_eq!(missing_en.problems().len(), 1);
     }
 }

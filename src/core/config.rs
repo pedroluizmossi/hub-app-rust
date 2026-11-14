@@ -1,4 +1,4 @@
-//! Configuração do usuário em `~/.config/miniutils/config.toml`.
+//! User configuration in `~/.config/miniutils/config.toml`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,107 +7,110 @@ use serde::{Deserialize, Serialize};
 
 use super::layout::{self, Rect};
 use super::manifest::Manifest;
+use crate::tr;
 
-/// Nome do app (padrão do nome exibido, pasta da config, socket e binário em minúsculas).
+/// App name (default display name; lowercased for the config folder, socket and binary).
 pub const APP_NAME: &str = "MiniUtils";
 
-/// Nome exibido atual, lido de outras threads (bandeja e notificações).
+/// Current display name, read from other threads (tray and notifications).
 static DISPLAY_NAME: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
-/// Nome que o usuário escolheu (`name` na config), ou `MiniUtils`.
+/// Name the user chose (`name` in the config), or `MiniUtils`.
 pub fn display_name() -> String {
     let n = DISPLAY_NAME.read().map(|n| n.clone()).unwrap_or_default();
     if n.trim().is_empty() { APP_NAME.into() } else { n }
 }
 
-/// Versão atual do formato do arquivo. Ao mudar a estrutura, suba o número e
-/// acrescente a migração correspondente em `migra`.
-pub const VERSAO_ATUAL: u32 = 4;
+/// Current version of the file format. When the structure changes, bump the number and
+/// add the matching migration in `migrate`.
+pub const CURRENT_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Versão do formato do arquivo (ausente = 0, o formato antigo).
+    /// File format version (missing = 0, the old format).
     pub version: u32,
-    /// Nome exibido na janela, na bandeja e nas notificações (o usuário pode trocar).
+    /// Name shown on the window, the tray and notifications (the user can change it).
     pub name: String,
-    /// Páginas do painel (a barra lateral), cada uma com a sua grade e os seus apps.
+    /// Pages of the panel (the sidebar), each with its own grid and apps.
     pub pages: Vec<Page>,
-    /// Visual da janela (ver `src/skin`).
+    /// Window skin (see `src/skin`).
     pub skin: String,
-    /// Cor de destaque por cima do visual: `""` (a do visual) ou uma de `skin::ACCENTS`.
+    /// Accent color on top of the skin: `""` (the skin's own) or one of `skin::ACCENTS`.
     pub accent: String,
-    /// Tamanho do texto da interface, em % do design (90 a 125).
+    /// Interface text size, in % of the design (90 to 125).
     pub text_scale: u32,
-    /// Fundo animado (chuva, estrelas, varredura); "Reduzir movimento" também o desliga.
+    /// Animated background (rain, stars, scanline); "Reduce motion" also turns it off.
     pub ambient: bool,
-    /// Reduzir movimento: mascotes sem pulos nem tremores, e sem reações nem easter eggs.
+    /// Reduce motion: mascots without jumps or shakes, and no reactions or easter eggs.
     pub reduce_motion: bool,
-    /// Quanto as mascotes conversam entre si: `"off"`, `"some"` ou `"lots"`.
+    /// How much the mascots chat with each other: `"off"`, `"some"` or `"lots"`.
     pub chatter: String,
-    /// Onde ficam as páginas: `"side"` (barra à esquerda), `"right"`, `"bottom"` ou `"top"`
-    /// (abas no cabeçalho). Valor desconhecido vale `"side"` (`hub::appearance::NAVS`).
+    /// Interface language: `"auto"` (the system's), `"en"` or `"pt-BR"` (`core::i18n`).
+    pub language: String,
+    /// Where the pages go: `"side"` (bar on the left), `"right"`, `"bottom"` or `"top"`
+    /// (tabs in the header). An unknown value means `"side"` (`hub::appearance::NAVS`).
     pub nav: String,
-    /// Mascote do ícone da bandeja: `"auto"` (a do app em pior estado) ou uma mascote.
+    /// Mascot of the tray icon: `"auto"` (the one of the app in the worst state) or a mascot.
     pub tray_icon: String,
-    /// Tema do ícone da bandeja: `"auto"` (o do app mostrado) ou um tema.
+    /// Theme of the tray icon: `"auto"` (the one of the app shown) or a theme.
     pub tray_theme: String,
-    /// Posição e tamanho de cada app na grade da sua página, em células: `[layout."cyber.docker"]`.
+    /// Position and size of each app in its page's grid, in cells: `[layout."cyber.docker"]`.
     pub layout: BTreeMap<String, Rect>,
-    /// Tamanho da janela em pixels lógicos (lembrado entre aberturas).
+    /// Window size in logical pixels (remembered between launches).
     pub window: Option<(u32, u32)>,
-    /// Mini-apps ligados, na ordem das abas.
+    /// Enabled mini-apps, in tab order.
     pub enabled: Vec<String>,
-    /// Configurações de cada mini-app: `[apps."cyber.docker"]`.
+    /// Settings of each mini-app: `[apps."cyber.docker"]`.
     pub apps: BTreeMap<String, toml::Table>,
-    /// Índice da loja de plugins (`registry.json`: caminho ou https://). Vazio = a loja
-    /// oficial (`store::OFFICIAL_INDEX`).
+    /// Plugin store index (`registry.json`: path or https://). Empty = the official store
+    /// (`store::OFFICIAL_INDEX`).
     pub store_index: String,
-    /// Chave pública (ed25519, hex) que assina o índice da loja. Vazia = a oficial, se o
-    /// índice for o oficial; para outro índice, sem conferência (só aceito se for local).
+    /// Public key (ed25519, hex) that signs the store index. Empty = the official one when
+    /// the index is the official one; for another index, no check (accepted only if local).
     pub store_key: String,
-    /// Como salvar, conforme o arquivo lido (não vai para o TOML).
+    /// How to save, depending on the file that was read (not written to the TOML).
     #[serde(skip)]
-    estado: Estado,
+    state: SaveState,
 }
 
-/// Uma página do painel: aparece na barra lateral e tem a própria grade.
+/// A page of the panel: shown in the sidebar, with its own grid.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Page {
-    /// Nome mostrado na barra lateral.
+    /// Name shown in the sidebar.
     pub name: String,
-    /// Mascote do ícone na barra lateral (chave de `mascot::sprites`).
+    /// Mascot of the sidebar icon (key of `mascot::sprites`).
     pub icon: String,
-    /// Colunas da grade.
+    /// Grid columns.
     pub columns: u32,
-    /// Linhas da grade.
+    /// Grid rows.
     pub rows: u32,
-    /// Apps desta página, ligados ou não. Um app fica em uma página só.
+    /// Apps of this page, enabled or not. An app is on one page only.
     pub apps: Vec<String>,
 }
 
 impl Default for Page {
     fn default() -> Self {
-        Page { name: "Geral".into(), icon: "neko".into(), columns: 2, rows: 1, apps: Vec::new() }
+        Page { name: tr!("General").into(), icon: "neko".into(), columns: 2, rows: 1, apps: Vec::new() }
     }
 }
 
-/// O que fazer ao salvar, conforme o arquivo que foi lido.
+/// What to do on save, depending on the file that was read.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-enum Estado {
+enum SaveState {
     #[default]
     Normal,
-    /// Arquivo de um MiniUtils mais novo: nunca é sobrescrito.
-    SomenteLeitura,
-    /// TOML quebrado: o original vai para `.quebrado` antes de salvar algo novo.
-    Quebrado,
+    /// File from a newer MiniUtils: never overwritten.
+    ReadOnly,
+    /// Broken TOML: the original is moved to `.broken` before saving anything new.
+    Broken,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            version: VERSAO_ATUAL,
+            version: CURRENT_VERSION,
             name: APP_NAME.into(),
             pages: vec![Page {
                 apps: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
@@ -119,6 +122,7 @@ impl Default for Config {
             ambient: true,
             reduce_motion: false,
             chatter: "some".into(),
+            language: "auto".into(),
             nav: "side".into(),
             tray_icon: "auto".into(),
             tray_theme: "auto".into(),
@@ -128,20 +132,20 @@ impl Default for Config {
             apps: BTreeMap::new(),
             store_index: String::new(),
             store_key: String::new(),
-            estado: Estado::Normal,
+            state: SaveState::Normal,
         }
     }
 }
 
 impl Config {
-    /// Página onde o app está, se estiver em alguma.
+    /// Page the app is on, if any.
     pub fn page_of(&self, id: &str) -> Option<usize> {
         self.pages.iter().position(|p| p.apps.iter().any(|a| a == id))
     }
 
-    /// Página pedida por `--tab`: pelo nome da página ou por um app que está nela, com o id
-    /// inteiro (`cyber.docker`) ou só a última parte (`docker`). Sem diferença de
-    /// maiúsculas; o nome da página ganha de um app com o mesmo nome.
+    /// Page asked for by `--tab`: by the page name or by an app on it, with the full id
+    /// (`cyber.docker`) or just its last part (`docker`). Case-insensitive; a page name
+    /// wins over an app with the same name.
     pub fn find_page(&self, tab: &str) -> Option<usize> {
         let tab = tab.trim();
         let same = |s: &str| s.trim().eq_ignore_ascii_case(tab);
@@ -152,18 +156,19 @@ impl Config {
         })
     }
 
-    /// Apps ligados da página, na ordem da página.
+    /// Enabled apps of the page, in page order.
     pub fn page_apps(&self, page: usize) -> Vec<String> {
         self.pages.get(page).map_or_else(Vec::new, |p| p.apps.iter().filter(|a| self.is_enabled(a)).cloned().collect())
     }
 
-    /// Retângulos dos apps ligados da página, na ordem de `page_apps`.
+    /// Rectangles of the page's enabled apps, in `page_apps` order.
     pub fn rects(&self, page: usize) -> Vec<Rect> {
         self.page_apps(page).iter().map(|id| self.layout.get(id).copied().unwrap_or(Rect::new(0, 0, 1, 1))).collect()
     }
 
-    /// Põe o app no fim da página `to` (tirando-o de onde estava). A posição é escolhida
-    /// pelo próximo `arrange`: fica onde estava se couber, senão vai para a primeira vaga.
+    /// Puts the app at the end of page `to` (taking it out of where it was). The position is
+    /// chosen by the next `arrange`: it stays where it was if it fits, otherwise it goes to
+    /// the first free spot.
     pub fn move_to_page(&mut self, id: &str, to: usize) {
         if to >= self.pages.len() || self.page_of(id) == Some(to) {
             return;
@@ -174,7 +179,7 @@ impl Config {
         self.pages[to].apps.push(id.to_string());
     }
 
-    /// Página nova no fim, com uma mascote que ainda não está em uso. Devolve o índice.
+    /// New page at the end, with a mascot not in use yet. Returns its index.
     pub fn add_page(&mut self) -> usize {
         let n = self.pages.len() + 1;
         let icon = crate::mascot::sprites::SPRITES
@@ -182,11 +187,11 @@ impl Config {
             .map(|s| s.key)
             .find(|k| !self.pages.iter().any(|p| p.icon == *k))
             .unwrap_or("neko");
-        self.pages.push(Page { name: format!("Página {n}"), icon: icon.into(), ..Page::default() });
+        self.pages.push(Page { name: tr!("Page {}", n), icon: icon.into(), ..Page::default() });
         self.pages.len() - 1
     }
 
-    /// Apaga a página; os apps dela vão para a anterior (ou a primeira). A última não sai.
+    /// Deletes the page; its apps go to the previous one (or the first). The last page stays.
     pub fn remove_page(&mut self, i: usize) -> bool {
         if self.pages.len() <= 1 || i >= self.pages.len() {
             return false;
@@ -197,7 +202,7 @@ impl Config {
         true
     }
 
-    /// Garante que há ao menos uma página e que todo app ligado está em exatamente uma.
+    /// Makes sure there is at least one page and that every enabled app is on exactly one.
     fn ensure_pages(&mut self) {
         if self.pages.is_empty() {
             self.pages.push(Page::default());
@@ -210,9 +215,9 @@ impl Config {
         self.pages[0].apps.extend(orphans);
     }
 
-    /// Garante que todo app ligado tem página e lugar na grade, e que ninguém se sobrepõe.
-    /// Cada um fica onde está se couber; senão vai para a primeira vaga e, sem vaga, a grade
-    /// cresce. Devolve `true` se mudou algo.
+    /// Makes sure every enabled app has a page and a spot on the grid, and that nothing
+    /// overlaps. Each app stays where it is if it fits; otherwise it goes to the first free
+    /// spot and, with none left, the grid grows. Returns `true` if anything changed.
     pub fn arrange(&mut self) -> bool {
         let before = (self.pages.clone(), self.layout.clone());
         self.ensure_pages();
@@ -224,7 +229,7 @@ impl Config {
             let (cols, mut rows) = (p.columns, p.rows);
             let mut placed: Vec<Rect> = Vec::new();
             for id in &ids {
-                // sem lugar guardado: uma célula, na primeira vaga
+                // no saved spot: one cell, in the first free spot
                 let want = self.layout.get(id).copied().unwrap_or(Rect::new(cols, 0, 1, 1));
                 let (r, used) = layout::add(&placed, want, cols, rows);
                 rows = used;
@@ -242,8 +247,8 @@ impl Config {
         dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("miniutils/config.toml")
     }
 
-    /// Lê a configuração; se não existir ou estiver quebrada, usa o padrão. Na primeira
-    /// vez, copia a config da época em que o app se chamava CyberHub.
+    /// Reads the configuration; if missing or broken, uses the defaults. The first time, it
+    /// copies the config from when the app was called CyberHub.
     pub fn load() -> Self {
         let path = Self::path();
         if !path.exists()
@@ -252,24 +257,24 @@ impl Config {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 match std::fs::copy(&old, &path) {
-                    Ok(_) => log::info!("config copiada de {}", old.display()),
-                    Err(e) => log::warn!("não consegui copiar {}: {e}", old.display()),
+                    Ok(_) => log::info!("config copied from {}", old.display()),
+                    Err(e) => log::warn!("could not copy {}: {e}", old.display()),
                 }
             }
         let mut cfg = Self::load_from(&path);
-        // deixa a linha `name` no arquivo, para o usuário achar onde trocar o nome
-        let sem_nome = std::fs::read_to_string(&path)
+        // keep the `name` line in the file, so the user finds where to change the name
+        let no_name = std::fs::read_to_string(&path)
             .ok()
             .and_then(|t| t.parse::<toml::Table>().ok())
             .is_some_and(|t| !t.contains_key("name"));
-        if sem_nome && cfg.estado == Estado::Normal {
+        if no_name && cfg.state == SaveState::Normal {
             cfg.save_to(&path);
         }
         cfg.publish_name();
         cfg
     }
 
-    /// Torna o nome exibido visível para a bandeja e as notificações.
+    /// Makes the display name visible to the tray and notifications.
     pub fn publish_name(&self) {
         if let Ok(mut n) = DISPLAY_NAME.write() {
             *n = self.name.trim().to_string();
@@ -280,61 +285,61 @@ impl Config {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Config::default();
         };
-        // Vazio não é uma config antiga (sem `version`), é uma gravação que não terminou:
-        // migrá-lo guardaria um backup vazio e gravaria os padrões como se fossem escolha.
+        // Empty is not an old config (without `version`), it is a write that did not finish:
+        // migrating it would keep an empty backup and save the defaults as if chosen.
         if text.trim().is_empty() {
             return Config::default();
         }
-        let mut tabela: toml::Table = match text.parse() {
+        let mut table: toml::Table = match text.parse() {
             Ok(t) => t,
-            Err(e) => return Self::quebrada(&e.to_string()),
+            Err(e) => return Self::broken(&e.to_string()),
         };
-        let versao = match tabela.get("version") {
+        let version = match table.get("version") {
             None => 0,
             Some(v) => match v.as_integer().and_then(|i| u32::try_from(i).ok()) {
                 Some(n) => n,
-                None => return Self::quebrada("versão inválida"),
+                None => return Self::broken("invalid version"),
             },
         };
 
-        // Arquivo de um MiniUtils mais novo: lê o que der, mas não mexe nele.
-        if versao > VERSAO_ATUAL {
+        // File from a newer MiniUtils: read what we can, but don't touch it.
+        if version > CURRENT_VERSION {
             log::warn!(
-                "{} é da versão {versao}, mais nova que a {VERSAO_ATUAL} daqui; alterações não serão salvas",
+                "{} is version {version}, newer than this build's {CURRENT_VERSION}; changes will not be saved",
                 path.display()
             );
-            let cfg = desserializa(tabela).unwrap_or_else(|e| {
-                log::warn!("config inválida ({e}); usando o padrão");
+            let cfg = deserialize(table).unwrap_or_else(|e| {
+                log::warn!("invalid config ({e}); using the defaults");
                 Config::default()
             });
-            return Config { estado: Estado::SomenteLeitura, ..cfg };
+            return Config { state: SaveState::ReadOnly, ..cfg };
         }
 
-        let antiga = versao < VERSAO_ATUAL;
-        if antiga {
-            migra(&mut tabela, versao);
+        let old = version < CURRENT_VERSION;
+        if old {
+            migrate(&mut table, version);
         }
-        match desserializa(tabela) {
+        match deserialize(table) {
             Ok(mut cfg) => {
-                // Grava a versão nova só depois de guardar o original.
-                if antiga && backup(path) {
+                // Save the new version only after keeping the original.
+                if old && backup(path) {
                     cfg.save_to(path);
                 }
                 cfg
             }
-            Err(e) => Self::quebrada(&e),
+            Err(e) => Self::broken(&e),
         }
     }
 
-    /// Configuração padrão para um arquivo que não pôde ser lido; o original é preservado.
-    fn quebrada(motivo: &str) -> Self {
-        log::warn!("config inválida ({motivo}); usando o padrão");
-        Config { estado: Estado::Quebrado, ..Config::default() }
+    /// Default configuration for a file that could not be read; the original is kept.
+    fn broken(reason: &str) -> Self {
+        log::warn!("invalid config ({reason}); using the defaults");
+        Config { state: SaveState::Broken, ..Config::default() }
     }
 
-    /// Grava a configuração. O texto é montado aqui e o disco fica com uma thread de
-    /// gravação: o `fsync` não trava a interface (o modo de edição salva a cada tecla).
-    /// Antes de sair, chame `flush_saves`.
+    /// Saves the configuration. The text is built here and a writer thread does the disk
+    /// work: the `fsync` does not block the interface (edit mode saves on every key press).
+    /// Call `flush_saves` before exiting.
     pub fn save(&mut self) {
         let path = Self::path();
         if let Some(text) = self.text_to_save(&path) {
@@ -348,27 +353,27 @@ impl Config {
         }
     }
 
-    /// O TOML a gravar em `path`, ou `None` se não deve gravar (somente leitura, ou o
-    /// arquivo quebrado não pôde ser posto de lado).
+    /// The TOML to write to `path`, or `None` if it must not be written (read-only, or the
+    /// broken file could not be moved aside).
     fn text_to_save(&mut self, path: &Path) -> Option<String> {
-        match self.estado {
-            Estado::SomenteLeitura => return None,
-            Estado::Quebrado => {
+        match self.state {
+            SaveState::ReadOnly => return None,
+            SaveState::Broken => {
                 if path.exists() {
-                    let destino = nome_livre(&com_sufixo(path, ".quebrado"));
-                    if let Err(e) = std::fs::rename(path, &destino) {
-                        log::warn!("não consegui mover {} para {}: {e}", path.display(), destino.display());
+                    let dest = free_name(&with_suffix(path, ".broken"));
+                    if let Err(e) = std::fs::rename(path, &dest) {
+                        log::warn!("could not move {} to {}: {e}", path.display(), dest.display());
                         return None;
                     }
                 }
-                self.estado = Estado::Normal;
+                self.state = SaveState::Normal;
             }
-            Estado::Normal => {}
+            SaveState::Normal => {}
         }
         match toml::to_string_pretty(self) {
             Ok(text) => Some(text),
             Err(e) => {
-                log::error!("erro ao serializar config: {e}");
+                log::error!("could not serialize the config: {e}");
                 None
             }
         }
@@ -378,7 +383,7 @@ impl Config {
         self.enabled.iter().any(|e| e == id)
     }
 
-    /// Valor de uma configuração do app, ou o padrão do manifesto.
+    /// Value of an app setting, or the manifest default.
     pub fn value(&self, m: &Manifest, key: &str) -> toml::Value {
         self.apps
             .get(&m.id)
@@ -405,7 +410,7 @@ impl Config {
     }
 }
 
-/// Espera a thread de gravação terminar o que tem pendente (chamar antes de sair).
+/// Waits for the writer thread to finish what is pending (call before exiting).
 pub fn flush_saves() {
     writer::flush();
 }
@@ -415,12 +420,12 @@ fn write_logged(path: &Path, text: &str) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Err(e) = write_atomic(path, text.as_bytes()) {
-        log::error!("não consegui salvar {}: {e}", path.display());
+        log::error!("could not save {}: {e}", path.display());
     }
 }
 
-/// Thread única que grava a configuração. Guarda só o pedido mais novo: várias gravações
-/// seguidas (setas no modo de edição) viram uma ida ao disco.
+/// Single thread that writes the configuration. It keeps only the newest request: many
+/// saves in a row (arrow keys in edit mode) become one trip to the disk.
 mod writer {
     use std::path::PathBuf;
     use std::sync::{Condvar, Mutex, Once};
@@ -441,7 +446,7 @@ mod writer {
             STARTED.store(ok, std::sync::atomic::Ordering::Relaxed);
         });
         if !STARTED.load(std::sync::atomic::Ordering::Relaxed) {
-            // sem thread: grava aqui mesmo
+            // no thread: write right here
             super::write_logged(&path, &text);
             return;
         }
@@ -477,12 +482,13 @@ mod writer {
     }
 }
 
-/// Grava `bytes` em `path` sem nunca deixar o arquivo pela metade: escreve num temporário
-/// ao lado, garante que foi para o disco e só então o põe no lugar (o `rename` é atômico).
-/// Disco cheio, queda de energia ou o processo morto no meio deixam o arquivo anterior intacto.
+/// Writes `bytes` to `path` without ever leaving the file half-written: writes to a
+/// temporary file next to it, makes sure it reached the disk and only then moves it into
+/// place (`rename` is atomic). A full disk, a power cut or a killed process leave the
+/// previous file intact.
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    let tmp = com_sufixo(path, ".tmp");
+    let tmp = with_suffix(path, ".tmp");
     let written = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -495,44 +501,45 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
-/// Desserializa a tabela TOML (já migrada) na configuração.
-fn desserializa(tabela: toml::Table) -> Result<Config, String> {
-    toml::Value::Table(tabela).try_into::<Config>().map_err(|e| e.to_string())
+/// Deserializes the (already migrated) TOML table into the configuration.
+fn deserialize(table: toml::Table) -> Result<Config, String> {
+    toml::Value::Table(table).try_into::<Config>().map_err(|e| e.to_string())
 }
 
-/// Leva a tabela da versão `de` até `VERSAO_ATUAL`, passo a passo.
-fn migra(t: &mut toml::Table, de: u32) {
-    for v in de..VERSAO_ATUAL {
+/// Brings the table from version `from` up to `CURRENT_VERSION`, step by step.
+fn migrate(t: &mut toml::Table, from: u32) {
+    for v in from..CURRENT_VERSION {
         match v {
-            0 => migra_0_para_1(t),
-            1 => migra_1_para_2(t),
-            2 => migra_2_para_3(t),
-            3 => migra_3_para_4(t),
+            0 => migrate_0_to_1(t),
+            1 => migrate_1_to_2(t),
+            2 => migrate_2_to_3(t),
+            3 => migrate_3_to_4(t),
             _ => {}
         }
     }
-    t.insert("version".to_string(), toml::Value::Integer(VERSAO_ATUAL.into()));
+    t.insert("version".to_string(), toml::Value::Integer(CURRENT_VERSION.into()));
 }
 
-/// v0 -> v1: `theme` global vira tema de cada app (se ele não tiver o seu); `mascot` é descartado.
-fn migra_0_para_1(t: &mut toml::Table) {
-    let tema = t.remove("theme");
+/// v0 -> v1: the global `theme` becomes each app's theme (unless it has its own); `mascot`
+/// is dropped.
+fn migrate_0_to_1(t: &mut toml::Table) {
+    let theme = t.remove("theme");
     t.remove("mascot");
-    let Some(tema) = tema else { return };
+    let Some(theme) = theme else { return };
     let apps = t.entry("apps").or_insert_with(|| toml::Value::Table(toml::Table::new()));
     let Some(apps) = apps.as_table_mut() else { return };
     for id in ["cyber.docker", "cyber.vitals"] {
         let app = apps.entry(id).or_insert_with(|| toml::Value::Table(toml::Table::new()));
         if let Some(app) = app.as_table_mut()
             && !app.contains_key("theme") {
-                app.insert("theme".to_string(), tema.clone());
+                app.insert("theme".to_string(), theme.clone());
             }
     }
 }
 
-/// v1 -> v2: a grade deixa de ser empacotada na ordem e cada app guarda a posição (`x`, `y`)
-/// além do tamanho; a grade ganha um número de linhas. A posição vem do empacotamento antigo.
-fn migra_1_para_2(t: &mut toml::Table) {
+/// v1 -> v2: the grid is no longer packed in order; each app keeps its position (`x`, `y`)
+/// besides its size, and the grid gets a number of rows. Positions come from the old packing.
+fn migrate_1_to_2(t: &mut toml::Table) {
     let cols = t.get("columns").and_then(|v| v.as_integer()).unwrap_or(2).clamp(1, layout::MAX_COLS as i64) as u32;
     let enabled: Vec<String> = match t.get("enabled").and_then(|v| v.as_array()) {
         Some(a) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
@@ -542,8 +549,8 @@ fn migra_1_para_2(t: &mut toml::Table) {
         Some(toml::Value::Table(l)) => l,
         _ => toml::Table::new(),
     };
-    let size = |lay: &toml::Table, id: &str, campo: &str, padrao: u32| -> u32 {
-        lay.get(id).and_then(|v| v.get(campo)).and_then(|v| v.as_integer()).map_or(padrao, |n| n.max(1) as u32)
+    let size = |lay: &toml::Table, id: &str, field: &str, default: u32| -> u32 {
+        lay.get(id).and_then(|v| v.get(field)).and_then(|v| v.as_integer()).map_or(default, |n| n.max(1) as u32)
     };
     let spans: Vec<(u32, u32)> =
         enabled.iter().map(|id| (size(&lay, id, "w", cols).min(cols), size(&lay, id, "h", 1).min(3))).collect();
@@ -551,9 +558,9 @@ fn migra_1_para_2(t: &mut toml::Table) {
     for (id, r) in enabled.iter().zip(placed) {
         lay.insert(id.clone(), rect_toml(r));
     }
-    // apps desligados guardam só o tamanho; a posição é escolhida ao religar
-    let desligados: Vec<String> = lay.keys().filter(|k| !enabled.contains(k)).cloned().collect();
-    for id in desligados {
+    // disabled apps keep only their size; the position is chosen when re-enabled
+    let disabled: Vec<String> = lay.keys().filter(|k| !enabled.contains(k)).cloned().collect();
+    for id in disabled {
         let r = Rect::new(0, 0, size(&lay, &id, "w", 1).min(cols), size(&lay, &id, "h", 1).min(3));
         lay.insert(id, rect_toml(r));
     }
@@ -561,19 +568,19 @@ fn migra_1_para_2(t: &mut toml::Table) {
     t.insert("rows".into(), toml::Value::Integer(rows.clamp(1, layout::MAX_ROWS) as i64));
 }
 
-/// v2 -> v3: o mini-app CD Player entra ligado (na primeira vaga livre da grade).
-fn migra_2_para_3(t: &mut toml::Table) {
-    let Some(lista) = t.get_mut("enabled").and_then(|v| v.as_array_mut()) else { return };
-    if !lista.iter().any(|v| v.as_str() == Some("cyber.cd")) {
-        lista.push(toml::Value::String("cyber.cd".to_string()));
+/// v2 -> v3: the CD Player mini-app comes enabled (in the first free spot of the grid).
+fn migrate_2_to_3(t: &mut toml::Table) {
+    let Some(list) = t.get_mut("enabled").and_then(|v| v.as_array_mut()) else { return };
+    if !list.iter().any(|v| v.as_str() == Some("cyber.cd")) {
+        list.push(toml::Value::String("cyber.cd".to_string()));
     }
 }
 
-/// v3 -> v4: a grade única vira a página "Geral" (barra lateral), com as colunas, as
-/// linhas e os apps ligados de antes. As posições em `layout` continuam valendo.
-fn migra_3_para_4(t: &mut toml::Table) {
+/// v3 -> v4: the single grid becomes the "General" page (sidebar), with the previous
+/// columns, rows and enabled apps. Positions in `layout` still apply.
+fn migrate_3_to_4(t: &mut toml::Table) {
     let mut page = toml::Table::new();
-    page.insert("name".into(), toml::Value::String("Geral".into()));
+    page.insert("name".into(), toml::Value::String(tr!("General").into()));
     page.insert("icon".into(), toml::Value::String("neko".into()));
     page.insert("columns".into(), t.remove("columns").unwrap_or(toml::Value::Integer(2)));
     page.insert("rows".into(), t.remove("rows").unwrap_or(toml::Value::Integer(1)));
@@ -590,34 +597,34 @@ fn rect_toml(r: Rect) -> toml::Value {
     toml::Value::Table(t)
 }
 
-/// Copia o arquivo para `.bak`, se ainda não existir. Devolve `false` se não conseguir.
+/// Copies the file to `.bak`, unless that already exists. Returns `false` on failure.
 fn backup(path: &Path) -> bool {
-    let bak = com_sufixo(path, ".bak");
+    let bak = with_suffix(path, ".bak");
     if bak.exists() {
         return true;
     }
     match std::fs::copy(path, &bak) {
         Ok(_) => true,
         Err(e) => {
-            log::warn!("não consegui criar {}: {e}", bak.display());
+            log::warn!("could not create {}: {e}", bak.display());
             false
         }
     }
 }
 
-/// Caminho com um sufixo extra, como `config.toml.bak`.
-fn com_sufixo(path: &Path, sufixo: &str) -> PathBuf {
+/// Path with an extra suffix, such as `config.toml.bak`.
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut s = path.as_os_str().to_owned();
-    s.push(sufixo);
+    s.push(suffix);
     PathBuf::from(s)
 }
 
-/// Primeiro nome livre: `base`, depois `base.1`, `base.2`…
-fn nome_livre(base: &Path) -> PathBuf {
+/// First free name: `base`, then `base.1`, `base.2`…
+fn free_name(base: &Path) -> PathBuf {
     let mut p = base.to_path_buf();
     let mut n = 1;
     while p.exists() {
-        p = com_sufixo(base, &format!(".{n}"));
+        p = with_suffix(base, &format!(".{n}"));
         n += 1;
     }
     p
@@ -627,18 +634,18 @@ fn nome_livre(base: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Diretório temporário exclusivo de cada teste; é apagado ao fim.
+    /// Temporary directory of its own for each test; deleted at the end.
     struct Tmp(PathBuf);
 
     impl Tmp {
-        fn new(nome: &str) -> Self {
-            let d = std::env::temp_dir().join(format!("miniutils-teste-{}-{nome}", std::process::id()));
+        fn new(name: &str) -> Self {
+            let d = std::env::temp_dir().join(format!("miniutils-test-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d);
             std::fs::create_dir_all(&d).unwrap();
             Tmp(d)
         }
 
-        fn arquivo(&self) -> PathBuf {
+        fn file(&self) -> PathBuf {
             self.0.join("config.toml")
         }
     }
@@ -650,29 +657,29 @@ mod tests {
     }
 
     #[test]
-    fn arquivo_vazio_nao_e_migrado_e_a_gravacao_nao_deixa_resto() {
-        let tmp = Tmp::new("vazio");
-        let path = tmp.arquivo();
-        // uma gravação antiga interrompida deixou o arquivo vazio
+    fn empty_file_is_not_migrated_and_saving_leaves_nothing_behind() {
+        let tmp = Tmp::new("empty");
+        let path = tmp.file();
+        // an old interrupted write left the file empty
         std::fs::write(&path, "  \n").unwrap();
         let mut cfg = Config::load_from(&path);
-        assert!(cfg.estado == Estado::Normal);
-        // nada de backup de um arquivo vazio, nem regravação "migrada"
+        assert!(cfg.state == SaveState::Normal);
+        // no backup of an empty file, and no "migrated" rewrite
         assert_eq!(std::fs::read_dir(&tmp.0).unwrap().count(), 1);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "  \n");
 
-        cfg.name = "Meu hub".into();
+        cfg.name = "My hub".into();
         cfg.save_to(&path);
-        // o temporário virou o arquivo; não sobra nada ao lado
+        // the temporary file became the file; nothing is left next to it
         assert_eq!(std::fs::read_dir(&tmp.0).unwrap().count(), 1);
-        assert_eq!(Config::load_from(&path).name, "Meu hub");
+        assert_eq!(Config::load_from(&path).name, "My hub");
 
-        // sem conseguir gravar (o destino é um diretório), o que existe fica como está
-        let ocupado = tmp.0.join("ocupado");
-        std::fs::create_dir_all(ocupado.join("dentro")).unwrap();
-        assert!(write_atomic(&ocupado, b"x").is_err());
-        assert!(ocupado.join("dentro").is_dir());
-        assert!(!com_sufixo(&ocupado, ".tmp").exists());
+        // when it cannot write (the target is a directory), what exists stays as it is
+        let taken = tmp.0.join("taken");
+        std::fs::create_dir_all(taken.join("inside")).unwrap();
+        assert!(write_atomic(&taken, b"x").is_err());
+        assert!(taken.join("inside").is_dir());
+        assert!(!with_suffix(&taken, ".tmp").exists());
     }
 
     const V0: &str = r#"
@@ -686,75 +693,75 @@ warn = 70
 "#;
 
     #[test]
-    fn v0_migra_theme_e_descarta_mascot() {
+    fn v0_migrates_theme_and_drops_mascot() {
         let t = Tmp::new("v0");
-        std::fs::write(t.arquivo(), V0).unwrap();
+        std::fs::write(t.file(), V0).unwrap();
 
-        let cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.version, VERSAO_ATUAL);
+        let cfg = Config::load_from(&t.file());
+        assert_eq!(cfg.version, CURRENT_VERSION);
         assert_eq!(cfg.pages[0].columns, 3);
         assert_eq!(cfg.apps["cyber.docker"]["theme"].as_str(), Some("matrix"));
         assert_eq!(cfg.apps["cyber.vitals"]["theme"].as_str(), Some("matrix"));
         assert_eq!(cfg.apps["cyber.vitals"]["warn"].as_integer(), Some(70));
 
-        // arquivo migrado gravado com a versão, sem `mascot`; original guardado no .bak
-        let novo = std::fs::read_to_string(t.arquivo()).unwrap();
-        assert!(novo.contains(&format!("version = {VERSAO_ATUAL}")));
-        assert!(!novo.contains("mascot"));
-        assert_eq!(std::fs::read_to_string(com_sufixo(&t.arquivo(), ".bak")).unwrap(), V0);
+        // migrated file saved with the version, without `mascot`; original kept in .bak
+        let new = std::fs::read_to_string(t.file()).unwrap();
+        assert!(new.contains(&format!("version = {CURRENT_VERSION}")));
+        assert!(!new.contains("mascot"));
+        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".bak")).unwrap(), V0);
     }
 
     #[test]
-    fn v0_nao_sobrescreve_theme_proprio_do_app() {
-        let t = Tmp::new("v0-proprio");
+    fn v0_does_not_overwrite_the_apps_own_theme() {
+        let t = Tmp::new("v0-own");
         std::fs::write(
-            t.arquivo(),
+            t.file(),
             "theme = \"matrix\"\n[apps.\"cyber.docker\"]\ntheme = \"neon\"\n",
         )
         .unwrap();
 
-        let cfg = Config::load_from(&t.arquivo());
+        let cfg = Config::load_from(&t.file());
         assert_eq!(cfg.apps["cyber.docker"]["theme"].as_str(), Some("neon"));
         assert_eq!(cfg.apps["cyber.vitals"]["theme"].as_str(), Some("matrix"));
     }
 
     #[test]
-    fn v1_ganha_posicoes_do_empacotamento_antigo() {
+    fn v1_gets_positions_from_the_old_packing() {
         let t = Tmp::new("v1");
         std::fs::write(
-            t.arquivo(),
+            t.file(),
             "version = 1\ncolumns = 3\nenabled = [\"cyber.docker\", \"cyber.vitals\"]\n\
              [layout.\"cyber.docker\"]\nw = 2\nh = 1\n[layout.\"cyber.vitals\"]\nw = 1\nh = 2\n\
-             [layout.\"outro\"]\nw = 2\nh = 1\n",
+             [layout.\"other\"]\nw = 2\nh = 1\n",
         )
         .unwrap();
 
-        let cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.version, VERSAO_ATUAL);
+        let cfg = Config::load_from(&t.file());
+        assert_eq!(cfg.version, CURRENT_VERSION);
         assert_eq!(cfg.layout["cyber.docker"], Rect::new(0, 0, 2, 1));
         assert_eq!(cfg.layout["cyber.vitals"], Rect::new(2, 0, 1, 2));
-        assert_eq!(cfg.layout["outro"], Rect::new(0, 0, 2, 1));
+        assert_eq!(cfg.layout["other"], Rect::new(0, 0, 2, 1));
         assert_eq!(cfg.pages[0].rows, 2);
-        assert!(com_sufixo(&t.arquivo(), ".bak").exists());
+        assert!(with_suffix(&t.file(), ".bak").exists());
     }
 
     #[test]
-    fn v2_liga_o_cd_player_uma_vez_so() {
+    fn v2_enables_the_cd_player_only_once() {
         let t = Tmp::new("v2-cd");
-        std::fs::write(t.arquivo(), "version = 2\ncolumns = 2\nenabled = [\"cyber.docker\"]\n").unwrap();
+        std::fs::write(t.file(), "version = 2\ncolumns = 2\nenabled = [\"cyber.docker\"]\n").unwrap();
 
-        let cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.version, VERSAO_ATUAL);
+        let cfg = Config::load_from(&t.file());
+        assert_eq!(cfg.version, CURRENT_VERSION);
         assert_eq!(cfg.enabled, vec!["cyber.docker".to_string(), "cyber.cd".to_string()]);
-        assert!(com_sufixo(&t.arquivo(), ".bak").exists());
+        assert!(with_suffix(&t.file(), ".bak").exists());
 
-        // já migrado: reler não duplica o app
-        let cfg = Config::load_from(&t.arquivo());
+        // already migrated: reading again does not duplicate the app
+        let cfg = Config::load_from(&t.file());
         assert_eq!(cfg.enabled.iter().filter(|e| *e == "cyber.cd").count(), 1);
     }
 
     #[test]
-    fn arrange_acha_lugar_para_app_religado() {
+    fn arrange_finds_a_spot_for_a_re_enabled_app() {
         let page = Page { columns: 2, rows: 1, apps: vec!["a".into(), "b".into()], ..Page::default() };
         let mut cfg = Config { pages: vec![page], enabled: vec!["a".into()], ..Config::default() };
         cfg.layout.insert("a".into(), Rect::new(0, 0, 2, 1));
@@ -768,29 +775,36 @@ warn = 70
     }
 
     #[test]
-    fn v3_vira_pagina_geral() {
+    fn v3_becomes_the_general_page() {
         let t = Tmp::new("v3");
         std::fs::write(
-            t.arquivo(),
+            t.file(),
             "version = 3\ncolumns = 3\nrows = 2\nenabled = [\"cyber.docker\", \"cyber.cd\"]\n\
              [layout.\"cyber.docker\"]\nx = 1\ny = 1\nw = 2\nh = 1\n",
         )
         .unwrap();
 
-        let cfg = Config::load_from(&t.arquivo());
-        assert_eq!(cfg.version, VERSAO_ATUAL);
+        let cfg = Config::load_from(&t.file());
+        assert_eq!(cfg.version, CURRENT_VERSION);
         assert_eq!(cfg.pages.len(), 1);
         let p = &cfg.pages[0];
-        assert_eq!((p.name.as_str(), p.columns, p.rows), ("Geral", 3, 2));
+        assert_eq!((p.name.as_str(), p.columns, p.rows), ("General", 3, 2));
         assert_eq!(p.apps, vec!["cyber.docker".to_string(), "cyber.cd".to_string()]);
         assert_eq!(cfg.layout["cyber.docker"], Rect::new(1, 1, 2, 1));
-        let novo = std::fs::read_to_string(t.arquivo()).unwrap();
-        let tabela: toml::Table = novo.parse().unwrap();
-        assert!(!tabela.contains_key("columns") && !tabela.contains_key("rows"));
+        let new = std::fs::read_to_string(t.file()).unwrap();
+        let table: toml::Table = new.parse().unwrap();
+        assert!(!table.contains_key("columns") && !table.contains_key("rows"));
     }
 
     #[test]
-    fn app_ligado_sem_pagina_vai_para_a_primeira() {
+    fn existing_page_names_are_kept() {
+        let t = Tmp::new("page-name");
+        std::fs::write(t.file(), format!("version = {CURRENT_VERSION}\n[[pages]]\nname = \"Geral\"\n")).unwrap();
+        assert_eq!(Config::load_from(&t.file()).pages[0].name, "Geral");
+    }
+
+    #[test]
+    fn enabled_app_without_a_page_goes_to_the_first() {
         let mut cfg = Config { pages: vec![Page::default(), Page::default()], enabled: vec!["a".into()], ..Config::default() };
         cfg.arrange();
         assert_eq!(cfg.page_of("a"), Some(0));
@@ -798,98 +812,99 @@ warn = 70
     }
 
     #[test]
-    fn find_page_pelo_nome_ou_pelo_app() {
+    fn find_page_by_name_or_by_app() {
         let page = |name: &str, apps: &[&str]| Page {
             name: name.into(),
             apps: apps.iter().map(|a| a.to_string()).collect(),
             ..Page::default()
         };
         let cfg = Config {
-            pages: vec![page("Geral", &["cyber.vitals"]), page("IA", &["cyber.docker", "io.github.x.uptime"]), page("Docker", &[])],
+            pages: vec![page("General", &["cyber.vitals"]), page("AI", &["cyber.docker", "io.github.x.uptime"]), page("Docker", &[])],
             ..Config::default()
         };
-        assert_eq!(cfg.find_page("geral"), Some(0));
-        assert_eq!(cfg.find_page(" IA "), Some(1));
+        assert_eq!(cfg.find_page("general"), Some(0));
+        assert_eq!(cfg.find_page(" AI "), Some(1));
         assert_eq!(cfg.find_page("cyber.vitals"), Some(0));
         assert_eq!(cfg.find_page("Vitals"), Some(0));
         assert_eq!(cfg.find_page("uptime"), Some(1));
-        // a página chamada "Docker" ganha do app cyber.docker
+        // the page called "Docker" wins over the cyber.docker app
         assert_eq!(cfg.find_page("docker"), Some(2));
         assert_eq!(cfg.find_page("cyber"), None);
-        assert_eq!(cfg.find_page("nada"), None);
+        assert_eq!(cfg.find_page("nothing"), None);
     }
 
     #[test]
-    fn mover_e_apagar_paginas() {
+    fn move_and_delete_pages() {
         let mut cfg = Config { pages: vec![Page::default()], enabled: vec!["a".into(), "b".into()], ..Config::default() };
         cfg.arrange();
         let p = cfg.add_page();
         assert_eq!(p, 1);
+        assert_eq!(cfg.pages[1].name, "Page 2");
         assert_ne!(cfg.pages[1].icon, cfg.pages[0].icon);
         cfg.move_to_page("b", 1);
         cfg.arrange();
         assert_eq!(cfg.page_apps(0), vec!["a".to_string()]);
         assert_eq!(cfg.page_apps(1), vec!["b".to_string()]);
-        // app movido fica onde estava, se couber na grade nova
+        // a moved app stays where it was, if it fits the new grid
         assert_eq!(cfg.rects(1), vec![Rect::new(1, 0, 1, 1)]);
 
         assert!(cfg.remove_page(1));
         assert_eq!(cfg.page_of("b"), Some(0));
-        // a última página não sai
+        // the last page stays
         assert!(!cfg.remove_page(0));
     }
 
     #[test]
-    fn versao_atual_carrega_sem_migrar_nem_criar_backup() {
-        let t = Tmp::new("atual");
-        std::fs::write(t.arquivo(), format!("version = {VERSAO_ATUAL}\nskin = \"matrix\"\nenabled = []\n")).unwrap();
+    fn current_version_loads_without_migrating_or_backing_up() {
+        let t = Tmp::new("current");
+        std::fs::write(t.file(), format!("version = {CURRENT_VERSION}\nskin = \"matrix\"\nenabled = []\n")).unwrap();
 
-        let cfg = Config::load_from(&t.arquivo());
+        let cfg = Config::load_from(&t.file());
         assert_eq!(cfg.skin, "matrix");
         assert!(cfg.enabled.is_empty());
-        assert!(!com_sufixo(&t.arquivo(), ".bak").exists());
+        assert!(!with_suffix(&t.file(), ".bak").exists());
     }
 
     #[test]
-    fn versao_futura_so_leitura() {
-        let t = Tmp::new("futura");
-        let original = format!("version = {}\nskin = \"matrix\"\nnovidade = true\n", VERSAO_ATUAL + 1);
-        std::fs::write(t.arquivo(), &original).unwrap();
+    fn future_version_is_read_only() {
+        let t = Tmp::new("future");
+        let original = format!("version = {}\nskin = \"matrix\"\nnovelty = true\n", CURRENT_VERSION + 1);
+        std::fs::write(t.file(), &original).unwrap();
 
-        let mut cfg = Config::load_from(&t.arquivo());
+        let mut cfg = Config::load_from(&t.file());
         assert_eq!(cfg.skin, "matrix");
         cfg.skin = "neon".into();
-        cfg.save_to(&t.arquivo());
-        assert_eq!(std::fs::read_to_string(t.arquivo()).unwrap(), original);
-        assert!(!com_sufixo(&t.arquivo(), ".bak").exists());
+        cfg.save_to(&t.file());
+        assert_eq!(std::fs::read_to_string(t.file()).unwrap(), original);
+        assert!(!with_suffix(&t.file(), ".bak").exists());
     }
 
     #[test]
-    fn toml_quebrado_e_preservado_ao_salvar() {
-        let t = Tmp::new("quebrado");
-        let quebrado = "skin = [\n";
-        std::fs::write(t.arquivo(), quebrado).unwrap();
+    fn broken_toml_is_kept_on_save() {
+        let t = Tmp::new("broken");
+        let broken = "skin = [\n";
+        std::fs::write(t.file(), broken).unwrap();
 
-        let mut cfg = Config::load_from(&t.arquivo());
+        let mut cfg = Config::load_from(&t.file());
         assert_eq!(cfg.skin, Config::default().skin);
-        // nada é gravado até o primeiro save
-        assert_eq!(std::fs::read_to_string(t.arquivo()).unwrap(), quebrado);
+        // nothing is written until the first save
+        assert_eq!(std::fs::read_to_string(t.file()).unwrap(), broken);
 
         cfg.skin = "matrix".into();
-        cfg.save_to(&t.arquivo());
-        assert_eq!(std::fs::read_to_string(com_sufixo(&t.arquivo(), ".quebrado")).unwrap(), quebrado);
-        let novo = Config::load_from(&t.arquivo());
-        assert_eq!(novo.skin, "matrix");
-        assert_eq!(novo.version, VERSAO_ATUAL);
+        cfg.save_to(&t.file());
+        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".broken")).unwrap(), broken);
+        let new = Config::load_from(&t.file());
+        assert_eq!(new.skin, "matrix");
+        assert_eq!(new.version, CURRENT_VERSION);
     }
 
     #[test]
-    fn save_sem_arquivo_cria_com_versao() {
-        let t = Tmp::new("novo");
-        let mut cfg = Config::load_from(&t.arquivo());
-        cfg.save_to(&t.arquivo());
-        let texto = std::fs::read_to_string(t.arquivo()).unwrap();
-        assert!(texto.contains(&format!("version = {VERSAO_ATUAL}")));
-        assert!(!com_sufixo(&t.arquivo(), ".quebrado").exists());
+    fn save_without_a_file_creates_it_with_the_version() {
+        let t = Tmp::new("new");
+        let mut cfg = Config::load_from(&t.file());
+        cfg.save_to(&t.file());
+        let text = std::fs::read_to_string(t.file()).unwrap();
+        assert!(text.contains(&format!("version = {CURRENT_VERSION}")));
+        assert!(!with_suffix(&t.file(), ".broken").exists());
     }
 }

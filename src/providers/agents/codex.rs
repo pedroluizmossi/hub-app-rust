@@ -1,6 +1,6 @@
-//! Codex: a tabela `threads` de `~/.codex/state_<n>.sqlite` (e `thread_spawn_edges` para
-//! os subagentes) e, no fim do log da sessão (`rollout-*.jsonl`), o último
-//! `task_started`/`task_complete`/`turn_aborted` e a última chamada de ferramenta.
+//! Codex: the `threads` table of `~/.codex/state_<n>.sqlite` (and `thread_spawn_edges` for
+//! subagents) and, at the end of the session log (`rollout-*.jsonl`), the last
+//! `task_started`/`task_complete`/`turn_aborted` and the last tool call.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,8 +11,9 @@ use super::{
     Agent, Details, LIMIT, RECENT, STALE, Source, State, Step, StepKind, Tool, base_name, describe, home_dir, iso_ms,
     last_steps, mtime_ms, one_line, open, push_step, read_tail, short_cmd,
 };
+use crate::tr;
 
-/// Último turno marcado no log.
+/// Last turn marked in the log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Turn {
     Started,
@@ -20,18 +21,18 @@ enum Turn {
     Aborted,
 }
 
-/// O que interessa do fim de um log.
+/// What matters from the end of a log.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Tail {
-    /// Último início ou fim de turno e a hora dele (ms).
+    /// Last turn start or end and its time (ms).
     turn: Option<(Turn, i64)>,
-    /// Última ferramenta chamada no turno em curso.
+    /// Last tool called in the current turn.
     action: String,
 }
 
 #[derive(Default)]
 pub(super) struct Codex {
-    /// Fim de log já lido: (tamanho, mtime em ms) → o que tinha. Só relê quando muda.
+    /// Log tails already read: (size, mtime in ms) → what they had. Only re-read on change.
     tails: HashMap<PathBuf, ((u64, i64), Tail)>,
 }
 
@@ -54,7 +55,7 @@ impl Source for Codex {
                  FROM threads t WHERE t.archived = 0 AND COALESCE(t.updated_at_ms, t.updated_at * 1000) >= ?1 \
                  ORDER BY 5 DESC LIMIT ?2",
             )
-            .map_err(|_| "formato do banco não reconhecido")?;
+            .map_err(|_| tr!("unrecognized database format"))?;
         let rows = stmt
             .query_map((now - RECENT.as_millis() as i64, LIMIT as i64), |r| {
                 Ok((
@@ -66,7 +67,7 @@ impl Source for Codex {
                     r.get::<_, Option<String>>(5)?,
                 ))
             })
-            .map_err(|_| "não consegui ler as sessões")?;
+            .map_err(|_| tr!("could not read the sessions"))?;
         let rows: Vec<_> = rows.flatten().collect();
         let mut agents = Vec::new();
         let mut used = Vec::new();
@@ -76,16 +77,16 @@ impl Source for Codex {
             used.push(path.clone());
             let quiet = now - mtime.max(updated);
             let (state, since) = match tail.turn {
-                // começou um turno e ainda escreve (ou escreveu há pouco): trabalhando
+                // a turn started and it is still writing (or wrote recently): working
                 Some((Turn::Started, at)) if quiet < STALE.as_millis() as i64 => (State::Working, at),
                 Some((_, at)) => (State::Idle, at),
                 None => (State::Idle, updated),
             };
-            // o app do Codex cria sessões vazias ao abrir; só aparecem quando têm um pedido
+            // the Codex app creates empty sessions when it opens; they only show up once they have a prompt
             if title.is_empty() && state == State::Idle {
                 continue;
             }
-            let detail = if matches!(tail.turn, Some((Turn::Aborted, _))) { "interrompido" } else { "" };
+            let detail = if matches!(tail.turn, Some((Turn::Aborted, _))) { tr!("interrupted") } else { "" };
             agents.push(Agent {
                 tool: Tool::Codex,
                 id,
@@ -106,7 +107,7 @@ impl Source for Codex {
 }
 
 impl Codex {
-    /// mtime do log (ms) e o que o fim dele diz. Só relê o arquivo quando ele muda.
+    /// The log's mtime (ms) and what its end says. Only re-reads the file when it changes.
     fn tail(&mut self, path: &Path) -> (i64, Tail) {
         let Ok(meta) = std::fs::metadata(path) else { return (0, Tail::default()) };
         let key = (meta.len(), mtime_ms(&meta));
@@ -120,7 +121,7 @@ impl Codex {
     }
 }
 
-/// `state_<n>.sqlite` de número mais alto (o número sobe quando o formato muda).
+/// The `state_<n>.sqlite` with the highest number (the number goes up when the format changes).
 fn find_db(home: &Path) -> Option<PathBuf> {
     std::fs::read_dir(home)
         .ok()?
@@ -134,11 +135,11 @@ fn find_db(home: &Path) -> Option<PathBuf> {
         .map(|(_, p)| p)
 }
 
-/// Último início ou fim de turno num trecho do log (com a hora, em ms) e a última
-/// ferramenta chamada depois dele.
+/// Last turn start or end in a log chunk (with its time, in ms) and the last tool called
+/// after it.
 ///
-/// Procura o começo do `payload` do evento, com as aspas sem escape: dentro de um texto
-/// (uma resposta citando esses nomes) as aspas viriam como `\"` e não casam.
+/// Looks for the start of the event's `payload`, with unescaped quotes: inside a text (a
+/// reply quoting these names) the quotes would come as `\"` and not match.
 fn parse_tail(tail: &str) -> Tail {
     const MARKS: [(&str, Turn); 3] = [
         (r#""type":"event_msg","payload":{"type":"task_started""#, Turn::Started),
@@ -154,7 +155,7 @@ fn parse_tail(tail: &str) -> Tail {
         if let Some((_, turn)) = MARKS.iter().find(|(mark, _)| line.contains(mark)) {
             let stamp = line.split(r#""timestamp":""#).nth(1).and_then(|r| r.split('"').next());
             let at = stamp.and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map_or(0, |t| t.timestamp_millis());
-            // de trás para frente: a primeira chamada vista é a última do turno em curso
+            // backwards: the first call seen is the last one of the current turn
             let action = if *turn == Turn::Started { action } else { String::new() };
             return Tail { turn: Some((*turn, at)), action };
         }
@@ -165,8 +166,8 @@ fn parse_tail(tail: &str) -> Tail {
     Tail::default()
 }
 
-/// Linha do tempo de um trecho do log: os itens concluídos (`item_completed`) de pedido,
-/// resposta e comando; logs antigos têm `user_message`/`agent_message` no lugar.
+/// Timeline of a log chunk: the completed items (`item_completed`) of prompts, replies and
+/// commands; old logs have `user_message`/`agent_message` instead.
 pub(super) fn timeline(text: &str) -> Vec<Step> {
     const ITEM: &str = r#""type":"event_msg","payload":{"type":"item_completed""#;
     const OLD: [&str; 2] =
@@ -193,8 +194,8 @@ pub(super) fn timeline(text: &str) -> Vec<Step> {
             Some("UserMessage") => push_step(&mut steps, at, StepKind::User, &text_of(item)),
             Some("AgentMessage") => push_step(&mut steps, at, StepKind::Reply, &text_of(item)),
             Some("CommandExecution") => {
-                // leitura de arquivo: o nome dele; o resto, só o programa do script
-                // (`command` é texto ou lista: `["zsh", "-lc", "…"]`)
+                // a file read: its name; anything else, only the script's program
+                // (`command` is a string or a list: `["zsh", "-lc", "…"]`)
                 let parsed = &item["parsed_cmd"][0];
                 let summary = match (parsed["type"].as_str(), parsed["name"].as_str()) {
                     (Some("read"), Some(name)) => format!("read: {}", base_name(name)),
@@ -209,7 +210,7 @@ pub(super) fn timeline(text: &str) -> Vec<Step> {
                 };
                 push_step(&mut steps, at, StepKind::Tool, &summary);
                 if let Some(code) = item["exit_code"].as_i64().filter(|c| *c != 0) {
-                    push_step(&mut steps, at, StepKind::Error, &format!("o comando saiu com código {code}"));
+                    push_step(&mut steps, at, StepKind::Error, &tr!("the command exited with code {}", code));
                 }
             }
             _ => {}
@@ -218,9 +219,8 @@ pub(super) fn timeline(text: &str) -> Vec<Step> {
     last_steps(steps)
 }
 
-/// Resumo de uma chamada de ferramenta. No formato atual a ferramenta é `exec` e a
-/// entrada é código (`tools.exec_command({cmd:"…"})`); no antigo, uma função com os
-/// argumentos em JSON.
+/// Summary of a tool call. In the current format the tool is `exec` and the input is code
+/// (`tools.exec_command({cmd:"…"})`); in the old one, a function with JSON arguments.
 fn parse_call(line: &str) -> Option<String> {
     let v: Value = serde_json::from_str(line).ok()?;
     let p = &v["payload"];
@@ -230,7 +230,7 @@ fn parse_call(line: &str) -> Option<String> {
         return Some(cmd.map_or_else(|| name.to_string(), |c| format!("{name}: {c}")));
     }
     let args: Value = p["arguments"].as_str().and_then(|a| serde_json::from_str(a).ok()).unwrap_or(Value::Null);
-    // `command` também vem como lista (`["bash", "-lc", "…"]`): aí só o nome da função
+    // `command` also comes as a list (`["bash", "-lc", "…"]`): then only the function name
     Some(describe(name, &args))
 }
 
@@ -239,14 +239,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ultimo_turno_e_ultima_ferramenta() {
+    fn last_turn_and_last_tool() {
         let started = r#"{"timestamp":"2026-11-11T01:59:21.947Z","ordinal":1,"type":"event_msg","payload":{"type":"task_started","turn_id":"a"}}"#;
         let done = r#"{"timestamp":"2026-11-11T03:31:58.110Z","ordinal":9,"type":"event_msg","payload":{"type":"task_complete"}}"#;
         let aborted = r#"{"timestamp":"2026-11-11T02:02:04.948Z","ordinal":5,"type":"event_msg","payload":{"type":"turn_aborted"}}"#;
-        // um texto que cita o evento tem as aspas com escape e não conta
+        // a text quoting the event has escaped quotes and doesn't count
         let quoted = r#"{"timestamp":"2026-11-11T04:00:00.000Z","type":"response_item","payload":{"type":"message","text":"{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}"}}"#;
         let other = r#"{"timestamp":"2026-11-11T04:00:01.000Z","type":"event_msg","payload":{"type":"token_count"}}"#;
-        // como no log: `payload` começa pelo tipo e a entrada é código, com as aspas escapadas
+        // as in the log: `payload` starts with the type and the input is code, with escaped quotes
         let call = |cmd: &str| {
             format!(
                 r#"{{"timestamp":"2026-11-11T04:00:02.000Z","ordinal":3,"type":"response_item","payload":{{"type":"custom_tool_call","id":"ctc_1","status":"completed","name":"exec","input":"const r = await tools.exec_command({{cmd:\"{cmd}\",timeout:5}});"}}}}"#
@@ -260,25 +260,25 @@ mod tests {
         assert_eq!(turn(&[started, aborted]), Some(Turn::Aborted));
         assert_eq!(turn(&[quoted, other]), None);
 
-        // a ação é a última chamada do turno em curso, reduzida ao programa
-        let (old, new) = (call("pwd && ls"), call("TOKEN=abc cargo test --all -- segredo"));
+        // the action is the last call of the current turn, reduced to the program
+        let (old, new) = (call("pwd && ls"), call("TOKEN=abc cargo test --all -- secret"));
         let working = parse_tail(&[started, old.as_str(), other, new.as_str(), other].join("\n"));
         assert_eq!(working.action, "exec: cargo test");
-        // turno fechado não tem ação, e chamada do turno anterior não vaza para o novo
+        // a closed turn has no action, and a call from the previous turn doesn't leak into the new one
         assert_eq!(parse_tail(&[started, new.as_str(), done].join("\n")).action, "");
         assert_eq!(parse_tail(&[started, new.as_str(), done, started].join("\n")).action, "");
     }
 
     #[test]
-    fn linha_do_tempo() {
+    fn timeline_steps() {
         let lines = [
-            r#"{"timestamp":"2026-11-11T13:57:13.069Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"crie a imagem"}]}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:13.069Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"create the image"}]}}}"#,
             r#"{"timestamp":"2026-11-11T13:57:14.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","content":[]}}}"#,
-            r#"{"timestamp":"2026-11-11T13:57:15.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","content":[{"type":"Text","text":"Vou verificar."}]}}}"#,
-            r#"{"timestamp":"2026-11-11T13:57:16.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":"TOKEN=x cargo build --release","exit_code":101,"aggregated_output":"segredo"}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:15.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","content":[{"type":"Text","text":"Let me check."}]}}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:16.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":"TOKEN=x cargo build --release","exit_code":101,"aggregated_output":"secret"}}}"#,
             r#"{"timestamp":"2026-11-11T13:57:17.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["bash","-lc","ls -la"],"exit_code":0}}}"#,
             r#"{"timestamp":"2026-11-11T13:57:17.500Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["zsh","-lc","cat /a/SKILL.md"],"parsed_cmd":[{"type":"read","cmd":"cat /a/SKILL.md","name":"SKILL.md"}],"exit_code":0}}}"#,
-            r#"{"timestamp":"2026-11-11T13:57:18.000Z","type":"event_msg","payload":{"type":"agent_message","message":"formato antigo"}}"#,
+            r#"{"timestamp":"2026-11-11T13:57:18.000Z","type":"event_msg","payload":{"type":"agent_message","message":"old format"}}"#,
             r#"{"timestamp":"2026-11-11T13:57:19.000Z","type":"event_msg","payload":{"type":"token_count"}}"#,
         ]
         .join("\n");
@@ -286,13 +286,13 @@ mod tests {
         assert_eq!(
             got,
             [
-                (StepKind::User, "crie a imagem".to_string()),
-                (StepKind::Reply, "Vou verificar.".into()),
+                (StepKind::User, "create the image".to_string()),
+                (StepKind::Reply, "Let me check.".into()),
                 (StepKind::Tool, "exec: cargo build".into()),
-                (StepKind::Error, "o comando saiu com código 101".into()),
+                (StepKind::Error, "the command exited with code 101".into()),
                 (StepKind::Tool, "exec: ls".into()),
                 (StepKind::Tool, "read: SKILL.md".into()),
-                (StepKind::Reply, "formato antigo".into()),
+                (StepKind::Reply, "old format".into()),
             ]
         );
     }

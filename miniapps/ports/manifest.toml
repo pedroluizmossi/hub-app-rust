@@ -1,44 +1,44 @@
 id = "cyber.ports"
-name = "Portas abertas"
-description = "O que está escutando em cada porta, com atalho para abrir no navegador e encerrar o processo."
+name = "Open ports"
+description = "What is listening on each port, with shortcuts to open it in the browser and to kill the process."
 icon = "coruja"
 api = 1
 uses = ["ports"]
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "show_udp"
-label = "Mostrar UDP"
+label = "Show UDP"
 type = "bool"
 default = false
 
 [[settings]]
 key = "hide_others"
-label = "Esconder portas de outros usuários (sem processo)"
+label = "Hide other users' ports (no process)"
 type = "bool"
 default = false
 
 [[settings]]
 key = "notify_new"
-label = "Notificar quando uma porta nova abrir"
+label = "Notify when a new port opens"
 type = "bool"
 default = false
 
 [[settings]]
 key = "warn_exposed"
-label = "Mascote agitada com porta sua aberta para a rede"
+label = "Restless mascot when one of your ports is open to the network"
 type = "bool"
 default = false
 
 [[settings]]
 key = "mascot"
-label = "Mascote"
+label = "Mascot"
 type = "choice"
 default = "coruja"
 options = ["coruja", "rato", "polvo", "neko", "robo", "hacker", "kitsune", "morcego"]

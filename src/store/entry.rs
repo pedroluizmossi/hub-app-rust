@@ -13,7 +13,7 @@
 //!   owner and the license from the `LICENSE` file (or `--license`).
 //!
 //! It does not sign: the report shows what changed (version, commit, new grants and the link
-//! to compare the code) for review before `--loja-assinar`.
+//! to compare the code) for review before `--store-sign`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use super::{check_entry, check_matches, download_verified, fetch, git, grant_list, Binary, Entry, Index};
 use crate::core::appdata::Kind;
 use crate::core::plugins::{self, Plugin};
+use crate::tr;
 
 /// `--store-entry` options besides the index, the repository and the tag.
 #[derive(Debug, Default)]
@@ -39,9 +40,9 @@ pub struct Opts {
 pub fn run(index_path: &Path, repo: &str, git_ref: &str, opts: &Opts) -> Result<String, String> {
     let repo = normalize_repo(repo)?;
     let text = std::fs::read_to_string(index_path).map_err(|e| format!("{}: {e}", index_path.display()))?;
-    let mut index: Index = serde_json::from_str(&text).map_err(|e| format!("{}: índice inválido: {e}", index_path.display()))?;
+    let mut index: Index = serde_json::from_str(&text).map_err(|e| tr!("{}: invalid index: {}", index_path.display(), e))?;
     if index.schema != 1 {
-        return Err(format!("{}: índice na versão {} (este miniutils entende a 1)", index_path.display(), index.schema));
+        return Err(tr!("{}: index is version {} (this miniutils understands 1)", index_path.display(), index.schema));
     }
     let tmp = std::env::temp_dir().join(format!("miniutils-store-entry-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -58,7 +59,7 @@ pub fn run(index_path: &Path, repo: &str, git_ref: &str, opts: &Opts) -> Result<
     let mut json = serde_json::to_string_pretty(&index).map_err(|e| e.to_string())?;
     json.push('\n');
     std::fs::write(index_path, json).map_err(|e| format!("{}: {e}", index_path.display()))?;
-    Ok(format!("{report}{} atualizado; revise e assine com --loja-assinar", index_path.display()))
+    Ok(format!("{report}{}", tr!("{} updated; review it and sign with --store-sign", index_path.display())))
 }
 
 /// Builds the entry from the clone and the Release, plus the report for the reviewer.
@@ -66,7 +67,7 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
     let version = match &opts.version {
         Some(v) => v.trim().to_string(),
         None => version_from_ref(git_ref).ok_or_else(|| {
-            format!("{git_ref}: a tag não termina em v<versão> (ex.: repos-v0.2.0); informe a versão com --app-version")
+            tr!("{}: the tag does not end in v<version> (e.g. repos-v0.2.0); give the version with --app-version", git_ref)
         })?,
     };
 
@@ -86,20 +87,20 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
     };
     let src = if path.is_empty() { checkout.clone() } else { checkout.join(&path) };
     let text = std::fs::read_to_string(src.join("manifest.toml"))
-        .map_err(|e| format!("{repo} ({git_ref}): sem {} ({e}); a subpasta do app vai em --path", manifest_path(&path)))?;
-    let plugin = Plugin::parse(&text).map_err(|e| format!("{}: manifesto inválido: {e}", manifest_path(&path)))?;
+        .map_err(|e| tr!("{} ({}): no {} ({}); the app subfolder goes in --path", repo, git_ref, manifest_path(&path), e))?;
+    let plugin = Plugin::parse(&text).map_err(|e| tr!("{}: invalid manifest: {}", manifest_path(&path), e))?;
     let id = plugin.manifest.id.clone();
     plugins::validate_id(&id)?;
 
     let old = index.plugins.iter().find(|e| e.id == id);
     if old.is_some_and(|o| o.commit.eq_ignore_ascii_case(&commit)) {
-        return Err(format!("{id} já está no índice nesse commit ({commit})"));
+        return Err(tr!("{} is already in the index at that commit ({})", id, commit));
     }
     let license = match (&opts.license, old) {
         (Some(l), _) => l.trim().to_string(),
         (None, Some(o)) => o.license.clone(),
         (None, None) => detect_license(&[&src, &checkout])
-            .ok_or("não reconheci a licença pelo arquivo LICENSE; informe com --license (ex.: MIT)")?
+            .ok_or(tr!("could not recognize the license from the LICENSE file; give it with --license (e.g. MIT)"))?
             .to_string(),
     };
     let author = match old {
@@ -144,25 +145,22 @@ fn release_binaries(entry: &Entry, tag: &str, tmp: &Path) -> Result<BTreeMap<Str
     let base = format!("{}/releases/download/{tag}/", entry.repo);
     let url = format!("{base}registry-entry.json");
     let bytes = fetch(&url).map_err(|e| {
-        format!("{}: app externo precisa do Release da tag {tag} com registry-entry.json (o workflow de release gera): {e}", entry.id)
+        tr!("{}: an external app needs the Release of tag {} with registry-entry.json (the release workflow makes it): {}", entry.id, tag, e)
     })?;
     let release: Entry = serde_json::from_slice(&bytes).map_err(|e| format!("{url}: {e}"))?;
     if release.id != entry.id || release.path != entry.path {
-        return Err(format!("{url}: é de outro app ({} em \"{}\")", release.id, release.path));
+        return Err(tr!("{}: it belongs to another app ({} in \"{}\")", url, release.id, release.path));
     }
     if !release.commit.eq_ignore_ascii_case(&entry.commit) {
-        return Err(format!(
-            "{url}: o Release foi compilado do commit {}, mas a tag aponta para {}",
-            release.commit, entry.commit
-        ));
+        return Err(tr!("{}: the Release was built from commit {}, but the tag points to {}", url, release.commit, entry.commit));
     }
     if release.binaries.is_empty() {
-        return Err(format!("{url}: sem executáveis"));
+        return Err(tr!("{}: no executables", url));
     }
     for (os, b) in &release.binaries {
         // only files from this Release: no outside address
         if !b.url.starts_with(&base) {
-            return Err(format!("{url}: o executável de {os} não é deste Release ({})", b.url));
+            return Err(tr!("{}: the {} executable is not from this Release ({})", url, os, b.url));
         }
         download_verified(b, &tmp.join(format!("bin-{os}"))).map_err(|e| format!("{}: {os}: {e}", entry.id))?;
     }
@@ -179,29 +177,35 @@ fn report(old: Option<&Entry>, e: &Entry) -> String {
             out += &format!("{} {} → {}\n", e.name, o.version, e.version);
             out += &format!("commit: {} → {}\n", short(&o.commit), short(&e.commit));
             if o.repo == e.repo && e.repo.starts_with("https://github.com/") {
-                out += &format!("comparar: {}/compare/{}...{}\n", e.repo, o.commit, e.commit);
+                out += &tr!("compare: {}/compare/{}...{}", e.repo, o.commit, e.commit);
+                out.push('\n');
             }
         }
         None => {
-            out += &format!("{} {} (novo no índice)\n", e.name, e.version);
-            out += &format!("commit: {}\n", e.commit);
+            out += &tr!("{} {} (new in the index)", e.name, e.version);
+            out += &format!("\ncommit: {}\n", e.commit);
         }
     }
-    let folder = if e.path.is_empty() { String::new() } else { format!(" (pasta {})", e.path) };
-    out += &format!("repositório: {}{folder}\n", e.repo);
-    out += &format!("autor: {}   licença: {}\n", e.author, e.license);
-    out += &format!("permissões: {}\n", e.grants_text());
+    let folder = if e.path.is_empty() { String::new() } else { tr!(" (folder {})", e.path) };
+    out += &tr!("repository: {}", e.repo);
+    out += &format!("{folder}\n");
+    out += &tr!("author: {}   license: {}", e.author, e.license);
+    out.push('\n');
+    out += &tr!("permissions: {}", e.grants_text());
+    out.push('\n');
     let had = old.map(|o| grant_list(&o.permissions, &o.net, &o.uses, o.sqlite, o.full_access)).unwrap_or_default();
     let new: Vec<String> = grant_list(&e.permissions, &e.net, &e.uses, e.sqlite, e.full_access)
         .into_iter()
         .filter(|g| !had.contains(g))
         .collect();
     if old.is_some() && !new.is_empty() {
-        out += &format!("ATENÇÃO, permissão nova: {}\n", new.join(", "));
+        out += &tr!("WARNING, new permission: {}", new.join(", "));
+        out.push('\n');
     }
     if !e.binaries.is_empty() {
         let oses: Vec<&str> = e.binaries.keys().map(String::as_str).collect();
-        out += &format!("executáveis conferidos (SHA-256 do Release): {}\n", oses.join(", "));
+        out += &tr!("executables checked (SHA-256 from the Release): {}", oses.join(", "));
+        out.push('\n');
     }
     out
 }
@@ -209,7 +213,7 @@ fn report(old: Option<&Entry>, e: &Entry) -> String {
 /// The full commit SHA of a tag, remote branch or commit.
 fn resolve(checkout: &str, git_ref: &str) -> Result<String, String> {
     if git_ref.starts_with('-') {
-        return Err(format!("{git_ref}: referência inválida"));
+        return Err(tr!("{}: invalid reference", git_ref));
     }
     let mut last = String::new();
     for candidate in [format!("refs/tags/{git_ref}"), format!("refs/remotes/origin/{git_ref}"), git_ref.to_string()] {
@@ -220,7 +224,7 @@ fn resolve(checkout: &str, git_ref: &str) -> Result<String, String> {
             Err(e) => last = e,
         }
     }
-    Err(format!("{git_ref}: não há essa tag, branch ou commit no repositório (a tag foi enviada?) [{last}]"))
+    Err(tr!("{}: no such tag, branch or commit in the repository (was the tag pushed?) [{}]", git_ref, last))
 }
 
 /// `owner/repo` becomes `https://github.com/owner/repo`; strips a trailing `.git` and `/`.
@@ -236,7 +240,7 @@ fn normalize_repo(repo: &str) -> Result<String, String> {
     if parts.len() == 2 && parts.iter().all(|p| ok(p)) {
         return Ok(format!("https://github.com/{r}"));
     }
-    Err(format!("{repo}: use https://… ou dono/repositório (no GitHub)"))
+    Err(tr!("{}: use https://… or owner/repository (on GitHub)", repo))
 }
 
 /// The repository owner in the address (`https://github.com/owner/repo` → `owner`).
@@ -338,7 +342,7 @@ mod tests {
     {
       "id": "io.github.a.pulso",
       "name": "Pulso",
-      "description": "CPU ao vivo.",
+      "description": "Live CPU.",
       "author": "a",
       "license": "MIT",
       "version": "0.2.0",
@@ -356,7 +360,7 @@ mod tests {
     },
     {
       "id": "io.github.a.repos",
-      "name": "Repositórios",
+      "name": "Repositories",
       "description": "Git.",
       "author": "a",
       "license": "MIT",

@@ -1,49 +1,49 @@
-//! Portas abertas: o que está escutando em TCP e UDP.
+//! Open ports: what is listening on TCP and UDP.
 //!
-//! No Linux, pelo `ss` (iproute2). Sem root, o `ss` só diz o processo das portas do
-//! próprio usuário; as outras vêm sem nome nem pid (serviços do sistema, containers).
+//! On Linux, through `ss` (iproute2). Without root, `ss` only tells the process of the
+//! user's own ports; the others come without name or pid (system services, containers).
 //!
-//! No Windows, pelo `netstat -ano` (que sempre dá o pid) mais o nome e a linha de comando
-//! do processo; de processos de outro usuário ou do sistema a linha de comando vem vazia.
+//! On Windows, through `netstat -ano` (which always gives the pid) plus the process name
+//! and command line; for other users' or system processes the command line comes empty.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::core::exec;
 
-/// Uma porta escutando (endereços IPv4 e IPv6 do mesmo processo viram uma entrada só).
+/// A listening port (IPv4 and IPv6 addresses of the same process become a single entry).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Listener {
     /// "tcp" | "udp"
     pub proto: String,
     pub port: u16,
-    /// Endereços em que escuta: "127.0.0.1", "::1", "0.0.0.0", "*"…
+    /// Addresses it listens on: "127.0.0.1", "::1", "0.0.0.0", "*"…
     pub addrs: Vec<String>,
-    /// Nome do programa ("" = de outro usuário, o `ss` não mostra).
+    /// Program name ("" = another user's, `ss` doesn't show it).
     pub process: String,
-    /// Linha de comando completa ("" se não deu para ler).
+    /// Full command line ("" if it couldn't be read).
     pub cmd: String,
-    /// 0 = desconhecido.
+    /// 0 = unknown.
     pub pid: u32,
 }
 
 impl Listener {
-    /// Só aceita conexões da própria máquina.
+    /// Only accepts connections from this machine.
     pub fn local_only(&self) -> bool {
         !self.addrs.is_empty() && self.addrs.iter().all(|a| is_loopback(a))
     }
 
-    /// Escuta em todas as interfaces: qualquer um na rede alcança.
+    /// Listens on every interface: anyone on the network can reach it.
     pub fn exposed(&self) -> bool {
         self.addrs.iter().any(|a| is_wildcard(a))
     }
 
-    /// Endereço para abrir no navegador (só TCP).
+    /// Address to open in the browser (TCP only).
     pub fn url(&self) -> Option<String> {
         if self.proto != "tcp" {
             return None;
         }
-        // escuta em local ou em tudo: localhost serve; senão, o IP específico
+        // listening on loopback or on everything: localhost works; otherwise, the specific IP
         let host = if self.local_only() || self.exposed() {
             "localhost".to_string()
         } else {
@@ -65,7 +65,7 @@ pub fn is_wildcard(a: &str) -> bool {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PortsSnapshot {
     pub ok: bool,
-    /// O `ss` não está instalado.
+    /// `ss` is not installed.
     pub missing: bool,
     pub error: String,
     pub listeners: Vec<Listener>,
@@ -79,7 +79,7 @@ pub fn collect() -> PortsSnapshot {
             for l in &mut listeners {
                 if l.pid > 0
                     && let Some((name, cmd)) = read_cmdline(l.pid) {
-                        // o `ss` corta o nome em 15 letras; a linha de comando tem o inteiro
+                        // `ss` cuts the name at 15 characters; the command line has the whole one
                         if !name.is_empty() {
                             l.process = name;
                         }
@@ -104,7 +104,7 @@ pub fn collect() -> PortsSnapshot {
     }
 }
 
-/// Nome do programa e linha de comando de cada pid, pelo `sysinfo`.
+/// Program name and command line of each pid, through `sysinfo`.
 #[cfg(windows)]
 fn fill_processes(listeners: &mut [Listener]) {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
@@ -125,18 +125,18 @@ fn fill_processes(listeners: &mut [Listener]) {
     }
 }
 
-/// Lê a saída de `netstat -a -n -o`:
+/// Reads the output of `netstat -a -n -o`:
 /// `  TCP    127.0.0.1:5432    0.0.0.0:0    LISTENING    1234`
 /// `  UDP    [::]:5353         *:*                       2345`
 #[cfg(any(windows, test))]
 pub fn parse_netstat(out: &str) -> Vec<Listener> {
-    // (proto, porta, pid) → endereços
+    // (proto, port, pid) → addresses
     let mut merged: BTreeMap<(String, u16, u32), Vec<String>> = BTreeMap::new();
     for line in out.lines() {
         let cols: Vec<&str> = line.split_whitespace().collect();
         let (proto, local, pid) = match cols.as_slice() {
-            // escutando = sem ponta remota. Não dá para ler a coluna do estado: o texto
-            // dela ("LISTENING") muda com o idioma do Windows
+            // listening = no remote end. The state column can't be read: its text
+            // ("LISTENING") changes with the Windows display language
             ["TCP", local, remote, _state, pid] if remote.ends_with(":0") => ("tcp", local, pid),
             ["UDP", local, _remote, pid] => ("udp", local, pid),
             _ => continue,
@@ -157,7 +157,7 @@ pub fn parse_netstat(out: &str) -> Vec<Listener> {
         .collect()
 }
 
-/// Nome do programa e linha de comando, de `/proc/<pid>/cmdline`.
+/// Program name and command line, from `/proc/<pid>/cmdline`.
 #[cfg(not(windows))]
 fn read_cmdline(pid: u32) -> Option<(String, String)> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
@@ -168,11 +168,11 @@ fn read_cmdline(pid: u32) -> Option<(String, String)> {
     Some((name, args.join(" ")))
 }
 
-/// Lê a saída de `ss -H -l -n -p -t -u`:
+/// Reads the output of `ss -H -l -n -p -t -u`:
 /// `tcp LISTEN 0 128 127.0.0.1:5432 0.0.0.0:* users:(("postgres",pid=12,fd=5))`
 #[cfg(any(not(windows), test))]
 pub fn parse(out: &str) -> Vec<Listener> {
-    // (proto, porta, pid, processo) → endereços
+    // (proto, port, pid, process) → addresses
     let mut merged: BTreeMap<(String, u16, u32, String), Vec<String>> = BTreeMap::new();
     for line in out.lines() {
         let cols: Vec<&str> = line.split_whitespace().collect();
@@ -200,7 +200,7 @@ pub fn parse(out: &str) -> Vec<Listener> {
         .collect()
 }
 
-/// `users:(("postgres",pid=12,fd=5),(…))` → ("postgres", 12): só o primeiro processo.
+/// `users:(("postgres",pid=12,fd=5),(…))` → ("postgres", 12): only the first process.
 #[cfg(any(not(windows), test))]
 fn parse_users(s: &str) -> (String, u32) {
     let name = s.split('"').nth(1).unwrap_or_default().to_string();
@@ -226,11 +226,11 @@ tcp LISTEN 0 4096 [::1]:631 [::]:*
 tcp LISTEN 0 4096 127.0.0.1:631 0.0.0.0:*
 udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*
 tcp LISTEN 0 5 100.105.101.45:18449 0.0.0.0:* users:((\"socat\",pid=2665,fd=5))
-lixo
+garbage
 ";
 
     #[test]
-    fn le_e_junta_ipv4_e_ipv6() {
+    fn reads_and_merges_ipv4_and_ipv6() {
         let ls = parse(SAMPLE);
         assert_eq!(ls.len(), 6);
         let pg = ls.iter().find(|l| l.port == 5432).unwrap();
@@ -249,7 +249,7 @@ lixo
     }
 
     #[test]
-    fn netstat_do_windows_so_o_que_escuta() {
+    fn windows_netstat_only_listening() {
         let out = "\r\nConexões ativas\r\n\r\n  Proto  Endereço local  Endereço externo  Estado  PID\r\n\
   TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1108\r\n\
   TCP    127.0.0.1:5432         0.0.0.0:0              ABHÖREN         4321\r\n\
@@ -264,19 +264,19 @@ lixo
         assert_eq!((rpc.proto.as_str(), rpc.pid), ("tcp", 1108));
         assert_eq!(rpc.addrs, ["0.0.0.0", "::"]);
         assert!(rpc.exposed());
-        // o estado em outro idioma não atrapalha; IPv4 e IPv6 do mesmo processo se juntam
+        // the state in another language doesn't get in the way; IPv4 and IPv6 of the same process merge
         let pg = ls.iter().find(|l| l.port == 5432).unwrap();
         assert_eq!(pg.addrs, ["127.0.0.1", "::1"]);
         assert!(pg.local_only());
         assert_eq!(pg.url().as_deref(), Some("http://localhost:5432"));
-        // conexão de saída não é porta aberta
+        // an outgoing connection is not an open port
         assert!(ls.iter().all(|l| l.port != 51234));
         let ssdp = ls.iter().find(|l| l.port == 1900).unwrap();
         assert_eq!((ssdp.proto.as_str(), ssdp.addrs[0].as_str()), ("udp", "fe80::1"));
     }
 
     #[test]
-    fn endereco_para_o_navegador() {
+    fn browser_address() {
         let ls = parse(SAMPLE);
         let url = |p: u16| ls.iter().find(|l| l.port == p).unwrap().url().unwrap();
         assert_eq!(url(47836), "http://localhost:47836");

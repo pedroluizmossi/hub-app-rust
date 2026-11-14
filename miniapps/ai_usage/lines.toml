@@ -1,6 +1,6 @@
-# Falas das mascotes das assinaturas de IA ({s} = "Codex", "Claude", "Kiro", "OpenCode Go";
-# {v} = maior % usado; em [forecast], minutos até o limite acabar). Formato: src/core/chatter.rs. O que não estiver aqui vem das falas
-# genéricas (src/hub/lines.toml).
+# Lines of the AI subscriptions mascots ({s} = "Codex", "Claude", "Kiro", "OpenCode Go";
+# {v} = highest % used; in [forecast], minutes until the limit runs out). Format: src/core/chatter.rs.
+# Whatever is not here comes from the generic lines (src/hub/lines.toml).
 
 [trouble]
 pt = [

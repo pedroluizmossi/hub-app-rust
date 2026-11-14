@@ -1,0 +1,215 @@
+# Data providers (src/providers): statuses and errors shown on the cards, in the tray and
+# in the agents' timeline.
+
+# media
+msgid "CD Player: no media bus"
+msgstr "CD Player: sem o barramento"
+
+msgid "CD Player: no disc"
+msgstr "CD Player: sem disco"
+
+msgid "CD Player: {} open"
+msgstr "CD Player: {} aberto"
+
+msgid "media service unavailable"
+msgstr "serviço de mídia indisponível"
+
+msgid "media bus unavailable"
+msgstr "barramento indisponível"
+
+msgid "invalid player"
+msgstr "player inválido"
+
+msgid "the player closed"
+msgstr "o player fechou"
+
+msgid "the player refused the command"
+msgstr "o player recusou o comando"
+
+# agents
+msgid "could not open the database"
+msgstr "não consegui abrir o banco"
+
+msgid "unrecognized database format"
+msgstr "formato do banco não reconhecido"
+
+msgid "could not read the sessions"
+msgstr "não consegui ler as sessões"
+
+msgid "interrupted"
+msgstr "interrompido"
+
+msgid "inactive"
+msgstr "sem atividade"
+
+msgid "failed"
+msgstr "falhou"
+
+msgid "interrupted by the user"
+msgstr "interrompido pelo usuário"
+
+msgid "the tool failed"
+msgstr "a ferramenta falhou"
+
+msgid "the command exited with code {}"
+msgstr "o comando saiu com código {}"
+
+# AI usage
+msgid "Waiting for the first reading"
+msgstr "Aguardando leitura"
+
+msgid "Reading failed"
+msgstr "Falha na leitura"
+
+msgid "Updated"
+msgstr "Atualizado"
+
+msgid "No limits available"
+msgstr "Sem limites disponíveis"
+
+msgid "5 hours"
+msgstr "5 horas"
+
+msgid "Weekly"
+msgstr "Semanal"
+
+msgid "Weekly Sonnet"
+msgstr "Semanal Sonnet"
+
+msgid "Weekly {}"
+msgstr "Semanal {}"
+
+msgid "Monthly"
+msgstr "Mensal"
+
+msgid "Main limit"
+msgstr "Limite principal"
+
+msgid "Secondary limit"
+msgstr "Limite secundário"
+
+msgid "Credits"
+msgstr "Créditos"
+
+msgid "{} / {} credits"
+msgstr "{} / {} créditos"
+
+msgid "HTTPS client unavailable"
+msgstr "Cliente HTTPS indisponível"
+
+msgid "Connection failed"
+msgstr "Falha de conexão"
+
+msgid "Authentication refused"
+msgstr "Autenticação recusada"
+
+msgid "Too many requests; try again later"
+msgstr "Limite de consultas; tente mais tarde"
+
+msgid "Service unavailable (HTTP {})"
+msgstr "Serviço indisponível (HTTP {})"
+
+msgid "Incomplete response"
+msgstr "Resposta incompleta"
+
+msgid "Response too large"
+msgstr "Resposta muito grande"
+
+msgid "Invalid usage response"
+msgstr "Resposta de uso inválida"
+
+msgid "Local login not found"
+msgstr "Login local não encontrado"
+
+msgid "Invalid authentication file"
+msgstr "Arquivo de autenticação inválido"
+
+msgid "Invalid local login"
+msgstr "Login local inválido"
+
+msgid "Authentication database unavailable"
+msgstr "Banco de autenticação indisponível"
+
+msgid "Data folder unavailable"
+msgstr "Diretório de dados indisponível"
+
+msgid "Claude folder unavailable"
+msgstr "Diretório Claude indisponível"
+
+msgid "Claude Code is not signed in"
+msgstr "Claude Code sem login"
+
+msgid "Claude login expired; open Claude Code"
+msgstr "Login Claude expirado; abra o Claude Code"
+
+msgid "Invalid Claude path"
+msgstr "Caminho Claude inválido"
+
+msgid "Claude login unavailable"
+msgstr "Login Claude indisponível"
+
+msgid "Claude login is a link; renew it in Claude Code"
+msgstr "Login Claude é um link; renove pelo Claude Code"
+
+msgid "Claude lock unavailable"
+msgstr "Bloqueio Claude indisponível"
+
+msgid "Another Claude refresh in progress"
+msgstr "Outra atualização Claude em andamento"
+
+msgid "Invalid Claude login"
+msgstr "Login Claude inválido"
+
+msgid "Renew the login in Claude Code"
+msgstr "Renove o login no Claude Code"
+
+msgid "Could not prepare the Claude refresh"
+msgstr "Não foi possível preparar a renovação Claude"
+
+msgid "Invalid Claude refresh"
+msgstr "Renovação Claude inválida"
+
+msgid "Invalid Claude expiry"
+msgstr "Validade Claude inválida"
+
+msgid "Could not save the refreshed Claude login"
+msgstr "Não foi possível salvar o login Claude renovado"
+
+msgid "Claude login changed during refresh"
+msgstr "Login Claude alterado durante renovação"
+
+msgid "Claude login changed during refresh; check the login"
+msgstr "Login Claude alterado durante renovação; confira o login"
+
+msgid "Codex folder unavailable"
+msgstr "Diretório Codex indisponível"
+
+msgid "Codex is not signed in to ChatGPT"
+msgstr "Codex sem login ChatGPT"
+
+msgid "Sign in to OpenCode Go to renew the login"
+msgstr "Entre no OpenCode Go para renovar o login"
+
+msgid "Invalid Kiro login"
+msgstr "Login Kiro inválido"
+
+msgid "Kiro login expired"
+msgstr "Login Kiro expirado"
+
+msgid "Invalid Kiro region"
+msgstr "Região Kiro inválida"
+
+msgid "Kiro login unavailable"
+msgstr "Login Kiro indisponível"
+
+msgid "Invalid Kiro key"
+msgstr "Chave Kiro inválida"
+
+msgid "Kiro credits unavailable"
+msgstr "Créditos Kiro indisponíveis"
+
+msgid "Invalid Kiro usage"
+msgstr "Uso Kiro inválido"
+
+msgid "Invalid Kiro limit"
+msgstr "Limite Kiro inválido"

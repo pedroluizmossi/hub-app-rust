@@ -1,20 +1,20 @@
 id = "cyber.vitals"
-name = "Sinais vitais"
-description = "CPU, RAM, GPU, disco e rede, cada um com uma mascote que segue a carga."
+name = "Vital signs"
+description = "CPU, RAM, GPU, disk and network, each with a mascot that follows the load."
 icon = "chip"
 api = 1
 uses = ["sys", "gpu"]
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "warn"
-label = "Mascote agitada a partir de (%)"
+label = "Mascot gets restless from (%)"
 type = "int"
 default = 60
 min = 10
@@ -23,7 +23,7 @@ step = 5
 
 [[settings]]
 key = "alarm"
-label = "Mascote em alarme a partir de (%)"
+label = "Mascot in alarm from (%)"
 type = "int"
 default = 90
 min = 20
@@ -32,19 +32,19 @@ step = 5
 
 [[settings]]
 key = "alerts"
-label = "Avisar quando algo ficar alto por um tempo"
+label = "Warn when something stays high for a while"
 type = "bool"
 default = true
 
 [[settings]]
 key = "show_temps"
-label = "Mostrar temperaturas"
+label = "Show temperatures"
 type = "bool"
 default = true
 
 [[settings]]
 key = "temp_hot"
-label = "Temperatura quente (°C)"
+label = "Hot temperature (°C)"
 type = "int"
 default = 80
 min = 50
@@ -53,7 +53,7 @@ step = 5
 
 [[settings]]
 key = "temp_critical"
-label = "Temperatura crítica (°C)"
+label = "Critical temperature (°C)"
 type = "int"
 default = 95
 min = 60
@@ -62,35 +62,35 @@ step = 5
 
 [[settings]]
 key = "cpu_mascot"
-label = "Mascote da CPU"
+label = "CPU mascot"
 type = "choice"
 default = "abelha"
 options = ["abelha", "chip", "robo", "neko", "kitsune", "polvo", "hacker", "sapo"]
 
 [[settings]]
 key = "ram_mascot"
-label = "Mascote da RAM"
+label = "RAM mascot"
 type = "choice"
 default = "slime"
 options = ["slime", "sapo", "neko", "robo", "kitsune", "fantasma", "chip"]
 
 [[settings]]
 key = "gpu_mascot"
-label = "Mascote da GPU"
+label = "GPU mascot"
 type = "choice"
 default = "auto"
 options = ["auto", "nvidia", "amd", "robo", "neko", "chip", "vagalume"]
 
 [[settings]]
 key = "disk_mascot"
-label = "Mascote do disco"
+label = "Disk mascot"
 type = "choice"
 default = "tartaruga"
 options = ["tartaruga", "disquete", "caracol", "robo", "neko", "yurei", "chip"]
 
 [[settings]]
 key = "net_mascot"
-label = "Mascote da rede"
+label = "Network mascot"
 type = "choice"
 default = "rato"
 options = ["rato", "caracol", "usagi", "kitsune", "coruja", "neko", "robo"]

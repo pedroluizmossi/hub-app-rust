@@ -1,13 +1,13 @@
-// Moldura da janela sem borda: alças de redimensionar, fundo do visual, barras e título.
+// Frame of the borderless window: resize handles, the skin's background, bars and title.
 import { Anim, Skin } from "theme.slint";
 
-// Áreas invisíveis nas bordas e cantos para redimensionar a janela sem moldura.
+// Invisible areas on the edges and corners to resize the borderless window.
 export component ResizeHandles inherits Rectangle {
     callback start(string);
-    property <length> e: 6px;   // espessura da borda
-    property <length> k: 14px;  // tamanho do canto
+    property <length> e: 6px;   // edge thickness
+    property <length> k: 14px;  // corner size
 
-    // bordas
+    // edges
     TouchArea { y: 0; height: e; x: k; width: parent.width - 2 * k; mouse-cursor: ns-resize;
         pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("n"); } } }
     TouchArea { y: parent.height - e; height: e; x: k; width: parent.width - 2 * k; mouse-cursor: ns-resize;
@@ -16,7 +16,7 @@ export component ResizeHandles inherits Rectangle {
         pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("w"); } } }
     TouchArea { x: parent.width - e; width: e; y: k; height: parent.height - 2 * k; mouse-cursor: ew-resize;
         pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("e"); } } }
-    // cantos
+    // corners
     TouchArea { x: 0; y: 0; width: k; height: k; mouse-cursor: nwse-resize;
         pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("nw"); } } }
     TouchArea { x: parent.width - k; y: parent.height - k; width: k; height: k; mouse-cursor: nwse-resize;
@@ -27,12 +27,11 @@ export component ResizeHandles inherits Rectangle {
         pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.start("sw"); } } }
 }
 
-// Fundo da janela: polígono com os cantos superior direito e inferior esquerdo cortados
-// (ou retângulo, com chanfro 0). A borda tem a espessura do visual.
+// Window background: a polygon with the top-right and bottom-left corners cut off (or a
+// rectangle, with chamfer 0). The border has the skin's thickness.
 //
-// Retângulo de verdade quando o chanfro é 0 (a maioria dos visuais): um `Path` do tamanho
-// da janela é rasterizado inteiro, preenchimento e traço, em todo quadro, por menor que
-// seja a área que mudou.
+// A real rectangle when the chamfer is 0 (most skins): a window-sized `Path` is rasterized
+// whole, fill and stroke, on every frame, however small the changed area is.
 export component Frame inherits Rectangle {
     if Skin.chamfer == 0: Rectangle {
         background: Skin.bg;
@@ -43,7 +42,7 @@ export component Frame inherits Rectangle {
         property <float> w: self.width / 1px;
         property <float> h: self.height / 1px;
         property <float> c: Skin.chamfer / 1px;
-        property <float> b: Skin.border / 2px;   // traço centrado: recua meia borda
+        property <float> b: Skin.border / 2px;   // centered stroke: inset by half the border
         width: 100%;
         height: 100%;
         viewbox-width: w;
@@ -55,7 +54,7 @@ export component Frame inherits Rectangle {
         stroke: Skin.edge;
         stroke-width: Skin.border;
     }
-    // filete por dentro da borda (madeira do Aconchego)
+    // thin line inside the border (the wood of the Cozy skin)
     if Skin.edge-inner != transparent: Rectangle {
         x: Skin.border;
         y: Skin.border;
@@ -66,7 +65,7 @@ export component Frame inherits Rectangle {
     }
 }
 
-// Barra de título de uma tela, com linha embaixo (e brilho em cima, se o visual tiver).
+// Title bar of a screen, with a line below (and a highlight on top, if the skin has one).
 export component Bar inherits Rectangle {
     in property <color> line: Skin.line;
     in property <length> line-width: Skin.header-line;
@@ -81,7 +80,7 @@ export component Bar inherits Rectangle {
     Rectangle { y: parent.height - line-width; height: line-width; background: line; }
 }
 
-// Título da janela no estilo do visual: ícone em pixel, nome e cursor piscando.
+// Window title in the skin's style: pixel icon, name and a blinking cursor.
 export component Title inherits HorizontalLayout {
     spacing: Skin.title-cursor ? 4px : 10px;
     horizontal-stretch: 0;

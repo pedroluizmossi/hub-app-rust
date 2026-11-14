@@ -1,0 +1,430 @@
+# Built-in mini-apps: views (miniapps/*/*.slint) and manifests (miniapps/*/manifest.toml).
+
+# Settings shared by several manifests
+msgid "Theme"
+msgstr "Tema"
+
+msgid "Mascot"
+msgstr "Mascote"
+
+# Agents (miniapps/agents)
+msgid "AI agents"
+msgstr "Agentes de IA"
+
+msgid "Claude Code, Codex and OpenCode sessions: who is working, who is waiting for you and who is done."
+msgstr "Sessões do Claude Code, Codex e OpenCode: quem está trabalhando, quem espera você e quem já terminou."
+
+msgid "Show sessions idle for up to (min)"
+msgstr "Mostrar sessões paradas há até (min)"
+
+msgid "Notify when an agent is waiting for you"
+msgstr "Notificar quando um agente esperar por você"
+
+msgid "Notify when an agent finishes"
+msgstr "Notificar quando um agente terminar"
+
+msgid "Subagents walk as the imported mascots (a different one for each new subagent)"
+msgstr "Subagentes andando com as mascotes importadas (um diferente a cada novo)"
+
+msgid "effort"
+msgstr "esforço"
+
+msgid "in"
+msgstr "ent."
+
+msgid "input"
+msgstr "entrada"
+
+msgid "output"
+msgstr "saída"
+
+msgid "last turn"
+msgstr "último turno"
+
+msgid "last turn · {}"
+msgstr "último turno · {}"
+
+msgid "more subagents: {}"
+msgstr "mais subagentes: {}"
+
+msgid "Details"
+msgstr "Detalhes"
+
+msgid "Folder"
+msgstr "Pasta"
+
+msgid "Open folder"
+msgstr "Abrir pasta"
+
+msgid "Terminal"
+msgstr "Terminal"
+
+msgid "Terminal in folder"
+msgstr "Terminal na pasta"
+
+msgid "Resume"
+msgstr "Retomar"
+
+msgid "Resume session"
+msgstr "Retomar sessão"
+
+msgid "{} working · {} waiting for you · {} idle"
+msgstr "{} trabalhando · {} esperando você · {} parados"
+
+msgid "ACTIVE"
+msgstr "ATIVOS"
+
+msgid "WAITING"
+msgstr "ESPERA"
+
+msgid "IDLE"
+msgstr "LIVRES"
+
+msgid "Could not find Claude Code, Codex or OpenCode on this machine."
+msgstr "Não achei Claude Code, Codex nem OpenCode nesta máquina."
+
+msgid "No open or recent sessions."
+msgstr "Nenhuma sessão aberta ou recente."
+
+# Agent detail window (miniapps/agents/detail.slint)
+msgid "Agent"
+msgstr "Agente"
+
+msgid "Close"
+msgstr "Fechar"
+
+msgid "close"
+msgstr "fechar"
+
+msgid "The session closed or got too old for the list."
+msgstr "A sessão fechou ou ficou antiga demais para a lista."
+
+msgid "model"
+msgstr "modelo"
+
+msgid "WHAT IT IS DOING"
+msgstr "O QUE ESTÁ FAZENDO"
+
+msgid "Reading the conversation…"
+msgstr "Lendo a conversa…"
+
+msgid "Nothing to show for this session."
+msgstr "Nada para mostrar desta sessão."
+
+# AI subscriptions (miniapps/ai_usage)
+msgid "AI subscriptions"
+msgstr "Assinaturas de IA"
+
+msgid "Limits and credits of Codex, Claude, Kiro and OpenCode Go."
+msgstr "Limites e créditos do Codex, Claude, Kiro e OpenCode Go."
+
+msgid "Bar and mascot get restless from (%)"
+msgstr "Barra e mascote agitadas a partir de (%)"
+
+msgid "Bar and mascot in alarm from (%)"
+msgstr "Barra e mascote em alarme a partir de (%)"
+
+msgid "Warn when a limit goes past the alarm"
+msgstr "Avisar quando um limite passar do alarme"
+
+msgid "Predict when the limit runs out (from the usage pace)"
+msgstr "Prever quando o limite acaba (pelo ritmo de uso)"
+
+msgid "Show Codex"
+msgstr "Mostrar Codex"
+
+msgid "Show Claude"
+msgstr "Mostrar Claude"
+
+msgid "Show Kiro"
+msgstr "Mostrar Kiro"
+
+msgid "Show OpenCode Go"
+msgstr "Mostrar OpenCode Go"
+
+msgid "Hide sources with no reading"
+msgstr "Esconder fontes sem leitura"
+
+msgid "Show the reset as time left (instead of a date)"
+msgstr "Renovação em tempo restante (em vez de data)"
+
+msgid "Compact mode (no status or reset)"
+msgstr "Modo compacto (sem status nem renovação)"
+
+msgid "Refresh every (min)"
+msgstr "Atualizar a cada (min)"
+
+msgid "Open {} in the terminal"
+msgstr "Abrir {} no terminal"
+
+msgid "AI SUBSCRIPTIONS"
+msgstr "ASSINATURAS DE IA"
+
+msgid "Refresh"
+msgstr "Atualizar"
+
+msgid "No sources to show. Turn one on in the app settings."
+msgstr "Nenhuma fonte para mostrar. Ligue alguma nas configurações do app."
+
+# CD Player (miniapps/cdplayer)
+msgid "CD Player"
+msgstr "CD Player"
+
+msgid "What is playing: spinning disc, track and player controls."
+msgstr "O que está tocando: disco girando, faixa e controles do player."
+
+msgid "Notify when the track changes"
+msgstr "Notificar quando a faixa mudar"
+
+msgid "Show music and controls in the tray menu"
+msgstr "Mostrar música e controles no menu da bandeja"
+
+msgid "Skip forward/back step (s)"
+msgstr "Pulo de avançar/voltar (s)"
+
+msgid "NO DISC"
+msgstr "SEM DISCO"
+
+msgid "untitled track"
+msgstr "faixa sem título"
+
+msgid "no disc"
+msgstr "sem disco"
+
+msgid "Previous track"
+msgstr "Faixa anterior"
+
+msgid "Pause"
+msgstr "Pausar"
+
+msgid "Play"
+msgstr "Tocar"
+
+msgid "Next track"
+msgstr "Próxima faixa"
+
+msgid "open"
+msgstr "abrir"
+
+# Docker (miniapps/docker)
+msgid "Docker"
+msgstr "Docker"
+
+msgid "Containers and stacks with quick actions; the mascot reacts when something goes down."
+msgstr "Containers e stacks com ações rápidas; a mascote reage quando algo cai."
+
+msgid "Hide stopped containers"
+msgstr "Esconder containers parados"
+
+msgid "Sort list by"
+msgstr "Ordenar lista por"
+
+msgid "Notify when a container goes down"
+msgstr "Notificar quando um container cair"
+
+msgid "Notify when it comes back"
+msgstr "Notificar quando ele voltar"
+
+msgid "Restless mascot when a container's CPU is above (%)"
+msgstr "Mascote agitada com CPU de um container acima de (%)"
+
+msgid "Start"
+msgstr "Iniciar"
+
+msgid "Stop"
+msgstr "Parar"
+
+msgid "Restart"
+msgstr "Reiniciar"
+
+msgid "Logs"
+msgstr "Logs"
+
+msgid "Start stack {}"
+msgstr "Subir stack {}"
+
+msgid "Stop stack {}"
+msgstr "Parar stack {}"
+
+msgid "Restart stack {}"
+msgstr "Reiniciar stack {}"
+
+msgid "Docker not installed"
+msgstr "Docker não instalado"
+
+msgid "Docker is down"
+msgstr "Docker fora do ar"
+
+msgid "{} running · {} stopped · {} with errors"
+msgstr "{} rodando · {} parados · {} com erro"
+
+msgid "search…"
+msgstr "buscar…"
+
+msgid "search by name, image or stack"
+msgstr "buscar por nome, imagem ou stack"
+
+msgid "Active only"
+msgstr "Só ativos"
+
+msgid "active only"
+msgstr "só ativos"
+
+msgid "sort: {}"
+msgstr "ordem: {}"
+
+msgid "state"
+msgstr "estado"
+
+msgid "name"
+msgstr "nome"
+
+msgid "refresh"
+msgstr "atualizar"
+
+msgid "Install Docker to see the containers here."
+msgstr "Instale o Docker para ver os containers aqui."
+
+msgid "No connection to Docker."
+msgstr "Sem conexão com o Docker."
+
+msgid "No container matches this filter."
+msgstr "Nenhum container bate com esse filtro."
+
+msgid "No containers."
+msgstr "Nenhum container."
+
+# Open ports (miniapps/ports)
+msgid "Open ports"
+msgstr "Portas abertas"
+
+msgid "What is listening on each port, with shortcuts to open it in the browser and to kill the process."
+msgstr "O que está escutando em cada porta, com atalho para abrir no navegador e encerrar o processo."
+
+msgid "Show UDP"
+msgstr "Mostrar UDP"
+
+msgid "Hide other users' ports (no process)"
+msgstr "Esconder portas de outros usuários (sem processo)"
+
+msgid "Notify when a new port opens"
+msgstr "Notificar quando uma porta nova abrir"
+
+msgid "Restless mascot when one of your ports is open to the network"
+msgstr "Mascote agitada com porta sua aberta para a rede"
+
+msgid "new"
+msgstr "nova"
+
+msgid "Open in the browser"
+msgstr "Abrir no navegador"
+
+msgid "Confirm: kill {}"
+msgstr "Confirmar: encerrar {}"
+
+msgid "Kill {}"
+msgstr "Encerrar {}"
+
+msgid "ss not installed"
+msgstr "ss não instalado"
+
+msgid "Could not read the ports"
+msgstr "Não consegui ler as portas"
+
+msgid "{} TCP · yours: {} · on the whole network: {}"
+msgstr "{} TCP · suas: {} · na rede toda: {}"
+
+msgid "YOURS"
+msgstr "SUAS"
+
+msgid "NETWORK"
+msgstr "REDE"
+
+msgid "search by port or program"
+msgstr "buscar por porta ou programa"
+
+msgid "Install iproute2 to see the ports."
+msgstr "Instale o iproute2 para ver as portas."
+
+msgid "No port matches this filter."
+msgstr "Nenhuma porta bate com esse filtro."
+
+msgid "No port listening."
+msgstr "Nenhuma porta escutando."
+
+# Quick to-do (miniapps/todo)
+msgid "Quick to-do"
+msgstr "To-do rápido"
+
+msgid "A short task list, saved on the computer; the mascot celebrates when it is empty."
+msgstr "Uma lista curta de tarefas, salva no computador; a mascote comemora quando zera."
+
+msgid "Hide done tasks"
+msgstr "Esconder tarefas feitas"
+
+msgid "Move done tasks to the end of the list"
+msgstr "Tarefas feitas vão para o fim da lista"
+
+msgid "new task… (Enter)"
+msgstr "nova tarefa… (Enter)"
+
+msgid "New task"
+msgstr "Nova tarefa"
+
+msgid "Delete task"
+msgstr "Apagar tarefa"
+
+msgid "Pending: {} · done: {}"
+msgstr "Pendentes: {} · feitas: {}"
+
+msgid "clear done"
+msgstr "limpar feitas"
+
+msgid "All done (done tasks are hidden)."
+msgstr "Tudo feito (as feitas estão escondidas)."
+
+msgid "No tasks. Write one above."
+msgstr "Nenhuma tarefa. Escreva uma acima."
+
+# Vital signs (miniapps/vitals)
+msgid "Vital signs"
+msgstr "Sinais vitais"
+
+msgid "CPU, RAM, GPU, disk and network, each with a mascot that follows the load."
+msgstr "CPU, RAM, GPU, disco e rede, cada um com uma mascote que segue a carga."
+
+msgid "Mascot gets restless from (%)"
+msgstr "Mascote agitada a partir de (%)"
+
+msgid "Mascot in alarm from (%)"
+msgstr "Mascote em alarme a partir de (%)"
+
+msgid "Warn when something stays high for a while"
+msgstr "Avisar quando algo ficar alto por um tempo"
+
+msgid "Show temperatures"
+msgstr "Mostrar temperaturas"
+
+msgid "Hot temperature (°C)"
+msgstr "Temperatura quente (°C)"
+
+msgid "Critical temperature (°C)"
+msgstr "Temperatura crítica (°C)"
+
+msgid "CPU mascot"
+msgstr "Mascote da CPU"
+
+msgid "RAM mascot"
+msgstr "Mascote da RAM"
+
+msgid "GPU mascot"
+msgstr "Mascote da GPU"
+
+msgid "Disk mascot"
+msgstr "Mascote do disco"
+
+msgid "Network mascot"
+msgstr "Mascote da rede"
+
+msgid "not found"
+msgstr "não encontrado"

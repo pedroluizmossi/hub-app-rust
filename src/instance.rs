@@ -1,9 +1,9 @@
-//! Instância única: a primeira `miniutils` fica escutando; as seguintes só mandam um
-//! comando (`show`, `show apps`) para ela e saem.
+//! Single instance: the first `miniutils` keeps listening; later ones only send it a
+//! command (`show`, `show apps`) and exit.
 //!
-//! O canal muda por sistema, atrás da mesma interface (`socket_path`, `claim`,
-//! `Server::serve`, `notify_plugins_changed`): socket Unix no Linux (`linux.rs`), named
-//! pipe no Windows (`windows.rs`).
+//! The channel differs per system, behind the same interface (`socket_path`, `claim`,
+//! `Server::serve`, `notify_plugins_changed`): a Unix socket on Linux (`linux.rs`), a named
+//! pipe on Windows (`windows.rs`).
 
 #[cfg(unix)]
 #[path = "instance/linux.rs"]
@@ -14,16 +14,16 @@ mod imp;
 
 pub use imp::{Server, claim, notify_plugins_changed, socket_path};
 
-/// Pedido de outra instância para a que já está rodando.
+/// Request from another instance to the one already running.
 #[derive(Debug, PartialEq)]
 pub enum Command {
-    /// Mostra o popup; com aba (`show apps`), abre nela.
+    /// Shows the popup; with a tab (`show apps`), opens on it.
     Show(Option<String>),
-    /// Os plugins instalados mudaram (a loja pela linha de comando): relê a pasta.
+    /// The installed plugins changed (the store from the command line): re-read the folder.
     ReloadPlugins,
 }
 
-/// Lê uma linha recebida. Comando vazio ou desconhecido vira `None`.
+/// Reads a received line. An empty or unknown command becomes `None`.
 pub fn parse(line: &str) -> Option<Command> {
     let mut words = line.split_whitespace();
     match words.next()? {
@@ -33,7 +33,7 @@ pub fn parse(line: &str) -> Option<Command> {
     }
 }
 
-/// A linha que a segunda instância manda para a primeira.
+/// The line the second instance sends to the first.
 pub fn show_message(tab: Option<&str>) -> String {
     match tab {
         Some(t) => format!("show {t}"),
@@ -41,11 +41,11 @@ pub fn show_message(tab: Option<&str>) -> String {
     }
 }
 
-/// Nome base do canal: `miniutils`, ou `miniutils-<nome>` com `MINIUTILS_INSTANCE` (para
-/// rodar duas instâncias separadas, ex.: uma de teste).
+/// Base name of the channel: `miniutils`, or `miniutils-<name>` with `MINIUTILS_INSTANCE`
+/// (to run two separate instances, e.g. a test one).
 fn stem(instance: Option<&str>) -> String {
     match instance.filter(|n| !n.is_empty()) {
-        // o nome vai para o caminho: só letras, números, '-' (sem '/')
+        // the name goes into the path: only letters, digits, '-' (no '/')
         Some(name) => format!("miniutils-{}", clean(name)),
         None => "miniutils".to_string(),
     }
@@ -55,11 +55,11 @@ fn clean(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect()
 }
 
-/// Resultado de tentar ser a instância principal.
+/// Result of trying to be the main instance.
 pub enum Role {
-    /// Já há uma instância: ela recebeu o comando; esta deve sair.
+    /// There is already an instance: it got the command; this one must exit.
     Second,
-    /// Esta é a principal: o socket está aberto (ver `Server::serve`).
+    /// This is the main one: the socket is open (see `Server::serve`).
     First(Server),
 }
 
@@ -67,7 +67,7 @@ pub enum Role {
 mod tests {
     use super::*;
     #[test]
-    fn parse_aceita_show_com_ou_sem_aba() {
+    fn parse_accepts_show_with_or_without_a_tab() {
         assert_eq!(parse("show\n"), Some(Command::Show(None)));
         assert_eq!(parse("  show apps \n"), Some(Command::Show(Some("apps".into()))));
         assert_eq!(parse("show cyber.vitals"), Some(Command::Show(Some("cyber.vitals".into()))));
@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn mensagem_e_nome_do_canal() {
+    fn message_and_channel_name() {
         assert_eq!(show_message(None), "show");
         assert_eq!(show_message(Some("apps")), "show apps");
         assert_eq!(stem(None), "miniutils");
@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ignora_vazio_e_desconhecido() {
+    fn parse_ignores_empty_and_unknown() {
         assert_eq!(parse(""), None);
         assert_eq!(parse("\n"), None);
         assert_eq!(parse("quit"), None);

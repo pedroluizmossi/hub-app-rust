@@ -1,5 +1,5 @@
-// Cores de um tema. Cada mini-app tem o seu (vários aparecem juntos no painel),
-// então o tema é um valor passado aos componentes, não um global.
+// Colors of a theme. Each mini-app has its own (several show up together on the dashboard),
+// so the theme is a value passed to components, not a global.
 
 export struct Colors {
     fur: color,
@@ -17,7 +17,7 @@ export struct Colors {
 }
 
 export global Moods {
-    // cor de cada humor
+    // color of each mood
     public pure function color(t: Colors, mood: string) -> color {
         if mood == "alarm" { return t.alarm; }
         if mood == "busy" { return t.warn; }
@@ -27,80 +27,80 @@ export global Moods {
     }
 }
 
-// Quadro de animação (~8/s), avançado pelo Rust só com a janela visível.
+// Animation frame (~8/s), advanced by Rust only while the window is visible.
 export global Anim {
     in property <int> frame;
-    // relógio em ms (volta a zero a cada hora), para o fundo animado
+    // clock in ms (wraps to zero every hour), for the animated background
     in property <int> time;
-    // "reduzir movimento" (config `reduce_motion`): mascotes paradas, sem pulos nem tremores
+    // "reduce motion" (config `reduce_motion`): still mascots, no bounces or shakes
     in property <bool> calm: false;
 }
 
-// Visual da janela (a "skin"): fundo, moldura, cabeçalho, fontes e cores da interface.
-// Os valores vêm do Rust (src/skin/mod.rs); os daqui são os do visual Neon, usados só
-// até o Rust preencher. O conteúdo de cada app segue o tema do app (`Colors`).
+// Window look (the "skin"): background, frame, header, fonts and interface colors.
+// The values come from Rust (src/skin/mod.rs); the ones here are the Neon skin's, used only
+// until Rust fills them in. Each app's content follows the app's theme (`Colors`).
 export global Skin {
-    // superfícies
-    in property <color> bg: #0B0912;          // fundo do conteúdo
-    in property <color> panel: #0B0912;       // cabeçalho e rodapé
-    in property <color> panel-top: transparent; // brilho no alto do cabeçalho
-    in property <color> edge: #2E2546;        // borda da janela
+    // surfaces
+    in property <color> bg: #0B0912;          // content background
+    in property <color> panel: #0B0912;       // header and footer
+    in property <color> panel-top: transparent; // highlight at the top of the header
+    in property <color> edge: #2E2546;        // window border
     in property <color> edge-inner: transparent;
-    in property <color> line: #1E1830;        // linha sob o cabeçalho
-    in property <color> surface: #120A1F;     // blocos das configurações
+    in property <color> line: #1E1830;        // line under the header
+    in property <color> surface: #120A1F;     // settings blocks
     in property <color> surface-edge: #3A1F55;
-    in property <color> field: #0D0717;       // campos, selects, steppers
+    in property <color> field: #0D0717;       // fields, selects, steppers
     in property <color> field-edge: #3A2A55;
-    in property <color> slot: #2A4A55;        // células vazias no modo de edição
-    // texto
+    in property <color> slot: #2A4A55;        // empty cells in edit mode
+    // text
     in property <color> ink: #EDE6FF;
     in property <color> sub: #C9BEE6;
     in property <color> dim: #8E80AA;
-    in property <color> panel-ink: #EDE6FF;   // título no cabeçalho
-    in property <color> panel-sub: #C9BEE6;   // botões do cabeçalho
-    in property <color> tag-ink: #8E80AA;     // texto ao lado do título
-    // acentos
+    in property <color> panel-ink: #EDE6FF;   // title in the header
+    in property <color> panel-sub: #C9BEE6;   // header buttons
+    in property <color> tag-ink: #8E80AA;     // text next to the title
+    // accents
     in property <color> accent: #3DF2FF;
-    in property <color> accent-ink: #04161A;  // texto sobre o acento
-    in property <color> accent2: #FF3DB8;     // alfinete ligado
+    in property <color> accent-ink: #04161A;  // text on the accent
+    in property <color> accent2: #FF3DB8;     // pin on
     in property <color> hover: #24123A;
     in property <color> danger: #FF8095;
     in property <color> danger-edge: #5A1F3A;
     in property <color> bad: #FF4D6A;
-    // modo de edição (derivadas do acento)
+    // edit mode (derived from the accent)
     in property <color> edit-bg: #071A1E;
     in property <color> edit-line: #1F5A62;
     in property <color> edit-ink: #C9E9EC;
     in property <color> edit-sub: #9FD8DE;
-    // forma
-    in property <length> chamfer: 18px;       // corte dos cantos (0 = retos)
-    in property <length> border: 1px;         // espessura da borda da janela
+    // shape
+    in property <length> chamfer: 18px;       // corner cut (0 = square)
+    in property <length> border: 1px;         // window border thickness
     in property <length> header-h: 48px;
     in property <length> header-line: 1px;
     in property <length> panel-top-h: 0px;
-    in property <length> footer-h: 0px;       // rodapé (0 = sem; < 20 px = só a faixa)
-    // mascotes: largura de referência (a altura segue o quadro 16×14); cada app pode dar outra caixa
+    in property <length> footer-h: 0px;       // footer (0 = none; < 20 px = just the strip)
+    // mascots: reference width (height follows the 16×14 frame); each app may give another box
     in property <length> mascot-size: 72px;
-    in property <float> card-alpha: 1;        // opacidade do fundo dos apps sobre o fundo da janela
-    // tamanho do texto (Configurações › Aparência): todo `font-size` é multiplicado por ele
+    in property <float> card-alpha: 1;        // opacity of the apps' background over the window background
+    // text size (Settings › Appearance): every `font-size` is multiplied by it
     in property <float> text-scale: 1;
-    // letras
+    // fonts
     in property <string> font-ui: "Chakra Petch";
     in property <string> font-mono: "JetBrains Mono";
     in property <string> font-title: "Chakra Petch";
-    // cabeçalho
+    // header
     in property <string> title: "TOCA";
     in property <length> title-size: 18px;
     in property <int> title-weight: 700;
     in property <length> title-spacing: 3.2px;
-    in property <bool> title-cursor: false;   // cursor piscando depois do título
-    in property <string> title-icon;          // ícone em pixel (quadro 8×8, preenchido)
-    in property <string> title-icon-cut;      // furo no ícone (porta da casinha)
+    in property <bool> title-cursor: false;   // blinking cursor after the title
+    in property <string> title-icon;          // pixel icon (8×8 frame, filled)
+    in property <string> title-icon-cut;      // hole in the icon (the little house's door)
     in property <string> tag: "grid";         // "grid" | "greeting" | "none"
     in property <string> buttons: "icon";     // "icon" | "bracket" | "chunky"
 }
 
-// Ícones de traço (caminhos SVG num quadro 24×24, como no design).
+// Stroke icons (SVG paths in a 24×24 frame, as in the design).
 export global Icons {
     out property <string> pin: "M9 3h6l-1 6l3 3H7l3-3zM12 12v9";
     out property <string> gear: "M12 9a3 3 0 1 0 0 6a3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1";
@@ -119,15 +119,15 @@ export global Icons {
     out property <string> chevron-right: "M9 6l6 6l-6 6";
     out property <string> chevron-up: "M6 15l6-6l6 6";
     out property <string> plus: "M12 5v14M5 12h14";
-    // em pixel (quadro 7×7, preenchidos), para os botões "chunky"
+    // pixel icons (7×7 frame, filled), for the "chunky" buttons
     out property <string> px-pin: "M2 0h3v1H2zM2 1h1v2H2zM4 1h1v2H4zM1 3h5v1H1zM3 4h1v3H3z";
     out property <string> px-gear: "M3 0h1v1H3zM0 3h1v1H0zM6 3h1v1H6zM3 6h1v1H3zM1 1h1v1H1zM5 1h1v1H5zM1 5h1v1H1zM5 5h1v1H5zM2 2h3v1H2zM2 3h1v1H2zM4 3h1v1H4zM2 4h3v1H2z";
     out property <string> px-plus: "M3 0h1v7H3zM0 3h7v1H0z";
     out property <string> px-grid: "M0 0h3v3H0zM4 0h3v3H4zM0 4h3v3H0zM4 4h3v3H4z";
-    // prompt ">" e cursor "_" separados, para o cursor piscar sozinho
+    // prompt ">" and cursor "_" apart, so the cursor blinks on its own
     out property <string> px-prompt: "M0 1h2v1H0zM1 2h2v1H1zM2 3h2v1H2zM1 4h2v1H1zM0 5h2v1H0z";
     out property <string> px-cursor: "M4 5h3v1H4z";
     out property <string> px-close:"M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM6 0h1v1H6zM5 1h1v1H5zM4 2h1v1H4zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z";
-    // preenchido
+    // filled
     out property <string> grip: "M8 5h3v3H8zM13 5h3v3h-3zM8 10.5h3v3H8zM13 10.5h3v3h-3zM8 16h3v3H8zM13 16h3v3h-3z";
 }

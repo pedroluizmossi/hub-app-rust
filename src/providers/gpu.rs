@@ -1,4 +1,4 @@
-//! GPU: NVIDIA via `nvidia-smi`; senão a primeira placa AMD (amdgpu) via sysfs.
+//! GPU: NVIDIA through `nvidia-smi`; otherwise the first AMD card (amdgpu) through sysfs.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -18,20 +18,20 @@ pub struct GpuSnapshot {
     pub util: f32,
     pub vram_used_mib: f32,
     pub vram_total_mib: f32,
-    /// °C; 0 = sem sensor.
+    /// °C; 0 = no sensor.
     pub temp: f32,
 }
 
-/// De quanto em quanto tempo o `nvidia-smi` escreve uma leitura (o mesmo ritmo do provedor).
+/// How often `nvidia-smi` writes a reading (the same pace as the provider).
 const NVIDIA_EVERY: Duration = Duration::from_secs(2);
-/// Sem leitura por este tempo, a que temos é velha: a placa aparece como indisponível e o
-/// `nvidia-smi` (provavelmente travado) é reiniciado.
+/// With no reading for this long, the one we have is stale: the card shows as unavailable
+/// and `nvidia-smi` (probably stuck) is restarted.
 const NVIDIA_STALE: Duration = Duration::from_secs(8);
-/// Sem ninguém pedindo leitura por este tempo (o app foi desligado), o `nvidia-smi` é encerrado.
+/// With nobody asking for a reading for this long (the app was disabled), `nvidia-smi` is stopped.
 const NVIDIA_IDLE: Duration = Duration::from_secs(10);
-/// Na partida, espera a primeira leitura até este tempo, para a placa não piscar "indisponível".
+/// On start, waits up to this long for the first reading, so the card doesn't flash "unavailable".
 const NVIDIA_FIRST: Duration = Duration::from_millis(1500);
-/// Depois de tantas partidas seguidas sem nenhuma leitura, desiste do `nvidia-smi`.
+/// After this many starts in a row without any reading, gives up on `nvidia-smi`.
 const NVIDIA_TRIES: u32 = 3;
 
 enum Source {
@@ -45,7 +45,7 @@ pub struct GpuProvider {
 }
 
 impl GpuProvider {
-    /// Detecta a placa uma vez só.
+    /// Detects the card only once.
     pub fn detect() -> Self {
         let source = if exec::which("nvidia-smi") { Source::Nvidia(Nvidia::default()) } else { amd_or_none() };
         GpuProvider { source }
@@ -55,8 +55,8 @@ impl GpuProvider {
         if let Source::Nvidia(nvidia) = &mut self.source {
             match nvidia.read() {
                 Some(snap) => return snap,
-                // `nvidia-smi` no PATH mas sem funcionar (driver ausente, placa desligada):
-                // tenta a placa AMD em vez de mostrar "sem GPU" para sempre
+                // `nvidia-smi` on the PATH but not working (missing driver, card turned off):
+                // try the AMD card instead of showing "no GPU" forever
                 None => self.source = amd_or_none(),
             }
         }
@@ -71,12 +71,12 @@ fn amd_or_none() -> Source {
     amd_card().map(Source::Amd).unwrap_or(Source::None)
 }
 
-/// O que a thread leitora e o provedor dividem.
+/// What the reader thread and the provider share.
 #[derive(Default)]
 struct Stream {
-    /// O `nvidia-smi` em curso: o provedor mata por aqui, a leitora recolhe no fim.
+    /// The running `nvidia-smi`: the provider kills it through here, the reader reaps it at the end.
     child: Mutex<Option<Child>>,
-    /// Última vez que o provedor pediu uma leitura.
+    /// Last time the provider asked for a reading.
     asked: Mutex<Option<Instant>>,
 }
 
@@ -93,29 +93,29 @@ impl Stream {
     }
 }
 
-/// Leituras da NVIDIA por um único `nvidia-smi -l` de vida longa, em vez de um processo
-/// novo (fork, exec e inicialização da NVML) a cada coleta.
+/// NVIDIA readings through a single long-lived `nvidia-smi -l`, instead of a new process
+/// (fork, exec and NVML initialization) on every collection.
 #[derive(Default)]
 struct Nvidia {
     stream: Arc<Stream>,
-    /// Canal da leitora em curso; `None` = nenhuma rodando.
+    /// Channel of the running reader; `None` = none running.
     rx: Option<Receiver<GpuSnapshot>>,
     last: Option<(GpuSnapshot, Instant)>,
-    /// Quando a leitora atual começou, e se já entregou alguma leitura.
+    /// When the current reader started, and whether it has delivered any reading yet.
     started: Option<Instant>,
     delivered: bool,
-    /// Partidas seguidas que não renderam nenhuma leitura.
+    /// Starts in a row that yielded no reading.
     failures: u32,
 }
 
 impl Nvidia {
-    /// Leitura mais recente. `None` = o `nvidia-smi` não funciona aqui (desista dele).
+    /// Most recent reading. `None` = `nvidia-smi` doesn't work here (give up on it).
     fn read(&mut self) -> Option<GpuSnapshot> {
         if let Ok(mut asked) = self.stream.asked.lock() {
             *asked = Some(Instant::now());
         }
-        // primeiro percebe se a leitora anterior terminou (o app ficou desligado um tempo,
-        // ou o `nvidia-smi` caiu): assim a nova já sobe nesta coleta, não na seguinte
+        // first notice whether the previous reader ended (the app was disabled for a while,
+        // or `nvidia-smi` died): that way the new one starts in this collection, not the next
         self.drain();
         if self.rx.is_none() {
             if self.failures >= NVIDIA_TRIES {
@@ -123,7 +123,7 @@ impl Nvidia {
             }
             self.start();
         }
-        // rodando, mas calado: travou. Mata; a leitora termina e a próxima coleta recomeça.
+        // running, but silent: it is stuck. Kill it; the reader ends and the next collection restarts.
         let quiet = self.last.as_ref().map_or(self.started, |(_, at)| Some(*at));
         if self.rx.is_some() && quiet.is_some_and(|t| t.elapsed() >= NVIDIA_STALE) {
             self.stream.kill();
@@ -144,7 +144,7 @@ impl Nvidia {
         }
         self.started = Some(Instant::now());
         self.delivered = false;
-        // a primeira linha sai em uma fração de segundo
+        // the first line comes out within a fraction of a second
         if let Ok(snap) = rx.recv_timeout(NVIDIA_FIRST) {
             self.accept(snap);
         }
@@ -157,7 +157,7 @@ impl Nvidia {
         self.failures = 0;
     }
 
-    /// Fica com a leitura mais nova e percebe quando a leitora terminou.
+    /// Keeps the newest reading and notices when the reader ended.
     fn drain(&mut self) {
         let Some(rx) = self.rx.take() else { return };
         loop {
@@ -168,7 +168,7 @@ impl Nvidia {
                     return;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    // a leitora saiu: o `nvidia-smi` morreu (ou nem subiu)
+                    // the reader exited: `nvidia-smi` died (or never started)
                     if !self.delivered {
                         self.failures += 1;
                     }
@@ -185,8 +185,8 @@ impl Drop for Nvidia {
     }
 }
 
-/// Thread leitora: roda o `nvidia-smi -l` e entrega cada linha. Termina quando o
-/// processo acaba, quando o provedor some ou quando ninguém pede leitura há um tempo.
+/// Reader thread: runs `nvidia-smi -l` and delivers each line. Ends when the process ends,
+/// when the provider goes away or when nobody has asked for a reading for a while.
 fn watch(tx: Sender<GpuSnapshot>, stream: Arc<Stream>) {
     let spawned = exec::command("nvidia-smi")
         .args([
@@ -279,18 +279,18 @@ mod tests {
     }
 
     #[test]
-    fn leitura_velha_vira_indisponivel_e_falhas_seguidas_desistem() {
+    fn stale_reading_becomes_unavailable_and_repeated_failures_give_up() {
         let mut n = Nvidia::default();
         let snap = parse_nvidia("10, 1, 2, 30").unwrap();
-        // leitora "rodando" e leitura fresca
+        // reader "running" and a fresh reading
         let (tx, rx) = channel();
         n.rx = Some(rx);
         tx.send(snap.clone()).unwrap();
         assert_eq!(n.read(), Some(snap.clone()));
-        // a mesma leitura, velha demais
+        // the same reading, too old
         n.last = Some((snap, Instant::now() - NVIDIA_STALE));
         assert_eq!(n.read(), Some(GpuSnapshot::default()));
-        // a leitora terminou sem nunca entregar nada, várias vezes seguidas: desiste
+        // the reader ended without ever delivering anything, several times in a row: give up
         drop(tx);
         let mut n = Nvidia::default();
         n.failures = NVIDIA_TRIES - 1;

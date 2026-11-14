@@ -1,41 +1,45 @@
-//! Mascotes importadas: folhas PNG de qualquer tamanho (16×16, 32×32, 64×64…), lidas da
-//! pasta da pessoa, sem recompilar e sem entrar no repositório.
+//! Imported mascots: PNG sheets of any size (16×16, 32×32, 64×64…), read from the user's
+//! folder, without recompiling and without going into the repository.
 //!
 //! ```text
-//! <dados>/miniutils/mascotes/<chave>/     Linux: ~/.local/share/miniutils/mascotes
-//! ├── sprite.toml                          opcional (sem ele, deduz pelos nomes)
-//! ├── Pink_Monster_Idle_4.png              uma folha por animação, quadros lado a lado
+//! <data>/miniutils/mascots/<key>/          Linux: ~/.local/share/miniutils/mascots
+//! ├── sprite.toml                          optional (without it, deduced from the names)
+//! ├── Pink_Monster_Idle_4.png              one sheet per animation, frames side by side
 //! └── Pink_Monster_Walk_6.png
 //! ```
 //!
+//! (The folder used to be called `mascotes/`; [`migrate`] moves it on first use.)
+//!
 //! ```toml
 //! name = "Pink Monster"
-//! fps = 8                     # padrão de todas as animações
-//! facing = "right"            # para onde o desenho olha (andando ao contrário, espelha)
-//! trim = true                 # apara a borda transparente (o mesmo corte em tudo)
-//! # subagentes andando: o que fazem nas paradas (padrão: tudo menos death/hurt)
+//! fps = 8                     # default for every animation
+//! facing = "right"            # where the drawing looks (walking the other way mirrors it)
+//! trim = true                 # trims the transparent border (the same cut on everything)
+//! # walking subagents: what they do at their stops (default: everything but death/hurt)
 //! extras = ["idle", "attack1", "push", "throw"]
 //! [anim]
-//! idle = "Pink_Monster_Idle_4.png"                      # quadros pelo _4 do nome
-//! run = { file = "Pink_Monster_Run_6.png", fps = 12 }   # ou frames = 6
-//! [moods]                     # humor → animação (sem isto: nomes usuais, ver MOOD_NAMES)
+//! idle = "Pink_Monster_Idle_4.png"                      # frames from the _4 in the name
+//! run = { file = "Pink_Monster_Run_6.png", fps = 12 }   # or frames = 6
+//! [moods]                     # mood → animation (without it: usual names, see MOOD_NAMES)
 //! busy = "run"
 //! [reactions]                 # celebrate, surprised
 //! celebrate = "jump"
 //! ```
 //!
-//! Sem `sprite.toml`, cada `<Nome>_<Animação>_<N>.png` vira a animação `<animação>` com N
-//! quadros (o prefixo com mais animações é o da mascote; o resto, como poeira e pedras,
-//! fica de fora). Sem o `_N`, os quadros são quadrados (largura = altura da folha).
+//! Without `sprite.toml`, each `<Name>_<Animation>_<N>.png` becomes the animation
+//! `<animation>` with N frames (the prefix with the most animations is the mascot's; the
+//! rest, like dust and rocks, is left out). Without the `_N`, frames are square (width =
+//! sheet height). Animation names come from the user's files, so they are matched as they
+//! are (`idle`, `walk`, `run`…: the usual names of free sprite packs).
 //!
-//! A mascote importada vira um `Sprite` registrado em `sprites` (chave = nome da pasta) e
-//! aparece em todo lugar que mostra mascotes. O desenho é o do PNG: não segue o tema nem
-//! pisca; o humor aparece pela animação escolhida para ele, e dormindo ela fica mais lenta
-//! e esmaecida. Só lê PNG e TOML: nada da pasta é executado.
+//! The imported mascot becomes a `Sprite` registered in `sprites` (key = folder name) and
+//! shows up everywhere mascots are shown. The drawing is the PNG's: it doesn't follow the
+//! theme nor blink; the mood shows through the animation chosen for it, and asleep it gets
+//! slower and dimmed. Only PNG and TOML are read: nothing in the folder is executed.
 //!
-//! Com animação de andar (`walk` ou `run`), ela também anda pelos subagentes do app de
-//! agentes (`Troupe`, coreografia em `stroll`): anda, para fazendo as outras animações do
-//! pacote, corre (`run`) chamando ferramentas e pula (`jump`) ao terminar.
+//! With a walking animation (`walk` or `run`), it also walks as the subagents of the agents
+//! app (`Troupe`, choreography in `stroll`): walks, stops doing the pack's other
+//! animations, runs (`run`) while calling tools and jumps (`jump`) when done.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -50,17 +54,20 @@ use super::Mood;
 use super::anim::{self, Look, Reaction};
 use super::sprites::{self, Sprite};
 use super::stroll::Script;
+use crate::tr;
 
-/// Subpasta da pasta de aparência (`skin::user::dir`).
-pub const DIR: &str = "mascotes";
+/// Subfolder of the appearance folder (`skin::user::dir`).
+pub const DIR: &str = "mascots";
+/// Old (Portuguese) name of `DIR`: moved to the new name by [`migrate`], read as a fallback.
+pub const OLD_DIR: &str = "mascotes";
 const SPEC: &str = "sprite.toml";
-/// Limites contra arquivo estranho: quadro, quadros por animação, animações, arquivo.
+/// Limits against odd files: frame, frames per animation, animations, file.
 const MAX_SIDE: usize = 256;
 const MAX_FRAMES: usize = 64;
 const MAX_ANIMS: usize = 32;
 const MAX_FILE: u64 = 4 << 20;
 const DEFAULT_FPS: u32 = 8;
-/// Nomes procurados para cada humor (na ordem de `Mood`), quando o `sprite.toml` não diz.
+/// Names looked for for each mood (in `Mood` order), when `sprite.toml` doesn't say.
 const MOOD_NAMES: [&[&str]; 5] = [
     &["sleep", "idle"],
     &["idle"],
@@ -68,46 +75,46 @@ const MOOD_NAMES: [&[&str]; 5] = [
     &["busy", "run", "walk", "idle"],
     &["alarm", "hurt", "idle"],
 ];
-/// Animação de andar dos subagentes; sem nenhuma destas, a mascote não anda.
+/// Walking animation of the subagents; without any of these, the mascot doesn't walk.
 const WALK_NAMES: &[&str] = &["walk", "run"];
-/// Pulo de quando um subagente termina.
+/// Jump for when a subagent finishes.
 const JUMP_NAMES: &[&str] = &["jump", "celebrate"];
-/// Fora das paradas dos subagentes (sem `extras` no `sprite.toml`): morrer e se machucar
-/// não combinam com quem está trabalhando.
+/// Left out of the subagents' stops (without `extras` in `sprite.toml`): dying and getting
+/// hurt don't suit someone who is working.
 const GRIM: &[&str] = &["death", "dead", "die", "hurt", "hit"];
-/// Reações (`Reaction`): comemorar, susto.
+/// Reactions (`Reaction`): celebrate, surprise.
 const REACTION_NAMES: [&[&str]; 2] = [&["celebrate", "jump"], &["surprised", "hurt"]];
 
 pub type Buf = SharedPixelBuffer<Rgba8Pixel>;
-/// Um quadro em RGBA, linha a linha.
+/// One RGBA frame, row by row.
 type Pixels = Vec<[u8; 4]>;
 
-/// Uma animação: os quadros já cortados e esmaecidos (para dormir).
+/// An animation: the frames already cut, and dimmed (for sleeping).
 pub struct Anim {
     pub name: String,
     frames: Vec<Buf>,
     dim: Vec<Buf>,
-    /// Quanto cada quadro fica na tela.
+    /// How long each frame stays on screen.
     pub ms: u32,
 }
 
-/// Uma mascote importada.
+/// An imported mascot.
 pub struct Art {
     pub key: String,
     pub name: String,
-    /// Tamanho do quadro depois de aparar.
+    /// Frame size after trimming.
     pub w: usize,
     pub h: usize,
     anims: Vec<Anim>,
-    /// Animação de cada humor, na ordem de `Mood`.
+    /// Animation of each mood, in `Mood` order.
     moods: [usize; 5],
     reactions: [Option<usize>; 2],
-    /// Andando pelos subagentes (`None` = sem animação de andar).
+    /// Walking as the subagents (`None` = no walking animation).
     troupe: Option<Troupe>,
 }
 
-/// As animações de uma mascote para andar pelos subagentes, com corte próprio (um ataque
-/// largo não encolhe a mascote do cabeçalho), e o roteiro delas (`stroll::Script`).
+/// A mascot's animations for walking as the subagents, with their own cut (a wide attack
+/// doesn't shrink the header mascot), and their script (`stroll::Script`).
 pub struct Troupe {
     clips: Vec<(Vec<Buf>, Vec<Buf>)>,
     faces_left: bool,
@@ -115,14 +122,14 @@ pub struct Troupe {
 }
 
 impl Troupe {
-    /// Os quadros da animação `clip` olhando para a direita e para a esquerda.
+    /// The frames of animation `clip` facing right and facing left.
     pub fn frames(&self, clip: usize) -> (&[Buf], &[Buf]) {
         let (plain, mirrored) = &self.clips[clip];
         if self.faces_left { (mirrored, plain) } else { (plain, mirrored) }
     }
 }
 
-/// O quadro escolhido: animação, quadro, esmaecido. Serve para só redesenhar quando muda.
+/// The chosen frame: animation, frame, dimmed. Lets the caller redraw only on change.
 pub type FrameKey = (usize, usize, bool);
 
 impl Art {
@@ -134,8 +141,8 @@ impl Art {
         reaction.unwrap_or(self.moods[look.mood as usize])
     }
 
-    /// Qual quadro mostrar agora. Dormindo, a animação vai na metade da velocidade e
-    /// esmaecida; com "reduzir movimento", fica no primeiro quadro.
+    /// Which frame to show now. Asleep, the animation runs at half speed and dimmed; with
+    /// "reduce motion", it stays on the first frame.
     pub fn pick(&self, look: &Look) -> FrameKey {
         let i = self.anim_index(look);
         let a = &self.anims[i];
@@ -154,19 +161,19 @@ impl Art {
         Image::from_rgba8(self.buf(key).clone())
     }
 
-    /// Menor quadro (ms) da animação de agora, se ela se mexe: o hub acelera o timer.
+    /// Shortest frame (ms) of the current animation, if it moves: the hub speeds up its timer.
     pub fn frame_ms(&self, look: &Look) -> Option<u32> {
         let a = &self.anims[self.anim_index(look)];
         (a.frames.len() > 1).then_some(a.ms)
     }
 
-    /// Andando pelos subagentes (`None` = a mascote não anda).
+    /// Walking as the subagents (`None` = the mascot doesn't walk).
     pub fn troupe(&self) -> Option<&Troupe> {
         self.troupe.as_ref()
     }
 
-    /// Quadro centralizado num quadrado de lado `side` ou mais (ampliado por inteiro até
-    /// chegar perto de `side`), em RGBA: o lado e os pixels. Base do ícone da bandeja.
+    /// Frame centered in a square of side `side` or more (scaled up by a whole factor until
+    /// close to `side`), in RGBA: the side and the pixels. Base of the tray icon.
     pub fn square(&self, key: FrameKey, side: usize) -> (i32, Vec<u8>) {
         let big = self.w.max(self.h);
         let k = (side / big).max(1);
@@ -185,25 +192,25 @@ impl Art {
     }
 }
 
-// ---- registro -----------------------------------------------------------------
+// ---- registry -------------------------------------------------------------------
 
-/// Mascotes importadas e o `Sprite` de cada uma. Cada recarga vaza as anteriores (as telas
-/// guardam `&'static Sprite`); recarregar é raro e manual.
+/// Imported mascots and the `Sprite` of each. Each reload leaks the previous ones (the
+/// screens hold `&'static Sprite`); reloading is rare and manual.
 static ARTS: RwLock<Vec<(&'static Sprite, &'static Art)>> = RwLock::new(Vec::new());
 
-/// A mascote importada por trás de `sprite` (pelo endereço: uma chave igual à de uma
-/// mascote de app, como "claude", não confunde).
+/// The imported mascot behind `sprite` (by address: a key equal to an app mascot's, like
+/// "claude", doesn't get mixed up).
 pub fn art(sprite: &Sprite) -> Option<&'static Art> {
     let list = ARTS.read().ok()?;
     list.iter().find(|(s, _)| std::ptr::eq(*s, sprite)).map(|(_, a)| *a)
 }
 
-/// As importadas que sabem andar, em ordem de chave.
+/// The imported mascots that can walk, in key order.
 pub fn walkers() -> Vec<&'static Art> {
     ARTS.read().map(|l| l.iter().map(|(_, a)| *a).filter(|a| a.troupe.is_some()).collect()).unwrap_or_default()
 }
 
-/// Troca as mascotes importadas do programa.
+/// Replaces the program's imported mascots.
 pub fn set(arts: Vec<Art>) {
     let mut list = Vec::new();
     for art in arts {
@@ -228,23 +235,56 @@ pub fn set(arts: Vec<Art>) {
 
 const EMPTY_ROW: &str = "................";
 
-/// Pasta que não entrou, e por quê.
+/// The mascot folder to use, given `root` (`<appearance>/mascots`): moves an old
+/// `mascotes/` next to it into place first. The move happens when `mascots/` doesn't exist
+/// or is empty (the appearance screen may have created it empty); when both have content,
+/// `mascots/` wins and the old one is left alone. If the move fails, returns the old folder
+/// so the mascots still load. A `root` not named `mascots` is returned as is.
+pub fn migrate(root: &Path) -> PathBuf {
+    let Some(old) = root.parent().map(|p| p.join(OLD_DIR)) else { return root.to_path_buf() };
+    if root.file_name().is_none_or(|n| n != DIR) || !old.is_dir() {
+        return root.to_path_buf();
+    }
+    if root.exists() {
+        let empty = std::fs::read_dir(root).is_ok_and(|mut d| d.next().is_none());
+        if !empty {
+            return root.to_path_buf();
+        }
+        let _ = std::fs::remove_dir(root);
+    }
+    match std::fs::rename(&old, root) {
+        Ok(()) => {
+            log::info!("mascots: moved {} to {}", old.display(), root.display());
+            root.to_path_buf()
+        }
+        Err(e) => {
+            log::warn!("mascots: could not move {} to {} ({e}); reading the old folder", old.display(), root.display());
+            old
+        }
+    }
+}
+
+/// A folder that didn't make it in, and why.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Skipped {
-    /// `mascotes/pink-monster`
+    /// `mascots/pink-monster`
     pub dir: String,
+    /// Shown to the user (translated).
     pub reason: String,
 }
 
-/// Lê `root` (a pasta `mascotes/`) sem mexer no programa.
+/// Reads `root` (the `mascots/` folder, migrated from `mascotes/` if needed) without
+/// touching the program.
 pub fn load(root: &Path) -> (Vec<Art>, Vec<Skipped>) {
+    let root = migrate(root);
     let (mut arts, mut skipped) = (Vec::new(), Vec::new());
-    let Ok(entries) = std::fs::read_dir(root) else { return (arts, skipped) };
+    let Ok(entries) = std::fs::read_dir(&root) else { return (arts, skipped) };
+    let folder = root.file_name().and_then(|n| n.to_str()).unwrap_or(DIR).to_string();
     let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
     dirs.sort();
     for dir in dirs {
         let key = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-        let shown = format!("{DIR}/{key}");
+        let shown = format!("{folder}/{key}");
         match load_pack(&dir, &key) {
             Ok(a) => arts.push(a),
             Err(reason) => skipped.push(Skipped { dir: shown, reason }),
@@ -253,16 +293,16 @@ pub fn load(root: &Path) -> (Vec<Art>, Vec<Skipped>) {
     (arts, skipped)
 }
 
-/// Chave válida: minúsculas, números e hífen, sem repetir uma mascote embutida.
+/// Valid key: lowercase letters, digits and hyphens, not repeating a built-in mascot.
 fn check_key(key: &str) -> Result<(), String> {
     let ok = !key.is_empty()
         && key.len() <= 32
         && key.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
     if !ok {
-        return Err("o nome da pasta vira a chave da mascote: use só minúsculas, números e hífen (até 32)".into());
+        return Err(tr!("the folder name becomes the mascot's key: use only lowercase letters, digits and hyphens (up to 32)").into());
     }
     if sprites::SPRITES.iter().any(|s| s.key == key) {
-        return Err(format!("\"{key}\" já é uma mascote embutida; renomeie a pasta"));
+        return Err(tr!("\"{}\" is already a built-in mascot; rename the folder", key));
     }
     Ok(())
 }
@@ -280,7 +320,7 @@ struct Spec {
     moods: BTreeMap<String, String>,
     #[serde(default)]
     reactions: BTreeMap<String, String>,
-    /// Paradas dos subagentes andando (nomes de `[anim]`).
+    /// Stops of the walking subagents (names from `[anim]`).
     extras: Option<Vec<String>>,
 }
 
@@ -313,40 +353,41 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
         infer(dir)?
     };
     if spec.anim.is_empty() {
-        return Err("nenhuma animação (nem sprite.toml, nem PNG no formato Nome_Animação_N.png)".into());
+        return Err(tr!("no animations (no sprite.toml, and no PNG named like Name_Animation_N.png)").into());
     }
     if spec.anim.len() > MAX_ANIMS {
-        return Err(format!("animações demais ({}; até {MAX_ANIMS})", spec.anim.len()));
+        return Err(tr!("too many animations ({}; up to {})", spec.anim.len(), MAX_ANIMS));
     }
     let fps = spec.fps.unwrap_or(DEFAULT_FPS);
     let faces_left = match spec.facing.as_deref() {
         None | Some("right") => false,
         Some("left") => true,
-        Some(o) => return Err(format!("facing = \"{o}\": use \"right\" ou \"left\"")),
+        Some(o) => return Err(tr!("facing = \"{}\": use \"right\" or \"left\"", o)),
     };
 
-    // qual animação cada humor, reação e o andar usam (pelo nome); só essas são lidas:
-    // ataques e escaladas que ninguém usa não alargam o corte nem ocupam memória
+    // which animation each mood, reaction and the walk use (by name); only those are read:
+    // attacks and climbs nobody uses don't widen the cut nor take memory
     let names: Vec<&str> = spec.anim.keys().map(String::as_str).collect();
     let find = |name: &str| names.iter().position(|n| *n == name);
     let pick = |cands: &[&str]| cands.iter().find_map(|n| find(n));
+    let missing = |what: &str, name: &str| tr!("{} = \"{}\": there is no such animation", what, name);
     let mut moods = [0usize; 5];
     for (i, cands) in MOOD_NAMES.iter().enumerate() {
         moods[i] = pick(cands).unwrap_or(0);
     }
     for (mood, name) in &spec.moods {
-        let i = super::clips::MOODS.iter().position(|m| m == mood).ok_or(format!("[moods] humor desconhecido: {mood}"))?;
-        moods[i] = find(name).ok_or(format!("[moods] {mood} = \"{name}\": não há essa animação"))?;
+        let i = super::clips::MOODS.iter().position(|m| m == mood).ok_or_else(|| tr!("[moods] unknown mood: {}", mood))?;
+        moods[i] = find(name).ok_or_else(|| missing(&format!("[moods] {mood}"), name))?;
     }
     let mut reactions = [pick(REACTION_NAMES[0]), pick(REACTION_NAMES[1])];
     for (r, name) in &spec.reactions {
-        let i = ["celebrate", "surprised"].iter().position(|x| x == r).ok_or(format!("[reactions] reação desconhecida: {r}"))?;
-        reactions[i] = Some(find(name).ok_or(format!("[reactions] {r} = \"{name}\": não há essa animação"))?);
+        let i = ["celebrate", "surprised"].iter().position(|x| x == r).ok_or_else(|| tr!("[reactions] unknown reaction: {}", r))?;
+        reactions[i] = Some(find(name).ok_or_else(|| missing(&format!("[reactions] {r}"), name))?);
     }
     let mut used: Vec<usize> = moods.iter().copied().chain(reactions.iter().flatten().copied()).collect();
     used.sort();
     used.dedup();
-    // os subagentes andando: andar, correr, pular, parado e as paradas
+    // the walking subagents: walk, run, jump, idle and the stops
     let walk = pick(WALK_NAMES);
     let mut cast: Vec<usize> = Vec::new();
     if let Some(walk) = walk {
@@ -357,7 +398,7 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
         match &spec.extras {
             Some(list) => {
                 for name in list {
-                    cast.push(find(name).ok_or(format!("extras: \"{name}\": não há essa animação"))?);
+                    cast.push(find(name).ok_or_else(|| missing("extras", name))?);
                 }
             }
             None => cast.extend((0..names.len()).filter(|&i| !GRIM.iter().any(|g| names[i].starts_with(g)))),
@@ -369,14 +410,14 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
     needed.sort();
     needed.dedup();
 
-    // folhas cortadas em quadros, todas do mesmo tamanho: índice → (quadros, ms)
+    // sheets cut into frames, all the same size: index → (frames, ms)
     let mut raw: BTreeMap<usize, (Vec<Pixels>, u32)> = BTreeMap::new();
     let mut size: Option<(usize, usize)> = None;
     for &i in &needed {
         let (name, a) = (names[i], &spec.anim[names[i]]);
         let file = a.file();
         if file.contains('/') || file.contains('\\') || file.starts_with('.') {
-            return Err(format!("[anim] {name}: \"{file}\" tem de ser um arquivo desta pasta"));
+            return Err(tr!("[anim] {}: \"{}\" must be a file in this folder", name, file));
         }
         let (w, h, px) = read_png(&dir.join(file))?;
         let n = match a {
@@ -384,16 +425,16 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
             _ => frames_in_name(file).unwrap_or(w.checked_div(h).unwrap_or(0)),
         };
         if n == 0 || n > MAX_FRAMES || !w.is_multiple_of(n) {
-            return Err(format!("{file}: {w}×{h} não se divide em {n} quadros iguais (até {MAX_FRAMES})"));
+            return Err(tr!("{}: {}×{} doesn't split into {} equal frames (up to {})", file, w, h, n, MAX_FRAMES));
         }
         let fw = w / n;
         if fw > MAX_SIDE || h > MAX_SIDE {
-            return Err(format!("{file}: quadro de {fw}×{h}; o máximo é {MAX_SIDE}×{MAX_SIDE}"));
+            return Err(tr!("{}: {}×{} frame; the maximum is {}×{}", file, fw, h, MAX_SIDE, MAX_SIDE));
         }
         match size {
             None => size = Some((fw, h)),
             Some(s) if s != (fw, h) => {
-                return Err(format!("{file}: quadro de {fw}×{h}, mas as outras animações são {}×{}", s.0, s.1));
+                return Err(tr!("{}: {}×{} frame, but the other animations are {}×{}", file, fw, h, s.0, s.1));
             }
             _ => {}
         }
@@ -403,18 +444,18 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
             _ => fps,
         };
         if afps == 0 || afps > 30 {
-            return Err(format!("[anim] {name}: fps {afps} (use de 1 a 30)"));
+            return Err(tr!("[anim] {}: fps {} (use 1 to 30)", name, afps));
         }
         raw.insert(i, (frames, 1000 / afps));
     }
     let (fw, fh) = size.unwrap_or_default();
     let trim = spec.trim.unwrap_or(true);
-    // o mesmo corte em todos os quadros de um grupo: a mascote não pula ao trocar de animação
+    // the same cut on every frame of a group: the mascot doesn't jump when switching animations
     let cut = |group: &[usize]| -> Result<(usize, usize, usize, usize), String> {
         if !trim {
             return Ok((0, 0, fw, fh));
         }
-        bbox(group.iter().flat_map(|i| &raw[i].0), fw, fh).ok_or_else(|| "os quadros são todos transparentes".to_string())
+        bbox(group.iter().flat_map(|i| &raw[i].0), fw, fh).ok_or_else(|| tr!("the frames are all transparent").to_string())
     };
     let crop = |frames: &[Pixels], (x0, y0, x1, y1): (usize, usize, usize, usize)| -> Vec<Pixels> {
         frames.iter().map(|f| (y0..y1).flat_map(|y| f[y * fw + x0..y * fw + x1].to_vec()).collect()).collect()
@@ -467,7 +508,7 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
                 jump: jump.and_then(at),
                 idle: find("idle").and_then(at),
                 strolls: cast.iter().copied().filter(|&i| moving(i) && i != walk && Some(i) != run).filter_map(at).collect(),
-                // o pulo fica para o fim (a não ser que o sprite.toml o ponha nas paradas)
+                // the jump is kept for the end (unless sprite.toml puts it among the stops)
                 extras: cast
                     .iter()
                     .copied()
@@ -479,14 +520,14 @@ fn load_pack(dir: &Path, key: &str) -> Result<Art, String> {
         }
     };
 
-    // índices em `used` (só as animações lidas)
+    // indices into `used` (only the animations that were read)
     let at = |i: usize| used.iter().position(|u| *u == i).unwrap_or(0);
     let moods = moods.map(at);
     let reactions = reactions.map(|r| r.map(at));
     let name = spec.name.clone().unwrap_or_else(|| key.replace('-', " "));
     let list: Vec<&str> = anims.iter().map(|a| a.name.as_str()).collect();
-    let walking = troupe.as_ref().map(|t| t.script.names.join(", ")).unwrap_or_else(|| "não anda".into());
-    log::debug!("mascote {key}: {w}×{h}, animações {}; subagentes: {walking}", list.join(", "));
+    let walking = troupe.as_ref().map(|t| t.script.names.join(", ")).unwrap_or_else(|| "doesn't walk".into());
+    log::debug!("mascot {key}: {w}×{h}, animations {}; subagents: {walking}", list.join(", "));
     Ok(Art { key: key.to_string(), name, w, h, anims, moods, reactions, troupe })
 }
 
@@ -504,7 +545,7 @@ fn parse_sheet_name(stem: &str) -> Option<(&str, String, usize)> {
     (!prefix.is_empty() && !anim.is_empty()).then(|| (prefix, anim.to_lowercase(), n))
 }
 
-/// Sem `sprite.toml`: as folhas `<Nome>_<Animação>_<N>.png` do prefixo mais comum.
+/// Without `sprite.toml`: the `<Name>_<Animation>_<N>.png` sheets of the most common prefix.
 fn infer(dir: &Path) -> Result<Spec, String> {
     let mut by_prefix: BTreeMap<String, BTreeMap<String, AnimSpec>> = BTreeMap::new();
     let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
@@ -521,7 +562,7 @@ fn infer(dir: &Path) -> Result<Spec, String> {
     Ok(Spec { name: Some(prefix.replace('_', " ")), anim, ..Spec::default() })
 }
 
-/// O menor retângulo com algum pixel visível em todos os quadros.
+/// The smallest rectangle with some visible pixel across all frames.
 fn bbox<'a>(frames: impl Iterator<Item = &'a Pixels>, w: usize, h: usize) -> Option<(usize, usize, usize, usize)> {
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
     for f in frames {
@@ -536,7 +577,7 @@ fn bbox<'a>(frames: impl Iterator<Item = &'a Pixels>, w: usize, h: usize) -> Opt
     (x1 > x0 && y1 > y0).then_some((x0, y0, x1, y1))
 }
 
-/// Canal esmaecido (dormindo): ~55% do brilho.
+/// Dimmed channel (asleep): ~55% of the brightness.
 fn dim8(c: u8) -> u8 {
     (c as u16 * 11 / 20) as u8
 }
@@ -553,25 +594,25 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let len = std::fs::metadata(path).map_err(|e| format!("{name}: {e}"))?.len();
     if len > MAX_FILE {
-        return Err(format!("{name}: {} KiB; o máximo é {} KiB", len >> 10, MAX_FILE >> 10));
+        return Err(tr!("{}: {} KiB; the maximum is {} KiB", name, len >> 10, MAX_FILE >> 10));
     }
     std::fs::read(path).map_err(|e| format!("{name}: {e}"))
 }
 
-/// PNG em RGBA: largura, altura e pixels.
+/// PNG as RGBA: width, height and pixels.
 fn read_png(path: &Path) -> Result<(usize, usize, Pixels), String> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     read_limited(path)?;
     let file = File::open(path).map_err(|e| format!("{name}: {e}"))?;
     let mut decoder = png::Decoder::new(BufReader::new(file));
-    // paleta indexada vira RGB(A), 16 bits vira 8, e a transparência (tRNS) vira alfa
+    // indexed palette becomes RGB(A), 16 bits become 8, and transparency (tRNS) becomes alpha
     decoder.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut reader = decoder.read_info().map_err(|e| format!("{name}: {e}"))?;
     let (w, h) = (reader.info().width as usize, reader.info().height as usize);
     if w > MAX_SIDE * MAX_FRAMES || h > MAX_SIDE {
-        return Err(format!("{name}: {w}×{h} é grande demais"));
+        return Err(tr!("{}: {}×{} is too large", name, w, h));
     }
-    let mut buf = vec![0; reader.output_buffer_size().ok_or(format!("{name}: grande demais"))?];
+    let mut buf = vec![0; reader.output_buffer_size().ok_or_else(|| tr!("{}: too large", name))?];
     let info = reader.next_frame(&mut buf).map_err(|e| format!("{name}: {e}"))?;
     let data = &buf[..info.buffer_size()];
     let px = match info.color_type {
@@ -579,18 +620,19 @@ fn read_png(path: &Path) -> Result<(usize, usize, Pixels), String> {
         png::ColorType::Rgb => data.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2], 255]).collect(),
         png::ColorType::GrayscaleAlpha => data.as_chunks::<2>().0.iter().map(|c| [c[0], c[0], c[0], c[1]]).collect(),
         png::ColorType::Grayscale => data.iter().map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err(format!("{name}: PNG indexado não convertido")),
+        png::ColorType::Indexed => return Err(tr!("{}: indexed PNG not converted", name)),
     };
     Ok((w, h, px))
 }
 
-// ---- importar -----------------------------------------------------------------
+// ---- import -------------------------------------------------------------------
 
-/// `miniutils --importar-mascote <pasta>`: acha as folhas `<Nome>_<Animação>_<N>.png` na
-/// pasta e nas subpastas dela (um pacote costuma ter uma por personagem), copia as de cada
-/// personagem para `mascotes/<nome>/` e escreve um `sprite.toml` para ajustar. Não
-/// sobrescreve uma mascote que já existe. Devolve uma linha por personagem.
+/// `miniutils --import-mascot <folder>`: finds the `<Name>_<Animation>_<N>.png` sheets in
+/// the folder and its subfolders (a pack usually has one per character), copies each
+/// character's into `mascots/<name>/` and writes a `sprite.toml` to tweak. Doesn't overwrite
+/// a mascot that already exists. Returns one line per character (shown to the user).
 pub fn import(src: &Path, root: &Path) -> Result<Vec<String>, String> {
+    let root = migrate(root);
     let mut dirs = vec![src.to_path_buf()];
     if let Ok(entries) = std::fs::read_dir(src) {
         let mut subs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
@@ -604,13 +646,14 @@ pub fn import(src: &Path, root: &Path) -> Result<Vec<String>, String> {
         let key = slug(&name);
         let dest = root.join(&key);
         if dest.exists() {
-            out.push(format!("{key}: já existe em {} (apague a pasta para importar de novo)", dest.display()));
+            out.push(tr!("{}: already exists in {} (delete the folder to import it again)", key, dest.display()));
             continue;
         }
         check_key(&key)?;
         std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+        // a config file the user edits: its comments are in English, like the format docs
         let mut toml = format!(
-            "# Mascote importada de {}\n# Formato: topo de src/mascot/pack.rs (ou DESIGN.md › Mascotes importadas).\nname = \"{name}\"\nfps = {DEFAULT_FPS}\nfacing = \"right\"\n# subagentes andando: o que fazem nas paradas (sem isto, tudo menos death/hurt)\n# extras = [\"idle\", \"attack1\", \"push\"]\n\n[anim]\n",
+            "# Mascot imported from {}\n# Format: top of src/mascot/pack.rs (or DESIGN.md › Imported mascots).\nname = \"{name}\"\nfps = {DEFAULT_FPS}\nfacing = \"right\"\n# walking subagents: what they do at their stops (without this, everything but death/hurt)\n# extras = [\"idle\", \"attack1\", \"push\"]\n\n[anim]\n",
             dir.display().to_string().replace('"', "'")
         );
         for (anim, a) in &spec.anim {
@@ -619,16 +662,16 @@ pub fn import(src: &Path, root: &Path) -> Result<Vec<String>, String> {
             let k = if anim.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') { anim.clone() } else { format!("\"{anim}\"") };
             toml.push_str(&format!("{k} = \"{file}\"\n"));
         }
-        toml.push_str("\n# humor → animação (sleep, idle, happy, busy, alarm); sem isto, valem os nomes usuais\n# [moods]\n# busy = \"run\"\n");
+        toml.push_str("\n# mood → animation (sleep, idle, happy, busy, alarm); without this, the usual names apply\n# [moods]\n# busy = \"run\"\n");
         std::fs::write(dest.join(SPEC), toml).map_err(|e| format!("{SPEC}: {e}"))?;
-        // confere já: o que foi copiado tem de carregar
+        // check right away: what was copied must load
         match load_pack(&dest, &key) {
-            Ok(a) => out.push(format!("{key}: {} ({} animações, quadro {}×{} depois de aparar)", a.name, a.anims.len(), a.w, a.h)),
-            Err(e) => out.push(format!("{key}: copiada, mas não carrega: {e}")),
+            Ok(a) => out.push(tr!("{}: {} ({} animations, {}×{} frame after trimming)", key, a.name, a.anims.len(), a.w, a.h)),
+            Err(e) => out.push(tr!("{}: copied, but it doesn't load: {}", key, e)),
         }
     }
     if out.is_empty() {
-        return Err(format!("{}: nenhuma folha no formato Nome_Animação_N.png (pelo menos duas animações)", src.display()));
+        return Err(tr!("{}: no sheet named like Name_Animation_N.png (at least two animations)", src.display()));
     }
     Ok(out)
 }
@@ -650,7 +693,7 @@ fn slug(name: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Grava um PNG RGBA de `w`×`h` com `px`.
+    /// Writes a `w`×`h` RGBA PNG with `px`.
     fn png(path: &Path, w: usize, h: usize, px: &[[u8; 4]]) {
         let file = File::create(path).unwrap();
         let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
@@ -659,7 +702,7 @@ mod tests {
         enc.write_header().unwrap().write_image_data(px.as_flattened()).unwrap();
     }
 
-    /// Folha com `n` quadros de `side`×`side`, cada um com um quadrado opaco 2×3 em (3+i, 4).
+    /// Sheet with `n` frames of `side`×`side`, each with an opaque 2×3 square at (3+i, 4).
     fn sheet(path: &Path, n: usize, side: usize) {
         let w = n * side;
         let mut px = vec![[0u8; 4]; w * side];
@@ -673,31 +716,31 @@ mod tests {
         png(path, w, side, &px);
     }
 
-    fn temp(nome: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("miniutils-pack-{nome}-{}", std::process::id()));
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("miniutils-pack-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
     }
 
     #[test]
-    fn deduz_pelos_nomes_e_apara_a_borda() {
-        let d = temp("deduz");
-        let p = d.join("heroi");
+    fn deduces_from_names_and_trims_the_border() {
+        let d = temp("deduce");
+        let p = d.join("hero");
         std::fs::create_dir_all(&p).unwrap();
-        sheet(&p.join("Heroi_Idle_4.png"), 4, 32);
-        sheet(&p.join("Heroi_Walk_6.png"), 6, 32);
-        sheet(&p.join("Poeira_Dust_5.png"), 5, 16); // outro prefixo: fica de fora
+        sheet(&p.join("Hero_Idle_4.png"), 4, 32);
+        sheet(&p.join("Hero_Walk_6.png"), 6, 32);
+        sheet(&p.join("Dust_Dust_5.png"), 5, 16); // another prefix: left out
         let (arts, skipped) = load(&d);
         assert!(skipped.is_empty(), "{skipped:?}");
         let a = &arts[0];
-        assert_eq!((a.key.as_str(), a.name.as_str(), a.anims.len()), ("heroi", "Heroi", 2));
-        // o quadrado anda de x=3 (quadro 0) a x=8..10 (quadro 5): o corte cobre todos
+        assert_eq!((a.key.as_str(), a.name.as_str(), a.anims.len()), ("hero", "Hero", 2));
+        // the square moves from x=3 (frame 0) to x=8..10 (frame 5): the cut covers them all
         assert_eq!((a.w, a.h), (10 - 3, 3));
         let walk = a.anims.iter().find(|x| x.name == "walk").unwrap();
         assert_eq!((walk.name.as_str(), walk.frames.len(), walk.ms), ("walk", 6, 125));
-        // espelhado (subagente andando para a esquerda): o primeiro pixel opaco do quadro 0
-        // vai para a outra ponta
+        // mirrored (subagent walking left): the first opaque pixel of frame 0 goes to the
+        // other end
         assert_eq!(walk.frames[0].as_slice()[0].a, 255);
         let t = a.troupe().unwrap();
         let (right, left) = t.frames(t.script.walk);
@@ -707,8 +750,8 @@ mod tests {
     }
 
     #[test]
-    fn humor_escolhe_a_animacao_e_dormindo_esmaece() {
-        let d = temp("humor");
+    fn mood_picks_the_animation_and_sleep_dims() {
+        let d = temp("mood");
         let p = d.join("h");
         std::fs::create_dir_all(&p).unwrap();
         for (f, n) in [("H_Idle_4.png", 4), ("H_Run_6.png", 6), ("H_Hurt_4.png", 4), ("H_Jump_8.png", 8)] {
@@ -721,23 +764,23 @@ mod tests {
         assert_eq!(name(a.pick(&look(Mood::Busy, 0))), "run");
         assert_eq!(name(a.pick(&look(Mood::Alarm, 0))), "hurt");
         assert_eq!(name(a.pick(&look(Mood::Idle, 0))), "idle");
-        // 8 fps: aos 250 ms, o terceiro quadro; dormindo, na metade da velocidade e esmaecido
+        // 8 fps: at 250 ms, the third frame; asleep, at half speed and dimmed
         assert_eq!(a.pick(&look(Mood::Idle, 250)).1, 2);
         assert_eq!(a.pick(&look(Mood::Sleep, 250)), (a.moods[0], 1, true));
-        let pulo = Look { reaction: Some(Reaction::Celebrate), ..look(Mood::Idle, 0) };
-        assert_eq!(name(a.pick(&pulo)), "jump");
+        let jump = Look { reaction: Some(Reaction::Celebrate), ..look(Mood::Idle, 0) };
+        assert_eq!(name(a.pick(&jump)), "jump");
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
-    fn subagentes_usam_o_pacote_todo_menos_morrer() {
-        let d = temp("trupe");
+    fn subagents_use_the_whole_pack_except_dying() {
+        let d = temp("troupe");
         let p = d.join("t");
         std::fs::create_dir_all(&p).unwrap();
         for (f, n) in [("T_Idle_4.png", 4), ("T_Walk_6.png", 6), ("T_Run_6.png", 6), ("T_Jump_8.png", 8), ("T_Death_8.png", 8), ("T_Walk+Attack_6.png", 6)] {
             sheet(&p.join(f), n, 16);
         }
-        // um ataque que vai até a borda: alarga só o corte dos subagentes
+        // an attack reaching the border: widens only the subagents' cut
         let mut px = vec![[0u8; 4]; 2 * 16 * 16];
         for f in 0..2 {
             px[5 * 32 + f * 16] = [255, 0, 0, 255];
@@ -753,7 +796,7 @@ mod tests {
         assert_eq!((name(s.walk), s.run.map(name), s.jump.map(name), s.idle.map(name)), ("walk", Some("run"), Some("jump"), Some("idle")));
         assert_eq!(s.strolls.iter().map(|&i| name(i)).collect::<Vec<_>>(), ["walk+attack"]);
         assert_eq!(s.extras.iter().map(|&i| name(i)).collect::<Vec<_>>(), ["attack1", "idle"]);
-        // cabeçalho: corte das animações de humor; subagentes: o quadro inteiro (16 de largura)
+        // header: cut of the mood animations; subagents: the whole frame (16 wide)
         assert!(a.w < 16);
         let (right, _) = a.troupe().unwrap().frames(0);
         assert_eq!(right[0].width(), 16);
@@ -761,42 +804,47 @@ mod tests {
     }
 
     #[test]
-    fn sprite_toml_manda_e_erros_tem_motivo() {
+    fn sprite_toml_rules_and_errors_have_a_reason() {
         let d = temp("toml");
         let ok = d.join("ok");
         std::fs::create_dir_all(&ok).unwrap();
-        sheet(&ok.join("anda.png"), 3, 24);
-        std::fs::write(ok.join(SPEC), "name = \"Ok\"\nfacing = \"left\"\nextras = []\n[anim]\nwalk = { file = \"anda.png\", frames = 3, fps = 4 }\n[moods]\nbusy = \"walk\"\n").unwrap();
-        let ruim = d.join("ruim");
-        std::fs::create_dir_all(&ruim).unwrap();
-        sheet(&ruim.join("x.png"), 3, 24);
-        std::fs::write(ruim.join(SPEC), "[anim]\nwalk = { file = \"x.png\", frames = 5 }\n").unwrap();
-        let fora = d.join("fora");
-        std::fs::create_dir_all(&fora).unwrap();
-        std::fs::write(fora.join(SPEC), "[anim]\nwalk = \"../ok/anda.png\"\n").unwrap();
+        sheet(&ok.join("walks.png"), 3, 24);
+        std::fs::write(ok.join(SPEC), "name = \"Ok\"\nfacing = \"left\"\nextras = []\n[anim]\nwalk = { file = \"walks.png\", frames = 3, fps = 4 }\n[moods]\nbusy = \"walk\"\n").unwrap();
+        let bad = d.join("bad");
+        std::fs::create_dir_all(&bad).unwrap();
+        sheet(&bad.join("x.png"), 3, 24);
+        std::fs::write(bad.join(SPEC), "[anim]\nwalk = { file = \"x.png\", frames = 5 }\n").unwrap();
+        let outside = d.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join(SPEC), "[anim]\nwalk = \"../ok/walks.png\"\n").unwrap();
         let neko = d.join("neko");
         std::fs::create_dir_all(&neko).unwrap();
         sheet(&neko.join("N_Idle_2.png"), 2, 16);
+        let mood = d.join("mood");
+        std::fs::create_dir_all(&mood).unwrap();
+        sheet(&mood.join("m.png"), 2, 16);
+        std::fs::write(mood.join(SPEC), "[anim]\nidle = \"m.png\"\n[moods]\nbusy = \"run\"\n").unwrap();
 
         let (arts, skipped) = load(&d);
         assert_eq!(arts.len(), 1);
         let a = &arts[0];
         assert_eq!(a.anims[0].ms, 250);
-        // virado para a esquerda: andar para a direita usa os quadros espelhados
+        // facing left: walking right uses the mirrored frames
         let t = a.troupe().unwrap();
         let (right, left) = t.frames(t.script.walk);
         assert_eq!((right.len(), left.len()), (3, 3));
         assert!(std::ptr::eq(right.as_ptr(), t.clips[t.script.walk].1.as_ptr()));
-        let motivos: Vec<(&str, &str)> = skipped.iter().map(|s| (s.dir.as_str(), s.reason.as_str())).collect();
-        assert!(motivos.iter().any(|(d, r)| d.ends_with("ruim") && r.contains("5 quadros")), "{motivos:?}");
-        assert!(motivos.iter().any(|(d, r)| d.ends_with("fora") && r.contains("desta pasta")), "{motivos:?}");
-        assert!(motivos.iter().any(|(d, r)| d.ends_with("neko") && r.contains("embutida")), "{motivos:?}");
+        let reasons: Vec<(&str, &str)> = skipped.iter().map(|s| (s.dir.as_str(), s.reason.as_str())).collect();
+        assert!(reasons.iter().any(|(d, r)| d.ends_with("bad") && r.contains("5 equal frames")), "{reasons:?}");
+        assert!(reasons.iter().any(|(d, r)| d.ends_with("outside") && r.contains("in this folder")), "{reasons:?}");
+        assert!(reasons.iter().any(|(d, r)| d.ends_with("neko") && r.contains("built-in")), "{reasons:?}");
+        assert!(reasons.iter().any(|(d, r)| d.ends_with("mood") && r.contains("[moods] busy = \"run\": there is no such animation")), "{reasons:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
-    fn importa_cada_personagem_numa_pasta() {
-        let src = temp("importa-src");
+    fn imports_each_character_into_a_folder() {
+        let src = temp("import-src");
         for who in ["Pink_Monster", "Dude_Monster"] {
             let p = src.join(format!("1 {who}"));
             std::fs::create_dir_all(&p).unwrap();
@@ -804,7 +852,7 @@ mod tests {
             sheet(&p.join(format!("{who}_Walk_6.png")), 6, 32);
             sheet(&p.join("Rock1.png"), 1, 8);
         }
-        let root = temp("importa-dst");
+        let root = temp("import-dst");
         let out = import(&src, &root).unwrap();
         assert_eq!(out.len(), 2, "{out:?}");
         assert!(root.join("pink-monster/Pink_Monster_Walk_6.png").exists());
@@ -812,29 +860,65 @@ mod tests {
         assert!(std::fs::read_to_string(root.join("dude-monster/sprite.toml")).unwrap().contains("name = \"Dude Monster\""));
         let (arts, skipped) = load(&root);
         assert_eq!((arts.len(), skipped.len()), (2, 0));
-        // de novo: não sobrescreve
-        assert!(import(&src, &root).unwrap().iter().all(|l| l.contains("já existe")));
+        // again: doesn't overwrite
+        assert!(import(&src, &root).unwrap().iter().all(|l| l.contains("already exists")));
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn quadrado_da_bandeja_amplia_por_inteiro() {
-        let d = temp("quadrado");
+    fn old_mascotes_folder_moves_to_mascots() {
+        // nothing new yet: the old folder is renamed and its mascots load
+        let base = temp("migrate");
+        std::fs::create_dir_all(base.join(OLD_DIR).join("hero")).unwrap();
+        sheet(&base.join(OLD_DIR).join("hero/Hero_Idle_2.png"), 2, 16);
+        let (arts, skipped) = load(&base.join(DIR));
+        assert_eq!((arts.len(), skipped.len()), (1, 0));
+        assert!(base.join(DIR).join("hero/Hero_Idle_2.png").exists());
+        assert!(!base.join(OLD_DIR).exists());
+        // importing goes to the new folder too
+        assert_eq!(migrate(&base.join(DIR)), base.join(DIR));
+
+        // an empty new folder (created by "open folder") doesn't block the move
+        let base2 = temp("migrate-empty");
+        std::fs::create_dir_all(base2.join(DIR)).unwrap();
+        std::fs::create_dir_all(base2.join(OLD_DIR).join("hero")).unwrap();
+        assert_eq!(migrate(&base2.join(DIR)), base2.join(DIR));
+        assert!(base2.join(DIR).join("hero").is_dir());
+        assert!(!base2.join(OLD_DIR).exists());
+
+        // both with content: the new one wins and the old one is left alone
+        let base3 = temp("migrate-both");
+        std::fs::create_dir_all(base3.join(DIR).join("a")).unwrap();
+        std::fs::create_dir_all(base3.join(OLD_DIR).join("b")).unwrap();
+        assert_eq!(migrate(&base3.join(DIR)), base3.join(DIR));
+        assert!(base3.join(OLD_DIR).join("b").is_dir());
+        assert!(!base3.join(DIR).join("b").exists());
+
+        // a folder with another name (tests, a custom path) is not touched
+        assert_eq!(migrate(&base3.join("other")), base3.join("other"));
+        for b in [base, base2, base3] {
+            let _ = std::fs::remove_dir_all(&b);
+        }
+    }
+
+    #[test]
+    fn tray_square_scales_by_a_whole_factor() {
+        let d = temp("square");
         let p = d.join("q");
         std::fs::create_dir_all(&p).unwrap();
         sheet(&p.join("Q_Idle_2.png"), 2, 16);
         let (arts, _) = load(&d);
         let a = &arts[0];
         let (side, px) = a.square((0, 0, false), 32);
-        // quadro aparado de 3×3 → ampliado 10× → 30
+        // trimmed 3×3 frame → scaled 10× → 30
         assert_eq!(side, 30);
         assert_eq!(px.len(), 30 * 30 * 4);
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
-    fn nomes() {
+    fn names() {
         assert_eq!(parse_sheet_name("Pink_Monster_Walk+Attack_6"), Some(("Pink_Monster", "walk+attack".into(), 6)));
         assert_eq!(parse_sheet_name("Rock1"), None);
         assert_eq!(frames_in_name("A_Run_6.png"), Some(6));

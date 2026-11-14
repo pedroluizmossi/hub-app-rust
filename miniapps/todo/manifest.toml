@@ -1,35 +1,35 @@
 id = "cyber.todo"
-name = "To-do rápido"
-description = "Uma lista curta de tarefas, salva no computador; a mascote comemora quando zera."
+name = "Quick to-do"
+description = "A short task list, saved on the computer; the mascot celebrates when it is empty."
 icon = "capivara"
 api = 1
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "hide_done"
-label = "Esconder tarefas feitas"
+label = "Hide done tasks"
 type = "bool"
 default = false
 
 [[settings]]
 key = "done_last"
-label = "Tarefas feitas vão para o fim da lista"
+label = "Move done tasks to the end of the list"
 type = "bool"
 default = true
 
 [[settings]]
 key = "mascot"
-label = "Mascote"
+label = "Mascot"
 type = "choice"
 default = "capivara"
 options = ["capivara", "coruja", "neko", "sapo", "coelho", "chaleira", "cogumelo", "gatopao", "pato"]
 
-# a lista fica em todo.json, na pasta de dados do app (core/appdata.rs)
+# the list lives in todo.json, in the app data folder (core/appdata.rs)
 [data]
 kinds = ["files"]

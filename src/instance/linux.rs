@@ -1,4 +1,4 @@
-//! Instância única no Linux: um socket Unix em `$XDG_RUNTIME_DIR`.
+//! Single instance on Linux: a Unix socket in `$XDG_RUNTIME_DIR`.
 
 use std::fs;
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
@@ -8,18 +8,18 @@ use std::time::Duration;
 
 use super::{Command, Role, parse, stem};
 
-/// Avisa a instância rodando (se houver) que os plugins mudaram. `false` = nenhuma ouviu.
+/// Tells the running instance (if any) that the plugins changed. `false` = nobody listened.
 pub fn notify_plugins_changed() -> bool {
     let Ok(mut stream) = UnixStream::connect(socket_path()) else { return false };
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     stream.write_all(b"plugins\n").is_ok()
 }
 
-/// `$XDG_RUNTIME_DIR/miniutils.sock` (ou `miniutils-<nome>.sock` com `MINIUTILS_INSTANCE`).
+/// `$XDG_RUNTIME_DIR/miniutils.sock` (or `miniutils-<name>.sock` with `MINIUTILS_INSTANCE`).
 pub fn socket_path() -> PathBuf {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR");
     let instance = std::env::var("MINIUTILS_INSTANCE").ok();
-    // SAFETY: getuid não tem efeitos colaterais nem falha
+    // SAFETY: getuid has no side effects and cannot fail
     let uid = unsafe { libc::getuid() };
     socket_path_for(runtime.as_deref().map(Path::new), uid, instance.as_deref())
 }
@@ -32,14 +32,14 @@ fn socket_path_for(runtime_dir: Option<&Path>, uid: u32, instance: Option<&str>)
     }
 }
 
-/// Socket da instância principal. Apaga o arquivo ao sair.
+/// Socket of the main instance. Deletes the file on exit.
 pub struct Server {
     path: PathBuf,
     listener: UnixListener,
 }
 
 impl Server {
-    /// Atende os pedidos numa thread própria; `on_command` roda nessa thread.
+    /// Serves requests on a thread of its own; `on_command` runs on that thread.
     pub fn serve<F>(&self, on_command: F) -> io::Result<()>
     where
         F: Fn(Command) + Send + 'static,
@@ -61,26 +61,26 @@ impl Drop for Server {
 }
 
 fn handle<F: Fn(Command)>(stream: UnixStream, on_command: &F) {
-    // cliente que não manda nada não pode travar os outros
+    // a client that sends nothing must not block the others
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let mut line = String::new();
-    // limite de 256 bytes: uma linha de comando nunca passa disso
+    // 256-byte limit: a command line is never longer
     if BufReader::new((&stream).take(256)).read_line(&mut line).is_ok()
         && let Some(cmd) = parse(&line) {
             on_command(cmd);
         }
 }
 
-/// Tenta ser a instância principal em `path`. Se já houver uma, entrega `message` a ela.
+/// Tries to be the main instance at `path`. If there already is one, hands it `message`.
 pub fn claim(path: &Path, message: &str) -> io::Result<Role> {
-    // duas tentativas: a 2ª cobre o caso de outra instância ter subido bem na hora
+    // two attempts: the 2nd covers another instance starting at that very moment
     for _ in 0..2 {
         if let Ok(mut stream) = UnixStream::connect(path) {
             let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
             let _ = stream.write_all(format!("{message}\n").as_bytes());
             return Ok(Role::Second);
         }
-        // ninguém atende: socket velho de um processo morto (ou arquivo que sobrou)
+        // nobody answers: stale socket of a dead process (or a leftover file)
         let _ = fs::remove_file(path);
         match UnixListener::bind(path) {
             Ok(listener) => return Ok(Role::First(Server { path: path.to_path_buf(), listener })),
@@ -88,7 +88,7 @@ pub fn claim(path: &Path, message: &str) -> io::Result<Role> {
             Err(e) => return Err(e),
         }
     }
-    Err(io::Error::new(ErrorKind::AddrInUse, "socket ocupado"))
+    Err(io::Error::new(ErrorKind::AddrInUse, "socket in use"))
 }
 
 #[cfg(test)]
@@ -103,50 +103,50 @@ mod tests {
     }
 
     #[test]
-    fn mensagem_e_caminho_do_socket() {
+    fn message_and_socket_path() {
         let run = Path::new("/run/user/1000");
         assert_eq!(socket_path_for(Some(run), 1000, None), run.join("miniutils.sock"));
-        assert_eq!(socket_path_for(Some(run), 1000, Some("teste1")), run.join("miniutils-teste1.sock"));
+        assert_eq!(socket_path_for(Some(run), 1000, Some("test1")), run.join("miniutils-test1.sock"));
         assert_eq!(socket_path_for(Some(Path::new("")), 1000, None), PathBuf::from("/tmp/miniutils-1000.sock"));
         assert_eq!(socket_path_for(None, 7, Some("a/b")), PathBuf::from("/tmp/miniutils-a_b-7.sock"));
     }
 
     #[test]
-    fn socket_velho_de_processo_morto_e_substituido() {
-        // o arquivo fica depois que o listener morre, e ninguém mais atende
-        let path = test_path("velho");
+    fn stale_socket_of_a_dead_process_is_replaced() {
+        // the file stays after the listener dies, and nobody answers anymore
+        let path = test_path("stale");
         drop(UnixListener::bind(&path).unwrap());
         assert!(path.exists());
         assert!(matches!(claim(&path, "show").unwrap(), Role::First(_)));
     }
 
     #[test]
-    fn arquivo_comum_no_lugar_do_socket_e_substituido() {
-        let path = test_path("arquivo");
-        fs::write(&path, b"lixo").unwrap();
+    fn regular_file_in_place_of_the_socket_is_replaced() {
+        let path = test_path("file");
+        fs::write(&path, b"junk").unwrap();
         assert!(matches!(claim(&path, "show").unwrap(), Role::First(_)));
     }
 
     #[test]
-    fn segunda_instancia_entrega_o_comando_e_sai() {
-        let path = test_path("segunda");
+    fn second_instance_delivers_the_command_and_exits() {
+        let path = test_path("second");
         let Role::First(server) = claim(&path, "show apps").unwrap() else {
-            panic!("a primeira instância devia virar a principal");
+            panic!("the first instance should become the main one");
         };
         let (tx, rx) = mpsc::channel();
         server.serve(move |cmd| {
             let _ = tx.send(cmd);
         }).unwrap();
         assert!(matches!(claim(&path, "show apps").unwrap(), Role::Second));
-        let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("comando não chegou");
+        let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("command did not arrive");
         assert_eq!(cmd, Command::Show(Some("apps".into())));
     }
 
     #[test]
-    fn socket_some_ao_sair_da_principal() {
-        let path = test_path("saida");
+    fn socket_goes_away_when_the_main_one_exits() {
+        let path = test_path("exit");
         let Role::First(server) = claim(&path, "show").unwrap() else {
-            panic!("a primeira instância devia virar a principal");
+            panic!("the first instance should become the main one");
         };
         assert!(path.exists());
         drop(server);
