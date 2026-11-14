@@ -1,10 +1,10 @@
-//! Barramento dos provedores de dados.
+//! Bus of the data providers.
 //!
-//! Cada provedor roda numa thread própria e só coleta enquanto algum mini-app ativo o
-//! assina (contagem de referências). Sem assinante, a thread dorme numa `Condvar` até
-//! alguém assinar; com assinante, dorme até o próximo intervalo ou até um `poke`.
-//! As leituras chegam à thread da UI por um canal; cada leitura toca o `Waker`, e o hub
-//! acorda para esvaziar o canal — a UI nunca é tocada fora da thread dela.
+//! Each provider runs on its own thread and only collects while some active mini-app
+//! subscribes to it (reference counting). With no subscriber, the thread sleeps on a
+//! `Condvar` until someone subscribes; with one, it sleeps until the next interval or a
+//! `poke`. Readings reach the UI thread through a channel; each reading rings the `Waker`,
+//! and the hub wakes up to drain the channel — the UI is never touched off its thread.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -16,8 +16,8 @@ use super::wake::Waker;
 
 use crate::providers::{agents::AgentsSnapshot, ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, ports::PortsSnapshot, procs::ProcsSnapshot, sys::SysSnapshot};
 
-/// Um provedor de dados. É o nome usado em `uses` no manifesto (em snake_case) e a chave
-/// de tudo no barramento: um nome errado não compila (ou não passa do parse do manifesto).
+/// A data provider. It is the name used in `uses` in the manifest (in snake_case) and the
+/// key of everything on the bus: a wrong name does not compile (or fails manifest parsing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Topic {
@@ -28,7 +28,7 @@ pub enum Topic {
     AiUsage,
     Ports,
     Agents,
-    /// Processos mais pesados: só para plugins (os apps embutidos não usam).
+    /// Heaviest processes: for plugins only (the built-in apps don't use it).
     Procs,
 }
 
@@ -47,7 +47,7 @@ impl Topic {
     }
 }
 
-/// Uma leitura de um provedor.
+/// A reading from a provider.
 #[derive(Debug, Clone)]
 pub enum Event {
     Sys(SysSnapshot),
@@ -61,7 +61,7 @@ pub enum Event {
 }
 
 impl Event {
-    /// De qual provedor veio.
+    /// Which provider it came from.
     pub fn topic(&self) -> Topic {
         match self {
             Event::Sys(_) => Topic::Sys,
@@ -76,15 +76,15 @@ impl Event {
     }
 }
 
-/// Estado de um provedor no barramento, compartilhado com a thread dele.
+/// State of a provider on the bus, shared with its thread.
 struct Slot {
     subscribers: AtomicUsize,
-    /// Pede uma leitura agora (ex.: logo depois de reiniciar um container). Fica sob o
-    /// mutex da `Condvar`, para o aviso não se perder entre o teste e o sono da thread.
+    /// Asks for a reading now (e.g. right after restarting a container). Kept under the
+    /// `Condvar` mutex, so the signal is not lost between the check and the thread's sleep.
     poke: Mutex<bool>,
-    /// Acorda a thread: assinou, deixou de assinar ou pediu leitura.
+    /// Wakes the thread: subscribed, unsubscribed or asked for a reading.
     changed: Condvar,
-    /// A janela do hub está aberta (o mesmo para todos os provedores).
+    /// The hub window is open (the same for every provider).
     visible: Arc<AtomicBool>,
 }
 
@@ -97,13 +97,13 @@ impl Slot {
         self.subscribers.load(Ordering::Relaxed) > 0
     }
 
-    /// Acorda a thread depois de mudar algo (com o mutex, para não perder o aviso).
+    /// Wakes the thread after changing something (with the mutex, so the signal is not lost).
     fn notify(&self) {
         let _guard = self.lock();
         self.changed.notify_all();
     }
 
-    /// Dorme até haver assinante.
+    /// Sleeps until there is a subscriber.
     fn wait_subscriber(&self) {
         let mut guard = self.lock();
         while !self.subscribed() {
@@ -111,7 +111,7 @@ impl Slot {
         }
     }
 
-    /// Dorme até `tick` passar, chegar um `poke` ou não haver mais assinante.
+    /// Sleeps until `tick` passes, a `poke` arrives or there are no subscribers left.
     fn wait_next(&self, tick: Duration) {
         let end = Instant::now() + tick;
         let mut guard = self.lock();
@@ -145,7 +145,7 @@ impl Default for Bus {
 }
 
 impl Bus {
-    /// Registra um provedor: `collect` roda a cada `interval` enquanto houver assinantes.
+    /// Registers a provider: `collect` runs every `interval` while there are subscribers.
     pub fn spawn<F>(&mut self, topic: Topic, interval: Duration, mut collect: F)
     where
         F: FnMut() -> Event + Send + 'static,
@@ -153,8 +153,8 @@ impl Bus {
         self.spawn_polled(topic, interval, move |_, _| Some(collect()));
     }
 
-    /// Como `spawn`, mas `collect` recebe o `Poker` do próprio provedor e se a leitura foi
-    /// pedida agora (`poked`). Pode devolver `None` para não publicar nada nesta rodada.
+    /// Like `spawn`, but `collect` gets the provider's own `Poker` and whether the reading
+    /// was asked for just now (`poked`). It may return `None` to publish nothing this round.
     pub fn spawn_polled<F>(&mut self, topic: Topic, tick: Duration, mut collect: F)
     where
         F: FnMut(&Poker, bool) -> Option<Event> + Send + 'static,
@@ -177,17 +177,17 @@ impl Bus {
                     let poked = slot.take_poke();
                     if let Some(ev) = collect(&me, poked) {
                         if tx.send(ev).is_err() {
-                            return; // o hub fechou
+                            return; // the hub closed
                         }
                         waker.wake();
                     }
                     slot.wait_next(tick);
                 }
             })
-            .expect("não consegui criar a thread do provedor");
+            .expect("could not create the provider thread");
     }
 
-    /// O despertador que as leituras tocam (o hub instala o que ele faz).
+    /// The waker the readings ring (the hub installs what it does).
     pub fn waker(&self) -> &Waker {
         &self.waker
     }
@@ -206,7 +206,7 @@ impl Bus {
         }
     }
 
-    /// Alça para pedir leitura de outra thread (ex.: depois de um `docker restart`).
+    /// Handle to ask for a reading from another thread (e.g. after a `docker restart`).
     pub fn poker(&self, topic: Topic) -> Poker {
         Poker(self.slots.get(&topic).cloned())
     }
@@ -215,19 +215,19 @@ impl Bus {
         self.poker(topic).poke();
     }
 
-    /// A janela abriu ou se escondeu: os provedores que custam caro coletam mais devagar
-    /// enquanto ninguém está olhando (ver `Poker::visible`).
+    /// The window opened or was hidden: expensive providers collect more slowly while
+    /// nobody is looking (see `Poker::visible`).
     pub fn set_visible(&self, on: bool) {
         self.visible.store(on, Ordering::Relaxed);
     }
 
-    /// Leituras pendentes (chamado na thread da UI).
+    /// Pending readings (called on the UI thread).
     pub fn drain(&self) -> Vec<Event> {
         self.rx.try_iter().collect()
     }
 }
 
-/// Pede uma leitura imediata a um provedor; pode ir para outras threads.
+/// Asks a provider for an immediate reading; can be sent to other threads.
 #[derive(Clone)]
 pub struct Poker(Option<Arc<Slot>>);
 
@@ -239,12 +239,12 @@ impl Poker {
         }
     }
 
-    /// O provedor tem algum assinante agora (quem o assina pode parar de trabalhar).
+    /// The provider has a subscriber right now (without one, the provider can stop working).
     pub fn subscribed(&self) -> bool {
         self.0.as_ref().is_some_and(|t| t.subscribed())
     }
 
-    /// A janela do hub está aberta. Escondida, os dados só alimentam a bandeja.
+    /// The hub window is open. While hidden, the data only feeds the tray.
     pub fn visible(&self) -> bool {
         self.0.as_ref().is_some_and(|t| t.visible.load(Ordering::Relaxed))
     }
@@ -255,7 +255,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nomes_dos_topicos_batem_com_o_manifesto() {
+    fn topic_names_match_the_manifest() {
         #[derive(serde::Deserialize)]
         struct Uses {
             uses: Vec<Topic>,
@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn so_coleta_com_assinante_e_atende_o_poke() {
+    fn collects_only_with_a_subscriber_and_answers_the_poke() {
         let mut bus = Bus::default();
         let n = Arc::new(AtomicUsize::new(0));
         let count = n.clone();
@@ -283,10 +283,10 @@ mod tests {
             n.load(Ordering::Relaxed)
         };
         std::thread::sleep(Duration::from_millis(350));
-        assert_eq!(n.load(Ordering::Relaxed), 0, "sem assinante não coleta");
+        assert_eq!(n.load(Ordering::Relaxed), 0, "no collection without a subscriber");
         bus.subscribe(Topic::Sys);
         assert_eq!(wait(1), 1);
-        bus.poke(Topic::Sys); // fura a espera de uma hora
+        bus.poke(Topic::Sys); // cuts the one-hour wait short
         assert_eq!(wait(2), 2);
         assert_eq!(bus.drain().len(), 2);
         assert!(!bus.poker(Topic::Sys).visible());

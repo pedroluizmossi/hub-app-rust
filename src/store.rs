@@ -1,24 +1,25 @@
-//! Loja de plugins: índice, instalação, atualização e remoção.
+//! Plugin store: index, installation, update and removal.
 //!
-//! Segue o modelo do marketplace do Omarchy: um índice (`registry.json`) lista os plugins,
-//! cada um num repositório git. Diferenças de propósito:
-//! - o índice fixa o **commit** revisado, e a instalação confere que veio exatamente ele
-//!   (o Omarchy clona o HEAD, que pode ter mudado depois da revisão);
-//! - o índice é **assinado** (ed25519, `registry.json.sig` ao lado): com a chave pública
-//!   configurada, índice adulterado é recusado. Sem chave, só um índice local é aceito;
-//! - o plugin não roda código nativo: o host executa o manifesto e, nos plugins com tela,
-//!   interpreta o `.slint` e o script Rhai isolados (ver `apps/plugin/`); só os arquivos
-//!   que `plugins::files` aceita são copiados;
-//! - a exceção é o **app externo** (`[app]`, acesso total): o índice tem de anunciá-lo
-//!   (`full_access`) e fixar, por sistema, de onde vem o executável e o SHA-256 dele
-//!   (`binaries`). O executável não vem do repositório: é baixado do endereço do índice
-//!   (de preferência compilado pela própria loja a partir do commit revisado) e só entra se
-//!   o hash bater. A confirmação avisa, em destaque, que o app tem acesso total;
-//! - as permissões que o índice anuncia (programas, domínios da rede e provedores lidos)
-//!   têm de bater com as do manifesto, e aparecem antes de instalar (numa atualização, as
-//!   novas aparecem destacadas).
+//! Follows Omarchy's marketplace model: an index (`registry.json`) lists the plugins, each
+//! in a git repository. Deliberate differences:
+//! - the index pins the reviewed **commit**, and installation checks that exactly that
+//!   commit arrived (Omarchy clones HEAD, which may have changed after the review);
+//! - the index is **signed** (ed25519, `registry.json.sig` next to it): with the public key
+//!   configured, a tampered index is refused. Without a key, only a local index is accepted;
+//! - the plugin does not run native code: the host runs the manifest and, for plugins with
+//!   a view, interprets the `.slint` and the Rhai script sandboxed (see `apps/plugin/`); only
+//!   the files `plugins::files` accepts are copied;
+//! - the exception is the **external app** (`[app]`, full access): the index must announce
+//!   it (`full_access`) and pin, per OS, where the executable comes from and its SHA-256
+//!   (`binaries`). The executable does not come from the repository: it is downloaded from
+//!   the address in the index (preferably built by the store itself from the reviewed
+//!   commit) and only goes in if the hash matches. The confirmation warns, prominently, that
+//!   the app has full access;
+//! - the permissions the index announces (programs, network domains and providers read)
+//!   must match the manifest's, and are shown before installing (on an update, the new ones
+//!   are highlighted).
 //!
-//! Linha de comando em `USAGE`; a janela usa a mesma lógica (aba Loja, `hub/store.rs`).
+//! Command line in [`USAGE`]; the window uses the same logic (Store tab, `hub/store.rs`).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Read, Write};
@@ -31,63 +32,103 @@ use serde::{Deserialize, Serialize};
 use crate::core::appdata::{self, Kind};
 use crate::core::config::Config;
 use crate::core::exec;
+use crate::core::i18n;
 use crate::core::plugins::{self, Plugin};
+use crate::tr;
 
 mod entry;
 
-pub const USAGE: &str = "\
-loja de plugins:
-  miniutils --loja [índice]                     lista os plugins e o estado de cada um
-  miniutils --instalar <id> [índice] [--sim]    instala (pergunta antes, sem --sim)
-  miniutils --atualizar <id> [índice] [--sim]   atualiza para o commit do índice
-  miniutils --remover <id> [--apagar-dados | --manter-dados]
-                                                remove um plugin instalado; se ele tiver
-                                                dados, pergunta se apaga (ou siga a opção)
-  miniutils --plugins                           lista os instalados (da loja e locais)
-  miniutils --recarregar                        o MiniUtils aberto relê os apps e os temas
-  --chave <hex>     chave pública que assina o índice (padrão: store_key da config)
-Sem índice, usa o store_index da config ou, se ele estiver vazio, a loja oficial
-(github.com/pedroluizmossi/miniutils-store). O índice é um registry.json (caminho ou
-https://), com a assinatura em registry.json.sig.
+/// The store part of `--help`, in the current language (`println!("{}", store::USAGE)`).
+pub const USAGE: Usage = Usage;
 
-quem mantém um índice:
-  miniutils --loja-chave <arquivo>              gera um par de chaves (imprime a pública)
-  miniutils --loja-assinar <registry.json> <arquivo>   grava registry.json.sig
-  miniutils --store-entry <registry.json> <repo> <tag> [--path p] [--app-version v] [--license l]
-                                                inclui ou atualiza o app do repositório
-                                                (https://… ou dono/repo) naquela tag: lê o
-                                                manifesto do commit e, num app externo,
-                                                confere os executáveis do Release da tag
+/// See [`USAGE`].
+pub struct Usage;
 
-O miniutils aberto relê os plugins sozinho depois de instalar, atualizar ou remover.
-App local (sem loja): crie a pasta <id>/ dentro da pasta dos apps (miniutils --pastas)
-e rode miniutils --recarregar, ou use Configurações › Sistema › Recarregar.";
+impl std::fmt::Display for Usage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&usage())
+    }
+}
 
-/// Prazo do `git clone`/`checkout`.
+/// Width of the command column in [`usage`].
+const USAGE_COLUMN: usize = 48;
+
+/// One command of the help: the command, then its description aligned in a column
+/// (a description with `\n` continues on the next lines, in the same column).
+fn usage_line(out: &mut String, cmd: &str, desc: &str) {
+    out.push_str("  ");
+    out.push_str(cmd);
+    let mut lines = desc.lines();
+    if cmd.chars().count() + 2 < USAGE_COLUMN {
+        out.push_str(&" ".repeat(USAGE_COLUMN - 2 - cmd.chars().count()));
+        out.push_str(lines.next().unwrap_or(""));
+    }
+    for l in lines {
+        out.push('\n');
+        out.push_str(&" ".repeat(USAGE_COLUMN));
+        out.push_str(l);
+    }
+    out.push('\n');
+}
+
+/// The store commands for `--help` (and the answer to a malformed store command).
+pub fn usage() -> String {
+    let mut out = String::new();
+    out.push_str(tr!("plugin store:"));
+    out.push('\n');
+    usage_line(&mut out, "miniutils --store [index]", tr!("lists the plugins and the state of each"));
+    usage_line(&mut out, "miniutils --install <id> [index] [--yes]", tr!("installs (asks first, without --yes)"));
+    usage_line(&mut out, "miniutils --update <id> [index] [--yes]", tr!("updates to the index's commit"));
+    usage_line(
+        &mut out,
+        "miniutils --remove <id> [--delete-data | --keep-data]",
+        tr!("removes an installed plugin; if it has\ndata, asks whether to delete it (or follows the option)"),
+    );
+    usage_line(&mut out, "miniutils --plugins", tr!("lists the installed ones (from the store and local)"));
+    usage_line(&mut out, "miniutils --reload", tr!("the running MiniUtils rereads the apps and themes"));
+    out.push_str(tr!("  --key <hex>     public key that signs the index (default: store_key from the config)"));
+    out.push('\n');
+    out.push_str(tr!("Without an index, uses the config's store_index or, if it is empty, the official store\n(github.com/pedroluizmossi/miniutils-store). The index is a registry.json (path or\nhttps://), with the signature in registry.json.sig."));
+    out.push_str("\n\n");
+    out.push_str(tr!("index maintainers:"));
+    out.push('\n');
+    usage_line(&mut out, "miniutils --store-key <file>", tr!("generates a key pair (prints the public one)"));
+    usage_line(&mut out, "miniutils --store-sign <registry.json> <file>", tr!("writes registry.json.sig"));
+    usage_line(
+        &mut out,
+        "miniutils --store-entry <registry.json> <repo> <tag> [--path p] [--app-version v] [--license l]",
+        tr!("adds or updates the app of the repository\n(https://… or owner/repo) at that tag: reads the\nmanifest at the commit and, for an external app,\nchecks the executables of the tag's Release"),
+    );
+    out.push('\n');
+    out.push_str(tr!("The running miniutils rereads the plugins by itself after installing, updating or removing.\nLocal app (no store): create the folder <id>/ inside the apps folder (miniutils --dirs)\nand run miniutils --reload, or use Settings › System › Reload."));
+    out
+}
+
+/// Deadline for `git clone`/`checkout`.
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// A loja oficial: vale quando a config não diz outra (`store_index` vazio). O índice e a
-/// chave são os de https://github.com/pedroluizmossi/miniutils-store.
+/// The official store: used when the config does not name another (`store_index` empty).
+/// The index and the key are those of https://github.com/pedroluizmossi/miniutils-store.
 pub const OFFICIAL_INDEX: &str = "https://raw.githubusercontent.com/pedroluizmossi/miniutils-store/main/registry.json";
 pub const OFFICIAL_KEY: &str = "070dba03dd19902eeed1d02573272be1fa3fc263f4a8eda3cf10b3beca98464e";
 
-/// De onde vem o índice e com que chave conferir.
+/// Where the index comes from and which key checks it.
 #[derive(Debug, Clone, Default)]
 pub struct Source {
     pub index: String,
-    /// Chave pública ed25519 (hex). Vazia = sem conferência (só índice local).
+    /// ed25519 public key (hex). Empty = no check (local index only).
     pub key: String,
 }
 
 impl Source {
-    /// O índice e a chave da configuração; sem índice, a loja oficial.
+    /// The index and key from the config; without an index, the official store.
     pub fn from_config(cfg: &Config) -> Source {
         let index = cfg.store_index.trim();
         Source { index: if index.is_empty() { OFFICIAL_INDEX } else { index }.to_string(), key: cfg.store_key.trim().to_string() }
             .with_official_key()
     }
 
-    /// O índice oficial sem chave informada usa a chave oficial.
+    /// The official index with no key given uses the official key.
     fn with_official_key(mut self) -> Source {
         if self.key.is_empty() && self.index == OFFICIAL_INDEX {
             self.key = OFFICIAL_KEY.to_string();
@@ -155,7 +196,7 @@ pub struct Binary {
 }
 
 impl Entry {
-    /// "executa: ps · rede: api.x.com · lê: sys" (ou "ACESSO TOTAL: …").
+    /// "runs: ps · network: api.x.com · reads: sys" (or "FULL ACCESS: …").
     pub fn grants_text(&self) -> String {
         if self.full_access {
             return plugins::describe_full_access(&self.uses);
@@ -164,22 +205,24 @@ impl Entry {
     }
 }
 
-/// O que se perde ao dar acesso total, na lista de permissões novas de uma atualização.
-const FULL_ACCESS: &str = "ACESSO TOTAL";
+/// What is given up with full access, in the list of new permissions of an update.
+fn full_access_grant() -> &'static str {
+    tr!("FULL ACCESS")
+}
 
-/// Cada permissão com o tipo na frente ("ps", "rede: api.x.com", "lê: sys", "guarda:
-/// banco SQLite", "ACESSO TOTAL"), para comparar versões.
+/// Each permission with its kind in front ("ps", "network: api.x.com", "reads: sys",
+/// "stores: SQLite database", "FULL ACCESS"), to compare versions.
 fn grant_list(exec: &[String], net: &[String], uses: &[String], sqlite: bool, full: bool) -> Vec<String> {
-    full.then(|| FULL_ACCESS.to_string())
+    full.then(|| full_access_grant().to_string())
         .into_iter()
         .chain(exec.iter().cloned())
-        .chain(net.iter().map(|h| format!("rede: {h}")))
-        .chain(uses.iter().map(|t| format!("lê: {t}")))
-        .chain(sqlite.then(|| plugins::GRANT_SQLITE.to_string()))
+        .chain(net.iter().map(|h| tr!("network: {}", h)))
+        .chain(uses.iter().map(|t| tr!("reads: {}", t)))
+        .chain(sqlite.then(|| i18n::tr(plugins::GRANT_SQLITE).to_string()))
         .collect()
 }
 
-/// O que fica gravado ao lado do plugin instalado.
+/// What is written next to the installed plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Installed {
     pub id: String,
@@ -198,16 +241,16 @@ pub struct Installed {
     pub sqlite: bool,
 }
 
-/// Como o índice foi conferido.
+/// How the index was checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trust {
-    /// Assinatura válida com a chave configurada.
+    /// Valid signature with the configured key.
     Signed,
-    /// Sem chave configurada: índice local, aceito sem conferência.
+    /// No key configured: local index, accepted without a check.
     Unsigned,
 }
 
-/// Um plugin do índice e a situação dele aqui.
+/// A plugin from the index and its state here.
 #[derive(Debug, Clone)]
 pub struct Status {
     pub entry: Entry,
@@ -215,13 +258,13 @@ pub struct Status {
 }
 
 impl Status {
-    /// Instalado num commit diferente do que o índice fixa agora.
+    /// Installed at a commit other than the one the index pins now.
     pub fn has_update(&self) -> bool {
         self.installed.as_ref().is_some_and(|i| !i.commit.eq_ignore_ascii_case(&self.entry.commit))
     }
 
-    /// Permissões que a versão do índice pede e a instalada não pedia ("who", "rede:
-    /// api.x.com", "lê: agents").
+    /// Permissions the index's version asks for that the installed one did not ("who",
+    /// "network: api.x.com", "reads: agents").
     pub fn new_permissions(&self) -> Vec<String> {
         let had = self
             .installed
@@ -233,28 +276,51 @@ impl Status {
     }
 }
 
-// ---- linha de comando ---------------------------------------------------------------
+// ---- command line -------------------------------------------------------------------
 
-/// Atende os comandos da loja. `None` se `args` não é da loja; senão o código de saída.
+/// Portuguese names the store flags had before; still accepted, so scripts and habits
+/// keep working.
+const LEGACY_FLAGS: [(&str, &str); 12] = [
+    ("--loja", "--store"),
+    ("--instalar", "--install"),
+    ("--atualizar", "--update"),
+    ("--remover", "--remove"),
+    ("--recarregar", "--reload"),
+    ("--loja-chave", "--store-key"),
+    ("--loja-assinar", "--store-sign"),
+    ("--chave", "--key"),
+    ("--sim", "--yes"),
+    ("--apagar-dados", "--delete-data"),
+    ("--manter-dados", "--keep-data"),
+    ("--loja-entrada", "--store-entry"),
+];
+
+/// The current name of a flag (an old Portuguese name becomes the English one).
+fn canonical_flag(arg: &str) -> &str {
+    LEGACY_FLAGS.iter().find(|(old, _)| *old == arg).map_or(arg, |(_, new)| new)
+}
+
+/// Handles the store commands. `None` if `args` is not a store command; otherwise the exit
+/// code.
 pub fn run_cli(args: &[String]) -> Option<i32> {
-    let cmd = args.first()?.as_str();
+    let cmd = canonical_flag(args.first()?.as_str());
     if !matches!(
         cmd,
-        "--loja"
-            | "--instalar"
-            | "--atualizar"
-            | "--remover"
+        "--store"
+            | "--install"
+            | "--update"
+            | "--remove"
             | "--plugins"
-            | "--recarregar"
-            | "--loja-chave"
-            | "--loja-assinar"
+            | "--reload"
+            | "--store-key"
+            | "--store-sign"
             | "--store-entry"
     ) {
         return None;
     }
-    // os dados dos apps no lugar de antes (`--remover` precisa vê-los)
+    // the apps' data where it used to be (`--remove` needs to see it)
     appdata::migrate_legacy(false);
-    // `--chave <hex>` e `--sim` podem vir em qualquer posição
+    // `--key <hex>` and `--yes` may come in any position
     let mut key = None;
     let mut yes = false;
     let mut purge: Option<bool> = None;
@@ -262,15 +328,15 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     let mut pos: Vec<&str> = Vec::new();
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
-        match a.as_str() {
-            "--chave" => key = it.next().cloned(),
+        match canonical_flag(a) {
+            "--key" => key = it.next().cloned(),
             "--path" => entry_opts.path = it.next().cloned(),
             "--app-version" => entry_opts.version = it.next().cloned(),
             "--license" => entry_opts.license = it.next().cloned(),
-            "--sim" => yes = true,
-            "--apagar-dados" => purge = Some(true),
-            "--manter-dados" => purge = Some(false),
-            s => pos.push(s),
+            "--yes" => yes = true,
+            "--delete-data" => purge = Some(true),
+            "--keep-data" => purge = Some(false),
+            _ => pos.push(a),
         }
     }
     let cfg = Config::load();
@@ -278,7 +344,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
         let mut s = Source::from_config(&cfg);
         if let Some(index) = pos.get(i) {
             s.index = index.to_string();
-            // índice dado na linha de comando: a chave da config é de outro índice
+            // index given on the command line: the config's key belongs to another index
             if s.index != Source::from_config(&cfg).index {
                 s.key.clear();
             }
@@ -293,37 +359,35 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     let confirm: &mut dyn FnMut(&str) -> bool = if yes { &mut always } else { &mut prompt };
     let id = pos.first().copied();
     let result = match (cmd, id) {
-        ("--loja", _) => source(0).and_then(|s| list(&s, &root)),
-        ("--instalar", Some(id)) | ("--atualizar", Some(id)) => {
-            source(1).and_then(|s| install(&s, id, &root, confirm)).map(|dir| {
-                crate::instance::notify_plugins_changed();
-                format!("instalado em {}", dir.display())
-            })
-        }
-        ("--remover", Some(id)) => remove_cli(id, &root, purge, !yes).inspect(|_| {
+        ("--store", _) => source(0).and_then(|s| list(&s, &root)),
+        ("--install", Some(id)) | ("--update", Some(id)) => source(1).and_then(|s| install(&s, id, &root, confirm)).map(|dir| {
+            crate::instance::notify_plugins_changed();
+            tr!("installed in {}", dir.display())
+        }),
+        ("--remove", Some(id)) => remove_cli(id, &root, purge, !yes).inspect(|_| {
             crate::instance::notify_plugins_changed();
         }),
         ("--plugins", _) => Ok(installed_list(&root)),
-        ("--recarregar", _) => Ok(if crate::instance::notify_plugins_changed() {
-            format!(
-                "o MiniUtils aberto releu os apps ({}) e os temas, visuais e fundos ({})\n{}",
+        ("--reload", _) => Ok(if crate::instance::notify_plugins_changed() {
+            tr!(
+                "the running MiniUtils reread the apps ({}) and the themes, skins and backdrops ({})\n{}",
                 root.display(),
                 crate::skin::user::dir().display(),
                 installed_list(&root)
             )
         } else {
-            format!("nenhum MiniUtils aberto: os apps de {} entram quando ele abrir", root.display())
+            tr!("no MiniUtils running: the apps in {} load when it opens", root.display())
         }),
-        ("--loja-chave", Some(path)) => keygen(Path::new(path)),
-        ("--loja-assinar", Some(index)) => match pos.get(1) {
+        ("--store-key", Some(path)) => keygen(Path::new(path)),
+        ("--store-sign", Some(index)) => match pos.get(1) {
             Some(k) => sign(Path::new(index), Path::new(k)),
-            None => Err(USAGE.to_string()),
+            None => Err(usage()),
         },
         ("--store-entry", Some(index)) => match (pos.get(1), pos.get(2)) {
             (Some(repo), Some(tag)) => entry::run(Path::new(index), repo, tag, &entry_opts),
-            _ => Err(USAGE.to_string()),
+            _ => Err(usage()),
         },
-        _ => Err(USAGE.to_string()),
+        _ => Err(usage()),
     };
     Some(match result {
         Ok(msg) => {
@@ -339,25 +403,26 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
 
 fn list(src: &Source, root: &Path) -> Result<String, String> {
     let (statuses, trust) = statuses(src, root)?;
-    let mut out = format!(
-        "{} plugin(s) em {} ({}):\n",
+    let mut out = tr!(
+        "{} plugin(s) in {} ({}):",
         statuses.len(),
         src.index,
-        if trust == Trust::Signed { "assinatura conferida" } else { "índice local, sem assinatura conferida" }
+        if trust == Trust::Signed { tr!("signature checked") } else { tr!("local index, signature not checked") }
     );
+    out.push('\n');
     for s in &statuses {
         let e = &s.entry;
         let state = match &s.installed {
-            None => "não instalado".to_string(),
-            Some(_) if s.has_update() => format!("instalado {} · atualização para {}", s.installed.as_ref().unwrap().version, e.version),
-            Some(i) => format!("instalado {}", i.version),
+            None => tr!("not installed").to_string(),
+            Some(i) if s.has_update() => tr!("installed {} · update to {}", i.version, e.version),
+            Some(i) => tr!("installed {}", i.version),
         };
         out.push_str(&format!(
             "\n  {}  {} {}  ({}, {})  [{state}]\n    {}\n    {}\n",
             e.id,
             e.name,
             e.version,
-            if e.author.is_empty() { "sem autor" } else { &e.author },
+            if e.author.is_empty() { tr!("no author") } else { &e.author },
             e.license,
             e.description,
             e.grants_text()
@@ -366,21 +431,22 @@ fn list(src: &Source, root: &Path) -> Result<String, String> {
     Ok(out)
 }
 
-/// Pergunta no terminal se pode instalar.
+/// Asks on the terminal whether to install.
 fn ask_install(summary: &str) -> bool {
-    ask(summary, "Instalar?")
+    ask(summary, tr!("Install?"))
 }
 
-/// Mostra o resumo e pergunta (sim/não; o padrão é não).
+/// Shows the summary and asks (yes/no; the default is no).
 fn ask(summary: &str, question: &str) -> bool {
-    print!("{summary}\n{question} [s/N] ");
+    print!("{summary}\n{question} {} ", tr!("[y/N]"));
     let _ = std::io::stdout().flush();
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
+    // Portuguese answers too, whatever the language
     matches!(line.trim().to_lowercase().as_str(), "s" | "sim" | "y" | "yes")
 }
 
-// ---- índice e assinatura -----------------------------------------------------------
+// ---- index and signature ------------------------------------------------------------
 
 fn fetch(src: &str) -> Result<Vec<u8>, String> {
     if src.starts_with("https://") {
@@ -391,7 +457,7 @@ fn fetch(src: &str) -> Result<Vec<u8>, String> {
         let resp = client.get(src).send().and_then(|r| r.error_for_status()).map_err(|e| format!("{src}: {e}"))?;
         let bytes = resp.bytes().map_err(|e| e.to_string())?;
         if bytes.len() > 4 << 20 {
-            return Err(format!("{src}: índice grande demais"));
+            return Err(tr!("{}: index too large", src));
         }
         Ok(bytes.to_vec())
     } else {
@@ -399,44 +465,40 @@ fn fetch(src: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Lê o índice e confere a assinatura (`<índice>.sig`) com a chave da fonte.
+/// Reads the index and checks the signature (`<index>.sig`) with the source's key.
 pub fn load_index(src: &Source) -> Result<(Index, Trust), String> {
-    // remoto sem chave: recusa antes de baixar
+    // remote without a key: refused before downloading
     if src.key.trim().is_empty() && src.index.starts_with("https://") {
-        return Err(format!(
-            "{}: índice remoto sem chave para conferir a assinatura (configure a chave da loja)",
-            src.index
-        ));
+        return Err(tr!("{}: remote index with no key to check the signature (configure the store key)", src.index));
     }
     let bytes = fetch(&src.index)?;
     let trust = if src.key.trim().is_empty() {
         Trust::Unsigned
     } else {
-        let key = from_hex(src.key.trim()).filter(|k| k.len() == 32).ok_or("chave da loja inválida (64 caracteres hex)")?;
-        let sig_text = fetch(&format!("{}.sig", src.index)).map_err(|e| format!("sem assinatura do índice: {e}"))?;
-        let sig = from_hex(String::from_utf8_lossy(&sig_text).trim()).ok_or("assinatura do índice ilegível")?;
+        let key = from_hex(src.key.trim()).filter(|k| k.len() == 32).ok_or(tr!("invalid store key (64 hex characters)"))?;
+        let sig_text = fetch(&format!("{}.sig", src.index)).map_err(|e| tr!("no index signature: {}", e))?;
+        let sig = from_hex(String::from_utf8_lossy(&sig_text).trim()).ok_or(tr!("unreadable index signature"))?;
         signature::UnparsedPublicKey::new(&signature::ED25519, &key)
             .verify(&bytes, &sig)
-            .map_err(|_| format!("{}: a assinatura não confere (índice adulterado ou chave errada)", src.index))?;
+            .map_err(|_| tr!("{}: the signature does not match (tampered index or wrong key)", src.index))?;
         Trust::Signed
     };
-    let index: Index =
-        serde_json::from_slice(&bytes).map_err(|e| format!("{}: índice inválido: {e}", src.index))?;
+    let index: Index = serde_json::from_slice(&bytes).map_err(|e| tr!("{}: invalid index: {}", src.index, e))?;
     if index.schema != 1 {
-        return Err(format!("{}: índice na versão {} (este miniutils entende a 1)", src.index, index.schema));
+        return Err(tr!("{}: index is version {} (this miniutils understands 1)", src.index, index.schema));
     }
     Ok((index, trust))
 }
 
-/// Gera um par de chaves ed25519: a privada vai para `path` (só o dono lê), a pública
-/// sai na tela para pôr na config de quem usa a loja.
+/// Generates an ed25519 key pair: the private key goes to `path` (readable by the owner
+/// only), the public one is printed, to put in the config of those who use the store.
 fn keygen(path: &Path) -> Result<String, String> {
     if path.exists() {
-        return Err(format!("{} já existe: não sobrescrevo uma chave", path.display()));
+        return Err(tr!("{} already exists: I don't overwrite a key", path.display()));
     }
     let rng = ring::rand::SystemRandom::new();
-    let pkcs8 = signature::Ed25519KeyPair::generate_pkcs8(&rng).map_err(|_| "não consegui gerar a chave")?;
-    let pair = signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).map_err(|_| "chave gerada inválida")?;
+    let pkcs8 = signature::Ed25519KeyPair::generate_pkcs8(&rng).map_err(|_| tr!("could not generate the key"))?;
+    let pair = signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).map_err(|_| tr!("generated key is invalid"))?;
     let mut f = crate::core::os::owner_only(std::fs::OpenOptions::new().write(true).create_new(true))
         .open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -444,17 +506,17 @@ fn keygen(path: &Path) -> Result<String, String> {
     Ok(to_hex(pair.public_key().as_ref()))
 }
 
-/// Assina o índice com a chave privada de `key_path`; grava `<índice>.sig`.
+/// Signs the index with the private key in `key_path`; writes `<index>.sig`.
 fn sign(index: &Path, key_path: &Path) -> Result<String, String> {
     let text = std::fs::read_to_string(key_path).map_err(|e| format!("{}: {e}", key_path.display()))?;
-    let pkcs8 = from_hex(text.trim()).ok_or("arquivo de chave ilegível")?;
-    let pair = signature::Ed25519KeyPair::from_pkcs8(&pkcs8).map_err(|_| "arquivo de chave inválido")?;
+    let pkcs8 = from_hex(text.trim()).ok_or(tr!("unreadable key file"))?;
+    let pair = signature::Ed25519KeyPair::from_pkcs8(&pkcs8).map_err(|_| tr!("invalid key file"))?;
     let bytes = std::fs::read(index).map_err(|e| format!("{}: {e}", index.display()))?;
-    // confere antes de assinar: não adianta assinar um índice que não abre
-    serde_json::from_slice::<Index>(&bytes).map_err(|e| format!("{}: índice inválido: {e}", index.display()))?;
+    // check before signing: no point signing an index that does not open
+    serde_json::from_slice::<Index>(&bytes).map_err(|e| tr!("{}: invalid index: {}", index.display(), e))?;
     let sig_path = PathBuf::from(format!("{}.sig", index.display()));
     std::fs::write(&sig_path, to_hex(pair.sign(&bytes).as_ref())).map_err(|e| e.to_string())?;
-    Ok(format!("{}\nchave pública: {}", sig_path.display(), to_hex(pair.public_key().as_ref())))
+    Ok(tr!("{}\npublic key: {}", sig_path.display(), to_hex(pair.public_key().as_ref())))
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -468,15 +530,15 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
 }
 
-// ---- estado, instalação, remoção ---------------------------------------------------
+// ---- state, installation, removal --------------------------------------------------
 
-/// O que está instalado em `root/<id>/`, se estiver.
+/// What is installed in `root/<id>/`, if anything.
 pub fn installed(root: &Path, id: &str) -> Option<Installed> {
     let text = std::fs::read_to_string(root.join(id).join("installed.json")).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-/// Cada plugin do índice e se está instalado (e em que commit).
+/// Each plugin in the index and whether it is installed (and at which commit).
 pub fn statuses(src: &Source, root: &Path) -> Result<(Vec<Status>, Trust), String> {
     let (index, trust) = load_index(src)?;
     let list = index
@@ -490,19 +552,20 @@ pub fn statuses(src: &Source, root: &Path) -> Result<(Vec<Status>, Trust), Strin
     Ok((list, trust))
 }
 
-/// Instala (ou atualiza) o plugin `id` do índice em `root/<id>/`. `confirm` recebe o
-/// resumo (nome, autor, commit, permissões) e decide. Devolve a pasta instalada.
+/// Installs (or updates) plugin `id` from the index into `root/<id>/`. `confirm` gets the
+/// summary (name, author, commit, permissions) and decides. Returns the installed folder.
 pub fn install(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str) -> bool) -> Result<PathBuf, String> {
     let (index, trust) = load_index(src)?;
-    let entry = index.plugins.iter().find(|e| e.id == id).ok_or_else(|| format!("\"{id}\" não está no índice"))?;
+    let entry = index.plugins.iter().find(|e| e.id == id).ok_or_else(|| tr!("\"{}\" is not in the index", id))?;
     plugins::validate_id(&entry.id)?;
     check_entry(entry)?;
     let previous = installed(root, id);
     if previous.as_ref().is_some_and(|p| p.commit.eq_ignore_ascii_case(&entry.commit)) {
-        return Err(format!("{id} já está instalado nesta versão ({})", entry.version));
+        return Err(tr!("{} is already installed at this version ({})", id, entry.version));
     }
 
-    // baixa num lugar temporário, ao lado do destino (o `rename` final não cruza discos)
+    // download to a temporary place next to the destination (the final `rename` does not
+    // cross disks)
     std::fs::create_dir_all(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let tmp = root.join(format!(".{id}.{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -511,41 +574,41 @@ pub fn install(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str
     result
 }
 
-/// Confere o que o índice diz antes de baixar qualquer coisa.
+/// Checks what the index says before downloading anything.
 fn check_entry(e: &Entry) -> Result<(), String> {
     if e.commit.len() != 40 || !e.commit.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("{}: o índice precisa fixar o commit (SHA de 40 caracteres)", e.id));
+        return Err(tr!("{}: the index must pin the commit (40-character SHA)", e.id));
     }
-    // só https ou pasta local: nada de ext::, ssh com comando, file:// com truques
+    // only https or a local folder: no ext::, ssh with a command, file:// with tricks
     let local = Path::new(&e.repo).is_absolute();
     if !(e.repo.starts_with("https://") || local) {
-        return Err(format!("{}: repositório precisa ser https:// (ou uma pasta local, para testes)", e.id));
+        return Err(tr!("{}: the repository must be https:// (or a local folder, for tests)", e.id));
     }
     if e.path.contains("..") || e.path.starts_with('/') {
-        return Err(format!("{}: path inválido no índice: {}", e.id, e.path));
+        return Err(tr!("{}: invalid path in the index: {}", e.id, e.path));
     }
     if e.license.trim().is_empty() {
-        return Err(format!("{}: o índice não declara a licença", e.id));
+        return Err(tr!("{}: the index does not declare the license", e.id));
     }
     if !e.full_access && !e.binaries.is_empty() {
-        return Err(format!("{}: só um app com full_access traz executável (binaries)", e.id));
+        return Err(tr!("{}: only an app with full_access brings an executable (binaries)", e.id));
     }
     for (os, b) in &e.binaries {
         if !["linux", "windows"].contains(&os.as_str()) {
-            return Err(format!("{}: binaries.{os}: use linux ou windows", e.id));
+            return Err(tr!("{}: binaries.{}: use linux or windows", e.id, os));
         }
         if !(b.url.starts_with("https://") || Path::new(&b.url).is_absolute()) {
-            return Err(format!("{}: binaries.{os}: o endereço precisa ser https:// (ou um caminho local, para testes)", e.id));
+            return Err(tr!("{}: binaries.{}: the address must be https:// (or a local path, for tests)", e.id, os));
         }
         if b.sha256.len() != 64 || !b.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(format!("{}: binaries.{os}: sha256 precisa ter 64 caracteres hex", e.id));
+            return Err(tr!("{}: binaries.{}: sha256 must have 64 hex characters", e.id, os));
         }
     }
     Ok(())
 }
 
-/// Baixa (ou copia, se for um caminho local) o executável para `to`, conferindo tamanho e
-/// SHA-256. Hash errado: o arquivo é apagado e a instalação para.
+/// Downloads (or copies, for a local path) the executable to `to`, checking size and
+/// SHA-256. Wrong hash: the file is deleted and installation stops.
 fn download_verified(b: &Binary, to: &Path) -> Result<(), String> {
     let mut reader: Box<dyn Read> = if b.url.starts_with("https://") {
         let client = reqwest::blocking::Client::builder()
@@ -569,7 +632,7 @@ fn download_verified(b: &Binary, to: &Path) -> Result<(), String> {
         };
         total += n as u64;
         if total > plugins::MAX_BIN {
-            break Err(format!("{}: o executável passa de {} MiB", b.url, plugins::MAX_BIN >> 20));
+            break Err(tr!("{}: the executable is over {} MiB", b.url, plugins::MAX_BIN >> 20));
         }
         digest.update(&buf[..n]);
         if let Err(e) = file.write_all(&buf[..n]) {
@@ -581,7 +644,7 @@ fn download_verified(b: &Binary, to: &Path) -> Result<(), String> {
         if got.eq_ignore_ascii_case(&b.sha256) {
             Ok(())
         } else {
-            Err(format!("o executável baixado tem SHA-256 {got}, não o {} do índice", b.sha256))
+            Err(tr!("the downloaded executable has SHA-256 {}, not the index's {}", got, b.sha256))
         }
     });
     drop(file);
@@ -589,7 +652,7 @@ fn download_verified(b: &Binary, to: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(to);
     }
     result?;
-    // executável para o dono (e leitura para os outros), como um binário instalado
+    // executable for the owner (and readable by others), like an installed binary
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -612,29 +675,29 @@ fn fetch_and_install(
 ) -> Result<PathBuf, String> {
     let checkout = tmp.join("repo");
     let checkout_s = checkout.to_string_lossy().to_string();
-    // sem hooks nem submódulos: o clone não roda nada do repositório
+    // no hooks or submodules: the clone runs nothing from the repository
     git(&["clone", "--quiet", "--no-checkout", "-c", "core.hooksPath=/dev/null", "--", &e.repo, &checkout_s])?;
     git(&["-C", &checkout_s, "-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", &e.commit])?;
     let head = git(&["-C", &checkout_s, "rev-parse", "HEAD"])?;
     if !head.trim().eq_ignore_ascii_case(&e.commit) {
-        return Err(format!("{}: o repositório entregou o commit {}, não o {} do índice", e.id, head.trim(), e.commit));
+        return Err(tr!("{}: the repository delivered commit {}, not the index's {}", e.id, head.trim(), e.commit));
     }
 
     let src = if e.path.is_empty() { checkout.clone() } else { checkout.join(&e.path) };
-    let text = std::fs::read_to_string(src.join("manifest.toml")).map_err(|err| format!("{}: sem manifest.toml ({err})", e.id))?;
-    let plugin = Plugin::parse(&text).map_err(|err| format!("{}: manifesto inválido: {err}", e.id))?;
+    let text = std::fs::read_to_string(src.join("manifest.toml")).map_err(|err| tr!("{}: no manifest.toml ({})", e.id, err))?;
+    let plugin = Plugin::parse(&text).map_err(|err| tr!("{}: invalid manifest: {}", e.id, err))?;
     check_matches(e, &plugin)?;
     if let Some(ui) = &plugin.ui {
-        // a tela e o script também precisam abrir antes de instalar
+        // the view and the script must also open before installing
         crate::apps::plugin::check_files(&src, ui).map_err(|err| format!("{}: {err}", e.id))?;
     }
-    // app externo: a tela abre, e há executável para este sistema
+    // external app: the view opens, and there is an executable for this OS
     let binary = match &plugin.app {
         Some(app) => {
             crate::apps::plugin::check_view(&src).map_err(|err| format!("{}: {err}", e.id))?;
             let os = plugins::this_os();
             let (Some(name), Some(b)) = (app.binary(), e.binaries.get(os)) else {
-                return Err(format!("{}: este app não tem versão para {os}", e.id));
+                return Err(tr!("{}: this app has no version for {}", e.id, os));
             };
             Some((name.to_string(), b.clone()))
         }
@@ -649,43 +712,49 @@ fn fetch_and_install(
         None => Vec::new(),
     };
     let what = match (&plugin.run, &plugin.ui, &binary) {
-        (_, _, Some((name, b))) => format!("executável {name}, sha256 {}…", &b.sha256[..12]),
-        (_, Some(ui), _) => format!("tela própria e script ({}, {})", ui.view, ui.script),
-        (Some(run), None, _) => format!("a cada {} s: {}", run.every, run.command.join(" ")),
+        (_, _, Some((name, b))) => tr!("executable {}, sha256 {}…", name, &b.sha256[..12]),
+        (_, Some(ui), _) => tr!("own view and script ({}, {})", ui.view, ui.script),
+        (Some(run), None, _) => tr!("every {} s: {}", run.every, run.command.join(" ")),
         (None, None, None) => String::new(),
     };
     let danger = if plugin.full_access() {
-        "  ATENÇÃO: ACESSO TOTAL. Este app roda um programa próprio com as permissões do seu\n  usuário: lê e grava seus arquivos, usa a rede e roda outros programas. Instale só\n  se confia no autor e na loja.\n"
+        tr!("  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author and the store.\n")
     } else {
         ""
     };
-    let summary = format!(
-        "\n{} {}  ({})\n  {}\n  autor: {}   licença: {}\n  repositório: {}\n  commit: {}\n  índice: {}\n  {}{}  ({what})\n{}{danger}",
-        plugin.manifest.name,
-        e.version,
-        e.id,
-        plugin.manifest.description,
-        if e.author.is_empty() { "?" } else { &e.author },
-        e.license,
-        e.repo,
-        e.commit,
-        if *trust == Trust::Signed { "assinatura conferida" } else { "local, sem assinatura conferida" },
-        match previous {
-            Some(p) => format!("atualização de {} para {}\n  ", p.version, e.version),
-            None => String::new(),
-        },
-        plugin.grants(),
-        if new_perms.is_empty() { String::new() } else { format!("  ATENÇÃO, permissão nova: {}\n", new_perms.join(", ")) },
+    let mut summary = format!("\n{} {}  ({})\n  {}\n  ", plugin.manifest.name, e.version, e.id, plugin.manifest.description);
+    summary += &tr!("author: {}   license: {}", if e.author.is_empty() { "?" } else { &e.author }, e.license);
+    summary += "\n  ";
+    summary += &tr!("repository: {}", e.repo);
+    summary += "\n  commit: ";
+    summary += &e.commit;
+    summary += "\n  ";
+    summary += &tr!(
+        "index: {}",
+        if *trust == Trust::Signed { tr!("signature checked") } else { tr!("local, signature not checked") }
     );
+    summary += "\n  ";
+    if let Some(p) = previous {
+        summary += &tr!("update from {} to {}", p.version, e.version);
+        summary += "\n  ";
+    }
+    summary += &format!("{}  ({what})\n", plugin.grants());
+    if !new_perms.is_empty() {
+        summary += "  ";
+        summary += &tr!("WARNING, new permission: {}", new_perms.join(", "));
+        summary += "\n";
+    }
+    summary += danger;
     if !confirm(&summary) {
-        return Err("instalação cancelada".into());
+        return Err(tr!("installation cancelled").into());
     }
 
-    // só os arquivos permitidos, e só arquivos de verdade (nada de link)
+    // only the allowed files, and only real files (no links)
     let staged = tmp.join("plugin");
     std::fs::create_dir_all(&staged).map_err(|err| err.to_string())?;
     for rel in plugins::files(&src).map_err(|err| format!("{}: {err}", e.id))? {
-        // o executável vem do endereço do índice, conferido pelo hash, nunca do repositório
+        // the executable comes from the index's address, checked by its hash, never from
+        // the repository
         if plugins::is_bin(&rel) {
             continue;
         }
@@ -716,13 +785,13 @@ fn fetch_and_install(
     let meta = serde_json::to_string_pretty(&installed).map_err(|err| err.to_string())?;
     std::fs::write(staged.join("installed.json"), meta).map_err(|err| err.to_string())?;
 
-    // troca: a versão antiga só sai quando a nova está pronta ao lado
+    // swap: the old version only leaves when the new one is ready next to it
     let dest = root.join(&e.id);
-    let old = tmp.join("antigo");
+    let old = tmp.join("old");
     if dest.exists() {
-        // no Windows, um executável rodando trava a pasta: o hub para o app antes de
-        // atualizar pela janela, mas a linha de comando não tem como
-        let hint = if plugin.full_access() { " (desligue o app no hub e tente de novo)" } else { "" };
+        // on Windows a running executable locks the folder: the hub stops the app before
+        // updating from the window, but the command line has no way to
+        let hint = if plugin.full_access() { tr!(" (turn the app off in the hub and try again)") } else { "" };
         std::fs::rename(&dest, &old).map_err(|err| format!("{}: {err}{hint}", dest.display()))?;
     }
     if let Err(err) = std::fs::rename(&staged, &dest) {
@@ -732,10 +801,10 @@ fn fetch_and_install(
     Ok(dest)
 }
 
-/// O que o índice anuncia tem de ser o que o manifesto pede.
+/// What the index announces must be what the manifest asks for.
 fn check_matches(e: &Entry, p: &Plugin) -> Result<(), String> {
     if p.manifest.id != e.id {
-        return Err(format!("o manifesto diz id \"{}\", o índice \"{}\"", p.manifest.id, e.id));
+        return Err(tr!("the manifest says id \"{}\", the index \"{}\"", p.manifest.id, e.id));
     }
     let sorted = |v: &[String]| {
         let mut v = v.to_vec();
@@ -745,63 +814,63 @@ fn check_matches(e: &Entry, p: &Plugin) -> Result<(), String> {
     };
     if e.full_access != p.full_access() {
         return Err(if p.full_access() {
-            format!("{}: o manifesto é de um app com acesso total ([app]), mas o índice não anuncia full_access", e.id)
+            tr!("{}: the manifest is of an app with full access ([app]), but the index does not announce full_access", e.id)
         } else {
-            format!("{}: o índice anuncia full_access, mas o manifesto não é de um app externo ([app])", e.id)
+            tr!("{}: the index announces full_access, but the manifest is not of an external app ([app])", e.id)
         });
     }
-    // o índice pode publicar menos sistemas que o manifesto (a instalação diz qual falta),
-    // nunca um que o manifesto não declara
+    // the index may publish fewer OSes than the manifest (installation says which one is
+    // missing), never one the manifest does not declare
     if let Some(app) = &p.app {
         let declared: Vec<&str> = app.binaries().into_iter().map(|(os, _)| os).collect();
         if let Some(os) = e.binaries.keys().find(|os| !declared.contains(&os.as_str())) {
-            return Err(format!("{}: o índice traz executável para {os}, que o manifesto não declara", e.id));
+            return Err(tr!("{}: the index brings an executable for {}, which the manifest does not declare", e.id, os));
         }
     }
     if e.sqlite != p.data().has(Kind::Sqlite) {
         return Err(if e.sqlite {
-            format!("{}: o índice anuncia sqlite, mas o manifesto não pede banco ([data] kinds)", e.id)
+            tr!("{}: the index announces sqlite, but the manifest asks for no database ([data] kinds)", e.id)
         } else {
-            format!("{}: o manifesto guarda dados num banco ([data] kinds = [\"sqlite\"]), mas o índice não anuncia sqlite", e.id)
+            tr!("{}: the manifest stores data in a database ([data] kinds = [\"sqlite\"]), but the index does not announce sqlite", e.id)
         });
     }
     let uses: Vec<String> = p.manifest.uses.iter().map(|t| t.name().to_string()).collect();
     let pairs = [
-        ("executar", &e.permissions, &p.manifest.permissions.exec),
-        ("consultar (net)", &e.net, &p.manifest.permissions.net),
-        ("ler (uses)", &e.uses, &uses),
+        (tr!("to run"), &e.permissions, &p.manifest.permissions.exec),
+        (tr!("to query (net)"), &e.net, &p.manifest.permissions.net),
+        (tr!("to read (uses)"), &e.uses, &uses),
     ];
     for (what, want, got) in pairs {
         let (want, got) = (sorted(want), sorted(got));
         if want != got {
-            return Err(format!("{}: o índice anuncia {what} {want:?}, mas o manifesto pede {got:?}", e.id));
+            return Err(tr!("{}: the index announces {} {}, but the manifest asks for {}", e.id, what, format!("{want:?}"), format!("{got:?}")));
         }
     }
     Ok(())
 }
 
-/// Remove o plugin `id` de `root`. Os dados (a pasta do app em `data_root`, ver
-/// `core/appdata.rs`) ficam guardados para uma reinstalação, a menos que `purge`.
+/// Removes plugin `id` from `root`. The data (the app's folder in `data_root`, see
+/// `core/appdata.rs`) is kept for a reinstall, unless `purge`.
 pub fn remove(id: &str, root: &Path, data_root: &Path, purge: bool) -> Result<String, String> {
     plugins::validate_id(id)?;
     let dir = root.join(id);
     if !dir.join("manifest.toml").is_file() {
-        return Err(format!("\"{id}\" não está instalado"));
+        return Err(tr!("\"{}\" is not installed", id));
     }
     std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let kept = !purge && appdata::has_data(&data_root.join(id));
-    // apagar; ou, sem dados, só a pasta que guardava a versão
+    // delete; or, with no data, only the folder that kept the version
     if !kept {
-        appdata::delete(data_root, id).map_err(|e| format!("{id} removido, mas os dados ficaram: {e}"))?;
+        appdata::delete(data_root, id).map_err(|e| tr!("{} removed, but the data stayed: {}", id, e))?;
     }
     Ok(match (purge, kept) {
-        (true, _) => format!("{id} removido, com os dados"),
-        (false, true) => format!("{id} removido; os dados ficaram guardados para quando você reinstalar"),
-        (false, false) => format!("{id} removido"),
+        (true, _) => tr!("{} removed, with its data", id),
+        (false, true) => tr!("{} removed; its data is kept for when you reinstall", id),
+        (false, false) => tr!("{} removed", id),
     })
 }
 
-/// `--remover`: com dados guardados e sem `--apagar-dados`/`--manter-dados`, pergunta.
+/// `--remove`: with stored data and no `--delete-data`/`--keep-data`, asks.
 fn remove_cli(id: &str, root: &Path, choice: Option<bool>, confirm_tty: bool) -> Result<String, String> {
     let data_root = appdata::root();
     let data = data_root.join(id);
@@ -811,8 +880,8 @@ fn remove_cli(id: &str, root: &Path, choice: Option<bool>, confirm_tty: bool) ->
             let (bytes, _) = appdata::size(&data);
             confirm_tty
                 && ask(
-                    &format!("{id} tem {} de dados em {}.", appdata::human(bytes), data.display()),
-                    "Apagar os dados também? (não: ficam guardados para quando você reinstalar)",
+                    &tr!("{} has {} of data in {}.", id, appdata::human(bytes), data.display()),
+                    tr!("Delete the data too? (no: it is kept for when you reinstall)"),
                 )
         }
         None => false,
@@ -823,18 +892,19 @@ fn remove_cli(id: &str, root: &Path, choice: Option<bool>, confirm_tty: bool) ->
 fn installed_list(root: &Path) -> String {
     let (list, skipped) = plugins::scan(root);
     if list.is_empty() && skipped.is_empty() {
-        return format!("nenhum plugin instalado em {}", root.display());
+        return tr!("no plugins installed in {}", root.display());
     }
-    let mut out = format!("instalados em {}:\n", root.display());
+    let mut out = tr!("installed in {}:", root.display());
+    out.push('\n');
     for p in list {
         let origin = match installed(root, &p.manifest.id) {
-            Some(m) => format!("{}  (loja, commit {})", m.version, m.commit.chars().take(12).collect::<String>()),
-            None => "(local)".into(),
+            Some(m) => tr!("{}  (store, commit {})", m.version, m.commit.chars().take(12).collect::<String>()),
+            None => tr!("(local)").to_string(),
         };
         out.push_str(&format!("  {}  {} {origin}\n", p.manifest.id, p.manifest.name));
     }
     for s in skipped {
-        out.push_str(&format!("  ignorado: {}/  {}\n", s.folder, s.reason));
+        out.push_str(&format!("  {}\n", tr!("skipped: {}/  {}", s.folder, s.reason)));
     }
     out
 }
@@ -842,28 +912,28 @@ fn installed_list(root: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::plugins::tests::EXEMPLO;
+    use crate::core::plugins::tests::EXAMPLE;
 
-    /// Repositório git de verdade com o plugin de exemplo e um índice apontando para ele.
-    struct Loja {
+    /// A real git repository with the example plugin and an index pointing to it.
+    struct Store {
         dir: PathBuf,
         commit: String,
     }
 
-    impl Loja {
-        fn new(nome: &str) -> Option<Loja> {
+    impl Store {
+        fn new(name: &str) -> Option<Store> {
             if !exec::which("git") {
                 return None;
             }
-            let dir = std::env::temp_dir().join(format!("miniutils-loja-{nome}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("miniutils-store-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             let repo = dir.join("repo");
             std::fs::create_dir_all(&repo).unwrap();
-            std::fs::write(repo.join("manifest.toml"), EXEMPLO).unwrap();
-            std::fs::write(repo.join("README.md"), "# exemplo").unwrap();
-            std::fs::write(repo.join("instalar.sh"), "rm -rf ~").unwrap(); // não pode ser copiado
-            let commit = Loja::commit(&repo, "v1");
-            Some(Loja { dir, commit })
+            std::fs::write(repo.join("manifest.toml"), EXAMPLE).unwrap();
+            std::fs::write(repo.join("README.md"), "# example").unwrap();
+            std::fs::write(repo.join("install.sh"), "rm -rf ~").unwrap(); // must not be copied
+            let commit = Store::commit(&repo, "v1");
+            Some(Store { dir, commit })
         }
 
         fn commit(repo: &Path, msg: &str) -> String {
@@ -878,33 +948,47 @@ mod tests {
 
         fn index(&self, commit: &str, version: &str, permissions: &str) -> Source {
             let path = self.dir.join("registry.json");
-            // O caminho vai como string JSON escapada: no Windows ele tem `\`.
+            // The path goes as an escaped JSON string: on Windows it has `\`.
             let repo = serde_json::to_string(&self.dir.join("repo").to_string_lossy()).unwrap();
             let json = format!(
-                r#"{{"schema":1,"plugins":[{{"id":"io.github.exemplo.uptime","name":"Tempo ligado","license":"MIT","version":"{version}","repo":{repo},"commit":"{commit}","permissions":[{permissions}]}}]}}"#
+                r#"{{"schema":1,"plugins":[{{"id":"io.github.exemplo.uptime","name":"Uptime","license":"MIT","version":"{version}","repo":{repo},"commit":"{commit}","permissions":[{permissions}]}}]}}"#
             );
             std::fs::write(&path, json).unwrap();
             Source { index: path.to_string_lossy().to_string(), key: String::new() }
         }
     }
 
-    impl Drop for Loja {
+    impl Drop for Store {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// The old Portuguese flags still work, as the English ones.
+    #[test]
+    fn legacy_portuguese_flags_are_aliases() {
+        for (old, new) in LEGACY_FLAGS {
+            assert_eq!(canonical_flag(old), new);
+            assert_eq!(canonical_flag(new), new);
+        }
+        assert_eq!(canonical_flag("--instalar"), "--install");
+        assert_eq!(canonical_flag("--apagar-dados"), "--delete-data");
+        assert_eq!(canonical_flag("registry.json"), "registry.json");
+        // not a store command: left to the rest of `main`
+        assert_eq!(run_cli(&["--hidden".to_string()]), None);
     }
 
     /// `--store-entry`: the new version from the tag changes only the entry's commit and
     /// version, the same commit again is refused, and the rewritten index installs.
     #[test]
     fn store_entry_from_tag_updates_index_and_installs() {
-        let Some(store) = Loja::new("tagged") else { return };
+        let Some(store) = Store::new("tagged") else { return };
         let src = store.index(&store.commit, "0.1.0", r#""uptime""#);
         let index = PathBuf::from(&src.index);
         let repo = store.dir.join("repo");
         let r = repo.to_string_lossy().to_string();
         std::fs::write(repo.join("README.md"), "# example 2").unwrap();
-        let new_commit = Loja::commit(&repo, "v2");
+        let new_commit = Store::commit(&repo, "v2");
         git(&["-C", &r, "tag", "v0.2.0"]).unwrap();
 
         let report = entry::run(&index, &r, "v0.2.0", &entry::Opts::default()).unwrap();
@@ -917,9 +1001,9 @@ mod tests {
         assert_eq!(e.permissions, ["uptime"]);
 
         let err = entry::run(&index, &r, "v0.2.0", &entry::Opts::default()).unwrap_err();
-        assert!(err.contains("já está no índice"), "{err}");
+        assert!(err.contains("already in the index"), "{err}");
         let err = entry::run(&index, &r, "missing-v9.0.0", &entry::Opts::default()).unwrap_err();
-        assert!(err.contains("não há essa tag"), "{err}");
+        assert!(err.contains("no such tag"), "{err}");
 
         let root = store.dir.join("plugins");
         install(&src, "io.github.exemplo.uptime", &root, &mut |_| true).unwrap();
@@ -927,151 +1011,152 @@ mod tests {
     }
 
     #[test]
-    fn instala_no_commit_fixado_so_os_arquivos_permitidos() {
-        let Some(loja) = Loja::new("ok") else { return };
-        let src = loja.index(&loja.commit, "0.1.0", r#""uptime""#);
-        let root = loja.dir.join("plugins");
-        let mut resumo = String::new();
+    fn installs_pinned_commit_and_only_allowed_files() {
+        let Some(store) = Store::new("ok") else { return };
+        let src = store.index(&store.commit, "0.1.0", r#""uptime""#);
+        let root = store.dir.join("plugins");
+        let mut summary = String::new();
         let dest = install(&src, "io.github.exemplo.uptime", &root, &mut |s| {
-            resumo = s.to_string();
+            summary = s.to_string();
             true
         })
         .unwrap();
-        assert!(resumo.contains("executa: uptime"));
+        let grants = plugins::describe_grants(&["uptime".to_string()], &[], &[], false);
+        assert!(summary.contains(&grants), "{summary}");
         assert!(dest.join("manifest.toml").is_file());
         assert!(dest.join("README.md").is_file());
-        assert!(!dest.join("instalar.sh").exists(), "arquivo fora da lista não entra");
-        assert_eq!(installed(&root, "io.github.exemplo.uptime").unwrap().commit, loja.commit);
-        let instalados = plugins::load_installed(&root);
-        assert_eq!(instalados.len(), 1);
-        assert_eq!(instalados[0].manifest.name, "Tempo ligado");
-        assert!(install(&src, "io.github.exemplo.uptime", &root, &mut |_| true).unwrap_err().contains("já está instalado"));
-        let dados = root.join("dados-de-teste");
-        std::fs::create_dir_all(dados.join("io.github.exemplo.uptime")).unwrap();
-        std::fs::write(dados.join("io.github.exemplo.uptime").join("store.json"), "{}").unwrap();
-        // sem "apagar os dados": a pasta de dados fica para a reinstalação
-        assert!(remove("io.github.exemplo.uptime", &root, &dados, false).unwrap().contains("guardados"));
-        assert!(dados.join("io.github.exemplo.uptime").join("store.json").exists());
+        assert!(!dest.join("install.sh").exists(), "a file outside the list does not go in");
+        assert_eq!(installed(&root, "io.github.exemplo.uptime").unwrap().commit, store.commit);
+        let all = plugins::load_installed(&root);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].manifest.name, "Uptime");
+        assert!(install(&src, "io.github.exemplo.uptime", &root, &mut |_| true).unwrap_err().contains("already installed"));
+        let data = root.join("test-data");
+        std::fs::create_dir_all(data.join("io.github.exemplo.uptime")).unwrap();
+        std::fs::write(data.join("io.github.exemplo.uptime").join("store.json"), "{}").unwrap();
+        // without "delete the data": the data folder stays for a reinstall
+        assert!(remove("io.github.exemplo.uptime", &root, &data, false).unwrap().contains("kept"));
+        assert!(data.join("io.github.exemplo.uptime").join("store.json").exists());
         assert!(plugins::load_installed(&root).is_empty());
     }
 
     #[test]
-    fn atualiza_e_avisa_permissao_nova() {
-        let Some(loja) = Loja::new("upd") else { return };
-        let root = loja.dir.join("plugins");
+    fn updates_and_warns_of_new_permission() {
+        let Some(store) = Store::new("upd") else { return };
+        let root = store.dir.join("plugins");
         let id = "io.github.exemplo.uptime";
-        install(&loja.index(&loja.commit, "0.1.0", r#""uptime""#), id, &root, &mut |_| true).unwrap();
-        // versão nova pede mais um programa
-        let repo = loja.dir.join("repo");
-        let novo = EXEMPLO.replace(r#"exec = ["uptime"]"#, r#"exec = ["uptime", "who"]"#);
-        std::fs::write(repo.join("manifest.toml"), novo).unwrap();
-        let commit2 = Loja::commit(&repo, "v2");
-        let src = loja.index(&commit2, "0.2.0", r#""uptime", "who""#);
+        install(&store.index(&store.commit, "0.1.0", r#""uptime""#), id, &root, &mut |_| true).unwrap();
+        // the new version asks for one more program
+        let repo = store.dir.join("repo");
+        let manifest = EXAMPLE.replace(r#"exec = ["uptime"]"#, r#"exec = ["uptime", "who"]"#);
+        std::fs::write(repo.join("manifest.toml"), manifest).unwrap();
+        let commit2 = Store::commit(&repo, "v2");
+        let src = store.index(&commit2, "0.2.0", r#""uptime", "who""#);
         let (st, _) = statuses(&src, &root).unwrap();
         assert!(st[0].has_update());
         assert_eq!(st[0].new_permissions(), ["who"]);
-        let mut resumo = String::new();
+        let mut summary = String::new();
         install(&src, id, &root, &mut |s| {
-            resumo = s.to_string();
+            summary = s.to_string();
             true
         })
         .unwrap();
-        assert!(resumo.contains("atualização de 0.1.0 para 0.2.0"));
-        assert!(resumo.contains("permissão nova: who"));
+        assert!(summary.contains("update from 0.1.0 to 0.2.0"), "{summary}");
+        assert!(summary.contains("new permission: who"), "{summary}");
         assert_eq!(installed(&root, id).unwrap().version, "0.2.0");
     }
 
     #[test]
-    fn recusa_commit_ou_permissao_que_nao_batem_e_respeita_o_nao() {
-        let Some(loja) = Loja::new("ruim") else { return };
-        let root = loja.dir.join("plugins");
+    fn refuses_mismatched_commit_or_permission_and_respects_no() {
+        let Some(store) = Store::new("bad") else { return };
+        let root = store.dir.join("plugins");
         let id = "io.github.exemplo.uptime";
-        // commit que não existe no repositório
-        let outro = loja.index(&"a".repeat(40), "0.1.0", r#""uptime""#);
-        assert!(install(&outro, id, &root, &mut |_| true).is_err());
-        // índice escondendo uma permissão
-        let mentira = loja.index(&loja.commit, "0.1.0", "");
-        assert!(install(&mentira, id, &root, &mut |_| true).unwrap_err().contains("anuncia"));
-        // commit curto (não fixado)
-        let curto = loja.index("abc123", "0.1.0", r#""uptime""#);
-        assert!(install(&curto, id, &root, &mut |_| true).unwrap_err().contains("40 caracteres"));
-        // o usuário disse não
-        let ok = loja.index(&loja.commit, "0.1.0", r#""uptime""#);
-        assert!(install(&ok, id, &root, &mut |_| false).unwrap_err().contains("cancelada"));
+        // a commit that does not exist in the repository
+        let other = store.index(&"a".repeat(40), "0.1.0", r#""uptime""#);
+        assert!(install(&other, id, &root, &mut |_| true).is_err());
+        // an index hiding a permission
+        let lie = store.index(&store.commit, "0.1.0", "");
+        assert!(install(&lie, id, &root, &mut |_| true).unwrap_err().contains("announces"));
+        // short commit (not pinned)
+        let short = store.index("abc123", "0.1.0", r#""uptime""#);
+        assert!(install(&short, id, &root, &mut |_| true).unwrap_err().contains("40-character"));
+        // the user said no
+        let ok = store.index(&store.commit, "0.1.0", r#""uptime""#);
+        assert!(install(&ok, id, &root, &mut |_| false).unwrap_err().contains("cancelled"));
         assert!(plugins::load_installed(&root).is_empty());
     }
 
-    /// Índice com um app externo: o repositório traz manifesto e tela; o executável vem de
-    /// um arquivo à parte, fixado pelo SHA-256 no índice.
+    /// An index with an external app: the repository brings manifest and view; the
+    /// executable comes from a separate file, pinned by the SHA-256 in the index.
     #[test]
-    fn app_externo_baixa_o_binario_e_confere_o_hash() {
+    fn external_app_downloads_the_binary_and_checks_the_hash() {
         if !exec::which("git") {
             return;
         }
-        let dir = std::env::temp_dir().join(format!("miniutils-loja-app-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("miniutils-store-app-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let repo = dir.join("repo");
         std::fs::create_dir_all(repo.join("bin")).unwrap();
-        let exemplo = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/app-hello");
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/app-hello");
         for f in ["manifest.toml", "view.slint", "README.md"] {
-            std::fs::copy(exemplo.join(f), repo.join(f)).unwrap();
+            std::fs::copy(example.join(f), repo.join(f)).unwrap();
         }
-        // um binário no repositório não é usado: o que vale é o do índice
-        std::fs::write(repo.join("bin/app-hello"), "do repositório").unwrap();
-        let commit = Loja::commit(&repo, "app");
-        let binario = dir.join("app-hello-publicado");
-        std::fs::write(&binario, "binário compilado pela loja").unwrap();
-        let hash = to_hex(ring::digest::digest(&ring::digest::SHA256, b"bin\xc3\xa1rio compilado pela loja").as_ref());
-        let indice = |full: bool, sha: &str| -> Source {
+        // a binary in the repository is not used: the index's one is
+        std::fs::write(repo.join("bin/app-hello"), "from the repository").unwrap();
+        let commit = Store::commit(&repo, "app");
+        let binary = dir.join("app-hello-published");
+        std::fs::write(&binary, "binary built by the store").unwrap();
+        let hash = to_hex(ring::digest::digest(&ring::digest::SHA256, b"binary built by the store").as_ref());
+        let index = |full: bool, sha: &str| -> Source {
             let path = dir.join("registry.json");
-            let url = serde_json::to_string(&binario.to_string_lossy()).unwrap();
+            let url = serde_json::to_string(&binary.to_string_lossy()).unwrap();
             let repo = serde_json::to_string(&repo.to_string_lossy()).unwrap();
             let bins = format!(r#"{{"linux":{{"url":{url},"sha256":"{sha}"}},"windows":{{"url":{url},"sha256":"{sha}"}}}}"#);
             let extra = if full { format!(r#","full_access":true,"binaries":{bins}"#) } else { String::new() };
             let json = format!(
-                r#"{{"schema":1,"plugins":[{{"id":"io.github.pedroluizmossi.app-hello","name":"Olá","license":"MIT","version":"0.1.0","repo":{repo},"commit":"{commit}","uses":["sys"]{extra}}}]}}"#
+                r#"{{"schema":1,"plugins":[{{"id":"io.github.pedroluizmossi.app-hello","name":"Hello","license":"MIT","version":"0.1.0","repo":{repo},"commit":"{commit}","uses":["sys"]{extra}}}]}}"#
             );
             std::fs::write(&path, json).unwrap();
             Source { index: path.to_string_lossy().to_string(), key: String::new() }
         };
         let root = dir.join("plugins");
         let id = "io.github.pedroluizmossi.app-hello";
-        // índice escondendo o acesso total
-        assert!(install(&indice(false, &hash), id, &root, &mut |_| true).unwrap_err().contains("full_access"));
-        // hash que não bate: nada instalado
-        let errado = "0".repeat(64);
-        assert!(install(&indice(true, &errado), id, &root, &mut |_| true).unwrap_err().contains("SHA-256"));
+        // an index hiding the full access
+        assert!(install(&index(false, &hash), id, &root, &mut |_| true).unwrap_err().contains("full_access"));
+        // a hash that does not match: nothing installed
+        let wrong = "0".repeat(64);
+        assert!(install(&index(true, &wrong), id, &root, &mut |_| true).unwrap_err().contains("SHA-256"));
         assert!(plugins::load_installed(&root).is_empty());
-        // certo: o aviso aparece e o binário instalado é o do índice
-        let mut resumo = String::new();
-        let dest = install(&indice(true, &hash), id, &root, &mut |s| {
-            resumo = s.to_string();
+        // right: the warning shows and the installed binary is the index's
+        let mut summary = String::new();
+        let dest = install(&index(true, &hash), id, &root, &mut |s| {
+            summary = s.to_string();
             true
         })
         .unwrap();
-        assert!(resumo.contains("ACESSO TOTAL"), "{resumo}");
-        let nome = if cfg!(windows) { "bin/app-hello.exe" } else { "bin/app-hello" };
-        assert_eq!(std::fs::read_to_string(dest.join(nome)).unwrap(), "binário compilado pela loja");
+        assert!(summary.contains("FULL ACCESS"), "{summary}");
+        let name = if cfg!(windows) { "bin/app-hello.exe" } else { "bin/app-hello" };
+        assert_eq!(std::fs::read_to_string(dest.join(name)).unwrap(), "binary built by the store");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(dest.join(nome)).unwrap().permissions().mode() & 0o777, 0o755);
+            assert_eq!(std::fs::metadata(dest.join(name)).unwrap().permissions().mode() & 0o777, 0o755);
         }
         let inst = installed(&root, id).unwrap();
         assert!(inst.full_access);
         let p = &plugins::load_installed(&root)[0];
         assert!(p.full_access() && p.binary_path().unwrap().is_file());
-        // remover com "apagar os dados" leva também a pasta de dados do app
-        let dados = dir.join("dados");
-        std::fs::create_dir_all(dados.join(id)).unwrap();
-        std::fs::write(dados.join(id).join("x"), "1").unwrap();
-        remove(id, &root, &dados, true).unwrap();
-        assert!(!dados.join(id).exists());
+        // removing with "delete the data" also takes the app's data folder
+        let data = dir.join("data");
+        std::fs::create_dir_all(data.join(id)).unwrap();
+        std::fs::write(data.join(id).join("x"), "1").unwrap();
+        remove(id, &root, &data, true).unwrap();
+        assert!(!data.join(id).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn acesso_total_numa_atualizacao_e_permissao_nova() {
+    fn full_access_in_an_update_is_a_new_permission() {
         let entry = |full: bool| Entry {
             id: "a.b".into(),
             name: "x".into(),
@@ -1089,7 +1174,7 @@ mod tests {
             sqlite: false,
             binaries: BTreeMap::new(),
         };
-        let antes = Installed {
+        let before = Installed {
             id: "a.b".into(),
             version: "1".into(),
             repo: "https://x".into(),
@@ -1100,16 +1185,17 @@ mod tests {
             full_access: false,
             sqlite: false,
         };
-        let st = Status { entry: entry(true), installed: Some(antes.clone()) };
-        assert_eq!(st.new_permissions(), [FULL_ACCESS]);
-        // passar a guardar num banco também aparece como permissão nova
-        let mut com_banco = entry(false);
-        com_banco.sqlite = true;
-        assert!(com_banco.grants_text().ends_with(plugins::GRANT_SQLITE));
-        let st2 = Status { entry: com_banco, installed: Some(antes) };
-        assert_eq!(st2.new_permissions(), [plugins::GRANT_SQLITE]);
-        assert!(st.entry.grants_text().starts_with("ACESSO TOTAL"));
-        // binário em índice que não anuncia acesso total
+        let st = Status { entry: entry(true), installed: Some(before.clone()) };
+        assert_eq!(st.new_permissions(), [full_access_grant()]);
+        // starting to store in a database also shows as a new permission
+        let mut with_db = entry(false);
+        with_db.sqlite = true;
+        let sqlite = i18n::tr(plugins::GRANT_SQLITE);
+        assert!(with_db.grants_text().ends_with(sqlite));
+        let st2 = Status { entry: with_db, installed: Some(before) };
+        assert_eq!(st2.new_permissions(), [sqlite]);
+        assert!(st.entry.grants_text().starts_with(&plugins::describe_full_access(&[])));
+        // a binary in an index that does not announce full access
         let mut e = entry(false);
         e.binaries.insert("linux".into(), Binary { url: "https://x/b".into(), sha256: "0".repeat(64) });
         assert!(check_entry(&e).unwrap_err().contains("full_access"));
@@ -1119,39 +1205,49 @@ mod tests {
     }
 
     #[test]
-    fn sem_indice_na_config_vale_a_loja_oficial() {
+    fn no_index_in_config_means_the_official_store() {
         let mut cfg = Config::default();
         let s = Source::from_config(&cfg);
         assert_eq!((s.index.as_str(), s.key.as_str()), (OFFICIAL_INDEX, OFFICIAL_KEY));
-        // outra loja: a chave oficial não vai junto
-        cfg.store_index = "/tmp/outra/registry.json".into();
+        // another store: the official key does not go along
+        cfg.store_index = "/tmp/other/registry.json".into();
         assert_eq!(Source::from_config(&cfg).key, "");
         cfg.store_key = "ab".repeat(32);
         assert_eq!(Source::from_config(&cfg).key, "ab".repeat(32));
     }
 
     #[test]
-    fn assinatura_do_indice() {
-        let dir = std::env::temp_dir().join(format!("miniutils-assina-{}", std::process::id()));
+    fn index_signature() {
+        let dir = std::env::temp_dir().join(format!("miniutils-sign-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let index = dir.join("registry.json");
         std::fs::write(&index, r#"{"schema":1,"plugins":[]}"#).unwrap();
-        let key_file = dir.join("chave");
+        let key_file = dir.join("key");
         let public = keygen(&key_file).unwrap();
-        assert!(keygen(&key_file).is_err(), "não sobrescreve a chave");
+        assert!(keygen(&key_file).is_err(), "does not overwrite the key");
         sign(&index, &key_file).unwrap();
         let src = Source { index: index.to_string_lossy().to_string(), key: public.clone() };
         assert_eq!(load_index(&src).unwrap().1, Trust::Signed);
-        // adulterado depois de assinar
+        // tampered with after signing
         std::fs::write(&index, r#"{"schema":1,"plugins":[ ]}"#).unwrap();
-        assert!(load_index(&src).unwrap_err().contains("não confere"));
-        // chave de outra loja
-        let outra = Source { key: "11".repeat(32), ..src.clone() };
-        assert!(load_index(&outra).is_err());
-        // remoto sem chave: recusado antes de baixar
-        let remoto = Source { index: "https://example.invalid/registry.json".into(), key: String::new() };
-        assert!(load_index(&remoto).unwrap_err().contains("sem chave"));
+        assert!(load_index(&src).unwrap_err().contains("does not match"));
+        // another store's key
+        let other = Source { key: "11".repeat(32), ..src.clone() };
+        assert!(load_index(&other).is_err());
+        // remote without a key: refused before downloading
+        let remote = Source { index: "https://example.invalid/registry.json".into(), key: String::new() };
+        assert!(load_index(&remote).unwrap_err().contains("no key"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The help lists the English commands, aligned.
+    #[test]
+    fn usage_lists_the_commands() {
+        let u = USAGE.to_string();
+        for cmd in ["--store", "--install", "--update", "--remove", "--reload", "--store-key", "--store-sign", "--store-entry", "--key"] {
+            assert!(u.contains(cmd), "{cmd}: {u}");
+        }
+        assert!(u.contains("  miniutils --plugins                           lists"), "{u}");
     }
 }

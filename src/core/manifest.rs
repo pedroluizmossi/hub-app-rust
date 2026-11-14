@@ -1,4 +1,4 @@
-//! Formato do `manifest.toml` de um mini-app.
+//! Format of a mini-app's `manifest.toml`.
 
 use serde::Deserialize;
 
@@ -6,7 +6,7 @@ use super::appdata::DataSpec;
 use super::bus::Topic;
 use crate::mascot::sprites;
 
-/// Versão do contrato entre host e mini-apps que este binário entende.
+/// Version of the host/mini-app contract this binary understands.
 pub const API_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -15,19 +15,19 @@ pub struct Manifest {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// Mascote usada na aba do mini-app.
+    /// Mascot used on the mini-app's tab.
     #[serde(default = "default_icon")]
     pub icon: String,
     pub api: u32,
-    /// Provedores de dados que o app assina enquanto está ativo.
+    /// Data providers the app subscribes to while it is active.
     #[serde(default)]
     pub uses: Vec<Topic>,
     #[serde(default)]
     pub permissions: Permissions,
     #[serde(default)]
     pub settings: Vec<SettingDef>,
-    /// O que o app guarda (`[data]`; ver `core/appdata.rs`). Sem a seção, vale o padrão
-    /// do tipo de app (`Plugin::data`).
+    /// What the app stores (`[data]`; see `core/appdata.rs`). Without the section, the
+    /// default for the kind of app applies (`Plugin::data`).
     #[serde(default)]
     pub data: Option<DataSpec>,
 }
@@ -38,10 +38,10 @@ fn default_icon() -> String {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Permissions {
-    /// Programas que o app pode executar (allowlist do executor).
+    /// Programs the app may run (the executor's allowlist).
     #[serde(default)]
     pub exec: Vec<String>,
-    /// Domínios que o app pode consultar por HTTPS (só plugins com tela; ver `apps/plugin/script.rs`).
+    /// Domains the app may query over HTTPS (only plugins with a view; see `apps/plugin/script.rs`).
     #[serde(default)]
     pub net: Vec<String>,
 }
@@ -54,7 +54,7 @@ pub enum SettingKind {
     Choice,
 }
 
-/// Uma configuração declarada no manifesto; vira formulário na aba "Apps".
+/// A setting declared in the manifest; becomes a form field on the "Apps" tab.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SettingDef {
     pub key: String,
@@ -68,24 +68,24 @@ pub struct SettingDef {
     pub max: Option<i64>,
     #[serde(default)]
     pub step: Option<i64>,
-    /// Opções de um `choice`. Numa opção de mascote, as do manifesto são as sugeridas e
-    /// vêm primeiro; `Manifest::parse` completa a lista com as outras mascotes.
+    /// Options of a `choice`. For a mascot choice, the manifest's options are the suggested
+    /// ones and come first; `Manifest::parse` completes the list with the other mascots.
     #[serde(default)]
     pub options: Vec<String>,
 }
 
 impl SettingDef {
-    /// As opções que a tela mostra. A do tema (`theme`) é sempre "auto" mais todos os
-    /// temas, inclusive os de arquivo: um tema novo aparece em todos os apps sem editar
-    /// manifestos. As demais são as do manifesto.
+    /// The options the screen shows. The theme one (`theme`) is always "auto" plus every
+    /// theme, file themes included: a new theme shows up in every app without editing
+    /// manifests. The others are the manifest's.
     pub fn live_options(&self) -> Vec<String> {
         if self.key == "theme" && self.kind == SettingKind::Choice {
             let mut v = vec!["auto".to_string()];
             v.extend(crate::mascot::themes::all().iter().map(|t| t.key.to_string()));
             return v;
         }
-        // escolha de mascote: as do manifesto e, depois, as importadas que ainda não estão
-        // (a pasta de mascotes muda sem reler os manifestos)
+        // mascot choice: the manifest's, then the imported ones not listed yet (the mascot
+        // folder changes without re-reading the manifests)
         if self.kind == SettingKind::Choice && sprites::is_choice(&self.options) {
             let mut v = self.options.clone();
             v.extend(sprites::all().iter().map(|s| s.key.to_string()).filter(|k| !self.options.contains(k)));
@@ -98,9 +98,11 @@ impl SettingDef {
 impl Manifest {
     pub fn parse(text: &str) -> anyhow::Result<Self> {
         let mut m: Manifest = toml::from_str(text)?;
-        // Opção de mascote: o manifesto lista as que combinam com o app (sugeridas), mas
-        // qualquer mascote pode ser escolhida. As outras entram depois, na ordem de
-        // `SPRITES`; assim uma mascote nova aparece em todos os apps sem editar manifestos.
+        // hub catalog: the built-in apps' texts (a plugin's own catalog comes after, in Plugin::load)
+        crate::core::i18n::hub_catalog(crate::core::i18n::current()).localize_manifest(&mut m);
+        // Mascot choice: the manifest lists the ones that suit the app (suggested), but any
+        // mascot can be chosen. The others come after, in `SPRITES` order; so a new mascot
+        // shows up in every app without editing manifests.
         for s in m.settings.iter_mut().filter(|s| s.kind == SettingKind::Choice && sprites::is_choice(&s.options)) {
             let rest: Vec<String> =
                 sprites::SPRITES.iter().map(|sp| sp.key.to_string()).filter(|k| !s.options.contains(k)).collect();
@@ -108,7 +110,7 @@ impl Manifest {
         }
         anyhow::ensure!(
             m.api == API_VERSION,
-            "mini-app {} usa a API {} (este hub entende a {})",
+            "mini-app {} uses API {} (this hub understands {})",
             m.id,
             m.api,
             API_VERSION
@@ -129,7 +131,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn manifestos_embutidos_sao_validos() {
+    fn built_in_manifests_are_valid() {
         for text in [
             include_str!("../../miniapps/docker/manifest.toml"),
             include_str!("../../miniapps/vitals/manifest.toml"),
@@ -153,32 +155,32 @@ mod tests {
     }
 
     #[test]
-    fn opcao_de_mascote_oferece_todas_com_as_sugeridas_na_frente() {
+    fn mascot_choice_offers_all_with_the_suggested_first() {
         let vitals = Manifest::parse(include_str!("../../miniapps/vitals/manifest.toml")).unwrap();
         let gpu = &vitals.setting("gpu_mascot").unwrap().options;
-        // as do manifesto primeiro, na ordem dele ("auto" continua em primeiro)
+        // the manifest's first, in its order ("auto" stays first)
         assert_eq!(gpu[..7], ["auto", "nvidia", "amd", "robo", "neko", "chip", "vagalume"]);
-        assert_eq!(gpu.len(), sprites::SPRITES.len() + 1, "todas as mascotes, mais o auto");
+        assert_eq!(gpu.len(), sprites::SPRITES.len() + 1, "every mascot, plus auto");
         let mut sorted = gpu.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), gpu.len(), "sem repetição");
-        // opção que não é de mascote fica como está no manifesto
+        assert_eq!(sorted.len(), gpu.len(), "no duplicates");
+        // a choice that is not a mascot choice stays as in the manifest
         let theme = vitals.setting("theme").unwrap().live_options();
         assert!(theme.contains(&"auto".to_string()) && !theme.contains(&"neko".to_string()));
-        // a do tema é gerada: "auto" mais todos os temas, sem lista no manifesto
+        // the theme one is generated: "auto" plus every theme, no list in the manifest
         assert_eq!(theme.len(), crate::mascot::themes::all().len() + 1);
         assert!(vitals.setting("theme").unwrap().options.is_empty());
     }
 
     #[test]
-    fn rejeita_provedor_desconhecido() {
+    fn rejects_unknown_provider() {
         assert!(Manifest::parse("id='x'\nname='x'\napi=1\nuses=['sys']").is_ok());
         assert!(Manifest::parse("id='x'\nname='x'\napi=1\nuses=['sis']").is_err());
     }
 
     #[test]
-    fn rejeita_api_desconhecida() {
+    fn rejects_unknown_api() {
         assert!(Manifest::parse("id='x'\nname='x'\napi=99").is_err());
     }
 }

@@ -1,6 +1,6 @@
-//! A tela da loja de plugins (`ui/store.slint`): carrega o índice, mostra o estado de cada
-//! plugin e instala, atualiza ou remove com dois cliques. O trabalho (baixar o índice,
-//! `git clone`, copiar) roda numa thread; o resultado volta pela thread da UI.
+//! The plugin store screen (`ui/store.slint`): loads the index, shows the state of each
+//! plugin and installs, updates or removes with two clicks. The work (downloading the index,
+//! `git clone`, copying) runs in a thread; the result comes back through the UI thread.
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -10,9 +10,10 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 use super::{Hub, with_hub};
 use crate::core::{appdata, plugins};
 use crate::store::{self, Source, Status, Trust};
+use crate::tr;
 use crate::ui::{StoreApp, StoreRow};
 
-/// Tempo para o segundo clique confirmar uma ação.
+/// Time for the second click to confirm an action.
 const ARM_TTL: Duration = Duration::from_secs(8);
 
 #[derive(Default)]
@@ -22,9 +23,9 @@ pub(super) struct StoreState {
     status: String,
     failed: bool,
     loading: bool,
-    /// Ação esperando o segundo clique: (id, verbo, quando armou).
+    /// Action waiting for the second click: (id, verb, when it was armed).
     armed: Option<(String, String, Instant)>,
-    /// Plugin com uma ação em curso.
+    /// Plugin with an action in progress.
     busy: Option<String>,
 }
 
@@ -57,7 +58,7 @@ impl Hub {
         });
     }
 
-    /// Abriu a loja ou pediu para recarregar: baixa o índice numa thread.
+    /// The store was opened or a reload was asked for: downloads the index in a thread.
     pub(super) fn store_reload(&self) {
         let src = Source::from_config(&self.host.config.borrow());
         let g = self.ui.global::<StoreApp>();
@@ -69,12 +70,12 @@ impl Hub {
             st.loading = true;
         }
         self.store_push();
-        let spawned = std::thread::Builder::new().name("loja".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("store".into()).spawn(move || {
             let result = store::statuses(&src, &plugins::dir());
             let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_loaded(result)));
         });
         if let Err(e) = spawned {
-            self.store_failed(format!("sem thread para a loja: {e}"));
+            self.store_failed(tr!("no thread for the store: {}", e));
         }
     }
 
@@ -85,8 +86,8 @@ impl Hub {
             match result {
                 Ok((list, trust)) => {
                     st.status = format!(
-                        "{} · {} plugin(s)",
-                        if trust == Trust::Signed { "assinatura conferida" } else { "índice local, sem assinatura" },
+                        "{} · plugins: {}",
+                        if trust == Trust::Signed { tr!("signature verified") } else { tr!("local index, not signed") },
                         list.len()
                     );
                     st.statuses = list;
@@ -115,15 +116,15 @@ impl Hub {
         self.store_push();
     }
 
-    /// Primeiro clique arma (e mostra o que vai acontecer); o segundo, dentro de
-    /// `ARM_TTL`, faz.
+    /// The first click arms (and shows what will happen); the second one, within `ARM_TTL`,
+    /// does it.
     fn store_act(&self, id: &str, verb: &str) {
         let confirmed = {
             let mut st = self.store.borrow_mut();
             if st.busy.is_some() {
                 return;
             }
-            // "remove-purge" é o outro botão do segundo clique de "remove"
+            // "remove-purge" is the other button of the second click of "remove"
             let same = st.armed.as_ref().is_some_and(|(i, v, at)| {
                 i == id && (v == verb || (v == "remove" && verb == "remove-purge")) && at.elapsed() < ARM_TTL
             });
@@ -139,8 +140,8 @@ impl Hub {
         if !confirmed {
             return;
         }
-        // a lógica do plugin para antes de a pasta ser trocada (`store_done` religa); para
-        // apagar os dados, espera também ela soltar os arquivos
+        // the plugin logic stops before the folder is swapped (`store_done` restarts it); to
+        // delete the data, it also waits for it to release the files
         crate::apps::plugin::suspend(id);
         if verb == "remove-purge" {
             wait_release(id.to_string(), 0);
@@ -149,22 +150,22 @@ impl Hub {
         }
     }
 
-    /// Instala, atualiza ou remove numa thread; o resultado volta em `store_done`.
+    /// Installs, updates or removes in a thread; the result comes back in `store_done`.
     fn store_spawn(&self, id: &str, verb: &str) {
         let src = Source::from_config(&self.host.config.borrow());
         let (id, verb) = (id.to_string(), verb.to_string());
-        let spawned = std::thread::Builder::new().name("loja".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("store".into()).spawn(move || {
             let root = plugins::dir();
-            // a confirmação já foi o segundo clique, com o resumo na tela
+            // the confirmation was the second click, with the summary on screen
             let result = match verb.as_str() {
                 "remove" => store::remove(&id, &root, &appdata::root(), false),
                 "remove-purge" => store::remove(&id, &root, &appdata::root(), true),
-                _ => store::install(&src, &id, &root, &mut |_| true).map(|_| format!("{id} instalado")),
+                _ => store::install(&src, &id, &root, &mut |_| true).map(|_| tr!("{} installed", id)),
             };
             let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_done(&id, &verb, result)));
         });
         if let Err(e) = spawned {
-            self.store_failed(format!("sem thread para a loja: {e}"));
+            self.store_failed(tr!("no thread for the store: {}", e));
         }
     }
 
@@ -172,15 +173,15 @@ impl Hub {
         self.store.borrow_mut().busy = None;
         match result {
             Ok(msg) => {
-                // o plugin entra (ou sai) do hub sem reiniciar
+                // the plugin comes into (or leaves) the hub without restarting
                 self.reload_plugins();
-                // instalado agora: já liga, na página aberta
+                // just installed: enable it now, on the open page
                 if verb == "install" && !self.host.config.borrow().is_enabled(id) {
                     self.ui.invoke_toggle_app(id.into());
                 }
                 self.store_reload();
                 let mut st = self.store.borrow_mut();
-                st.status = if verb == "install" { format!("{msg} e ligado no painel") } else { msg };
+                st.status = if verb == "install" { tr!("{} and enabled on the panel", msg) } else { msg };
                 st.failed = false;
             }
             Err(e) => {
@@ -189,12 +190,12 @@ impl Hub {
                 st.failed = true;
             }
         }
-        // app externo parado pelo `suspend` e que não foi trocado: volta a rodar
+        // an external app stopped by `suspend` and not swapped: runs again
         crate::apps::plugin::resume(id);
         self.store_push();
     }
 
-    /// Leva o estado à tela.
+    /// Takes the state to the screen.
     fn store_push(&self) {
         let st = self.store.borrow();
         let armed = st.armed.as_ref().filter(|(_, _, at)| at.elapsed() < ARM_TTL);
@@ -205,7 +206,7 @@ impl Hub {
                 let e = &s.entry;
                 let verb = armed.filter(|(i, _, _)| *i == e.id).map(|(_, v, _)| v.as_str()).unwrap_or("");
                 let perms = e.grants_text();
-                // dados guardados (só importa para quem está instalado: a remoção pergunta)
+                // stored data (only matters for installed ones: removing asks about it)
                 let dir = appdata::dir(&e.id);
                 let data = if s.installed.is_some() && appdata::has_data(&dir) {
                     appdata::human(appdata::size(&dir).0)
@@ -214,38 +215,38 @@ impl Hub {
                 };
                 let new_perms = s.new_permissions();
                 let state = match &s.installed {
-                    None => "não instalado".to_string(),
-                    Some(i) if s.has_update() => format!("atualização: {} → {}", i.version, e.version),
-                    Some(i) => format!("instalado {}", i.version),
+                    None => tr!("not installed").to_string(),
+                    Some(i) if s.has_update() => tr!("update: {} → {}", i.version, e.version),
+                    Some(i) => tr!("installed {}", i.version),
                 };
                 let confirm = match verb {
                     "install" if e.full_access => {
-                        "Clique de novo para instalar com ACESSO TOTAL: o app roda com as permissões do seu usuário.".to_string()
+                        tr!("Click again to install with FULL ACCESS: the app runs with your user's permissions.").to_string()
                     }
-                    "install" => format!("Clique de novo para instalar. O plugin pede: {perms}."),
-                    "update" if !new_perms.is_empty() => format!("Clique de novo para atualizar e permitir também: {}.", new_perms.join(", ")),
-                    "update" => "Clique de novo para atualizar (sem permissão nova).".into(),
-                    "remove" if !data.is_empty() => format!(
-                        "{} tem {data} de dados guardados. Manter: ficam para quando você reinstalar (e aparecem em Configurações › Sistema). Apagar: some tudo.",
-                        e.name
+                    "install" => tr!("Click again to install. The plugin asks for: {}.", perms),
+                    "update" if !new_perms.is_empty() => tr!("Click again to update and also allow: {}.", new_perms.join(", ")),
+                    "update" => tr!("Click again to update (no new permission).").into(),
+                    "remove" if !data.is_empty() => tr!(
+                        "{} has {} of stored data. Keep: it stays for when you reinstall (and shows in Settings › System). Delete: it is all gone.",
+                        e.name, data
                     ),
-                    "remove" => format!("Clique de novo para remover {}.", e.name),
+                    "remove" => tr!("Click again to remove {}.", e.name),
                     _ => String::new(),
                 };
                 StoreRow {
                     id: e.id.as_str().into(),
                     name: e.name.as_str().into(),
                     version: e.version.as_str().into(),
-                    byline: format!("{} · {}", if e.author.is_empty() { "sem autor" } else { &e.author }, e.license).into(),
+                    byline: format!("{} · {}", if e.author.is_empty() { tr!("no author") } else { &e.author }, e.license).into(),
                     description: e.description.as_str().into(),
                     permissions: perms.into(),
                     state: state.into(),
                     installed: s.installed.is_some(),
                     update: s.has_update(),
                     warning: if s.has_update() && !new_perms.is_empty() {
-                        format!("ATENÇÃO: a versão nova pede permissão nova: {}", new_perms.join(", ")).into()
+                        tr!("WARNING: the new version asks for new permissions: {}", new_perms.join(", ")).into()
                     } else if e.full_access && s.installed.is_none() {
-                        "ATENÇÃO: app com acesso total. Lê e grava seus arquivos, usa a rede e roda outros programas. Instale só se confia no autor."
+                        tr!("WARNING: app with full access. It reads and writes your files, uses the network and runs other programs. Install only if you trust the author.")
                             .into()
                     } else {
                         "".into()
@@ -265,7 +266,7 @@ impl Hub {
     }
 }
 
-/// Espera a lógica do plugin soltar os arquivos (até 5 s) e então remove apagando os dados.
+/// Waits for the plugin logic to release the files (up to 5 s) and then removes it, deleting the data.
 fn wait_release(id: String, tries: u32) {
     const POLL: Duration = Duration::from_millis(100);
     slint::Timer::single_shot(POLL, move || {

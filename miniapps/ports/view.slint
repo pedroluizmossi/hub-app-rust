@@ -1,6 +1,6 @@
-// Tela do mini-app Portas. Responsiva: se adapta à célula do painel em que está.
-//   estreita (< 520 px): sem contadores grandes e sem linha de comando
-//   baixa (< 260 px): mascote menor
+// View of the Ports mini-app. Responsive: adapts to the panel cell it is in.
+//   narrow (< 520 px): no big counters and no command line
+//   short (< 260 px): smaller mascot
 import { ListView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "../../ui/theme.slint";
 import { Mascot, IconButton, TextButton, Counter, SearchBox, SqSwitch } from "../../ui/widgets.slint";
@@ -9,29 +9,29 @@ export struct PortRow {
     port: int,
     // "tcp" | "udp"
     proto: string,
-    // nome do programa ("(outro usuário)" quando o ss não diz)
+    // program name ("(other user)" when ss does not tell)
     process: string,
-    // linha de comando completa ("" se não deu para ler)
+    // full command line ("" if it could not be read)
     cmd: string,
-    // 0 = desconhecido (não dá para encerrar)
+    // 0 = unknown (cannot be killed)
     pid: int,
-    // "só local", "rede toda" ou o IP
+    // "local only", "whole network" or the IP
     addr-text: string,
     local: bool,
     exposed: bool,
-    // http://… para abrir no navegador ("" no UDP)
+    // http://… to open in the browser ("" for UDP)
     url: string,
-    // primeiro clique em "encerrar" dado: o próximo confirma
+    // first click on "kill" done: the next one confirms
     armed: bool,
-    // abriu há pouco
+    // opened a moment ago
     fresh: bool,
 }
 
-// Estado do mini-app, preenchido pelo Rust (src/apps/ports.rs).
+// Mini-app state, filled in by Rust (src/apps/ports.rs).
 export global PortsApp {
     in property <Colors> theme;
     in property <[PortRow]> rows;
-    // só TCP
+    // TCP only
     in property <int> total;
     in property <int> mine;
     in property <int> exposed;
@@ -71,7 +71,7 @@ component Row inherits Rectangle {
         padding-right: 12px;
         spacing: 12px;
 
-        // a porta, grande; clicável quando dá para abrir no navegador
+        // the port, large; clickable when it can be opened in the browser
         Rectangle {
             width: narrow ? 64px : 76px;
             Text {
@@ -111,7 +111,7 @@ component Row inherits Rectangle {
                     width: udp.preferred-width + 10px;
                     udp := Text { text: "udp"; color: t.fur.mix(t.text, 0.7); font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; }
                 }
-                if p.fresh: Text { text: "nova"; color: t.visor; font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; vertical-alignment: center; }
+                if p.fresh: Text { text: @tr("new"); color: t.visor; font-family: Skin.font-mono; font-size: 11px * Skin.text-scale; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
             }
             HorizontalLayout {
@@ -146,10 +146,10 @@ component Row inherits Rectangle {
                 ink: t.visor;
                 edge: t.visor.with-alpha(0.4);
                 enabled: p.url != "";
-                label: "Abrir no navegador";
+                label: @tr("Open in the browser");
                 clicked => { PortsApp.open-url(p.url); }
             }
-            // dois cliques: o primeiro arma (fica vermelho), o segundo encerra
+            // two clicks: the first arms it (turns red), the second kills
             IconButton {
                 width: btn;
                 height: btn;
@@ -157,7 +157,7 @@ component Row inherits Rectangle {
                 ink: p.armed ? t.alarm : t.fur;
                 edge: p.armed ? t.alarm : t.fur.with-alpha(0.5);
                 enabled: p.pid > 0;
-                label: p.armed ? "Confirmar: encerrar " + p.process : "Encerrar " + p.process;
+                label: p.armed ? @tr("Confirm: kill {}", p.process) : @tr("Kill {}", p.process);
                 clicked => { PortsApp.kill(p.pid); }
             }
         }
@@ -175,7 +175,7 @@ export component PortsView inherits Rectangle {
   VerticalLayout {
     spacing: 12px;
 
-    // mascote + fala + contadores
+    // mascot + speech + counters
     HorizontalLayout {
         spacing: 16px;
         Rectangle {
@@ -197,7 +197,7 @@ export component PortsView inherits Rectangle {
             horizontal-stretch: 1;
             spacing: 4px;
             Text {
-                text: PortsApp.missing ? "ss não instalado" : !PortsApp.ok ? "Não consegui ler as portas" : PortsApp.speech;
+                text: PortsApp.missing ? @tr("ss not installed") : !PortsApp.ok ? @tr("Could not read the ports") : PortsApp.speech;
                 color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
                 font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
@@ -205,7 +205,7 @@ export component PortsView inherits Rectangle {
             }
             Text {
                 text: !PortsApp.ok ? PortsApp.error-text
-                    : PortsApp.total + " TCP · " + PortsApp.mine + (PortsApp.mine == 1 ? " sua · " : " suas · ") + PortsApp.exposed + " na rede toda";
+                    : @tr("{} TCP · yours: {} · on the whole network: {}", PortsApp.total, PortsApp.mine, PortsApp.exposed);
                 color: t.sub;
                 font-family: Skin.font-mono;
                 font-size: 12px * Skin.text-scale;
@@ -216,18 +216,18 @@ export component PortsView inherits Rectangle {
             spacing: 8px;
             alignment: center;
             Counter { theme: t; label: "TCP"; value: PortsApp.total; tint: t.visor; }
-            Counter { theme: t; label: "SUAS"; value: PortsApp.mine; tint: t.ok; }
-            Counter { theme: t; label: "REDE"; value: PortsApp.exposed; tint: t.warn; }
+            Counter { theme: t; label: @tr("YOURS"); value: PortsApp.mine; tint: t.ok; }
+            Counter { theme: t; label: @tr("NETWORK"); value: PortsApp.exposed; tint: t.warn; }
         }
     }
 
-    // busca e filtros
+    // search and filters
     HorizontalLayout {
         spacing: 12px;
         SearchBox {
             theme: t;
             text <=> PortsApp.search;
-            placeholder: narrow ? "buscar…" : "buscar por porta ou programa";
+            placeholder: narrow ? @tr("search…") : @tr("search by port or program");
             horizontal-stretch: 1;
             edited(text) => { PortsApp.search-edited(text); }
         }
@@ -240,7 +240,7 @@ export component PortsView inherits Rectangle {
                 height: 18px;
                 knob: 12px;
                 accent: t.fur;
-                label: "Mostrar UDP";
+                label: @tr("Show UDP");
                 off-track: t.bg1;
                 off-edge: t.muted;
                 off-knob: t.sub;
@@ -251,7 +251,7 @@ export component PortsView inherits Rectangle {
             Text { text: "udp"; color: t.sub; font-size: 14px * Skin.text-scale; vertical-alignment: center; }
         }
         TextButton {
-            text: "atualizar";
+            text: @tr("refresh");
             icon: Icons.refresh;
             ink: t.visor;
             compact: narrow;
@@ -261,7 +261,7 @@ export component PortsView inherits Rectangle {
         }
     }
 
-    // lista
+    // list
     Rectangle {
         vertical-stretch: 1;
         min-height: 50px;
@@ -270,7 +270,7 @@ export component PortsView inherits Rectangle {
         background: t.bg1.mix(t.bg0, 0.6);
 
         if PortsApp.rows.length == 0: Text {
-            text: PortsApp.missing ? "Instale o iproute2 para ver as portas." : PortsApp.search != "" ? "Nenhuma porta bate com esse filtro." : "Nenhuma porta escutando.";
+            text: PortsApp.missing ? @tr("Install iproute2 to see the ports.") : PortsApp.search != "" ? @tr("No port matches this filter.") : @tr("No port listening.");
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 13px * Skin.text-scale;

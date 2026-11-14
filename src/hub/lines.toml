@@ -1,8 +1,8 @@
-# Falas genéricas das mascotes: valem para qualquer app que não declarou aquele caso no
-# próprio miniapps/<app>/lines.toml. Formato e lacunas: src/core/chatter.rs.
+# Generic mascot lines: they apply to any app that did not declare that case in its own
+# miniapps/<app>/lines.toml. Format and blanks: src/core/chatter.rs.
 #
-# Tom: fofo na maioria; algumas falas são bravas, com palavrão (as com ">:("), para a
-# mascote perder a paciência de vez em quando. O diretor não repete as últimas falas ditas.
+# Tone: cute most of the time; some lines are grumpy, with swearing (the ones with ">:("),
+# so the mascot loses its patience now and then. The director does not repeat the last lines said.
 
 [poked]
 pt = [

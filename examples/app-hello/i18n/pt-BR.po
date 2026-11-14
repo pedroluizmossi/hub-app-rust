@@ -1,0 +1,48 @@
+# Brazilian Portuguese for the example external app. The hub reads it for the manifest texts
+# and the @tr("…") of view.slint; the app itself (src/main.rs) reads it for the messages it
+# sends. msgid is the English text, msgstr its translation.
+
+# manifest.toml
+msgid "Hello, external app"
+msgstr "Olá, app externo"
+
+msgid "Example external app: reads the home folder, keeps a counter in a file and shows the CPU. Works on Linux and Windows."
+msgstr "Exemplo de app externo: lê a pasta pessoal, guarda um contador num arquivo e mostra a CPU. Funciona no Linux e no Windows."
+
+msgid "Show the home folder"
+msgstr "Mostrar a pasta pessoal"
+
+# view.slint
+msgid "starting…"
+msgstr "iniciando…"
+
+msgid "Folder"
+msgstr "Pasta"
+
+msgid "Clicks"
+msgstr "Cliques"
+
+msgid "Count"
+msgstr "Contar"
+
+msgid "Reset"
+msgstr "Zerar"
+
+# src/main.rs
+msgid "running as its own program"
+msgstr "rodando como programa próprio"
+
+msgid "up for {}"
+msgstr "ligado há {}"
+
+msgid "clicks: {}"
+msgstr "cliques: {}"
+
+msgid "no home folder"
+msgstr "sem pasta pessoal"
+
+msgid "{} ({} items)"
+msgstr "{} ({} itens)"
+
+msgid "could not write {}: {}"
+msgstr "não consegui gravar {}: {}"

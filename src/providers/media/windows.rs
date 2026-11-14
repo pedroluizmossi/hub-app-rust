@@ -1,5 +1,5 @@
-//! Controles de mídia do sistema no Windows (`GlobalSystemMediaTransportControls`): as
-//! mesmas sessões que aparecem no painel de volume — Spotify, navegadores, players.
+//! System media controls on Windows (`GlobalSystemMediaTransportControls`): the same
+//! sessions that show up in the volume flyout — Spotify, browsers, players.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -9,25 +9,26 @@ use windows::Media::Control::{
 };
 
 use super::{MediaSnapshot, friendly_app, usable};
+use crate::tr;
 
-/// Depois de falhar, espera isto antes de pedir o serviço de novo.
+/// After a failure, wait this long before asking for the service again.
 const RETRY: Duration = Duration::from_secs(10);
-/// O Windows conta o tempo em passos de 100 ns.
+/// Windows counts time in 100 ns steps.
 const TICKS_PER_SEC: i64 = 10_000_000;
-/// Segundos entre 1601 (início do relógio do Windows) e 1970 (início do Unix).
+/// Seconds between 1601 (start of the Windows clock) and 1970 (start of Unix time).
 const EPOCH_GAP_SECS: i64 = 11_644_473_600;
 
 #[derive(Default)]
 pub struct MediaProvider {
     manager: Option<Manager>,
-    /// Player em uso (mantém a escolha entre leituras).
+    /// Player in use (keeps the choice between readings).
     player: String,
     last: Option<MediaSnapshot>,
     retry_at: Option<Instant>,
 }
 
 impl MediaProvider {
-    /// Chamado a cada segundo enquanto o mini-app está ligado. `Some` quando algo mudou.
+    /// Called every second while the mini-app is enabled. `Some` when something changed.
     pub fn collect(&mut self, force: bool) -> Option<MediaSnapshot> {
         let snap = self.read();
         let changed = self.last.as_ref() != Some(&snap);
@@ -38,7 +39,7 @@ impl MediaProvider {
     fn read(&mut self) -> MediaSnapshot {
         if self.manager.is_none() {
             if self.retry_at.is_some_and(|t| Instant::now() < t) {
-                return self.fail("serviço de mídia indisponível");
+                return self.fail(tr!("media service unavailable"));
             }
             match manager() {
                 Ok(m) => {
@@ -51,7 +52,7 @@ impl MediaProvider {
                 }
             }
         }
-        let manager = self.manager.clone().expect("serviço recém-aberto");
+        let manager = self.manager.clone().expect("service just opened");
         match self.poll(&manager) {
             Ok(snap) => snap,
             Err(e) => {
@@ -62,14 +63,14 @@ impl MediaProvider {
         }
     }
 
-    fn fail(&mut self, motivo: &str) -> MediaSnapshot {
+    fn fail(&mut self, reason: &str) -> MediaSnapshot {
         self.player.clear();
-        MediaSnapshot { ok: false, error: motivo.lines().next().unwrap_or_default().to_string(), ..Default::default() }
+        MediaSnapshot { ok: false, error: reason.lines().next().unwrap_or_default().to_string(), ..Default::default() }
     }
 
     fn poll(&mut self, manager: &Manager) -> windows::core::Result<MediaSnapshot> {
-        // Vários apps podem ter sessão aberta. Fica o que toca e que sabe duração/posição;
-        // empate mantém o atual.
+        // Several apps may have a session open. Keep the one that is playing and knows
+        // length/position; a tie keeps the current one.
         let mut best: Option<((u8, u8, u8, u8), MediaSnapshot)> = None;
         for session in manager.GetSessions()? {
             let Ok(snap) = snapshot(&session) else { continue };
@@ -91,21 +92,21 @@ impl MediaProvider {
     }
 }
 
-/// O gerenciador de sessões. A chamada espera a resposta: nunca na thread da UI.
+/// The session manager. The call waits for the answer: never on the UI thread.
 fn manager() -> windows::core::Result<Manager> {
     Manager::RequestAsync()?.join()
 }
 
-/// Agora, no relógio do Windows (passos de 100 ns desde 1601).
+/// Now, on the Windows clock (100 ns steps since 1601).
 fn now_ticks() -> i64 {
     let unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     (unix.as_secs() as i64 + EPOCH_GAP_SECS) * TICKS_PER_SEC + unix.subsec_nanos() as i64 / 100
 }
 
-/// Início, fim e posição atual da faixa, em passos de 100 ns.
+/// Start, end and current position of the track, in 100 ns steps.
 ///
-/// Os apps só informam a posição de vez em quando: tocando, soma o tempo que passou desde
-/// a última informação.
+/// Apps only report the position now and then: while playing, add the time elapsed since
+/// the last report.
 fn timeline(session: &Session, playing: bool) -> windows::core::Result<(i64, i64, i64)> {
     let t = session.GetTimelineProperties()?;
     let (start, end) = (t.StartTime()?.Duration, t.EndTime()?.Duration);
@@ -133,7 +134,7 @@ fn snapshot(session: &Session) -> windows::core::Result<MediaSnapshot> {
     let toggle = can(controls.IsPlayPauseToggleEnabled());
     let (start, end, position) = timeline(session, state == "Playing").unwrap_or_default();
     let seconds = |ticks: i64| (ticks.max(0) / TICKS_PER_SEC) as u32;
-    // título e artista podem faltar (app que só abriu a sessão): ainda assim é um player
+    // title and artist may be missing (an app that only opened the session): still a player
     let props = session.TryGetMediaPropertiesAsync().and_then(|op| op.join()).ok();
     let text = |get: &dyn Fn(&windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> windows::core::Result<windows::core::HSTRING>| {
         props.as_ref().and_then(|p| get(p).ok()).map(|s| s.to_string()).unwrap_or_default()
@@ -157,16 +158,16 @@ fn snapshot(session: &Session) -> windows::core::Result<MediaSnapshot> {
     })
 }
 
-/// Executa um comando no player. Verbos: play-pause, next, prev, back, fwd, raise.
-/// `seek_us` é o pulo dos botões de avançar/voltar, em microssegundos.
+/// Runs a command on the player. Verbs: play-pause, next, prev, back, fwd, raise.
+/// `seek_us` is the jump of the back/forward buttons, in microseconds.
 pub fn send(service: &str, verb: &str, seek_us: i64) -> anyhow::Result<()> {
     if !valid_service(service) {
-        anyhow::bail!("player inválido");
+        anyhow::bail!("{}", tr!("invalid player"));
     }
     let mut sessions = manager()?.GetSessions()?.into_iter();
     let session = sessions
         .find(|s| s.SourceAppUserModelId().is_ok_and(|id| id == service))
-        .ok_or_else(|| anyhow::anyhow!("o player fechou"))?;
+        .ok_or_else(|| anyhow::anyhow!("{}", tr!("the player closed")))?;
     let accepted = match verb {
         "play-pause" => session.TryTogglePlayPauseAsync()?.join()?,
         "next" => session.TrySkipNextAsync()?.join()?,
@@ -174,20 +175,20 @@ pub fn send(service: &str, verb: &str, seek_us: i64) -> anyhow::Result<()> {
         "back" | "fwd" => {
             let playing = session.GetPlaybackInfo()?.PlaybackStatus()? == Status::Playing;
             let (start, end, position) = timeline(&session, playing)?;
-            // microssegundos -> passos de 100 ns
+            // microseconds -> 100 ns steps
             let step = seek_us.abs().saturating_mul(10);
             let target = if verb == "back" { position - step } else { position + step };
             let target = if end > start { target.clamp(start, end) } else { target.max(0) };
             session.TryChangePlaybackPositionAsync(target)?.join()?
         }
-        // o Windows não tem como trazer a janela de outro app para a frente por aqui
+        // Windows has no way to bring another app's window to the front from here
         _ => true,
     };
-    anyhow::ensure!(accepted, "o player recusou o comando");
+    anyhow::ensure!(accepted, "{}", tr!("the player refused the command"));
     Ok(())
 }
 
-/// Identificador de sessão que veio do sistema: qualquer texto não vazio e curto.
+/// Session identifier that came from the system: any short, non-empty text.
 pub fn valid_service(service: &str) -> bool {
     !service.is_empty() && service.len() <= 255
 }

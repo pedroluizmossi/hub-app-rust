@@ -1,6 +1,9 @@
-// Lógica do plugin "Top processos". Roda isolado: só pode usar a API do MiniUtils.
-// Os processos chegam do provedor "procs" do hub (uses no manifesto), a cada 3 s e iguais
-// no Linux e no Windows: o plugin não roda nenhum programa.
+// Logic of the "Top processes" plugin. It runs sandboxed: it can only use the MiniUtils API.
+// The processes come from the hub's "procs" provider (uses in the manifest), every 3 s and
+// the same on Linux and Windows: the plugin runs no program.
+//
+// Texts: the view (view.slint) phrases them with @tr("…") and translates them from
+// i18n/pt-BR.po; this script sends values (the process count, the sort order).
 
 fn start() {
     this.sort = "cpu";
@@ -29,19 +32,19 @@ fn show() {
     let list = if this.sort == "mem" { this.data.by_mem } else { this.data.by_cpu };
     let rows = [];
     for p in list {
-        // % da máquina toda: 25% numa máquina de 8 núcleos são 2 núcleos inteiros
+        // % of the whole machine: 25% on an 8-core machine is 2 full cores
         rows.push(#{ name: p.name, cpu: pct(p.cpu), mem: pct(p.mem), hot: p.cpu > 25.0 });
         if rows.len() >= 6 { break; }
     }
     ui("rows", rows);
-    let por = if this.sort == "mem" { "por memória" } else { "por CPU" };
-    ui("subtitle", `${por} · ${this.data.count} processos`);
+    ui("count", this.data.count);
     let top = if this.data.by_cpu.len() > 0 { this.data.by_cpu[0].cpu } else { 0.0 };
     mood(if top > 50.0 { "busy" } else if top > 5.0 { "happy" } else { "idle" });
     if rows.len() > 0 {
-        let de = if this.sort == "mem" { " de memória" } else { " de CPU" };
-        let valor = if this.sort == "mem" { rows[0].mem } else { rows[0].cpu };
-        summary(rows[0].name + " " + valor + de);
+        // the card's summary line (not translated: scripts have no catalog)
+        let what = if this.sort == "mem" { " memory" } else { " CPU" };
+        let value = if this.sort == "mem" { rows[0].mem } else { rows[0].cpu };
+        summary(rows[0].name + " " + value + what);
     }
 }
 

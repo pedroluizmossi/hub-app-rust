@@ -1,5 +1,6 @@
-// Tela do plugin "Top processos". O host preenche theme, mascot e mood; o script
-// (main.rhai) preenche o resto com ui("propriedade", valor).
+// View of the "Top processes" plugin. The host fills theme, mascot and mood; the script
+// (main.rhai) fills the rest with ui("property", value). Texts use @tr("…"): the hub
+// translates them from i18n/<language>.po when it loads the view.
 import { Theme } from "miniutils.slint";
 
 export struct Proc {
@@ -27,7 +28,8 @@ export component Main inherits Rectangle {
     in property <Theme> theme;
     in property <image> mascot;
     in property <string> mood;
-    in property <string> subtitle: "lendo…";
+    // number of processes; -1 until the first reading
+    in property <int> count: -1;
     in property <string> sort: "cpu";
     in property <[Proc]> rows;
     callback action(string, string);
@@ -46,15 +48,20 @@ export component Main inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 1;
-                Text { text: "Top processos"; color: theme.text; font-family: theme.font-title; font-size: 17px; font-weight: 700; }
-                Text { text: subtitle; color: theme.sub; font-size: 12px; overflow: elide; }
+                Text { text: @tr("Top processes"); color: theme.text; font-family: theme.font-title; font-size: 17px; font-weight: 700; }
+                Text {
+                    text: count < 0 ? @tr("reading…") : sort == "mem" ? @tr("by memory · {} processes", count) : @tr("by CPU · {} processes", count);
+                    color: theme.sub;
+                    font-size: 12px;
+                    overflow: elide;
+                }
             }
             VerticalLayout {
                 alignment: center;
                 HorizontalLayout {
                     spacing: 6px;
                     Tab { theme: theme; label: "CPU"; on: sort == "cpu"; clicked => { root.action("sort", "cpu"); } }
-                    Tab { theme: theme; label: "Memória"; on: sort == "mem"; clicked => { root.action("sort", "mem"); } }
+                    Tab { theme: theme; label: @tr("Memory"); on: sort == "mem"; clicked => { root.action("sort", "mem"); } }
                 }
             }
         }

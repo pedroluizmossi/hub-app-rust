@@ -1,4 +1,4 @@
-//! Cartões das assinaturas de IA; dados vêm dos provedores na thread de coleta.
+//! Cards of the AI subscriptions; the data comes from the providers on the collector thread.
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -13,6 +13,7 @@ use crate::core::miniapp::{Host, MiniApp};
 use crate::mascot::anim::{Animator, Reaction};
 use crate::mascot::{Mood, render};
 use crate::providers::ai_usage::{self as provider, UsageSnapshot, UsageWindow};
+use crate::tr;
 use crate::ui::{AiUsageApp, HubWindow, UsageCard, UsageLine};
 
 #[path = "ai_mascots.rs"]
@@ -22,16 +23,16 @@ mod ai_pace;
 use ai_pace::Forecast;
 
 const N: usize = provider::SOURCES.len();
-/// Chave de config que liga cada fonte, na ordem de `provider::SOURCES`.
+/// Config key that turns each source on, in the order of `provider::SOURCES`.
 const SHOW_KEYS: [&str; N] = ["show_codex", "show_claude", "show_kiro", "show_opencode"];
-/// Programa de linha de comando de cada fonte, na ordem de `provider::SOURCES`.
+/// Command-line program of each source, in the order of `provider::SOURCES`.
 const COMMANDS: [&str; N] = ["codex", "claude", "kiro-cli", "opencode"];
-/// Abaixo do alarme menos isto, o aviso daquela janela "rearma".
+/// Below the alarm minus this, the warning of that window "re-arms".
 const SLACK: f64 = 10.0;
-/// A fala da previsão só diz quantos minutos faltam até este tanto ("em 900 min" não ajuda).
+/// The forecast line only says how many minutes are left up to this much ("in 900 min" doesn't help).
 const FORECAST_MINUTES: i64 = 120;
 
-/// Limites (em %) lidos da config: agitado e alarme.
+/// Thresholds (in %) read from the config: busy and alarm.
 #[derive(Clone, Copy)]
 struct Levels {
     warn: f64,
@@ -39,7 +40,7 @@ struct Levels {
 }
 
 impl Levels {
-    /// Nível de uma janela de uso. Vale para a cor da barra e para o humor.
+    /// Level of a usage window. Used for the bar color and for the mood.
     fn of(self, used: f64) -> Mood {
         if used >= self.alarm {
             Mood::Alarm
@@ -56,25 +57,25 @@ pub struct AiUsageMini {
     manifest: Manifest,
     snap: UsageSnapshot,
     cards: Rc<VecModel<UsageCard>>,
-    /// Fonte (índice em `snap.cards`) mostrada em cada linha da tela.
+    /// Source (index into `snap.cards`) shown in each row of the screen.
     rows: Vec<usize>,
     mascots: [render::Cache; N],
     anims: [Animator; N],
     reactions: [Option<Reaction>; N],
-    /// Janelas que já avisaram (fonte + rótulo), até voltarem abaixo do alarme.
+    /// Windows that already warned (source + label), until they go back below the alarm.
     alerted: HashSet<String>,
-    /// Fontes ligadas na última leitura da config (para pedir leitura das recém-ligadas).
+    /// Sources enabled at the last config read (to request a reading of newly enabled ones).
     enabled: u8,
-    /// Humor de cada fonte pelo % usado (sem a previsão) na última leitura com dados,
-    /// para contar quando muda.
+    /// Mood of each source by the % used (without the forecast) at the last reading with
+    /// data, to tell when it changes.
     moods: [Mood; N],
-    /// Fontes que a previsão já apontava na última leitura com dados.
+    /// Sources the forecast already pointed at in the last reading with data.
     strained_before: [bool; N],
-    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    /// Facts for the chat between mascots, until the hub collects them.
     facts: Vec<Fact>,
-    /// Leituras recentes de cada janela de uso (fonte + rótulo), para medir o ritmo.
+    /// Recent readings of each usage window (source + label), to measure the pace.
     pace: HashMap<String, ai_pace::History>,
-    /// Previsão de cada janela de cada fonte, na ordem de `windows`.
+    /// Forecast of each window of each source, in the order of `windows`.
     forecasts: [Vec<Option<Forecast>>; N],
 }
 
@@ -84,7 +85,7 @@ impl AiUsageMini {
         ui.global::<AiUsageApp>().set_cards(ModelRc::from(cards.clone()));
         let app = Rc::new(RefCell::new(Self {
             host,
-            manifest: Manifest::parse(include_str!("../../miniapps/ai_usage/manifest.toml")).expect("manifesto inválido"),
+            manifest: Manifest::parse(include_str!("../../miniapps/ai_usage/manifest.toml")).expect("invalid manifest"),
             snap: UsageSnapshot::default(),
             cards,
             rows: Vec::new(),
@@ -125,12 +126,12 @@ impl AiUsageMini {
         app
     }
 
-    /// Abre num terminal o programa da fonte mostrada na linha `row`.
+    /// Opens the program of the source shown in row `row` in a terminal.
     fn launch(&self, row: usize) {
         let Some(&i) = self.rows.get(row) else { return };
         let (name, cmd) = (provider::SOURCES[i], COMMANDS[i]);
         if let Err(e) = self.host.exec_for(&self.manifest).open_terminal(name, &[cmd]) {
-            self.host.notifier.borrow_mut().send(&format!("ai_usage:launch:{cmd}"), &format!("Não deu para abrir o {name}"), &e.to_string(), false);
+            self.host.notifier.borrow_mut().send(&format!("ai_usage:launch:{cmd}"), &tr!("Couldn't open {}", name), &e.to_string(), false);
         }
     }
 
@@ -141,8 +142,8 @@ impl AiUsageMini {
         Levels { warn: warn.min(alarm), alarm }
     }
 
-    /// Lê da config as fontes ligadas e o intervalo, e repassa ao provedor (outra thread).
-    /// Fonte recém-ligada pede uma leitura na hora.
+    /// Reads the enabled sources and the interval from the config and passes them to the
+    /// provider (another thread). A newly enabled source requests a reading right away.
     fn sync_provider(&mut self) {
         let (enabled, poll) = {
             let cfg = self.host.config.borrow();
@@ -156,7 +157,7 @@ impl AiUsageMini {
         self.enabled = enabled;
     }
 
-    /// A mascote da fonte `i`, para a conversa entre mascotes.
+    /// The mascot of source `i`, for the chat between mascots.
     fn voice(&self, i: usize) -> Option<Voice> {
         let card = self.snap.cards.get(i)?;
         Some(Voice {
@@ -168,8 +169,8 @@ impl AiUsageMini {
         })
     }
 
-    /// Conta as fontes que pioraram ou melhoraram desde a última leitura. Fonte sem dados
-    /// (desatualizada, sem login) não conta: o humor dela é "dormindo" por falta de leitura.
+    /// Records the sources that got worse or better since the last reading. A source without
+    /// data (stale, not logged in) doesn't count: its mood is "sleeping" for lack of a reading.
     fn collect_facts(&mut self) {
         for i in 0..self.snap.cards.len().min(N) {
             let card = &self.snap.cards[i];
@@ -177,8 +178,8 @@ impl AiUsageMini {
                 continue;
             }
             let used = card.windows.iter().map(|w| w.used).fold(0.0, f64::max);
-            // O humor pelo % usado e a previsão são contados à parte: a previsão tem fala
-            // própria, e o fim dela (o ritmo caiu) não é "limite renovou".
+            // The mood by % used and the forecast are counted separately: the forecast has its
+            // own line, and its end (the pace dropped) is not "the limit renewed".
             let now = self.levels().of(used);
             let before = std::mem::replace(&mut self.moods[i], now);
             let strained = self.strained(i);
@@ -203,12 +204,12 @@ impl AiUsageMini {
         if self.strained(i) { mood.max(Mood::Busy) } else { mood }
     }
 
-    /// Alguma janela da fonte `i` acaba antes de renovar, no ritmo de agora.
+    /// Some window of source `i` runs out before it renews, at the current pace.
     fn strained(&self, i: usize) -> bool {
         self.forecasts[i].iter().flatten().any(|f| f.strained)
     }
 
-    /// Guarda a leitura nova de cada janela (sem horário de renovação, só para o gráfico).
+    /// Stores the new reading of each window (without a renewal time, only for the chart).
     fn record_pace(&mut self) {
         for card in self.snap.cards.iter().take(N) {
             let Some(at) = card.updated_at.filter(|_| !card.stale) else { continue };
@@ -219,7 +220,7 @@ impl AiUsageMini {
         }
     }
 
-    /// Refaz as previsões (config "forecast"). Fonte desatualizada não tem previsão.
+    /// Recomputes the forecasts (config "forecast"). A stale source has no forecast.
     fn refresh_forecasts(&mut self) {
         let on = self.host.config.borrow().bool(&self.manifest, "forecast");
         let now = now();
@@ -248,7 +249,7 @@ impl AiUsageMini {
         }
     }
 
-    /// Fontes que aparecem na tela, na ordem dos cartões.
+    /// Sources shown on screen, in card order.
     fn visible_rows(&self) -> Vec<usize> {
         let hide_empty = self.host.config.borrow().bool(&self.manifest, "hide_empty");
         self.snap.cards.iter().enumerate().take(N)
@@ -256,7 +257,7 @@ impl AiUsageMini {
             .map(|(i, _)| i).collect()
     }
 
-    /// Avisa uma vez quando uma janela de uso passa do alarme; rearma quando ela cai.
+    /// Warns once when a usage window goes past the alarm; re-arms when it drops.
     fn check_alerts(&mut self) {
         let on = self.host.config.borrow().bool(&self.manifest, "alerts");
         if !on {
@@ -275,7 +276,7 @@ impl AiUsageMini {
                             reset if reset.is_empty() => w.detail.clone(),
                             reset => reset,
                         };
-                        out.push((key, format!("{} · {} em {:.0}%", card.name, w.label, w.used), body));
+                        out.push((key, tr!("{} · {} at {}%", card.name, w.label, format!("{:.0}", w.used)), body));
                     }
                 } else if w.used < alarm - SLACK {
                     self.alerted.remove(&key);
@@ -304,7 +305,7 @@ impl AiUsageMini {
             let card = &self.snap.cards[i];
             let lines: Vec<UsageLine> = card.windows.iter().enumerate().map(|(k, w)| UsageLine {
                 label: w.label.clone().into(), value: w.used as f32,
-                detail: if w.detail.is_empty() { format!("{:.1}% usado", w.used) } else { w.detail.clone() }.into(),
+                detail: if w.detail.is_empty() { tr!("{}% used", format!("{:.1}", w.used)) } else { w.detail.clone() }.into(),
                 reset: match self.forecasts[i].get(k).copied().flatten() {
                     Some(f) => forecast_text(w, f, relative),
                     None => reset_text(w, relative),
@@ -335,11 +336,11 @@ fn now() -> i64 {
 
 fn age(at: i64) -> String {
     let minutes = now().saturating_sub(at) / 60;
-    if minutes < 1 { "agora".into() } else if minutes < 60 { format!("há {minutes} min") }
-    else { format!("há {} h", minutes / 60) }
+    if minutes < 1 { tr!("just now").into() } else if minutes < 60 { tr!("{} min ago", minutes) }
+    else { tr!("{} h ago", minutes / 60) }
 }
 
-/// Quanto falta, em texto curto: "35 min", "2 h 15 min", "3 d 4 h".
+/// Time left, as short text: "35 min", "2 h 15 min", "3 d 4 h".
 fn remaining(secs: i64) -> String {
     let minutes = (secs.max(0) + 59) / 60;
     let (d, h, m) = (minutes / 1440, minutes / 60 % 24, minutes % 60);
@@ -356,35 +357,36 @@ fn pace_key(source: &str, w: &UsageWindow) -> String {
     format!("{source}:{}", w.label)
 }
 
-/// Data e hora locais de um instante.
+/// Local date and time of an instant.
 fn local(at: i64) -> Option<chrono::DateTime<chrono::Local>> {
     chrono::DateTime::from_timestamp(at, 0).map(|utc| utc.with_timezone(&chrono::Local))
 }
 
 fn reset_text(w: &UsageWindow, relative: bool) -> String {
-    if !w.reset_date.is_empty() { return format!("Renova em {}", w.reset_date); }
+    if !w.reset_date.is_empty() { return tr!("Resets in {}", w.reset_date); }
     let Some(at) = w.resets_at.filter(|t| *t > 0) else { return String::new() };
-    if relative { return format!("Renova em {}", remaining(at - now())); }
+    if relative { return tr!("Resets in {}", remaining(at - now())); }
     let Some(local) = local(at) else { return String::new() };
-    local.format("Renova %d/%m às %H:%M").to_string()
+    // strftime pattern: the catalog gives each language its own date order
+    local.format(tr!("Resets %m/%d at %H:%M")).to_string()
 }
 
-/// Hora curta: "16:10" se for hoje, "12/11 16:10" se for outro dia.
+/// Short time: "16:10" if it's today, "11/12 16:10" (month/day in English) on another day.
 fn clock(at: i64) -> String {
     let (Some(t), Some(today)) = (local(at), local(now())) else { return String::new() };
-    let format = if t.date_naive() == today.date_naive() { "%H:%M" } else { "%d/%m %H:%M" };
+    let format = if t.date_naive() == today.date_naive() { "%H:%M" } else { tr!("%m/%d %H:%M") };
     t.format(format).to_string()
 }
 
-/// Texto da janela que, nesse ritmo, acaba antes de renovar. O fim vem primeiro: se a
-/// linha não couber, o que se perde é a renovação.
+/// Text of a window that, at this pace, runs out before it renews. The end comes first: if
+/// the line doesn't fit, what gets cut is the renewal.
 fn forecast_text(w: &UsageWindow, f: Forecast, relative: bool) -> String {
     let resets_at = w.resets_at.unwrap_or(0);
     if relative {
         let now = now();
-        format!("Acaba em ~{} · renova em {}", remaining(f.ends_at - now), remaining(resets_at - now))
+        tr!("Runs out in ~{} · resets in {}", remaining(f.ends_at - now), remaining(resets_at - now))
     } else {
-        format!("Acaba ~{} · renova {}", clock(f.ends_at), clock(resets_at))
+        tr!("Runs out ~{} · resets {}", clock(f.ends_at), clock(resets_at))
     }
 }
 
@@ -428,7 +430,7 @@ impl MiniApp for AiUsageMini {
     fn summary(&self) -> String {
         let shown = self.rows.len();
         let active = self.rows.iter().filter(|&&i| !self.snap.cards[i].windows.is_empty()).count();
-        format!("Assinaturas de IA: {active}/{shown} fontes disponíveis")
+        tr!("AI subscriptions: {}/{} sources available", active, shown)
     }
 }
 
@@ -437,15 +439,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn botoes_do_terminal_tem_permissao() {
+    fn terminal_buttons_have_permission() {
         let m = Manifest::parse(include_str!("../../miniapps/ai_usage/manifest.toml")).unwrap();
         for cmd in COMMANDS {
-            assert!(m.permissions.exec.iter().any(|p| p == cmd), "{cmd} fora de permissions.exec");
+            assert!(m.permissions.exec.iter().any(|p| p == cmd), "{cmd} missing from permissions.exec");
         }
     }
 
     #[test]
-    fn tempo_restante_curto() {
+    fn short_time_left() {
         assert_eq!(remaining(30), "1 min");
         assert_eq!(remaining(35 * 60), "35 min");
         assert_eq!(remaining(2 * 3600), "2 h");
@@ -456,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn niveis_pela_config() {
+    fn levels_from_the_config() {
         let l = Levels { warn: 60.0, alarm: 80.0 };
         assert_eq!(l.of(59.0), Mood::Idle);
         assert_eq!(l.of(60.0), Mood::Busy);

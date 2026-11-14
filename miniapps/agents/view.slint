@@ -1,19 +1,19 @@
-// Tela do mini-app Agentes de IA. Responsiva: se adapta à célula do painel em que está.
-//   estreita (< 520 px): sem contadores grandes, estado menor, detalhes sem recuo
-//   baixa (< 260 px): mascote menor e cartões só com o cabeçalho (sem os detalhes)
-// Cada sessão é um cartão: cabeçalho (mascote, título, estado) e, abaixo, o que a
-// ferramenta informar (etiquetas de modelo/esforço/branch, tokens, último turno, último
-// pedido, subagentes). O que vier vazio some, então o cartão de uma ferramenta que informa
-// menos é só mais baixo. Clicar no cartão abre os botões de ação; outro clique fecha.
-// "Detalhes" abre a sessão numa janela própria (detail.slint).
-// Sessão com subagentes trabalhando ganha uma faixa em que eles andam de um lado para o outro.
+// View of the AI agents mini-app. Responsive: adapts to the panel cell it is in.
+//   narrow (< 520 px): no big counters, smaller state, details without indent
+//   short (< 260 px): smaller mascot and cards with the header only (no details)
+// Each session is a card: header (mascot, title, state) and, below it, whatever the tool
+// reports (model/effort/branch chips, tokens, last turn, last prompt, subagents). Whatever
+// comes empty goes away, so the card of a tool that reports less is just shorter. Clicking
+// the card opens the action buttons; another click closes them.
+// "Details" opens the session in its own window (detail.slint).
+// A session with working subagents gets a strip where they walk back and forth.
 import { ListView } from "std-widgets.slint";
 import { Colors, Skin, Icons, Anim } from "../../ui/theme.slint";
 import { Mascot, Counter, TextButton } from "../../ui/widgets.slint";
 
-// Um subagente no cartão da sessão que o disparou.
+// A subagent on the card of the session that spawned it.
 export struct AgentSub {
-    // tipo ("Explore", "web-fetch"…; "" = não sei)
+    // type ("Explore", "web-fetch"…; "" = unknown)
     kind: string,
     title: string,
     // "working" | "idle"
@@ -21,40 +21,40 @@ export struct AgentSub {
     state-text: string,
 }
 
-// Um subagente andando com uma mascote importada (PNG; ver mascot/stroll.rs).
+// A subagent walking as an imported mascot (PNG; see mascot/stroll.rs).
 export struct AgentWalker {
-    // o quadro de agora (o Rust troca a cada quadro: anda, para, ataca, corre, pula)
+    // the current frame (Rust changes it every frame: walks, stops, attacks, runs, jumps)
     frame: image,
-    // posição na faixa: 0 = ponta esquerda, 1 = direita
+    // position on the strip: 0 = left end, 1 = right end
     x: float,
 }
 
 export struct AgentRow {
-    // identifica a sessão nos cliques (a posição muda quando a lista se reordena)
+    // identifies the session in clicks (the position changes when the list reorders)
     key: string,
     title: string,
-    // "Claude · 2 subagentes ativos · Edit: bus.rs" (parada, a pasta no lugar da ação)
+    // "Claude · 2 active subagents · Edit: bus.rs" (idle: the folder instead of the action)
     info: string,
     // "working" | "waiting" | "idle"
     state: string,
-    // "trabalhando há 3 min", "esperando você: permissão", "parado há 12 min"
+    // "working for 3 min", "waiting for you: permission", "idle for 12 min"
     state-text: string,
-    // subagente cuja sessão de origem não está na lista
+    // subagent whose parent session is not in the list
     sub: bool,
-    // mascote da ferramenta, já no humor do estado
+    // the tool mascot, already in the mood of the state
     mascot: image,
-    // sessão parada do Codex ou do OpenCode: dá para retomar num terminal
+    // idle Codex or OpenCode session: can be resumed in a terminal
     can-resume: bool,
-    // cartão clicado: mostra os botões
+    // clicked card: shows the buttons
     open: bool,
-    // subagentes trabalhando agora (no máximo 6 aparecem andando)
+    // subagents working now (at most 6 are shown walking)
     walkers: int,
-    // mascote de um subagente trabalhando
+    // mascot of a working subagent
     walker: image,
-    // os que andam com mascote importada, mais os que acabaram e estão pulando para sair
-    // (vazio = todos com `walker`)
+    // those walking as an imported mascot, plus those that finished and are jumping out
+    // (empty = all with `walker`)
     heroes: [AgentWalker],
-    // detalhes: "" (ou false) = a ferramenta não informa, e a parte some do cartão
+    // details: "" (or false) = the tool does not report it, and that part leaves the card
     model: string,
     effort: string,
     branch: string,
@@ -62,27 +62,27 @@ export struct AgentRow {
     tok-in: string,
     tok-out: string,
     tok-cache: string,
-    // duração do último turno
+    // duration of the last turn
     turn: string,
-    // "316 mensagens · resposta completa"
+    // "316 messages · full answer"
     turn-note: string,
-    // último pedido do usuário
+    // last user prompt
     prompt: string,
     subs: [AgentSub],
-    // subagentes além dos listados
+    // subagents beyond the listed ones
     more-subs: int,
 }
 
-// Estado do mini-app, preenchido pelo Rust (src/apps/agents.rs).
+// Mini-app state, filled in by Rust (src/apps/agents.rs).
 export global AgentsApp {
     in property <Colors> theme;
     in property <[AgentRow]> rows;
     in property <int> working;
     in property <int> waiting;
     in property <int> idle;
-    // nenhuma das ferramentas está instalada
+    // none of the tools is installed
     in property <bool> missing;
-    // fontes que não deu para ler ("" = tudo certo)
+    // sources that could not be read ("" = all fine)
     in property <string> error-text;
     in property <image> mascot;
     in property <string> mood: "sleep";
@@ -90,16 +90,15 @@ export global AgentsApp {
     in property <string> speech;
 
     callback mascot-poked();
-    // todos recebem o índice da linha
-    // recebem a `key` da sessão
-    callback toggle(string);          // abre ou fecha as opções
-    callback open-dir(string);        // pasta no gerenciador de arquivos
-    callback open-terminal(string);   // terminal na pasta
-    callback resume(string);          // retoma a sessão num terminal
-    callback details(string);         // abre a janela de detalhe da sessão
+    // these get the session `key`
+    callback toggle(string);          // opens or closes the options
+    callback open-dir(string);        // folder in the file manager
+    callback open-terminal(string);   // terminal in the folder
+    callback resume(string);          // resumes the session in a terminal
+    callback details(string);         // opens the session detail window
 }
 
-// Etiqueta pequena: modelo, esforço, branch.
+// Small chip: model, effort, branch.
 component Chip inherits Rectangle {
     in property <string> label;
     in property <string> text;
@@ -132,7 +131,7 @@ component Chip inherits Rectangle {
     }
 }
 
-// Um número com a legenda ao lado: "45 k saída".
+// A number with its caption beside it: "45 k output".
 component Stat inherits HorizontalLayout {
     in property <string> value;
     in property <string> label;
@@ -161,7 +160,7 @@ component Row inherits Rectangle {
     in property <AgentRow> a;
     in property <int> index;
     in property <bool> narrow;
-    // célula baixa: só o cabeçalho
+    // short cell: header only
     in property <bool> compact;
     property <Colors> t: AgentsApp.theme;
     property <color> ink: a.state == "waiting" ? t.warn : a.state == "working" ? t.ok : t.sub;
@@ -169,10 +168,10 @@ component Row inherits Rectangle {
     property <length> base: narrow ? 50px : 56px;
     property <length> inset: a.sub ? 28px : 12px;
     property <length> face-w: narrow ? 32px : 40px;
-    // os detalhes começam alinhados com o título (na célula estreita, com a mascote)
+    // the details start aligned with the title (in a narrow cell, with the mascot)
     property <length> text-x: narrow ? inset : inset + face-w + 12px;
 
-    // alturas de cada parte do cartão (0 = a parte não aparece)
+    // heights of each part of the card (0 = the part is not shown)
     property <bool> has-chips: !compact && (a.model != "" || a.effort != "" || a.branch != "");
     property <bool> has-stats: !compact && (a.has-tokens || a.turn != "");
     property <bool> has-prompt: !compact && a.prompt != "";
@@ -184,24 +183,24 @@ component Row inherits Rectangle {
     property <length> subs-h: sub-lines * sub-h + (sub-lines > 0 ? 4px : 0);
     property <length> details-h: chips-h + stats-h + prompt-h + subs-h
         + (has-chips || has-stats || has-prompt || sub-lines > 0 ? 8px : 0);
-    // faixa dos subagentes trabalhando (mais alta com as mascotes importadas, de até 32 px)
+    // strip of working subagents (taller with the imported mascots, up to 32 px)
     property <length> walk-h: a.heroes.length > 0 ? 42px : a.walkers > 0 ? 30px : 0;
     property <length> options-h: a.open ? 46px : 0;
 
     height: base + details-h + walk-h + options-h;
     background: a.state == "waiting" ? t.warn.with-alpha(0.1) : a.open ? t.visor.with-alpha(0.08) : hover.has-hover ? t.visor.with-alpha(0.05) : transparent;
 
-    // clique no cartão: abre ou fecha as opções
+    // click on the card: opens or closes the options
     hover := TouchArea {
         mouse-cursor: pointer;
         clicked => { AgentsApp.toggle(root.a.key); }
     }
 
     Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
-    // faixa do estado na borda esquerda
+    // state stripe on the left edge
     Rectangle { x: 0; width: 3px; background: a.state == "idle" ? transparent : ink; }
 
-    // cabeçalho: mascote, título, estado
+    // header: mascot, title, state
     HorizontalLayout {
         y: 0;
         height: base;
@@ -254,7 +253,7 @@ component Row inherits Rectangle {
         }
     }
 
-    // detalhes: cada parte tem altura fixa e some quando a ferramenta não informa
+    // details: each part has a fixed height and goes away when the tool does not report it
     if details-h > 0: Rectangle {
         x: text-x;
         y: base - 2px;
@@ -263,7 +262,7 @@ component Row inherits Rectangle {
         clip: true;
         opacity: dim ? 0.8 : 1;
 
-        // etiquetas: modelo, esforço, branch
+        // chips: model, effort, branch
         if has-chips: HorizontalLayout {
             x: 0;
             y: 0;
@@ -272,28 +271,28 @@ component Row inherits Rectangle {
             spacing: 6px;
             padding-bottom: 6px;
             if a.model != "": Chip { text: a.model; ink: t.visor; }
-            if a.effort != "": Chip { label: "esforço"; text: a.effort; ink: t.fur; }
+            if a.effort != "": Chip { label: @tr("effort"); text: a.effort; ink: t.fur; }
             if a.branch != "": Chip { label: "branch"; text: a.branch; ink: t.ok; }
         }
 
-        // números: tokens da sessão e o último turno
+        // numbers: session tokens and the last turn
         if has-stats: HorizontalLayout {
             x: 0;
             y: chips-h;
             height: stats-h;
             alignment: start;
             spacing: narrow ? 10px : 16px;
-            if a.has-tokens: Stat { value: a.tok-in; label: narrow ? "ent." : "entrada"; ink: t.text; }
-            if a.has-tokens: Stat { value: a.tok-out; label: "saída"; ink: t.text; }
+            if a.has-tokens: Stat { value: a.tok-in; label: narrow ? @tr("in") : @tr("input"); ink: t.text; }
+            if a.has-tokens: Stat { value: a.tok-out; label: @tr("output"); ink: t.text; }
             if a.has-tokens: Stat { value: a.tok-cache; label: "cache"; ink: t.text; }
             if a.turn != "": Stat {
                 value: a.turn;
-                label: narrow || a.turn-note == "" ? "último turno" : "último turno · " + a.turn-note;
+                label: narrow || a.turn-note == "" ? @tr("last turn") : @tr("last turn · {}", a.turn-note);
                 ink: t.visor;
             }
         }
 
-        // último pedido do usuário
+        // last user prompt
         if has-prompt: HorizontalLayout {
             x: 0;
             y: chips-h + stats-h;
@@ -315,7 +314,7 @@ component Row inherits Rectangle {
             }
         }
 
-        // subagentes: ponto do estado, tipo, o que faz e há quanto tempo
+        // subagents: state dot, type, what it does and for how long
         for s[i] in a.subs: HorizontalLayout {
             property <color> dot: s.state == "working" ? t.ok : t.muted;
             x: 0;
@@ -357,7 +356,7 @@ component Row inherits Rectangle {
             x: 12px;
             y: chips-h + stats-h + prompt-h + 4px + a.subs.length * sub-h;
             height: sub-h;
-            text: "e mais " + a.more-subs + (a.more-subs == 1 ? " subagente" : " subagentes");
+            text: @tr("more subagents: {}", a.more-subs);
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 11px * Skin.text-scale;
@@ -365,20 +364,20 @@ component Row inherits Rectangle {
         }
     }
 
-    // subagentes trabalhando: cada um anda de um lado para o outro, fora de compasso.
-    // Com "reduzir movimento", ficam parados, espalhados pela faixa.
+    // working subagents: each one walks back and forth, out of step.
+    // With "reduce motion", they stand still, spread over the strip.
     if a.walkers > 0 || a.heroes.length > 0: Rectangle {
         x: inset;
         y: base + details-h - 2px;
         width: root.width - inset - 12px;
         height: walk-h;
-        // o chão
+        // the ground
         Rectangle { y: parent.height - 7px; height: 1px; background: t.ok.with-alpha(0.35); }
-        // mascotes importadas: o Rust escolhe o quadro e o lugar (src/mascot/stroll.rs)
+        // imported mascots: Rust picks the frame and the place (src/mascot/stroll.rs)
         for h in a.heroes: Image {
             source: h.frame;
             image-rendering: pixelated;
-            // no tamanho do desenho (nítido), até 32 px de altura
+            // at the drawing size (crisp), up to 32 px tall
             property <length> hero-h: min(32px, h.frame.height * 1px);
             height: hero-h;
             width: hero-h * h.frame.width / max(1, h.frame.height);
@@ -386,7 +385,7 @@ component Row inherits Rectangle {
             y: parent.height - 8px - self.height;
             animate x { duration: 250ms; easing: linear; }
         }
-        // mascote da ferramenta: passos de uma ponta à outra; cada uma começa num ponto diferente
+        // tool mascot: steps from one end to the other; each one starts at a different point
         for k in (a.heroes.length > 0 ? 0 : a.walkers): Image {
             property <int> span: 14 + k * 3;
             property <int> step: mod(Anim.frame + k * 7, span * 2);
@@ -396,14 +395,14 @@ component Row inherits Rectangle {
             height: 22px * 14 / 16;
             width: 22px;
             x: pos * (parent.width - self.width);
-            // passinho: sobe e desce a cada quadro
+            // little step: up and down every frame
             y: parent.height - 8px - self.height - (!Anim.calm && mod(Anim.frame + k, 2) == 0 ? 2px : 0);
             animate x { duration: 220ms; easing: linear; }
             animate y { duration: 110ms; easing: ease-out; }
         }
     }
 
-    // opções do cartão clicado
+    // options of the clicked card
     if a.open: HorizontalLayout {
         y: base + details-h + walk-h;
         height: options-h;
@@ -413,28 +412,28 @@ component Row inherits Rectangle {
         spacing: 8px;
         alignment: start;
         TextButton {
-            text: "Detalhes";
+            text: @tr("Details");
             icon: Icons.logs;
             ink: t.visor;
             font-size: 13px * Skin.text-scale;
             clicked => { AgentsApp.details(root.a.key); }
         }
         TextButton {
-            text: narrow ? "Pasta" : "Abrir pasta";
+            text: narrow ? @tr("Folder") : @tr("Open folder");
             icon: Icons.grid;
             ink: t.visor;
             font-size: 13px * Skin.text-scale;
             clicked => { AgentsApp.open-dir(root.a.key); }
         }
         TextButton {
-            text: narrow ? "Terminal" : "Terminal na pasta";
+            text: narrow ? @tr("Terminal") : @tr("Terminal in folder");
             icon: Icons.terminal;
             ink: t.visor;
             font-size: 13px * Skin.text-scale;
             clicked => { AgentsApp.open-terminal(root.a.key); }
         }
         if a.can-resume: TextButton {
-            text: narrow ? "Retomar" : "Retomar sessão";
+            text: narrow ? @tr("Resume") : @tr("Resume session");
             icon: Icons.play;
             ink: t.ok;
             font-size: 13px * Skin.text-scale;
@@ -453,7 +452,7 @@ export component AgentsView inherits Rectangle {
   VerticalLayout {
     spacing: 12px;
 
-    // mascote + fala + contadores
+    // mascot + speech + counters
     HorizontalLayout {
         spacing: 16px;
         Rectangle {
@@ -483,7 +482,7 @@ export component AgentsView inherits Rectangle {
             }
             Text {
                 text: AgentsApp.error-text != "" ? AgentsApp.error-text
-                    : AgentsApp.working + " trabalhando · " + AgentsApp.waiting + " esperando você · " + AgentsApp.idle + (AgentsApp.idle == 1 ? " parado" : " parados");
+                    : @tr("{} working · {} waiting for you · {} idle", AgentsApp.working, AgentsApp.waiting, AgentsApp.idle);
                 color: AgentsApp.error-text != "" ? t.warn.mix(t.text, 0.6) : t.sub;
                 font-family: Skin.font-mono;
                 font-size: 12px * Skin.text-scale;
@@ -493,13 +492,13 @@ export component AgentsView inherits Rectangle {
         if !narrow: HorizontalLayout {
             spacing: 8px;
             alignment: center;
-            Counter { theme: t; label: "ATIVOS"; value: AgentsApp.working; tint: t.ok; }
-            Counter { theme: t; label: "ESPERA"; value: AgentsApp.waiting; tint: t.warn; }
-            Counter { theme: t; label: "LIVRES"; value: AgentsApp.idle; tint: t.visor; }
+            Counter { theme: t; label: @tr("ACTIVE"); value: AgentsApp.working; tint: t.ok; }
+            Counter { theme: t; label: @tr("WAITING"); value: AgentsApp.waiting; tint: t.warn; }
+            Counter { theme: t; label: @tr("IDLE"); value: AgentsApp.idle; tint: t.visor; }
         }
     }
 
-    // lista
+    // list
     Rectangle {
         vertical-stretch: 1;
         min-height: 50px;
@@ -508,7 +507,7 @@ export component AgentsView inherits Rectangle {
         background: t.bg1.mix(t.bg0, 0.6);
 
         if AgentsApp.rows.length == 0: Text {
-            text: AgentsApp.missing ? "Não achei Claude Code, Codex nem OpenCode nesta máquina." : "Nenhuma sessão aberta ou recente.";
+            text: AgentsApp.missing ? @tr("Could not find Claude Code, Codex or OpenCode on this machine.") : @tr("No open or recent sessions.");
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 13px * Skin.text-scale;

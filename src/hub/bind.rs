@@ -1,4 +1,4 @@
-//! Liga os callbacks da tela (e os eventos da janela) aos métodos do hub.
+//! Wires the screen callbacks (and the window events) to the hub methods.
 
 use std::rc::Rc;
 use std::time::Instant;
@@ -25,7 +25,7 @@ impl Hub {
                     h.store_reload();
                 }
                 h.rebuild_pages(true);
-                h.anim_tick(); // desenha as mascotes já no primeiro quadro
+                h.anim_tick(); // draw the mascots right on the first frame
                 h.schedule_backdrop();
             }
         });
@@ -34,7 +34,7 @@ impl Hub {
         ui.on_toggle_app(move |id| {
             let Some(h) = w.upgrade() else { return };
             let on = !h.host.config.borrow().is_enabled(&id);
-            // ligado pela primeira vez: entra na página aberta
+            // enabled for the first time: goes to the open page
             if on && h.host.config.borrow().page_of(&id).is_none() {
                 let page = h.current_page();
                 h.host.config.borrow_mut().move_to_page(&id, page);
@@ -110,6 +110,13 @@ impl Hub {
         ui.on_chatter_chosen(move |i| {
             if let Some(h) = w.upgrade() {
                 h.choose_chatter(i.max(0) as usize);
+            }
+        });
+
+        let w = Rc::downgrade(hub);
+        ui.on_language_chosen(move |i| {
+            if let Some(h) = w.upgrade() {
+                h.choose_language(i.max(0) as usize);
             }
         });
 
@@ -301,7 +308,7 @@ impl Hub {
             if let Some(h) = w.upgrade() {
                 let on = !h.pinned.get();
                 h.set_pinned(on);
-                // fixar pela bandeja: o menu rouba o foco e esconde o popup antes; reabre
+                // pinned from the tray: the menu steals focus and hides the popup first; reopen it
                 if on && !h.shown.get() {
                     h.show(None);
                 }
@@ -333,13 +340,13 @@ impl Hub {
             }
         });
 
-        // popup: clicou fora (perdeu o foco) -> esconde
+        // popup: clicked outside (lost focus) -> hide
         let w = Rc::downgrade(hub);
         {
             use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
             ui.window().on_winit_window_event(move |_, ev| {
                 if let WindowEvent::Focused(f) = ev {
-                    log::debug!("foco {f}");
+                    log::debug!("focus {f}");
                 }
                 let Some(h) = w.upgrade() else { return EventResult::Propagate };
                 match ev {
@@ -352,11 +359,11 @@ impl Hub {
                         h.had_focus.set(true);
                         h.resize_until.set(None);
                     }
-                    // redimensionando pela borda: cada tamanho novo adia o fim do arrasto
+                    // resizing by the edge: each new size postpones the end of the drag
                     WindowEvent::Resized(_) if h.resize_until.get().is_some() => {
                         h.resize_until.set(Some(Instant::now() + RESIZE_QUIET));
                     }
-                    // fixado ou no meio de um redimensionamento: não some sozinho
+                    // pinned or in the middle of a resize: does not hide by itself
                     WindowEvent::Focused(false)
                         if h.shown.get() && h.has_tray() && h.had_focus.get() && !h.pinned.get() && !h.resizing() => {
                             h.hide();
@@ -369,7 +376,7 @@ impl Hub {
         }
 
 
-        // fechar a janela só esconde quando há bandeja
+        // closing the window only hides it when there is a tray
         let w = Rc::downgrade(hub);
         ui.window().on_close_requested(move || {
             match w.upgrade() {

@@ -1,0 +1,11 @@
+# Brazilian Portuguese for the "Uptime" example plugin (manifest texts). msgid is the English
+# text, msgstr its translation.
+
+msgid "Uptime"
+msgstr "Tempo ligado"
+
+msgid "How long the computer has been on (uptime -p). Example plugin from the store."
+msgstr "Há quanto tempo o computador está ligado (uptime -p). Plugin de exemplo da loja."
+
+msgid "Up for"
+msgstr "Ligado há"

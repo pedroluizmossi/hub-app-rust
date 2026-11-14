@@ -1,31 +1,78 @@
-//! App externo de exemplo do MiniUtils.
+//! MiniUtils example external app.
 //!
-//! Um programa comum: lê mensagens do hub na entrada padrão (JSON, uma por linha) e
-//! responde na saída padrão. Tem acesso total, como qualquer programa do usuário: aqui ele
-//! lê a pasta pessoal e grava um arquivo na pasta de dados que o hub dá
-//! (`MINIUTILS_APP_DATA`). Protocolo completo: topo de `src/apps/external.rs` no repositório
-//! do MiniUtils.
+//! An ordinary program: it reads messages from the hub on standard input (JSON, one per
+//! line) and answers on standard output. It has full access, like any of the user's
+//! programs: here it reads the home folder and writes a file in the data folder the hub
+//! gives it (`MINIUTILS_APP_DATA`). Full protocol: top of `src/apps/external.rs` in the
+//! MiniUtils repository.
 //!
-//! Regras de convivência:
-//! - a saída padrão é só do protocolo: depuração vai para a saída de erro (`eprintln!`),
-//!   que o hub manda para o registro dele;
-//! - entrada fechada (EOF) ou `{"type":"stop"}`: saia logo.
+//! House rules:
+//! - standard output belongs to the protocol: debugging goes to standard error
+//!   (`eprintln!`), which the hub sends to its log;
+//! - input closed (EOF) or `{"type":"stop"}`: exit right away.
+//!
+//! Language: `start` brings `lang` ("en", "pt-BR"). The texts below are English and are
+//! translated with the app's own `i18n/<lang>.po` (the same file the hub uses for the view
+//! and the manifest). Apps built on the SDK use `miniutils_app::i18n::Catalog` instead of
+//! the small reader here.
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
 use serde_json::{Value, json};
 
-/// Manda uma mensagem ao hub.
+/// Sends a message to the hub.
 fn send(msg: Value) {
     let mut out = std::io::stdout().lock();
-    // sem o hub do outro lado não há o que fazer: o laço principal sai no EOF
+    // with no hub on the other side there is nothing to do: the main loop exits on EOF
     let _ = writeln!(out, "{msg}").and_then(|_| out.flush());
 }
 
 fn set(prop: &str, value: impl Into<Value>) {
     send(json!({ "type": "set", "prop": prop, "value": value.into() }));
+}
+
+/// Translations of one language (msgid → msgstr), read from a gettext `.po`.
+#[derive(Default)]
+struct Catalog(HashMap<String, String>);
+
+impl Catalog {
+    /// `i18n/<lang>.po` in the app's folder (the process runs there). English, or no file:
+    /// empty, and the English texts are shown.
+    fn load(lang: &str) -> Catalog {
+        if lang == "en" || lang.contains(['/', '\\', '.']) {
+            return Catalog::default();
+        }
+        let text = std::fs::read_to_string(format!("i18n/{lang}.po")).unwrap_or_default();
+        // only one-line `msgid "…"` / `msgstr "…"` pairs: enough for this app's file
+        let unquote = |s: &str| s.trim().trim_matches('"').replace("\\\"", "\"").replace("\\n", "\n");
+        let mut map = HashMap::new();
+        let mut id = None;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("msgid ") {
+                id = Some(unquote(rest));
+            } else if let (Some(rest), Some(i)) = (line.strip_prefix("msgstr "), id.take()) {
+                let s = unquote(rest);
+                if !i.is_empty() && !s.is_empty() {
+                    map.insert(i, s);
+                }
+            }
+        }
+        Catalog(map)
+    }
+
+    /// The translation of `msgid`, with each `{}` filled in order by `args`.
+    fn tr(&self, msgid: &str, args: &[&dyn std::fmt::Display]) -> String {
+        let mut text = self.0.get(msgid).map_or(msgid, String::as_str).to_string();
+        for a in args {
+            if let Some(i) = text.find("{}") {
+                text.replace_range(i..i + 2, &a.to_string());
+            }
+        }
+        text
+    }
 }
 
 struct App {
@@ -34,59 +81,66 @@ struct App {
     count: i64,
     show_home: bool,
     cpu_high: bool,
+    texts: Catalog,
 }
 
 impl App {
     fn state_file(&self) -> Option<PathBuf> {
-        self.data.as_ref().map(|d| d.join("estado.json"))
+        self.data.as_ref().map(|d| d.join("state.json"))
     }
 
     fn load(&mut self) {
-        let saved = self.state_file().and_then(|f| std::fs::read_to_string(f).ok());
+        // earlier versions of this example wrote "estado.json": read it if that is all there is
+        let old = self.data.as_ref().map(|d| d.join("estado.json"));
+        let saved = [self.state_file(), old].into_iter().flatten().find_map(|f| std::fs::read_to_string(f).ok());
         let parsed = saved.and_then(|t| serde_json::from_str::<Value>(&t).ok());
         self.count = parsed.and_then(|v| v["count"].as_i64()).unwrap_or(0);
     }
 
     fn save(&self) {
         if let Some(f) = self.state_file()
-            && let Err(e) = std::fs::write(&f, json!({ "count": self.count }).to_string()) {
-                send(json!({ "type": "error", "message": format!("não consegui gravar {}: {e}", f.display()) }));
-            }
+            && let Err(e) = std::fs::write(&f, json!({ "count": self.count }).to_string())
+        {
+            let message = self.texts.tr("could not write {}: {}", &[&f.display(), &e]);
+            send(json!({ "type": "error", "message": message }));
+        }
     }
 
-    /// A pasta pessoal e quantos itens ela tem (o que um plugin sem acesso total não lê).
+    /// The home folder and how many items it has (what a plugin without full access cannot read).
     fn home(&self) -> String {
         if !self.show_home {
             return String::new();
         }
         let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) else {
-            return "sem pasta pessoal".into();
+            return self.texts.tr("no home folder", &[]);
         };
         let home = PathBuf::from(home);
         let n = std::fs::read_dir(&home).map(|d| d.count()).unwrap_or(0);
-        format!("{} ({n} itens)", home.display())
+        self.texts.tr("{} ({} items)", &[&home.display(), &n])
     }
 
     fn redraw(&self) {
         set("count", self.count);
         set("home", self.home());
-        send(json!({ "type": "summary", "text": format!("{} clique(s)", self.count) }));
+        send(json!({ "type": "summary", "text": self.texts.tr("clicks: {}", &[&self.count]) }));
     }
 
     fn handle(&mut self, msg: &Value) -> bool {
         match msg["type"].as_str().unwrap_or_default() {
             "start" => {
+                self.texts = Catalog::load(msg["lang"].as_str().unwrap_or("en"));
                 self.data = msg["data_dir"].as_str().filter(|d| !d.is_empty()).map(PathBuf::from);
                 self.show_home = msg["settings"]["show_home"].as_bool().unwrap_or(true);
                 self.load();
-                eprintln!("iniciado no {} (protocolo {})", msg["os"], msg["api"]);
-                set("status", "rodando como programa próprio");
+                eprintln!("started on {} (protocol {})", msg["os"], msg["api"]);
+                set("status", self.texts.tr("running as its own program", &[]));
                 send(json!({ "type": "mood", "mood": "happy" }));
                 self.redraw();
             }
             "tick" => {
                 let s = self.started.elapsed().as_secs();
-                set("clock", format!("ligado há {}m{:02}s", s / 60, s % 60));
+                let uptime = format!("{}m{:02}s", s / 60, s % 60);
+                set("clock", self.texts.tr("up for {}", &[&uptime]));
             }
             "action" => {
                 match msg["name"].as_str().unwrap_or_default() {
@@ -121,11 +175,12 @@ impl App {
 }
 
 fn main() {
-    let mut app = App { started: Instant::now(), data: None, count: 0, show_home: true, cpu_high: false };
+    let mut app =
+        App { started: Instant::now(), data: None, count: 0, show_home: true, cpu_high: false, texts: Catalog::default() };
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         let Ok(msg) = serde_json::from_str::<Value>(&line) else {
-            eprintln!("mensagem ilegível: {line}");
+            eprintln!("unreadable message: {line}");
             continue;
         };
         if !app.handle(&msg) {

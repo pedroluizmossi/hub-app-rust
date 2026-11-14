@@ -1,22 +1,24 @@
-//! O banco SQLite de um plugin com script (`[data] kinds = ["sqlite"]`): `data.sqlite` na
-//! pasta de dados do app (`core/appdata.rs`), aberto pelo host na primeira chamada.
+//! The SQLite database of a scripted plugin (`[data] kinds = ["sqlite"]`): `data.sqlite` in
+//! the app's data folder (`core/appdata.rs`), opened by the host on the first call.
 //!
-//! API do script:
+//! Script API:
 //! ```text
-//! db_batch(sql)               várias instruções de uma vez, sem parâmetros (criar tabelas)
-//! db_exec(sql, [params])      uma instrução; devolve quantas linhas mudou
-//! db_query(sql, [params])     uma consulta; devolve as linhas, cada uma num mapa coluna → valor
+//! db_batch(sql)               several statements at once, no parameters (create tables)
+//! db_exec(sql, [params])      one statement; returns how many rows it changed
+//! db_query(sql, [params])     one query; returns the rows, each as a column → value map
 //! ```
-//! Parâmetros posicionais (`?`): `()` vira NULL, bool vira 0/1, números e textos como são,
-//! lista ou mapa vira texto JSON (leia de volta com `parse_json`). Na volta, INTEGER vira
-//! inteiro, REAL vira número, TEXT vira texto, NULL vira `()` e BLOB, uma lista de bytes.
+//! Positional parameters (`?`): `()` becomes NULL, bool becomes 0/1, numbers and texts stay
+//! as they are, a list or map becomes JSON text (read it back with `parse_json`). Coming
+//! back, INTEGER becomes an integer, REAL a number, TEXT a text, NULL `()` and BLOB a list
+//! of bytes.
 //!
-//! O script não sai da pasta dele nem passa da cota:
-//! - `ATTACH`/`DETACH` (abrir outro arquivo) e `PRAGMA` fora de uma lista de leitura e de
-//!   `user_version` são recusados; extensões não carregam;
-//! - o tamanho máximo é o `max_mb` do `[data]` (o SQLite recusa gravar além: `max_page_count`);
-//! - cada instrução tem até `TIMEOUT` e cada consulta devolve até `MAX_ROWS` linhas;
-//! - uma transação (`BEGIN`) aberta no fim da chamada do script é desfeita.
+//! The script doesn't leave its folder or go over its quota:
+//! - `ATTACH`/`DETACH` (opening another file) and `PRAGMA` outside a read-only list and
+//!   `user_version` are refused; extensions don't load;
+//! - the maximum size is the `max_mb` of `[data]` (SQLite refuses to write past it:
+//!   `max_page_count`);
+//! - each statement gets up to `TIMEOUT` and each query returns up to `MAX_ROWS` rows;
+//! - a transaction (`BEGIN`) left open at the end of the script's call is rolled back.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,15 +31,16 @@ use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, ErrorCode};
 
 use super::script::dyn_to_json;
+use crate::tr;
 
-/// Prazo de cada instrução (nos testes, curto: o teste da consulta sem fim espera por ele).
+/// Time limit of each statement (short in tests: the endless-query test waits for it).
 const TIMEOUT: Duration = if cfg!(test) { Duration::from_millis(400) } else { Duration::from_secs(5) };
-/// Linhas que uma consulta pode devolver.
+/// Rows a query may return.
 pub(super) const MAX_ROWS: usize = 10_000;
-/// Maior texto ou blob num valor, e maior instrução SQL.
+/// Largest text or blob in a value, and largest SQL statement.
 const MAX_VALUE: i32 = 4 << 20;
 const MAX_SQL: i32 = 1 << 20;
-/// PRAGMAs que o script pode usar (ler a estrutura; `user_version` para a migração).
+/// PRAGMAs the script may use (reading the structure; `user_version` for migrations).
 const PRAGMAS: &[&str] = &[
     "user_version",
     "table_info",
@@ -53,20 +56,20 @@ const PRAGMAS: &[&str] = &[
     "optimize",
 ];
 
-/// Onde fica o banco e a cota.
+/// Where the database lives and its quota.
 #[derive(Clone, Debug)]
 pub(super) struct DbSpec {
     pub path: PathBuf,
     pub max_bytes: u64,
 }
 
-/// O banco do plugin, aberto na primeira chamada.
+/// The plugin's database, opened on the first call.
 #[derive(Default)]
 pub(super) struct Db {
-    /// `None` = o app não declarou `sqlite`.
+    /// `None` = the app didn't declare `sqlite`.
     spec: Option<DbSpec>,
     conn: Option<Connection>,
-    /// Prazo da instrução em curso, em ms desde `epoch` (o progress handler confere).
+    /// Deadline of the running statement, in ms since `epoch` (the progress handler checks it).
     deadline: Arc<AtomicU64>,
     epoch: Option<Instant>,
 }
@@ -78,13 +81,13 @@ impl Db {
 
     fn conn(&mut self) -> Result<&Connection, String> {
         if self.conn.is_none() {
-            let spec = self.spec.as_ref().ok_or("este app não declarou banco: ponha [data] kinds = [\"sqlite\"] no manifest.toml")?;
+            let spec = self.spec.as_ref().ok_or(tr!("this app declared no database: add [data] kinds = [\"sqlite\"] to manifest.toml"))?;
             let epoch = *self.epoch.get_or_insert_with(Instant::now);
-            self.conn = Some(open(spec, epoch, self.deadline.clone()).map_err(|e| format!("banco: {e}"))?);
+            self.conn = Some(open(spec, epoch, self.deadline.clone()).map_err(|e| tr!("database: {}", e))?);
         }
         let epoch = self.epoch.unwrap_or_else(Instant::now);
         self.deadline.store((epoch.elapsed() + TIMEOUT).as_millis() as u64, Ordering::SeqCst);
-        Ok(self.conn.as_ref().expect("aberto acima"))
+        Ok(self.conn.as_ref().expect("opened above"))
     }
 
     pub(super) fn batch(&mut self, sql: &str) -> Result<(), String> {
@@ -110,7 +113,7 @@ impl Db {
         let mut out = rhai::Array::new();
         while let Some(row) = rows.next().map_err(|e| explain(e, max))? {
             if out.len() == MAX_ROWS {
-                return Err(format!("a consulta passa de {MAX_ROWS} linhas: use LIMIT"));
+                return Err(tr!("the query returns more than {} rows: use LIMIT", MAX_ROWS));
             }
             let mut m = rhai::Map::new();
             for (i, name) in names.iter().enumerate() {
@@ -122,18 +125,18 @@ impl Db {
         Ok(out)
     }
 
-    /// Fim de uma chamada do script: transação esquecida aberta é desfeita (senão travaria
-    /// o banco até a próxima). Devolve o aviso, se houve.
+    /// End of a script call: a transaction left open is rolled back (otherwise it would lock
+    /// the database until the next one). Returns the warning, if any.
     pub(super) fn end_call(&mut self) -> Option<String> {
         let conn = self.conn.as_ref()?;
         if conn.is_autocommit() {
             return None;
         }
         let _ = conn.execute_batch("ROLLBACK");
-        Some("banco: a chamada terminou com uma transação aberta (BEGIN sem COMMIT); ela foi desfeita".into())
+        Some(tr!("database: the call ended with an open transaction (BEGIN without COMMIT); it was rolled back").into())
     }
 
-    /// Fecha o arquivo (antes de devolver a cópia de uma migração que falhou).
+    /// Closes the file (before restoring the copy after a failed migration).
     pub(super) fn close(&mut self) {
         self.conn = None;
     }
@@ -143,8 +146,8 @@ impl Db {
     }
 }
 
-/// Abre o banco com os limites. As PRAGMAs do host vêm antes do autorizador, que as
-/// recusaria ao script.
+/// Opens the database with the limits. The host's PRAGMAs come before the authorizer,
+/// which would refuse them to the script.
 fn open(spec: &DbSpec, epoch: Instant, deadline: Arc<AtomicU64>) -> rusqlite::Result<Connection> {
     if let Some(dir) = spec.path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -174,17 +177,17 @@ fn open(spec: &DbSpec, epoch: Instant, deadline: Arc<AtomicU64>) -> rusqlite::Re
     Ok(conn)
 }
 
-/// O erro do SQLite num texto que diz o que fazer.
+/// The SQLite error as text that says what to do.
 fn explain(e: rusqlite::Error, max_bytes: u64) -> String {
     match e.sqlite_error_code() {
         Some(ErrorCode::DiskFull) => {
-            format!("banco: passou da cota de {} MB ([data] max_mb no manifest.toml)", max_bytes >> 20)
+            tr!("database: over the {} MB quota ([data] max_mb in manifest.toml)", max_bytes >> 20)
         }
-        Some(ErrorCode::OperationInterrupted) => format!("banco: a instrução passou de {} s", TIMEOUT.as_secs()),
+        Some(ErrorCode::OperationInterrupted) => tr!("database: the statement took longer than {} s", TIMEOUT.as_secs()),
         Some(ErrorCode::AuthorizationForStatementDenied) => {
-            "banco: instrução não permitida (ATTACH, DETACH e PRAGMA que muda o banco ficam com o host)".into()
+            tr!("database: statement not allowed (ATTACH, DETACH and PRAGMAs that change the database are reserved for the host)").into()
         }
-        _ => format!("banco: {e}"),
+        _ => tr!("database: {}", e),
     }
 }
 
@@ -211,7 +214,7 @@ fn to_sql(v: &rhai::Dynamic) -> Result<SqlValue, String> {
     if v.is_array() || v.is_map() {
         return serde_json::to_string(&dyn_to_json(v)).map(SqlValue::Text).map_err(|e| e.to_string());
     }
-    Err(format!("banco: parâmetro de tipo {} não vale (use número, texto, bool, () ou lista/mapa)", v.type_name()))
+    Err(tr!("database: a parameter of type {} isn't allowed (use a number, text, bool, () or a list/map)", v.type_name()))
 }
 
 fn from_sql(v: ValueRef<'_>) -> rhai::Dynamic {
@@ -228,25 +231,25 @@ fn from_sql(v: ValueRef<'_>) -> rhai::Dynamic {
 mod tests {
     use super::*;
 
-    fn banco(nome: &str, max_bytes: u64) -> (Db, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("miniutils-db-{nome}-{}", std::process::id()));
+    fn database(name: &str, max_bytes: u64) -> (Db, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("miniutils-db-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (Db::new(Some(DbSpec { path: dir.join("data.sqlite"), max_bytes })), dir)
     }
 
     #[test]
-    fn grava_le_e_converte() {
-        let (mut db, dir) = banco("le", 10 << 20);
-        db.batch("CREATE TABLE t(id INTEGER PRIMARY KEY, nome TEXT, peso REAL, extra TEXT, nada)").unwrap();
+    fn writes_reads_and_converts() {
+        let (mut db, dir) = database("read", 10 << 20);
+        db.batch("CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, weight REAL, extra TEXT, empty)").unwrap();
         let params: rhai::Array = vec!["ana".into(), (1.5 as rhai::FLOAT).into(), rhai::Array::from(vec![1.into()]).into(), ().into()];
-        assert_eq!(db.exec("INSERT INTO t(nome, peso, extra, nada) VALUES (?, ?, ?, ?)", &params).unwrap(), 1);
-        let rows = db.query("SELECT * FROM t WHERE nome = ?", &vec!["ana".into()]).unwrap();
+        assert_eq!(db.exec("INSERT INTO t(name, weight, extra, empty) VALUES (?, ?, ?, ?)", &params).unwrap(), 1);
+        let rows = db.query("SELECT * FROM t WHERE name = ?", &vec!["ana".into()]).unwrap();
         let m = rows[0].clone().cast::<rhai::Map>();
         assert_eq!(m["id"].as_int().unwrap(), 1);
-        assert_eq!(m["peso"].as_float().unwrap(), 1.5);
+        assert_eq!(m["weight"].as_float().unwrap(), 1.5);
         assert_eq!(m["extra"].clone().into_string().unwrap(), "[1]");
-        assert!(m["nada"].is_unit());
-        // transação esquecida aberta é desfeita no fim da chamada
+        assert!(m["empty"].is_unit());
+        // a transaction left open is rolled back at the end of the call
         db.exec("BEGIN", &vec![]).unwrap();
         db.exec("DELETE FROM t", &vec![]).unwrap();
         assert!(db.end_call().is_some());
@@ -256,47 +259,47 @@ mod tests {
     }
 
     #[test]
-    fn nao_sai_da_pasta_nem_da_cota() {
-        let (mut db, dir) = banco("limites", 64 << 10);
+    fn stays_inside_its_folder_and_quota() {
+        let (mut db, dir) = database("limits", 64 << 10);
         db.batch("CREATE TABLE t(x)").unwrap();
-        let fora = dir.join("outro.sqlite");
-        let attach = db.exec(&format!("ATTACH '{}' AS o", fora.display()), &vec![]);
-        assert!(attach.is_err(), "ATTACH abriria outro arquivo");
-        assert!(db.exec(&format!("VACUUM INTO '{}'", fora.display()), &vec![]).is_err());
-        assert!(!fora.exists());
-        assert!(db.exec("PRAGMA max_page_count = 100000", &vec![]).unwrap_err().contains("não permitida"));
+        let outside = dir.join("other.sqlite");
+        let attach = db.exec(&format!("ATTACH '{}' AS o", outside.display()), &vec![]);
+        assert!(attach.is_err(), "ATTACH would open another file");
+        assert!(db.exec(&format!("VACUUM INTO '{}'", outside.display()), &vec![]).is_err());
+        assert!(!outside.exists());
+        assert!(db.exec("PRAGMA max_page_count = 100000", &vec![]).unwrap_err().contains("not allowed"));
         assert!(db.batch("PRAGMA journal_mode = DELETE").is_err());
-        // a versão do esquema e a leitura da estrutura podem
+        // the schema version and reading the structure are allowed
         db.exec("PRAGMA user_version = 3", &vec![]).unwrap();
         assert_eq!(db.query("PRAGMA user_version", &vec![]).unwrap()[0].clone().cast::<rhai::Map>()["user_version"].as_int().unwrap(), 3);
         assert_eq!(db.query("PRAGMA table_info(t)", &vec![]).unwrap().len(), 1);
-        // passar da cota de 64 KiB
-        let grande: rhai::Dynamic = "x".repeat(20_000).into();
-        let mut erro = String::new();
+        // going over the 64 KiB quota
+        let big: rhai::Dynamic = "x".repeat(20_000).into();
+        let mut error = String::new();
         for _ in 0..10 {
-            if let Err(e) = db.exec("INSERT INTO t VALUES (?)", &vec![grande.clone()]) {
-                erro = e;
+            if let Err(e) = db.exec("INSERT INTO t VALUES (?)", &vec![big.clone()]) {
+                error = e;
                 break;
             }
         }
-        assert!(erro.contains("cota"), "{erro}");
+        assert!(error.contains("quota"), "{error}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn consulta_longa_ou_grande_para() {
-        let (mut db, dir) = banco("longa", 10 << 20);
-        let lenta = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
+    fn long_or_large_query_stops() {
+        let (mut db, dir) = database("long", 10 << 20);
+        let slow = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
         let t = Instant::now();
-        assert!(db.query(lenta, &vec![]).unwrap_err().contains("passou de"));
+        assert!(db.query(slow, &vec![]).unwrap_err().contains("longer than"));
         assert!(t.elapsed() < TIMEOUT + Duration::from_secs(3));
-        let muitas = format!("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c LIMIT {}) SELECT x FROM c", MAX_ROWS + 1);
-        assert!(db.query(&muitas, &vec![]).unwrap_err().contains("LIMIT"));
+        let many = format!("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c LIMIT {}) SELECT x FROM c", MAX_ROWS + 1);
+        assert!(db.query(&many, &vec![]).unwrap_err().contains("LIMIT"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn sem_declarar_nao_tem_banco() {
+    fn undeclared_has_no_database() {
         let mut db = Db::new(None);
         assert!(db.batch("CREATE TABLE t(x)").unwrap_err().contains("[data]"));
     }

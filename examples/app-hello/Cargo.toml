@@ -2,7 +2,7 @@
 name = "app-hello"
 version = "0.1.0"
 edition = "2024"
-description = "App externo de exemplo do MiniUtils: um executável próprio, com acesso total"
+description = "MiniUtils example external app: an executable of its own, with full access"
 license = "MIT"
 publish = false
 

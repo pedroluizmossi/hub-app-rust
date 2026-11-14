@@ -1,4 +1,4 @@
-//! Ícone na bandeja (StatusNotifierItem via D-Bus): a mascote no humor do hub.
+//! Tray icon (StatusNotifierItem over D-Bus): the mascot in the hub's mood.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,21 +9,22 @@ use crate::mascot::{Mood, render, sprites::Sprite, themes::Theme};
 use crate::ui::HubWindow;
 
 use crate::core::miniapp::TrayMedia;
+use crate::tr;
 
 pub struct AppTray {
     icons: Vec<ksni::Icon>,
     tooltip: String,
     ui: slint::Weak<HubWindow>,
-    /// Marca o item "Fixar janela" do menu.
+    /// Checks the "Pin window" menu item.
     pinned: bool,
     media: Option<TrayMedia>,
-    /// Há um painel (`StatusNotifierWatcher`) mostrando o ícone agora.
+    /// A panel (`StatusNotifierWatcher`) is showing the icon right now.
     online: Arc<AtomicBool>,
 }
 
 impl ksni::Tray for AppTray {
-    // o painel pode subir depois do app (autostart) ou reiniciar: o ksni registra o ícone
-    // de novo quando ele volta, e o hub só esconde a janela de vez com o painel no ar
+    // the panel may start after the app (autostart) or restart: ksni registers the icon
+    // again when it comes back, and the hub only hides the window for good with a panel up
     fn watcher_online(&self) {
         self.online.store(true, Ordering::Relaxed);
     }
@@ -53,7 +54,7 @@ impl ksni::Tray for AppTray {
         let _ = self.ui.upgrade_in_event_loop(move |ui| ui.invoke_toggle_requested(x, y));
     }
 
-    // clique do meio: liga/desliga o modo fixar
+    // middle click: toggles pin mode
     fn secondary_activate(&mut self, _x: i32, _y: i32) {
         let _ = self.ui.upgrade_in_event_loop(|ui| ui.invoke_toggle_pin());
     }
@@ -62,7 +63,7 @@ impl ksni::Tray for AppTray {
         use ksni::menu::*;
         let mut items: Vec<ksni::MenuItem<Self>> = vec![
             StandardItem {
-                label: "Mostrar / esconder".into(),
+                label: tr!("Show / hide").into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.ui.upgrade_in_event_loop(|ui| ui.invoke_toggle_requested(0, 0));
                 }),
@@ -70,7 +71,7 @@ impl ksni::Tray for AppTray {
             }
             .into(),
             CheckmarkItem {
-                label: "Fixar janela".into(),
+                label: tr!("Pin window").into(),
                 checked: self.pinned,
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.ui.upgrade_in_event_loop(|ui| ui.invoke_toggle_pin());
@@ -81,21 +82,21 @@ impl ksni::Tray for AppTray {
         ];
         if let Some(media) = &self.media {
             items.push(MenuItem::Separator);
-            // D-BusMenu interpreta sublinhados como atalhos de teclado.
+            // D-BusMenu treats underscores as keyboard shortcuts.
             items.push(StandardItem {
                 label: media.summary.replace('_', "__"),
                 enabled: false,
                 ..Default::default()
             }.into());
             for (label, verb, enabled) in [
-                ("Faixa anterior", "prev", media.can_previous),
-                (if media.playing { "Pausar" } else { "Tocar" }, "play-pause", media.can_play_pause),
-                ("Próxima faixa", "next", media.can_next),
+                (tr!("Previous track"), "prev", media.can_previous),
+                (if media.playing { tr!("Pause") } else { tr!("Play") }, "play-pause", media.can_play_pause),
+                (tr!("Next track"), "next", media.can_next),
             ] {
                 items.push(StandardItem {
                     label: label.into(),
                     enabled,
-                    // o hub leva o comando ao app dono da mídia
+                    // the hub takes the command to the app that owns the media
                     activate: Box::new(move |_: &mut Self| crate::hub::tray_media_command(verb)),
                     ..Default::default()
                 }.into());
@@ -104,7 +105,7 @@ impl ksni::Tray for AppTray {
         items.extend([
             MenuItem::Separator,
             StandardItem {
-                label: "Sair".into(),
+                label: tr!("Quit").into(),
                 icon_name: "application-exit".into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.ui.upgrade_in_event_loop(|ui| ui.invoke_quit());
@@ -118,7 +119,7 @@ impl ksni::Tray for AppTray {
 }
 
 fn icons(sprite: &Sprite, theme: &Theme, mood: Mood) -> Vec<ksni::Icon> {
-    // dois tamanhos nítidos (2× e 4×); o painel escolhe o mais próximo
+    // two crisp sizes (2× and 4×); the panel picks the closest
     [2, 4]
         .into_iter()
         .map(|scale| {
@@ -134,9 +135,9 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Cria o ícone. Sem painel no ar (ainda subindo, ou GNOME sem a extensão
-    /// AppIndicator), o serviço fica esperando e o ícone aparece quando o painel surgir;
-    /// `online` diz se ele está visível agora. Só falha sem D-Bus.
+    /// Creates the icon. With no panel up (still starting, or GNOME without the AppIndicator
+    /// extension), the service waits and the icon shows up when a panel appears; `online`
+    /// says whether it is visible now. Only fails without D-Bus.
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
         let online = Arc::new(AtomicBool::new(true));
         let tray = AppTray {
@@ -147,18 +148,18 @@ impl Tray {
             media: None,
             online: online.clone(),
         };
-        // sem painel, o ksni chama `watcher_offline` antes de voltar daqui
+        // without a panel, ksni calls `watcher_offline` before returning from here
         let handle = tray.assume_sni_available(true).spawn()?;
         Ok(Tray { handle, online })
     }
 
-    /// O ícone está num painel agora (dá para esconder a janela e voltar por ele).
+    /// The icon is on a panel now (the window can be hidden and brought back through it).
     pub fn online(&self) -> bool {
         self.online.load(Ordering::Relaxed)
     }
 
-    /// Atualiza tooltip e menu; o ícone só é redesenhado quando `icon` vem (a mascote, o
-    /// tema ou o humor mudaram). O ksni avisa o painel só do que mudou de fato.
+    /// Updates the tooltip and menu; the icon is only redrawn when `icon` is given (the
+    /// mascot, theme or mood changed). ksni tells the panel only what actually changed.
     pub fn update(&self, icon: Option<(&Sprite, &Theme, Mood)>, tooltip: String, media: Option<TrayMedia>) {
         let icons = icon.map(|(sprite, theme, mood)| icons(sprite, theme, mood));
         self.handle.update(move |t| {
@@ -170,7 +171,7 @@ impl Tray {
         });
     }
 
-    /// Atualiza a marca de "Fixar janela" no menu.
+    /// Updates the "Pin window" check mark in the menu.
     pub fn set_pinned(&self, pinned: bool) {
         self.handle.update(move |t| t.pinned = pinned);
     }

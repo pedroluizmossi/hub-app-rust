@@ -1,0 +1,20 @@
+# Brazilian Portuguese for the "Top processes" example plugin: the manifest texts and the
+# @tr("…") of view.slint. msgid is the English text, msgstr its translation.
+
+msgid "Top processes"
+msgstr "Top processos"
+
+msgid "The processes using the most CPU or memory, with its own view and script. Works on Linux and Windows. Example plugin from the MiniUtils store."
+msgstr "Os processos que mais usam CPU ou memória, com tela e script próprios. Funciona no Linux e no Windows. Plugin de exemplo da loja do MiniUtils."
+
+msgid "reading…"
+msgstr "lendo…"
+
+msgid "by memory · {} processes"
+msgstr "por memória · {} processos"
+
+msgid "by CPU · {} processes"
+msgstr "por CPU · {} processos"
+
+msgid "Memory"
+msgstr "Memória"

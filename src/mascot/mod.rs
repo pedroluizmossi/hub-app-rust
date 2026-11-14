@@ -1,4 +1,4 @@
-//! Mascotes em pixel art: sprites, temas e renderização.
+//! Pixel-art mascots: sprites, themes and rendering.
 pub mod anim;
 pub mod clips;
 pub mod disc;

@@ -1,16 +1,16 @@
-//! Fundos desenhados atrás da grade do painel. Feitos aqui, numa imagem do tamanho da
-//! área, porque o renderizador por software do Slint não tem padrões repetidos nem
-//! gradientes radiais baratos: uma imagem pronta custa só uma cópia por quadro.
+//! Backdrops drawn behind the panel grid. Made here, as an image the size of the area,
+//! because Slint's software renderer has no repeating patterns nor cheap radial
+//! gradients: a ready image costs only one copy per frame.
 //!
-//! Um fundo é uma lista de camadas (`Layer`) pintadas em ordem, com cores do visual pelo
-//! nome (`accent`, `bg`…) ou fixas (`#RRGGBB`). Os embutidos estão em `BUILTIN`; os da
-//! pessoa vêm de `fundos/<chave>.toml` (ver `user.rs`) com as mesmas camadas.
+//! A backdrop is a list of layers (`Layer`) painted in order, with skin colors by name
+//! (`accent`, `bg`…) or fixed ones (`#RRGGBB`). The built-in ones are in `BUILTIN`; the
+//! user's come from `backdrops/<key>.toml` (see `user.rs`) with the same layers.
 //!
-//! As camadas `rain`, `twinkle` e `scan` não vão para a imagem: viram elementos leves
-//! (`Ambient`) que a tela anima por cima dela (ver `ui/ambient.slint`), repintando só o
-//! pedacinho que mexe. Redesenhar a imagem a cada quadro custaria de 20 a 100 ms.
+//! The `rain`, `twinkle` and `scan` layers do not go into the image: they become light
+//! elements (`Ambient`) that the screen animates on top of it (see `ui/ambient.slint`),
+//! repainting only the little bit that moves. Redrawing the image every frame would cost 20 to 100 ms.
 //!
-//! As medidas são em pixels lógicos (como no design) e `scale` converte para físicos.
+//! Sizes are in logical pixels (as in the design) and `scale` converts to physical ones.
 
 use std::sync::RwLock;
 
@@ -20,7 +20,7 @@ use slint::{Rgb8Pixel, SharedPixelBuffer};
 use super::Skin;
 use super::color::mix;
 
-/// Cor de uma camada: uma cor do visual pelo nome, ou fixa.
+/// Color of a layer: a skin color by name, or a fixed one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Paint {
     Token(&'static str),
@@ -43,10 +43,7 @@ impl<'de> Deserialize<'de> for Paint {
             return Ok(Paint::Hex(c));
         }
         super::COLOR_FIELDS.iter().find(|f| **f == text).map(|f| Paint::Token(f)).ok_or_else(|| {
-            serde::de::Error::custom(format!(
-                "cor \"{text}\": use #RRGGBB ou uma cor do visual ({})",
-                super::COLOR_FIELDS.join(", ")
-            ))
+            serde::de::Error::custom(crate::tr!("color \"{}\": use #RRGGBB or a skin color ({})", text, super::COLOR_FIELDS.join(", ")))
         })
     }
 }
@@ -73,12 +70,12 @@ fn scan_speed() -> f32 {
     30.0
 }
 
-/// Uma camada. Posições `x`/`y` são frações da área (0 = esquerda/topo, 1 = direita/base),
-/// com `dx`/`dy` em pixels somados a elas; tamanhos em pixels.
+/// A layer. `x`/`y` positions are fractions of the area (0 = left/top, 1 = right/bottom),
+/// with `dx`/`dy` in pixels added to them; sizes in pixels.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Layer {
-    /// Grade de pontos de raio `radius`, passo `step`, começando em `offset`.
+    /// Grid of dots of radius `radius`, spacing `step`, starting at `offset`.
     Dots {
         step: f32,
         #[serde(default)]
@@ -88,7 +85,7 @@ pub enum Layer {
         #[serde(default = "one")]
         alpha: f32,
     },
-    /// Brilho elíptico centrado em (x, y), raios `rx`/`ry`, sumindo até `fade` do raio.
+    /// Elliptic glow centered at (x, y), radii `rx`/`ry`, fading out by `fade` of the radius.
     Glow {
         x: f32,
         y: f32,
@@ -104,7 +101,7 @@ pub enum Layer {
         #[serde(default = "one")]
         alpha: f32,
     },
-    /// Brilho que alcança os quatro cantos (vinheta), centrado em (x, y).
+    /// Glow that reaches the four corners (vignette), centered at (x, y).
     Vignette {
         #[serde(default = "half")]
         x: f32,
@@ -115,9 +112,9 @@ pub enum Layer {
         color: Paint,
         alpha: f32,
     },
-    /// Linhas finas repetidas a cada `step`, no ângulo `deg` (0 = horizontais).
+    /// Thin lines repeated every `step`, at angle `deg` (0 = horizontal).
     Stripes { deg: f32, step: f32, color: Paint, alpha: f32 },
-    /// Retângulo com o canto em (x, y).
+    /// Rectangle with its corner at (x, y).
     Rect {
         x: f32,
         y: f32,
@@ -131,10 +128,10 @@ pub enum Layer {
         #[serde(default = "one")]
         alpha: f32,
     },
-    /// A cidade da "Noite chuvosa" (lua, prédios, janelas que apagam). Só embutido.
+    /// The city of "Rainy night" (moon, buildings, windows that go dark). Built-in only.
     #[serde(skip)]
     City,
-    /// Animada: `count` gotas (numa área de 1000×600; escala com a área) caindo a `speed` px/s.
+    /// Animated: `count` drops (in a 1000×600 area; scales with the area) falling at `speed` px/s.
     Rain {
         count: u32,
         color: Paint,
@@ -144,8 +141,8 @@ pub enum Layer {
         #[serde(default = "rain_length")]
         length: f32,
     },
-    /// Animada: `count` pontos de lado `size` que acendem de vez em quando; com `grid`,
-    /// presos à grade (a mesma de uma camada `dots`).
+    /// Animated: `count` dots of side `size` that light up now and then; with `grid`, snapped
+    /// to the grid (the same as a `dots` layer).
     Twinkle {
         count: u32,
         color: Paint,
@@ -155,7 +152,7 @@ pub enum Layer {
         #[serde(default)]
         grid: f32,
     },
-    /// Animada: uma faixa de altura `height` descendo a `speed` px/s (varredura de tubo).
+    /// Animated: a band of height `height` going down at `speed` px/s (CRT scan).
     Scan {
         color: Paint,
         alpha: f32,
@@ -167,11 +164,11 @@ pub enum Layer {
 }
 
 impl Layer {
-    /// Confere os limites (um passo minúsculo travaria o desenho; mil gotas pesariam).
+    /// Checks the limits (a tiny step would freeze the drawing; a thousand drops would weigh).
     pub fn check(&self) -> Result<(), String> {
-        let alpha = |a: f32| if (0.0..=1.0).contains(&a) { Ok(()) } else { Err(format!("alpha {a} fora de 0 a 1")) };
-        let min = |name: &str, v: f32, m: f32| if v >= m { Ok(()) } else { Err(format!("{name} {v} é menor que {m}")) };
-        let count = |c: u32| if c <= 200 { Ok(()) } else { Err(format!("count {c} passa de 200")) };
+        let alpha = |a: f32| if (0.0..=1.0).contains(&a) { Ok(()) } else { Err(crate::tr!("alpha {} outside 0 to 1", a)) };
+        let min = |name: &str, v: f32, m: f32| if v >= m { Ok(()) } else { Err(crate::tr!("{} {} is less than {}", name, v, m)) };
+        let count = |c: u32| if c <= 200 { Ok(()) } else { Err(crate::tr!("count {} is over 200", c)) };
         match *self {
             Layer::Dots { step, radius, alpha: a, .. } => {
                 min("step", step, 4.0)?;
@@ -218,20 +215,22 @@ impl Layer {
     }
 }
 
-/// Um fundo: nome e camadas.
+/// A backdrop: name and layers.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Fundo {
+pub struct Backdrop {
     pub key: &'static str,
+    /// Display name in English (`tr_noop!`; translate with `i18n::tr` where shown). A
+    /// backdrop read from a file carries the user's own name here.
     pub label: &'static str,
     pub layers: &'static [Layer],
 }
 
 const ACCENT: Paint = Paint::Token("accent");
 
-pub static BUILTIN: &[Fundo] = &[
-    Fundo {
+pub static BUILTIN: &[Backdrop] = &[
+    Backdrop {
         key: "neon",
-        label: "Grade neon",
+        label: crate::tr_noop!("Neon grid"),
         layers: &[
             Layer::Dots { step: 20.0, offset: 10.0, radius: 1.0, color: ACCENT, alpha: 0.09 },
             Layer::Glow { x: 0.0, y: 0.0, dx: 0.0, dy: 0.0, rx: 420.0, ry: 260.0, fade: 0.7, color: Paint::Token("accent2"), alpha: 0.10 },
@@ -239,25 +238,25 @@ pub static BUILTIN: &[Fundo] = &[
             Layer::Twinkle { count: 24, color: ACCENT, alpha: 0.8, size: 2.0, grid: 20.0 },
         ],
     },
-    Fundo {
+    Backdrop {
         key: "terminal",
-        label: "Tubo (varredura)",
+        label: crate::tr_noop!("CRT (scanlines)"),
         layers: &[
-            // vinheta: mais claro no meio, apagando até 75% do raio até o canto
+            // vignette: lighter in the middle, fading out by 75% of the radius to the corner
             Layer::Vignette { x: 0.5, y: 0.45, fade: 0.75, color: ACCENT, alpha: 0.06 },
-            // linhas de varredura: 1 px escuro a cada 3
+            // scanlines: 1 dark px every 3
             Layer::Stripes { deg: 0.0, step: 3.0, color: Paint::Hex(0x000000), alpha: 0.28 },
             Layer::Scan { color: ACCENT, alpha: 0.05, height: 90.0, speed: 30.0 },
         ],
     },
-    Fundo {
+    Backdrop {
         key: "papel",
-        label: "Papel pontilhado",
+        label: crate::tr_noop!("Dotted paper"),
         layers: &[Layer::Dots { step: 24.0, offset: 12.0, radius: 1.5, color: Paint::Token("surface_edge"), alpha: 0.7 }],
     },
-    Fundo {
+    Backdrop {
         key: "cidade",
-        label: "Cidade chuvosa",
+        label: crate::tr_noop!("Rainy city"),
         layers: &[
             Layer::City,
             Layer::Rain { count: 40, color: Paint::Token("sub"), alpha: 0.35, speed: 220.0, length: 12.0 },
@@ -265,24 +264,24 @@ pub static BUILTIN: &[Fundo] = &[
     },
 ];
 
-/// Fundos de arquivo (depois dos embutidos); vazam a cada recarga, como temas e visuais.
-static EXTRA: RwLock<Vec<&'static Fundo>> = RwLock::new(Vec::new());
+/// Backdrops from files (after the built-in ones); leaked on each reload, like themes and skins.
+static EXTRA: RwLock<Vec<&'static Backdrop>> = RwLock::new(Vec::new());
 
-pub fn set_extra(list: Vec<Fundo>) {
+pub fn set_extra(list: Vec<Backdrop>) {
     let leaked = list.into_iter().map(|f| &*Box::leak(Box::new(f))).collect();
     if let Ok(mut extra) = EXTRA.write() {
         *extra = leaked;
     }
 }
 
-pub fn find(key: &str) -> Option<&'static Fundo> {
+pub fn find(key: &str) -> Option<&'static Backdrop> {
     if let Some(f) = BUILTIN.iter().find(|f| f.key == key) {
         return Some(f);
     }
     EXTRA.read().ok()?.iter().copied().find(|f| f.key == key)
 }
 
-pub fn get(key: &str) -> &'static Fundo {
+pub fn get(key: &str) -> &'static Backdrop {
     find(key).unwrap_or(&BUILTIN[0])
 }
 
@@ -290,7 +289,7 @@ fn rgb(c: u32) -> [f32; 3] {
     [((c >> 16) & 0xff) as f32 / 255.0, ((c >> 8) & 0xff) as f32 / 255.0, (c & 0xff) as f32 / 255.0]
 }
 
-/// Tela RGB em f32 (0..1), com operações de pintura com transparência.
+/// RGB canvas in f32 (0..1), with painting operations with transparency.
 struct Canvas {
     w: usize,
     h: usize,
@@ -314,7 +313,7 @@ impl Canvas {
         }
     }
 
-    /// Retângulo em pixels lógicos (bordas arredondadas para o pixel físico).
+    /// Rectangle in logical pixels (edges rounded to the physical pixel).
     fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: u32, a: f32) {
         let c = rgb(c);
         let (x0, y0) = ((x * self.s).round().max(0.0) as usize, (y * self.s).round().max(0.0) as usize);
@@ -327,8 +326,8 @@ impl Canvas {
         }
     }
 
-    /// Brilho elíptico: cor `c` com alfa `a` no centro (cx, cy), sumindo até `fade` do raio.
-    #[allow(clippy::too_many_arguments)] // centro, raios, fade e cor: agrupar não ajuda a ler
+    /// Elliptic glow: color `c` with alpha `a` at the center (cx, cy), fading out by `fade` of the radius.
+    #[allow(clippy::too_many_arguments)] // center, radii, fade and color: grouping does not help reading
     fn glow(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, fade: f32, c: u32, a: f32) {
         let c = rgb(c);
         let (cx, cy, rx, ry) = (cx * self.s, cy * self.s, rx * self.s * fade, ry * self.s * fade);
@@ -347,7 +346,7 @@ impl Canvas {
         }
     }
 
-    /// Pontos de raio `r` numa grade de passo `step`, começando em `off`.
+    /// Dots of radius `r` on a grid of spacing `step`, starting at `off`.
     fn dots(&mut self, step: f32, off: f32, r: f32, c: u32, a: f32) {
         let c = rgb(c);
         let (step, off, r) = (step * self.s, off * self.s, (r * self.s).max(0.6));
@@ -362,7 +361,7 @@ impl Canvas {
                 for y in y0..y1 {
                     for x in x0..x1 {
                         let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
-                        // borda suave de 1 pixel físico
+                        // soft edge of 1 physical pixel
                         self.blend(x, y, c, a * (r + 0.5 - d).clamp(0.0, 1.0));
                     }
                 }
@@ -372,14 +371,14 @@ impl Canvas {
         }
     }
 
-    /// Linhas finas repetidas, como `repeating-linear-gradient(<deg>, cor 0 1px, transparente 1px <passo>)`.
+    /// Thin repeated lines, like `repeating-linear-gradient(<deg>, color 0 1px, transparent 1px <step>)`.
     fn stripes(&mut self, deg: f32, step: f32, c: u32, a: f32) {
         let c = rgb(c);
         let (sin, cos) = deg.to_radians().sin_cos();
         let s = self.s;
         for y in 0..self.h {
             for x in 0..self.w {
-                // posição ao longo da direção do gradiente (0° = para cima, 90° = para a direita)
+                // position along the gradient direction (0° = up, 90° = right)
                 let t = (x as f32 * sin - y as f32 * cos) / s;
                 if t.rem_euclid(step) < 1.0 {
                     self.blend(x, y, c, a);
@@ -398,13 +397,13 @@ impl Canvas {
     }
 }
 
-/// Desenha `fundo` com as cores de `skin` para uma área de `w`×`h` pixels lógicos na
-/// escala `scale`. As camadas animadas ficam de fora (ver `ambient`).
-pub fn render(fundo: &Fundo, skin: &Skin, w: f32, h: f32, scale: f32) -> SharedPixelBuffer<Rgb8Pixel> {
+/// Draws `backdrop` with the colors of `skin` for an area of `w`×`h` logical pixels at
+/// scale `scale`. The animated layers are left out (see `ambient`).
+pub fn render(backdrop: &Backdrop, skin: &Skin, w: f32, h: f32, scale: f32) -> SharedPixelBuffer<Rgb8Pixel> {
     let pw = ((w * scale).round() as usize).max(1);
     let ph = ((h * scale).round() as usize).max(1);
     let mut c = Canvas::new(pw, ph, scale, skin.bg);
-    for layer in fundo.layers {
+    for layer in backdrop.layers {
         match *layer {
             Layer::Dots { step, offset, radius, color, alpha } => c.dots(step, offset, radius, color.resolve(skin), alpha),
             Layer::Glow { x, y, dx, dy, rx, ry, fade, color, alpha } => {
@@ -426,12 +425,12 @@ pub fn render(fundo: &Fundo, skin: &Skin, w: f32, h: f32, scale: f32) -> SharedP
     c.into_buffer()
 }
 
-/// Um elemento animado por cima do fundo, em pixels lógicos. A tela calcula a posição a
-/// cada quadro a partir do relógio (`Anim.time`, em ms): ver `ui/ambient.slint`.
+/// An animated element on top of the backdrop, in logical pixels. The screen computes the
+/// position every frame from the clock (`Anim.time`, in ms): see `ui/ambient.slint`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ambient {
-    /// `"fall"` (desce e volta ao topo), `"blink"` (aparece `on` ms a cada `period` ms) ou
-    /// `"scan"` (faixa que desce).
+    /// `"fall"` (goes down and back to the top), `"blink"` (shows for `on` ms every `period` ms)
+    /// or `"scan"` (a band going down).
     pub kind: &'static str,
     pub x: f32,
     pub y: f32,
@@ -439,15 +438,15 @@ pub struct Ambient {
     pub h: f32,
     pub color: u32,
     pub alpha: f32,
-    /// Atraso, em ms, para os elementos não andarem juntos.
+    /// Delay, in ms, so the elements don't move together.
     pub phase: i32,
     pub period: i32,
     pub on: i32,
-    /// Pixels por segundo (`fall` e `scan`).
+    /// Pixels per second (`fall` and `scan`).
     pub speed: f32,
 }
 
-/// Gerador pseudoaleatório fixo (xorshift): as mesmas gotas e estrelas a cada redesenho.
+/// Fixed pseudo-random generator (xorshift): the same drops and stars on every redraw.
 struct Rng(u32);
 
 impl Rng {
@@ -462,22 +461,22 @@ impl Rng {
     }
 }
 
-/// Inclinação da chuva (a mesma das linhas da cidade): x anda 0,18 px por px de queda.
+/// Slant of the rain (the same as the city's lines): x moves 0.18 px per px of fall.
 pub const RAIN_SLANT: f32 = 0.18;
 
-/// Os elementos animados de `fundo` para uma área de `w`×`h` pixels lógicos.
-pub fn ambient(fundo: &Fundo, skin: &Skin, w: f32, h: f32) -> Vec<Ambient> {
+/// The animated elements of `backdrop` for an area of `w`×`h` logical pixels.
+pub fn ambient(backdrop: &Backdrop, skin: &Skin, w: f32, h: f32) -> Vec<Ambient> {
     let area = (w * h / (1000.0 * 600.0)).clamp(0.2, 4.0);
     let scaled = |n: u32| ((n as f32 * area).round() as u32).min(200);
     let mut out = Vec::new();
-    for (i, layer) in fundo.layers.iter().enumerate() {
+    for (i, layer) in backdrop.layers.iter().enumerate() {
         let mut rng = Rng(0x9e37_79b9 ^ (i as u32 + 1).wrapping_mul(0x85eb_ca6b));
         match *layer {
             Layer::Rain { count, color, alpha, speed, length } => {
                 for _ in 0..scaled(count) {
                     out.push(Ambient {
                         kind: "fall",
-                        // começa até RAIN_SLANT·h à direita, para cobrir a área inteira ao inclinar
+                        // starts up to RAIN_SLANT·h to the right, to cover the whole area when slanted
                         x: rng.range(0.0, w + RAIN_SLANT * h),
                         y: rng.range(0.0, h + length),
                         w: 1.0,
@@ -534,7 +533,7 @@ pub fn ambient(fundo: &Fundo, skin: &Skin, w: f32, h: f32) -> Vec<Ambient> {
     out
 }
 
-/// Prédios do design (quadro 980×170), esticados na largura e presos embaixo.
+/// Buildings from the design (980×170 frame), stretched to the width and pinned to the bottom.
 const BUILDINGS: &[(f32, f32, f32, f32)] = &[
     (0.0, 90.0, 60.0, 80.0), (70.0, 60.0, 90.0, 110.0), (170.0, 100.0, 50.0, 70.0), (230.0, 40.0, 70.0, 130.0),
     (310.0, 80.0, 110.0, 90.0), (430.0, 55.0, 60.0, 115.0), (500.0, 95.0, 80.0, 75.0), (590.0, 30.0, 70.0, 140.0),
@@ -546,7 +545,7 @@ const WINDOWS: &[(f32, f32)] = &[
     (740.0, 112.0), (796.0, 66.0), (820.0, 96.0), (880.0, 102.0), (930.0, 122.0),
 ];
 
-/// Cores da cidade, tiradas do visual (na "Noite chuvosa" dão as do design).
+/// Colors of the city, taken from the skin (on "Rainy night" they give the design's).
 struct CityColors {
     building: u32,
     window: u32,
@@ -571,13 +570,13 @@ impl CityColors {
 
 fn city(c: &mut Canvas, skin: &Skin, w: f32, h: f32) {
     let k = CityColors::of(skin);
-    // lua com halo, no alto à direita
+    // moon with a halo, top right
     let (mx, my) = (w - 72.0 - 44.0, 34.0);
     if mx > 0.0 {
         c.glow(mx + 22.0, my + 22.0, 62.0, 62.0, 1.0, k.moon, 0.22);
         c.rect(mx, my, 44.0, 44.0, k.moon, 1.0);
     }
-    // prédios
+    // buildings
     let (sx, base) = (w / 980.0, h - 170.0);
     for &(x, y, bw, bh) in BUILDINGS {
         c.rect(x * sx, base + y, bw * sx, bh, k.building, 1.0);
@@ -586,14 +585,14 @@ fn city(c: &mut Canvas, skin: &Skin, w: f32, h: f32) {
         c.rect(x * sx, base + y, 6.0, 6.0, k.window, 1.0);
     }
     c.rect(520.0 * sx, base + 110.0, 40.0 * sx, 4.0, k.sign, 1.0);
-    // chuva parada (textura); as gotas que caem são a camada `rain`
+    // still rain (texture); the falling drops are the `rain` layer
     c.stripes(100.0, 17.0, k.rain, 0.08);
     c.stripes(100.0, 29.0, k.rain, 0.05);
-    // brilho quente embaixo à esquerda
+    // warm glow at the bottom left
     c.glow(0.0, h, 380.0, 260.0, 0.7, k.glow, 0.16);
 }
 
-/// Algumas janelas apagam de vez em quando: um quadrado da cor do prédio por cima.
+/// Some windows go dark now and then: a square of the building's color on top.
 fn city_lights(out: &mut Vec<Ambient>, skin: &Skin, w: f32, h: f32, rng: &mut Rng) {
     let k = CityColors::of(skin);
     let (sx, base) = (w / 980.0, h - 170.0);
@@ -620,7 +619,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tamanho_segue_a_escala() {
+    fn size_follows_the_scale() {
         let neon = crate::skin::get("neon");
         let b = render(get("papel"), neon, 100.0, 50.0, 2.0);
         assert_eq!((b.width(), b.height()), (200, 100));
@@ -629,38 +628,38 @@ mod tests {
     }
 
     #[test]
-    fn todos_desenham_algo_alem_do_fundo() {
+    fn all_draw_something_besides_the_background() {
         for s in crate::skin::BUILTIN {
             let b = render(get(s.backdrop), s, 300.0, 200.0, 1.0);
             let first = b.as_slice()[0];
-            assert!(b.as_slice().iter().any(|p| *p != first), "{} saiu liso", s.key);
+            assert!(b.as_slice().iter().any(|p| *p != first), "{} came out flat", s.key);
         }
     }
 
     #[test]
-    fn cores_vem_do_visual() {
-        // a mesma grade com outro destaque muda de cor
+    fn colors_come_from_the_skin() {
+        // the same grid with another accent changes color
         let neon = crate::skin::get("neon");
-        let rosa = crate::skin::effective(neon, "magenta");
-        assert_ne!(render(get("neon"), neon, 120.0, 80.0, 1.0).as_slice(), render(get("neon"), &rosa, 120.0, 80.0, 1.0).as_slice());
+        let pink = crate::skin::effective(neon, "magenta");
+        assert_ne!(render(get("neon"), neon, 120.0, 80.0, 1.0).as_slice(), render(get("neon"), &pink, 120.0, 80.0, 1.0).as_slice());
     }
 
     #[test]
-    fn animados_seguem_a_area_e_ficam_dentro() {
-        let noite = crate::skin::get("noite");
-        let small = ambient(get("cidade"), noite, 500.0, 300.0);
-        let big = ambient(get("cidade"), noite, 1500.0, 900.0);
+    fn animated_follow_the_area_and_stay_inside() {
+        let night = crate::skin::get("noite");
+        let small = ambient(get("cidade"), night, 500.0, 300.0);
+        let big = ambient(get("cidade"), night, 1500.0, 900.0);
         let falls = |v: &[Ambient]| v.iter().filter(|a| a.kind == "fall").count();
         assert!(falls(&big) > falls(&small) && falls(&small) > 0);
-        assert!(big.iter().any(|a| a.kind == "blink"), "janelas que apagam");
-        assert!(ambient(get("papel"), noite, 500.0, 300.0).is_empty());
-        for a in ambient(get("neon"), noite, 800.0, 500.0) {
+        assert!(big.iter().any(|a| a.kind == "blink"), "windows that go dark");
+        assert!(ambient(get("papel"), night, 500.0, 300.0).is_empty());
+        for a in ambient(get("neon"), night, 800.0, 500.0) {
             assert!(a.x >= 0.0 && a.x < 800.0 && a.y >= 0.0 && a.y < 500.0 && a.period > a.on);
         }
     }
 
     #[test]
-    fn limites_das_camadas() {
+    fn layer_limits() {
         let ok = Layer::Dots { step: 20.0, offset: 0.0, radius: 1.0, color: ACCENT, alpha: 0.1 };
         assert!(ok.check().is_ok());
         assert!(Layer::Dots { step: 1.0, offset: 0.0, radius: 1.0, color: ACCENT, alpha: 0.1 }.check().is_err());

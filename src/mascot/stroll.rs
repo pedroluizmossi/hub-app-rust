@@ -1,63 +1,63 @@
-//! Subagentes andando com as mascotes importadas: cada um anda um pouco, para e faz uma
-//! das animações do pacote (ataque, empurrar, arremessar, parado…), volta a andar, às
-//! vezes dá meia-volta; corre enquanto está chamando ferramentas e pula ao terminar.
+//! Subagents walking around as the imported mascots: each one walks a bit, stops and plays
+//! one of the pack's animations (attack, push, throw, idle…), walks again, sometimes turns
+//! around; it runs while calling tools and jumps when it finishes.
 //!
-//! Só números (que animação, que quadro, para que lado, onde na faixa): quem desenha é o
-//! app, com os quadros de `pack::Troupe`. O tempo é em ms de um relógio qualquer que só
-//! anda para a frente; a posição `x` vai de 0 (ponta esquerda) a 1 (direita).
+//! Numbers only (which animation, which frame, which way, where on the strip): the app does
+//! the drawing, with the frames of `pack::Troupe`. Time is in ms of any clock that only moves
+//! forward; the position `x` goes from 0 (left end) to 1 (right end).
 
-/// As animações de uma mascote para andar na faixa (índices em `frames`/`ms`).
+/// A mascot's animations for walking on the strip (indices into `frames`/`ms`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Script {
     pub names: Vec<String>,
-    /// Quadros de cada animação.
+    /// Frames of each animation.
     pub frames: Vec<usize>,
-    /// Quanto cada quadro fica na tela.
+    /// How long each frame stays on screen.
     pub ms: Vec<u32>,
     pub walk: usize,
-    /// Correr: enquanto chama ferramentas.
+    /// Running: while calling tools.
     pub run: Option<usize>,
-    /// Pular: ao terminar.
+    /// Jumping: when finished.
     pub jump: Option<usize>,
     pub idle: Option<usize>,
-    /// Andando, além de `walk` (ex.: "walk+attack").
+    /// Other ways of walking besides `walk` (e.g. "walk+attack").
     pub strolls: Vec<usize>,
-    /// Paradas no lugar: ataques, empurrar, arremessar, parado…
+    /// Stops in place: attacks, pushing, throwing, idle…
     pub extras: Vec<usize>,
 }
 
 impl Script {
-    /// Uma volta inteira da animação `c`, em ms.
+    /// One full lap of animation `c`, in ms.
     fn lap(&self, c: usize) -> u64 {
         (self.frames[c] as u64 * self.ms[c].max(1) as u64).max(1)
     }
 }
 
-/// O que desenhar de um subagente agora.
+/// What to draw of a subagent now.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pose {
-    /// Mascote (índice da lista que o app passou).
+    /// Mascot (index in the list the app passed).
     pub hero: usize,
     pub clip: usize,
     pub frame: usize,
-    /// Olhando para a direita.
+    /// Facing right.
     pub right: bool,
     pub x: f32,
 }
 
-/// Faixa por segundo, andando e correndo.
+/// Strip widths per second, walking and running.
 const WALK_SPEED: f32 = 0.07;
 const RUN_SPEED: f32 = 0.16;
-/// Parada mais curta (a animação repete até passar disso).
+/// Shortest stop (the animation repeats until it has passed).
 const MIN_STAY_MS: u64 = 900;
-/// Passo de tempo mais longo de uma vez (janela escondida não faz ninguém teleportar).
+/// Longest time step at once (a hidden window doesn't make anyone teleport).
 const MAX_STEP_MS: u64 = 400;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Act {
     Move(usize),
     Stay(usize),
-    /// Terminou: pula uma vez e sai (`None` = sem pulo no pacote, sai já).
+    /// Finished: jumps once and leaves (`None` = no jump in the pack, leaves at once).
     Leave(Option<usize>),
 }
 
@@ -71,15 +71,15 @@ struct Walker {
     start: u64,
     end: u64,
     active: bool,
-    /// Passo próprio (0,8 a 1,2× a velocidade): dois correndo juntos não andam grudados.
+    /// Own pace (0.8 to 1.2× the speed): two running together don't walk glued together.
     pace: f32,
-    /// Última parada, para não repetir a mesma em seguida.
+    /// Last stop, so the same one isn't repeated right after.
     last: Option<usize>,
     rng: u64,
 }
 
 impl Walker {
-    /// Número de 0 a `n - 1` (xorshift: a sequência de cada subagente sai do id dele).
+    /// A number from 0 to `n - 1` (xorshift: each subagent's sequence comes from its id).
     fn roll(&mut self, n: u64) -> u64 {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 7;
@@ -87,8 +87,8 @@ impl Walker {
         self.rng % n.max(1)
     }
 
-    /// Como anda agora: correndo se está chamando ferramentas; senão, em geral andando, às
-    /// vezes outro jeito de andar do pacote.
+    /// How it moves now: running if it is calling tools; otherwise usually walking,
+    /// sometimes another way of walking from the pack.
     fn mover(&mut self, s: &Script) -> usize {
         if self.active && let Some(run) = s.run {
             return run;
@@ -99,8 +99,8 @@ impl Walker {
         s.strolls[self.roll(s.strolls.len() as u64) as usize]
     }
 
-    /// Uma parada: "parado" um terço das vezes; senão, outra das extras, sem repetir a
-    /// última.
+    /// A stop: "idle" a third of the time; otherwise another of the extras, not repeating
+    /// the last one.
     fn extra(&mut self, s: &Script) -> usize {
         if let Some(idle) = s.idle.filter(|_| self.roll(3) == 0) {
             return idle;
@@ -112,7 +112,7 @@ impl Walker {
         pool[self.roll(pool.len() as u64) as usize]
     }
 
-    /// O que fazer quando o que estava fazendo acabou.
+    /// What to do when what it was doing is over.
     fn next(&mut self, s: &Script, now: u64) {
         let stays = if self.active { 25 } else { 55 };
         let stop = matches!(self.act, Act::Move(_)) && !s.extras.is_empty() && self.roll(100) < stays;
@@ -135,7 +135,7 @@ impl Walker {
     }
 }
 
-/// Os subagentes andando numa faixa (a de uma sessão).
+/// The subagents walking on one strip (a session's).
 #[derive(Debug, Clone, Default)]
 pub struct Stage {
     walkers: Vec<Walker>,
@@ -147,8 +147,8 @@ impl Stage {
         self.walkers.is_empty()
     }
 
-    /// Quem anda agora: (id, mascote, chamando ferramentas). Quem chega começa num ponto
-    /// qualquer da faixa; quem saiu pula uma vez e some.
+    /// Who is walking now: (id, mascot, calling tools). Newcomers start at a random spot on
+    /// the strip; those who left jump once and vanish.
     pub fn cast(&mut self, now: u64, here: &[(String, usize, bool)], scripts: &[&Script]) {
         for w in &mut self.walkers {
             if matches!(w.act, Act::Leave(_)) || here.iter().any(|(id, ..)| *id == w.id) {
@@ -166,7 +166,7 @@ impl Stage {
                 Some(w) => {
                     if w.active != *active {
                         w.active = *active;
-                        // começou ou parou de correr: troca o jeito de andar já
+                        // started or stopped running: switch the way of walking right away
                         if let Act::Move(c) = w.act
                             && (Some(c) == s.run || *active)
                         {
@@ -200,8 +200,8 @@ impl Stage {
         }
     }
 
-    /// Anda o tempo até `now`: quem anda muda de lugar (e vira na ponta), quem acabou o
-    /// que fazia passa ao próximo, quem saiu e já pulou some.
+    /// Advances time to `now`: walkers move (and turn at the ends), whoever finished what
+    /// it was doing goes to the next thing, whoever left and already jumped vanishes.
     pub fn step(&mut self, now: u64, scripts: &[&Script]) {
         let dt = self.at.map_or(0, |at| now.saturating_sub(at).min(MAX_STEP_MS)) as f32 / 1000.0;
         self.at = Some(now);
@@ -223,8 +223,8 @@ impl Stage {
         self.walkers.retain(|w| !matches!(w.act, Act::Leave(_)) || w.end > now);
     }
 
-    /// O que desenhar agora, na ordem de chegada. Com "reduzir movimento" (`calm`),
-    /// todos parados no primeiro quadro, espalhados pela faixa.
+    /// What to draw now, in order of arrival. With "reduce motion" (`calm`), everyone stands
+    /// still on the first frame, spread along the strip.
     pub fn poses(&self, now: u64, scripts: &[&Script], calm: bool) -> Vec<Pose> {
         let n = self.walkers.len();
         self.walkers
@@ -241,14 +241,14 @@ impl Stage {
                     Act::Leave(None) => s.walk,
                 };
                 let f = (now.saturating_sub(w.start) / s.ms[clip].max(1) as u64) as usize;
-                // o pulo de saída não repete: para no último quadro
+                // the leaving jump doesn't repeat: it stops on the last frame
                 let frame = if matches!(w.act, Act::Leave(_)) { f.min(s.frames[clip] - 1) } else { f % s.frames[clip] };
                 Some(Pose { hero: w.hero, clip, frame, right: w.right, x: w.x })
             })
             .collect()
     }
 
-    /// O quadro mais curto entre as animações na tela (o hub acelera o timer até ele).
+    /// The shortest frame among the animations on screen (the hub speeds its timer up to it).
     pub fn frame_ms(&self, scripts: &[&Script]) -> Option<u32> {
         self.walkers
             .iter()
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn anda_para_e_varia_as_animacoes() {
+    fn walks_stops_and_varies_the_animations() {
         let s = script();
         let mut stage = Stage::default();
         stage.cast(0, &here(&[("a", false)]), &[&s]);
@@ -302,27 +302,27 @@ mod tests {
             seen.insert(p.clip);
             xs.push(p.x);
         }
-        // em dois minutos: andou, parou em todas as extras e no "parado", nunca correu nem pulou
+        // in two minutes: walked, stopped at every extra and at "idle", never ran nor jumped
         for c in [0, 3, 4, 5, 6] {
-            assert!(seen.contains(&c), "{} nunca apareceu: {seen:?}", s.names[c]);
+            assert!(seen.contains(&c), "{} never showed up: {seen:?}", s.names[c]);
         }
         assert!(!seen.contains(&1) && !seen.contains(&2), "{seen:?}");
-        // e saiu do lugar
+        // and it moved around
         let (lo, hi) = xs.iter().fold((1f32, 0f32), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
         assert!(hi - lo > 0.3, "{lo}..{hi}");
     }
 
     #[test]
-    fn corre_chamando_ferramentas_e_pula_ao_terminar() {
+    fn runs_while_calling_tools_and_jumps_when_done() {
         let s = script();
         let mut stage = Stage::default();
         stage.cast(0, &here(&[("a", true)]), &[&s]);
         stage.step(0, &[&s]);
-        assert_eq!(stage.poses(0, &[&s], false)[0].clip, 1, "chamando ferramenta: corre");
-        // parou de chamar: volta a andar na hora
+        assert_eq!(stage.poses(0, &[&s], false)[0].clip, 1, "calling a tool: runs");
+        // stopped calling: back to walking at once
         stage.cast(500, &here(&[("a", false)]), &[&s]);
         assert_ne!(stage.poses(500, &[&s], false)[0].clip, 1);
-        // terminou: pula uma volta (8 quadros de 125 ms), parando no último quadro, e some
+        // finished: jumps one lap (8 frames of 125 ms), stopping on the last frame, and vanishes
         stage.cast(1000, &here(&[]), &[&s]);
         let p = stage.poses(1000 + 7 * 125 + 50, &[&s], false);
         assert_eq!((p[0].clip, p[0].frame), (2, 7));
@@ -333,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn cada_um_no_seu_ritmo_e_parados_com_calma() {
+    fn each_at_its_own_pace_and_still_when_calm() {
         let s = script();
         let mut stage = Stage::default();
         stage.cast(0, &here(&[("a", false), ("b", false), ("c", false)]), &[&s]);
@@ -343,7 +343,7 @@ mod tests {
         let calm = stage.poses(0, &[&s], true);
         assert!(calm.iter().all(|p| p.frame == 0 && p.clip == 3));
         assert_eq!(calm.iter().map(|p| p.x).collect::<Vec<_>>(), [0.5 / 3.0, 1.5 / 3.0, 2.5 / 3.0]);
-        // mesmo id, mesma sequência: a tela não muda de ideia ao redesenhar
+        // same id, same sequence: the screen doesn't change its mind when redrawing
         let mut again = Stage::default();
         again.cast(0, &here(&[("a", false), ("b", false), ("c", false)]), &[&s]);
         assert_eq!(again.poses(0, &[&s], false), p);

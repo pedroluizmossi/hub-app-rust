@@ -1,12 +1,13 @@
-//! Reações curtas das mascotes, por cima do humor.
+//! Short mascot reactions, on top of the mood.
 //!
-//! O `Mood` é o estado que dura (dormindo, normal, feliz, ocupado, alerta). Uma reação é um
-//! pico curto disparado por um evento ("um container voltou") ou pelo usuário (easter egg);
-//! quando acaba, a mascote volta ao humor. Cada mascote tem o seu `Animator`.
+//! The `Mood` is the lasting state (asleep, normal, happy, busy, alarm). A reaction is a
+//! short burst fired by an event ("a container came back") or by the user (easter egg);
+//! when it ends, the mascot goes back to its mood. Each mascot has its own `Animator`.
 //!
-//! Tudo é medido pelo relógio, não por quadros: o timer da janela muda de ritmo com o mouse
-//! (ver `FRAME_HOT` em `hub.rs`), e uma reação contada em quadros duraria o dobro. Pelo mesmo
-//! motivo, uma reação disparada com a mascote fora da tela expira sozinha.
+//! Everything is measured by the clock, not by frames: the window timer changes pace with
+//! the mouse (see `FRAME_HOT` in `hub.rs`), and a reaction counted in frames would last twice
+//! as long. For the same reason, a reaction fired while the mascot is off screen expires on
+//! its own.
 
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -18,21 +19,21 @@ use super::clips::{self, Clips, Grid};
 use super::pack;
 use super::sprites::Sprite;
 
-/// "Reduzir movimento" (config global): as animações desenhadas ficam na pose base.
+/// "Reduce motion" (global setting): drawn animations stay in the base pose.
 static CALM: AtomicBool = AtomicBool::new(false);
 
-/// Liga ou desliga "reduzir movimento" para as animações desenhadas.
+/// Turns "reduce motion" on or off for the drawn animations.
 pub fn set_calm(on: bool) {
     CALM.store(on, Ordering::Relaxed);
 }
 
-/// "Reduzir movimento" está ligado.
+/// "Reduce motion" is on.
 pub fn calm() -> bool {
     CALM.load(Ordering::Relaxed)
 }
 
 thread_local! {
-    /// Menor quadro (ms) pedido pelas mascotes desenhadas desde a última leitura do hub.
+    /// Shortest frame (ms) requested by the drawn mascots since the hub last read it.
     static WANT_MS: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -44,26 +45,26 @@ pub(crate) fn request_frame_ms(ms: u32) {
     });
 }
 
-/// O quadro mais curto que alguma animação na tela pediu desde a última chamada (o hub
-/// acelera o timer só enquanto precisa). `None` = ninguém pediu.
+/// The shortest frame some animation on screen asked for since the last call (the hub
+/// speeds up its timer only while needed). `None` = nobody asked.
 pub fn take_requested_frame_ms() -> Option<u32> {
     let ms = WANT_MS.with(|w| w.replace(0));
     (ms > 0).then_some(ms)
 }
 
-/// Quadro "virtual" de 125 ms: o desenho anima no mesmo ritmo com o timer rápido ou lento.
+/// "Virtual" 125 ms frame: the drawing animates at the same pace with a fast or slow timer.
 const FRAME: Duration = Duration::from_millis(125);
-/// Quanto dura uma piscada.
+/// How long a blink lasts.
 const BLINK: Duration = Duration::from_millis(160);
-/// Cliques na mascote para o easter egg, dentro desta janela.
+/// Clicks on the mascot for the easter egg, within this window.
 const POKES: usize = 3;
 const POKE_WINDOW: Duration = Duration::from_millis(1200);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reaction {
-    /// Algo deu certo (um container voltou): pula e brilha.
+    /// Something went right (a container came back): jumps and shines.
     Celebrate,
-    /// Easter egg: cutucaram a mascote.
+    /// Easter egg: someone poked the mascot.
     Surprised,
 }
 
@@ -82,7 +83,7 @@ impl Reaction {
         }
     }
 
-    /// Tempo mínimo entre duas vezes da mesma reação.
+    /// Minimum time between two plays of the same reaction.
     fn cooldown(self) -> Duration {
         match self {
             Reaction::Celebrate => Duration::from_secs(3),
@@ -90,7 +91,7 @@ impl Reaction {
         }
     }
 
-    /// Uma reação de prioridade maior não é interrompida por uma menor.
+    /// A higher-priority reaction is not interrupted by a lower one.
     fn priority(self) -> u8 {
         match self {
             Reaction::Celebrate => 2,
@@ -103,35 +104,35 @@ impl Reaction {
     }
 }
 
-/// O que desenhar agora.
+/// What to draw now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
     pub mood: Mood,
     pub reaction: Option<Reaction>,
-    /// Olhos fechados neste instante (piscada).
+    /// Eyes closed at this instant (blink).
     pub blink: bool,
-    /// Quadro virtual (LED, olhos do alerta, glitch).
+    /// Virtual frame (LED, alarm eyes, glitch).
     pub frame: u32,
-    /// Quadro de uma animação desenhada (`clips.rs`); `None` = o desenho base.
+    /// Frame of a drawn animation (`clips.rs`); `None` = the base drawing.
     pub pose: Option<Grid>,
-    /// Tempo desta mascote em ms: escolhe o quadro das mascotes importadas, que têm o
-    /// próprio ritmo (`pack.rs`).
+    /// This mascot's time in ms: picks the frame of imported mascots, which have their own
+    /// pace (`pack.rs`).
     pub ms: u64,
 }
 
 impl Look {
-    /// Sem `Animator`: piscada e quadro vêm do contador global (bandeja, ícones das listas).
+    /// Without an `Animator`: blink and frame come from the global counter (tray, list icons).
     pub fn from_frame(mood: Mood, frame: u32) -> Self {
         Look { mood, reaction: None, blink: frame.is_multiple_of(25), frame, pose: None, ms: frame as u64 * FRAME.as_millis() as u64 }
     }
 }
 
-/// Estado de animação de uma mascote.
+/// Animation state of one mascot.
 pub struct Animator {
     epoch: Instant,
-    /// Defasagem desta mascote: mascotes iguais não piscam juntas.
+    /// This mascot's offset: identical mascots don't blink together.
     phase: Duration,
-    /// Intervalo entre piscadas (varia um pouco de uma mascote para outra).
+    /// Interval between blinks (varies a little from one mascot to another).
     blink_every: Duration,
     active: Option<(Reaction, Instant)>,
     last: [Option<Instant>; 2],
@@ -140,9 +141,9 @@ pub struct Animator {
 }
 
 impl Animator {
-    /// `seed` distingue as mascotes (o índice serve).
+    /// `seed` tells the mascots apart (the index will do).
     pub fn new(seed: u32) -> Self {
-        let s = seed.wrapping_mul(2_654_435_761); // espalha seeds vizinhas
+        let s = seed.wrapping_mul(2_654_435_761); // spreads neighboring seeds
         Animator {
             epoch: Instant::now(),
             phase: Duration::from_millis((s % 3000) as u64),
@@ -154,8 +155,8 @@ impl Animator {
         }
     }
 
-    /// Dispara uma reação. Recusa se a mesma tocou há pouco ou se uma mais importante está
-    /// tocando. Devolve `true` se começou.
+    /// Fires a reaction. Refuses if the same one played recently or if a more important one
+    /// is playing. Returns `true` if it started.
     pub fn trigger(&mut self, r: Reaction, now: Instant) -> bool {
         if self.last[r.index()].is_some_and(|t| now.duration_since(t) < r.cooldown()) {
             return false;
@@ -169,8 +170,8 @@ impl Animator {
         true
     }
 
-    /// Clique na mascote. Alguns cliques seguidos disparam o easter egg, nunca durante um
-    /// alerta (ele não pode esconder um problema). Devolve `true` se a reação começou.
+    /// A click on the mascot. A few clicks in a row fire the easter egg, never during an
+    /// alarm (it must not hide a problem). Returns `true` if the reaction started.
     pub fn poke(&mut self, mood: Mood, now: Instant) -> bool {
         self.pokes.retain(|t| now.duration_since(*t) < POKE_WINDOW);
         self.pokes.push(now);
@@ -181,13 +182,13 @@ impl Animator {
         self.trigger(Reaction::Surprised, now)
     }
 
-    /// Reação tocando agora, se houver.
+    /// Reaction playing now, if any.
     pub fn current(&self, now: Instant) -> Option<Reaction> {
         let (r, t0) = self.active?;
         (now.duration_since(t0) < r.duration()).then_some(r)
     }
 
-    /// O que desenhar no instante `now` para o humor dado. Um alerta interrompe a reação.
+    /// What to draw at instant `now` for the given mood. An alarm interrupts the reaction.
     pub fn look(&mut self, mood: Mood, now: Instant) -> Look {
         if mood == Mood::Alarm {
             self.active = None;
@@ -203,12 +204,12 @@ impl Animator {
         Look { mood, reaction, blink, frame, pose: None, ms: t.as_millis() as u64 }
     }
 
-    /// Como `look`, com o quadro da animação desenhada de `sprite`, se ela tiver (ver
-    /// `clips.rs`): a da reação enquanto ela dura; senão a do humor, com transições e
-    /// variações. Com "reduzir movimento", fica na pose base.
+    /// Like `look`, with the frame of `sprite`'s drawn animation, if it has one (see
+    /// `clips.rs`): the reaction's while it lasts; otherwise the mood's, with transitions and
+    /// variants. With "reduce motion", it stays in the base pose.
     pub fn look_with(&mut self, sprite: &Sprite, mood: Mood, now: Instant) -> Look {
         let mut look = self.look(mood, now);
-        // importada: o quadro sai do tempo (`pack::Art::pick`); só pede o ritmo dela
+        // imported: the frame comes from the time (`pack::Art::pick`); just ask for its pace
         if let Some(art) = pack::art(sprite) {
             if !calm() && let Some(ms) = art.frame_ms(&look) {
                 request_frame_ms(ms);
@@ -237,15 +238,15 @@ impl Animator {
     }
 }
 
-/// Qual animação desenhada toca agora: o loop do humor, a transição de entrada ou saída e,
-/// de vez em quando, uma variação (ver `clips.rs`).
+/// Which drawn animation plays now: the mood's loop, the enter or exit transition and, now
+/// and then, a variant (see `clips.rs`).
 #[derive(Default)]
 struct Player {
-    /// Humor da última vez (para saber quando mudou).
+    /// Mood last time (to know when it changed).
     mood: Option<Mood>,
-    /// Desde quando o loop do humor está tocando.
+    /// Since when the mood's loop has been playing.
     loop_since: Option<Instant>,
-    /// Transição ou variação tocando uma vez, e quando começou.
+    /// Transition or variant playing once, and when it started.
     once: Option<(String, Instant)>,
     queue: VecDeque<String>,
     next_variant: Option<Instant>,
@@ -255,7 +256,7 @@ struct Player {
 impl Player {
     fn pose<'c>(&mut self, clips: &'c Clips, mood: Mood, now: Instant) -> Option<(Grid, &'c clips::Clip)> {
         if self.mood != Some(mood) {
-            // mudou de humor: sai do antigo, entra no novo, e o loop recomeça
+            // mood changed: leave the old one, enter the new one, and the loop restarts
             self.queue.clear();
             self.once = None;
             let exit = self.mood.and_then(|m| clips.get(m.as_str())).and_then(|c| c.exit.clone());
@@ -270,7 +271,7 @@ impl Player {
                 let t = now.duration_since(*t0).as_millis() as u64;
                 match clips.get(name) {
                     Some(c) if !c.done_at(t) => return Some((*c.frame_at(t), c)),
-                    // terminou (ou sumiu numa recarga): o loop recomeça do primeiro quadro
+                    // finished (or vanished in a reload): the loop restarts from the first frame
                     _ => {
                         self.once = None;
                         self.loop_since = Some(now);
@@ -304,13 +305,13 @@ impl Player {
         Some((*clip.frame_at(t), clip))
     }
 
-    /// Espera sorteada entre `min` e `max` segundos.
+    /// Random wait between `min` and `max` seconds.
     fn wait(&mut self, (min, max): (u32, u32)) -> Duration {
         let span = (max - min) as u64 * 1000;
         Duration::from_millis(min as u64 * 1000 + if span == 0 { 0 } else { self.roll() % (span + 1) })
     }
 
-    /// Sorteio simples (xorshift): variação não precisa de mais que isso.
+    /// Simple random draw (xorshift): variants need nothing more.
     fn roll(&mut self) -> u64 {
         let mut x = self.rng.max(1);
         x ^= x << 13;
@@ -329,69 +330,69 @@ mod tests {
         Duration::from_millis(n)
     }
 
-    /// Animações de teste na neko: cada uma com a 1ª linha marcada, para saber qual tocou.
-    fn clips_de_teste() -> Clips {
+    /// Test animations on the neko: each with its first row marked, to know which one played.
+    fn test_clips() -> Clips {
         let neko = crate::mascot::sprites::get("neko");
-        let q = |marca: &str| {
+        let q = |mark: &str| {
             let mut rows: Vec<&str> = neko.grid.to_vec();
-            rows[0] = marca;
+            rows[0] = mark;
             crate::mascot::clips::tests::frame(&rows)
         };
         let (a, b, c, d, e) = (q("K..............."), q(".K.............."), q("..K............."), q("...K............"), q("....K..........."));
         let src = format!(
-            "[idle]\nfps = 1\nexit = \"acorda\"\nvariants = [\"coca\"]\nevery = [5, 5]\nframes = [{a}]\n\
-             [sleep]\nfps = 1\nenter = \"boceja\"\nframes = [{b}]\n\
-             [boceja]\ndurations = [300]\nframes = [{c}]\n\
-             [acorda]\ndurations = [200]\nframes = [{d}]\n\
-             [coca]\ndurations = [400]\nframes = [{e}]\n"
+            "[idle]\nfps = 1\nexit = \"wake\"\nvariants = [\"scratch\"]\nevery = [5, 5]\nframes = [{a}]\n\
+             [sleep]\nfps = 1\nenter = \"yawn\"\nframes = [{b}]\n\
+             [yawn]\ndurations = [300]\nframes = [{c}]\n\
+             [wake]\ndurations = [200]\nframes = [{d}]\n\
+             [scratch]\ndurations = [400]\nframes = [{e}]\n"
         );
         crate::mascot::clips::parse(neko, &src).unwrap()
     }
 
-    fn marca(p: &mut Player, clips: &Clips, mood: Mood, t: Instant) -> &'static str {
+    fn mark(p: &mut Player, clips: &Clips, mood: Mood, t: Instant) -> &'static str {
         p.pose(clips, mood, t).map(|(g, _)| g[0]).unwrap_or("base")
     }
 
     #[test]
-    fn transicoes_ao_mudar_de_humor() {
-        let clips = clips_de_teste();
+    fn transitions_on_mood_change() {
+        let clips = test_clips();
         let mut p = Player { rng: 1, ..Default::default() };
         let t0 = Instant::now();
-        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0), "K...............");
-        // idle -> sleep: sai do idle (acorda, 200 ms), entra no sleep (boceja, 300 ms), loop
-        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1000)), "...K............");
-        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1150)), "...K............");
-        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1250)), "..K.............");
-        assert_eq!(marca(&mut p, &clips, Mood::Sleep, t0 + ms(1600)), ".K..............");
-        // humor sem animação: o desenho base
-        assert_eq!(marca(&mut p, &clips, Mood::Busy, t0 + ms(2000)), "base");
+        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0), "K...............");
+        // idle -> sleep: leaves idle (wake, 200 ms), enters sleep (yawn, 300 ms), loop
+        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1000)), "...K............");
+        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1150)), "...K............");
+        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1250)), "..K.............");
+        assert_eq!(mark(&mut p, &clips, Mood::Sleep, t0 + ms(1600)), ".K..............");
+        // mood without an animation: the base drawing
+        assert_eq!(mark(&mut p, &clips, Mood::Busy, t0 + ms(2000)), "base");
     }
 
     #[test]
-    fn variacao_de_vez_em_quando() {
-        let clips = clips_de_teste();
+    fn variant_now_and_then() {
+        let clips = test_clips();
         let mut p = Player { rng: 1, ..Default::default() };
         let t0 = Instant::now();
-        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0), "K...............");
-        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(4900)), "K...............");
-        // every = [5, 5]: aos 5 s entra a variação (400 ms) e depois volta ao loop
-        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(5000)), "....K...........");
-        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(5300)), "....K...........");
-        assert_eq!(marca(&mut p, &clips, Mood::Idle, t0 + ms(5500)), "K...............");
+        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0), "K...............");
+        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(4900)), "K...............");
+        // every = [5, 5]: at 5 s the variant (400 ms) comes in, then back to the loop
+        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(5000)), "....K...........");
+        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(5300)), "....K...........");
+        assert_eq!(mark(&mut p, &clips, Mood::Idle, t0 + ms(5500)), "K...............");
     }
 
     #[test]
-    fn reduzir_movimento_fica_na_pose_base() {
+    fn reduce_motion_stays_in_base_pose() {
         let neko = crate::mascot::sprites::get("neko");
         let mut a = Animator::new(0);
         set_calm(true);
-        let calmo = a.look_with(neko, Mood::Sleep, Instant::now()).pose;
+        let calm_pose = a.look_with(neko, Mood::Sleep, Instant::now()).pose;
         set_calm(false);
-        assert_eq!(calmo, None);
+        assert_eq!(calm_pose, None);
     }
 
     #[test]
-    fn reacao_expira_pelo_relogio() {
+    fn reaction_expires_by_the_clock() {
         let mut a = Animator::new(0);
         let t0 = Instant::now();
         assert!(a.trigger(Reaction::Celebrate, t0));
@@ -400,28 +401,28 @@ mod tests {
     }
 
     #[test]
-    fn alerta_interrompe_a_reacao() {
+    fn alarm_interrupts_the_reaction() {
         let mut a = Animator::new(0);
         let t0 = Instant::now();
         a.trigger(Reaction::Celebrate, t0);
         assert_eq!(a.look(Mood::Alarm, t0 + ms(100)).reaction, None);
-        // e ela não volta quando o alerta passa
+        // and it doesn't come back when the alarm is over
         assert_eq!(a.look(Mood::Idle, t0 + ms(200)).reaction, None);
     }
 
     #[test]
-    fn intervalo_minimo_e_prioridade() {
+    fn cooldown_and_priority() {
         let mut a = Animator::new(0);
         let t0 = Instant::now();
         assert!(a.trigger(Reaction::Celebrate, t0));
         assert!(!a.trigger(Reaction::Celebrate, t0 + ms(500)));
-        // o easter egg não interrompe a comemoração
+        // the easter egg doesn't interrupt the celebration
         assert!(!a.trigger(Reaction::Surprised, t0 + ms(500)));
         assert!(a.trigger(Reaction::Celebrate, t0 + ms(3100)));
     }
 
     #[test]
-    fn tres_cutucadas_disparam_o_easter_egg_mas_nao_no_alerta() {
+    fn three_pokes_fire_the_easter_egg_but_not_during_alarm() {
         let t0 = Instant::now();
         let mut a = Animator::new(0);
         assert!(!a.poke(Mood::Idle, t0));
@@ -432,7 +433,7 @@ mod tests {
         for i in 0..3 {
             assert!(!b.poke(Mood::Alarm, t0 + ms(i * 100)));
         }
-        // cliques espaçados não contam
+        // spaced-out clicks don't count
         let mut c = Animator::new(2);
         for i in 0..3 {
             assert!(!c.poke(Mood::Idle, t0 + ms(i * 1000)));
@@ -440,20 +441,20 @@ mod tests {
     }
 
     #[test]
-    fn mascotes_diferentes_nao_piscam_juntas() {
+    fn different_mascots_dont_blink_together() {
         let t0 = Instant::now();
         let mut a = Animator::new(0);
         let mut b = Animator::new(1);
-        // amostra 10 s a cada 20 ms: as piscadas não podem coincidir sempre
-        let (mut ja, mut jb, mut juntas) = (0, 0, 0);
+        // samples 10 s every 20 ms: the blinks can't always coincide
+        let (mut blinks_a, mut blinks_b, mut together) = (0, 0, 0);
         for i in 0..500 {
             let t = t0 + ms(i * 20);
             let (pa, pb) = (a.look(Mood::Idle, t).blink, b.look(Mood::Idle, t).blink);
-            ja += pa as u32;
-            jb += pb as u32;
-            juntas += (pa && pb) as u32;
+            blinks_a += pa as u32;
+            blinks_b += pb as u32;
+            together += (pa && pb) as u32;
         }
-        assert!(ja > 0 && jb > 0);
-        assert!(juntas < ja.min(jb));
+        assert!(blinks_a > 0 && blinks_b > 0);
+        assert!(together < blinks_a.min(blinks_b));
     }
 }

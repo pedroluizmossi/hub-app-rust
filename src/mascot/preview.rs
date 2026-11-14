@@ -1,7 +1,7 @@
-//! Prévia das animações em GIF, fora do app: `miniutils --previa <mascote> [animação]`.
+//! GIF preview of the animations, outside the app: `miniutils --preview <mascot> [animation]`.
 //!
-//! Desenha cada quadro com o mesmo renderizador do app, em vários temas lado a lado e
-//! ampliado, para conferir uma animação (ou mostrar a alguém) sem abrir a janela.
+//! Draws each frame with the app's own renderer, in several themes side by side and scaled
+//! up, to check an animation (or show it to someone) without opening the window.
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -14,43 +14,44 @@ use super::sprites::SPRITES;
 use super::themes::BUILTIN as THEMES;
 use super::Mood;
 
-/// Ampliação de cada pixel da mascote.
+/// How much each mascot pixel is scaled up.
 const SCALE: usize = 6;
-/// Margem em volta de cada mascote (em pixels já ampliados).
+/// Margin around each mascot (in already scaled pixels).
 const PAD: usize = 12;
-/// Temas por linha na folha.
+/// Themes per row in the sheet.
 const COLS: usize = 4;
-/// Uma animação que repete toca pelo menos isso na prévia.
+/// A looping animation plays at least this long in the preview.
 const MIN_LOOP_MS: u32 = 2000;
 
-pub const USAGE: &str = "\
-uso: miniutils --previa <mascote> [animação] [--saida arquivo.gif]
+/// The `--output` flag, and its old Portuguese name, still accepted (not shown in the help).
+const OUTPUT_FLAGS: [&str; 2] = ["--output", "--saida"];
 
-Gera um GIF da animação (ou de todas, uma depois da outra) em todos os temas.
-Sem --saida, grava <mascote>[-<animação>].gif na pasta atual.
-Com MINIUTILS_CLIPS=<pasta>, lê as animações da pasta em vez das embutidas.";
+/// Help for the subcommand, in the interface language.
+pub fn usage() -> &'static str {
+    crate::tr!("usage: miniutils --preview <mascot> [animation] [--output file.gif]\n\nMakes a GIF of the animation (or of all of them, one after another) in every theme.\nWithout --output, writes <mascot>[-<animation>].gif in the current folder.\nWith MINIUTILS_CLIPS=<folder>, reads the animations from that folder instead of the built-in ones.")
+}
 
-/// Roda a prévia; devolve o caminho do GIF gravado.
+/// Runs the preview; returns the path of the GIF it wrote.
 pub fn run(args: &[String]) -> Result<PathBuf, String> {
     let mut pos = Vec::new();
     let mut out = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--saida" => out = Some(PathBuf::from(it.next().ok_or("--saida precisa de um arquivo")?)),
-            s if s.starts_with('-') => return Err(format!("opção desconhecida: {s}\n\n{USAGE}")),
+            s if OUTPUT_FLAGS.contains(&s) => out = Some(PathBuf::from(it.next().ok_or(crate::tr!("--output needs a file name"))?)),
+            s if s.starts_with('-') => return Err(crate::tr!("unknown option: {}\n\n{}", s, usage())),
             s => pos.push(s.to_string()),
         }
     }
-    let key = pos.first().ok_or(USAGE)?;
-    let sprite = SPRITES.iter().find(|s| s.key == key).ok_or_else(|| format!("não há mascote \"{key}\" em sprites.rs"))?;
-    let all = clips::of(key).ok_or_else(|| format!("a mascote \"{key}\" não tem animações"))?;
+    let key = pos.first().ok_or(usage())?;
+    let sprite = SPRITES.iter().find(|s| s.key == key).ok_or_else(|| crate::tr!("there is no mascot \"{}\" in sprites.rs", key))?;
+    let all = clips::of(key).ok_or_else(|| crate::tr!("the mascot \"{}\" has no animations", key))?;
     let names: Vec<String> = match pos.get(1) {
         Some(name) if all.contains_key(name) => vec![name.clone()],
         Some(name) => {
             let mut have: Vec<&String> = all.keys().collect();
             have.sort();
-            return Err(format!("\"{key}\" não tem a animação \"{name}\"; tem: {have:?}"));
+            return Err(crate::tr!("\"{}\" has no animation \"{}\"; it has: {}", key, name, format!("{have:?}")));
         }
         None => {
             let mut v: Vec<String> = all.keys().cloned().collect();
@@ -63,7 +64,7 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
         None => format!("{key}.gif"),
     }));
 
-    // a sequência: cada animação com o humor (ou reação) que o nome indica
+    // the sequence: each animation with the mood (or reaction) its name points to
     let mut seq: Vec<(Look, u32)> = Vec::new();
     for name in &names {
         let clip = &all[name];
@@ -105,7 +106,7 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
             }
         }
         let mut frame = gif::Frame::from_rgba_speed(gw as u16, gh as u16, &mut rgba, 10);
-        // o GIF conta em centésimos de segundo
+        // GIF counts in hundredths of a second
         frame.delay = (ms / 10).max(2) as u16;
         enc.write_frame(&frame).map_err(|e| e.to_string())?;
     }
@@ -117,8 +118,9 @@ fn put(buf: &mut [u8], w: usize, x: usize, y: usize, p: [u8; 4]) {
     buf[i..i + 4].copy_from_slice(&p);
 }
 
-/// Humor e reação em que a animação toca no app, para os efeitos (olhos, LED, cores)
-/// baterem: o do nome, ou o do humor que a cita como `enter`, `exit` ou variação.
+/// Mood and reaction the animation plays in inside the app, so the effects (eyes, LED,
+/// colors) match: the one in its name, or that of the mood that mentions it as `enter`,
+/// `exit` or a variant.
 fn look_for(name: &str, all: &clips::Clips) -> Look {
     let owner = all
         .iter()
@@ -139,7 +141,7 @@ fn look_for(name: &str, all: &clips::Clips) -> Look {
     Look { mood, reaction, blink: false, frame: 0, pose: None, ms: 0 }
 }
 
-/// Quadros e durações; uma animação que repete toca voltas até somar `MIN_LOOP_MS`.
+/// Frames and durations; a looping animation plays laps until they add up to `MIN_LOOP_MS`.
 fn timeline(clip: &Clip) -> Vec<(&clips::Grid, u32)> {
     let once: Vec<_> = clip.frames.iter().zip(clip.durations.iter().copied()).collect();
     if !clip.looping {
@@ -154,19 +156,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gera_gif_da_neko() {
-        let dir = std::env::temp_dir().join(format!("miniutils-previa-{}", std::process::id()));
+    fn makes_a_gif_of_the_neko() {
+        let dir = std::env::temp_dir().join(format!("miniutils-preview-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("neko.gif");
-        let args = ["neko".to_string(), "--saida".into(), out.to_string_lossy().into_owned()];
+        let args = ["neko".to_string(), "--output".into(), out.to_string_lossy().into_owned()];
         let path = run(&args).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         assert!(bytes.starts_with(b"GIF89a"));
-        assert!(run(&["neko".into(), "nao-existe".into()]).unwrap_err().contains("tem:"));
-        // a transição de entrada do sono aparece como no app: dormindo
+        assert!(run(&["neko".into(), "does-not-exist".into()]).unwrap_err().contains("it has:"));
+        // the sleep enter transition shows as in the app: asleep
         let neko = clips::of("neko").unwrap();
-        assert_eq!(look_for("boceja", &neko).mood, Mood::Sleep);
+        assert_eq!(look_for("yawn", &neko).mood, Mood::Sleep);
         assert_eq!(look_for("celebrate", &neko).reaction, Some(Reaction::Celebrate));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_output_flag_still_works() {
+        let dir = std::env::temp_dir().join(format!("miniutils-preview-old-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("lumi.gif");
+        let args = ["lumi".to_string(), "idle".into(), "--saida".into(), out.to_string_lossy().into_owned()];
+        assert_eq!(run(&args).unwrap(), out);
+        assert!(out.exists());
+        // the old name is accepted but not advertised
+        assert!(!usage().contains("--saida"));
+        assert!(run(&["lumi".into(), "--output".into()]).unwrap_err().contains("--output"));
+        assert!(run(&["lumi".into(), "--bogus".into()]).unwrap_err().contains("unknown option: --bogus"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

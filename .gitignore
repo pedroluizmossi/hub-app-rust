@@ -1,5 +1,5 @@
 /target
 
-# Claude Code: worktrees dos agentes (cada uma com seu target/) e ajustes locais
+# Claude Code: agent worktrees (each with its own target/) and local settings
 /.claude/worktrees/
 /.claude/settings.local.json

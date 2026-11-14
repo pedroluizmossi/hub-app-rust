@@ -1,6 +1,6 @@
-// Tela do mini-app To-do rápido. Responsiva: se adapta à célula do painel em que está.
-//   estreita (< 420 px): sem a idade das tarefas
-//   baixa (< 260 px): mascote menor e sem a fala longa
+// View of the Quick to-do mini-app. Responsive: adapts to the panel cell it is in.
+//   narrow (< 420 px): no task age
+//   short (< 260 px): smaller mascot and no long speech
 import { ListView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "../../ui/theme.slint";
 import { Mascot, Icon, IconButton, TextButton } from "../../ui/widgets.slint";
@@ -9,11 +9,11 @@ export struct TodoRow {
     id: int,
     text: string,
     done: bool,
-    // "há 5 min"
+    // "5 min ago"
     age-text: string,
 }
 
-// Estado do mini-app, preenchido pelo Rust (src/apps/todo.rs).
+// Mini-app state, filled in by Rust (src/apps/todo.rs).
 export global TodoApp {
     in property <Colors> theme;
     in property <[TodoRow]> rows;
@@ -23,9 +23,9 @@ export global TodoApp {
     in property <string> mood: "sleep";
     in property <string> reaction;
     in property <string> speech;
-    // falha ao gravar o arquivo
+    // failure saving the file
     in property <string> error-text;
-    // o que está sendo digitado (o Rust limpa depois de acrescentar)
+    // what is being typed (Rust clears it after adding)
     in-out property <string> draft;
 
     callback add(string);
@@ -35,7 +35,7 @@ export global TodoApp {
     callback mascot-poked();
 }
 
-// Campo para escrever a tarefa nova: Enter acrescenta.
+// Field to write the new task: Enter adds it.
 component NewTask inherits Rectangle {
     in property <Colors> theme;
     height: 38px;
@@ -53,7 +53,7 @@ component NewTask inherits Rectangle {
         }
         Rectangle {
             if TodoApp.draft == "": Text {
-                text: "nova tarefa… (Enter)";
+                text: @tr("new task… (Enter)");
                 color: theme.sub.with-alpha(0.8);
                 font-family: Skin.font-mono;
                 font-size: 13px * Skin.text-scale;
@@ -69,7 +69,7 @@ component NewTask inherits Rectangle {
                 font-size: 13px * Skin.text-scale;
                 vertical-alignment: center;
                 single-line: true;
-                accessible-label: "Nova tarefa";
+                accessible-label: @tr("New task");
                 accepted => { TodoApp.add(self.text); }
             }
         }
@@ -92,7 +92,7 @@ component Row inherits Rectangle {
         padding-right: 8px;
         spacing: 8px;
 
-        // caixa de marcar: a área de clique é a linha toda menos o botão de apagar
+        // checkbox: the click area is the whole row except the delete button
         Rectangle {
             width: 36px;
             Rectangle {
@@ -130,7 +130,7 @@ component Row inherits Rectangle {
                 icon-size: 14px;
                 ink: t.sub;
                 edge: transparent;
-                label: "Apagar tarefa";
+                label: @tr("Delete task");
                 clicked => { TodoApp.remove(r.id); }
             }
         }
@@ -157,7 +157,7 @@ export component TodoView inherits Rectangle {
   VerticalLayout {
     spacing: 12px;
 
-    // mascote + fala
+    // mascot + speech
     HorizontalLayout {
         spacing: 16px;
         Rectangle {
@@ -186,7 +186,7 @@ export component TodoView inherits Rectangle {
                 wrap: word-wrap;
             }
             Text {
-                text: TodoApp.error-text != "" ? TodoApp.error-text : TodoApp.pending + (TodoApp.pending == 1 ? " pendente · " : " pendentes · ") + TodoApp.done + (TodoApp.done == 1 ? " feita" : " feitas");
+                text: TodoApp.error-text != "" ? TodoApp.error-text : @tr("Pending: {} · done: {}", TodoApp.pending, TodoApp.done);
                 color: TodoApp.error-text != "" ? t.alarm : t.sub;
                 font-family: Skin.font-mono;
                 font-size: 12px * Skin.text-scale;
@@ -197,7 +197,7 @@ export component TodoView inherits Rectangle {
             alignment: center;
             horizontal-stretch: 0;
             TextButton {
-                text: "limpar feitas";
+                text: @tr("clear done");
                 icon: Icons.close;
                 ink: t.sub;
                 compact: narrow;
@@ -209,7 +209,7 @@ export component TodoView inherits Rectangle {
 
     NewTask { theme: t; }
 
-    // lista
+    // list
     Rectangle {
         vertical-stretch: 1;
         min-height: 44px;
@@ -218,7 +218,7 @@ export component TodoView inherits Rectangle {
         background: t.bg1.mix(t.bg0, 0.6);
 
         if TodoApp.rows.length == 0: Text {
-            text: TodoApp.done > 0 ? "Tudo feito (as feitas estão escondidas)." : "Nenhuma tarefa. Escreva uma acima.";
+            text: TodoApp.done > 0 ? @tr("All done (done tasks are hidden).") : @tr("No tasks. Write one above.");
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 13px * Skin.text-scale;

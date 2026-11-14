@@ -1,7 +1,7 @@
-//! Ícone na bandeja: a mascote no humor do hub, com o menu (mostrar, fixar, mídia, sair).
+//! Tray icon: the mascot in the hub's mood, with the menu (show, pin, media, quit).
 //!
-//! A mesma interface nos dois sistemas (`Tray::spawn`, `online`, `update`, `set_pinned`):
-//! StatusNotifierItem pelo D-Bus no Linux (`linux.rs`), área de notificação no Windows
+//! The same interface on both systems (`Tray::spawn`, `online`, `update`, `set_pinned`):
+//! StatusNotifierItem over D-Bus on Linux (`linux.rs`), the notification area on Windows
 //! (`windows.rs`).
 
 #[cfg(target_os = "linux")]

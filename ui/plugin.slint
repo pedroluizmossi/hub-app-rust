@@ -1,30 +1,30 @@
-// Tela genérica dos plugins da comunidade (src/apps/plugin/mod.rs): mascote, título e a saída
-// do comando que o plugin declara. Um plugin não traz tela própria: todos usam esta.
-//   baixa (< 200 px): mascote menor e só a 1ª linha da saída
+// Generic screen of community plugins (src/apps/plugin/mod.rs): mascot, title and the
+// output of the command the plugin declares. A plugin without its own view uses this one.
+//   short (< 200 px): smaller mascot and only the 1st line of the output
 import { Colors, Skin, Icons } from "theme.slint";
 import { Mascot, IconButton } from "widgets.slint";
 
 export struct PluginCard {
-    // id do plugin (o hub mostra o cartão na célula de mesmo id)
+    // plugin id (the hub shows the card in the cell with the same id)
     id: string,
     title: string,
-    // saída do comando, já cortada nas linhas que o plugin pediu
+    // command output, already cut to the lines the plugin asked for
     text: string,
-    // "atualizado há 12 s · a cada 30 s", ou o erro
+    // "updated 12 s ago · every 30 s", or the error
     detail: string,
     failed: bool,
     running: bool,
     mascot: image,
     mood: string,
     reaction: string,
-    // id da mascote na conversa entre mascotes ("app:nome")
+    // mascot id in the chatter between mascots ("app:name")
     voice: string,
-    // plugin com tela própria: a tela interpretada (src/apps/plugin/view.rs)
+    // plugin with its own view: the interpreted view (src/apps/plugin/view.rs)
     has-view: bool,
     view: component-factory,
 }
 
-// Estado de todos os plugins, preenchido pelo Rust.
+// State of all plugins, filled by Rust.
 export global PluginApps {
     in property <[PluginCard]> cards;
     callback poked(string /* id */);
@@ -38,7 +38,7 @@ export component PluginView inherits Rectangle {
     property <bool> short: self.height < 200px;
     property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
 
-    // tela própria do plugin, encaixada aqui
+    // the plugin's own view, embedded here
     if card.has-view && !card.failed: ComponentContainer {
         component-factory: card.view;
         width: parent.width;
@@ -83,7 +83,7 @@ export component PluginView inherits Rectangle {
                     ink: t.sub;
                     edge: t.muted;
                     enabled: !card.running;
-                    label: "Atualizar";
+                    label: @tr("Refresh");
                     clicked => { PluginApps.refresh(card.id); }
                 }
             }
@@ -101,7 +101,7 @@ export component PluginView inherits Rectangle {
                 font-size: 11px * Skin.text-scale;
                 wrap: word-wrap;
             }
-            // o resto da célula fica livre embaixo (o texto não se espalha até o rodapé)
+            // the rest of the cell stays free below (the text doesn't spread down to the footer)
             Rectangle { vertical-stretch: 1; }
         }
     }

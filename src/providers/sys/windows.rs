@@ -1,7 +1,7 @@
-//! Coleta no Windows, pelo crate `sysinfo`.
+//! Collection on Windows, through the `sysinfo` crate.
 //!
-//! Fica de fora o que o Windows não entrega sem privilégio ou sem driver: carga média e
-//! temperatura da CPU (ambas em zero no snapshot).
+//! Left out is what Windows doesn't provide without privileges or a driver: load average
+//! and CPU temperature (both zero in the snapshot).
 
 use std::net::{IpAddr, UdpSocket};
 use std::time::Instant;
@@ -10,15 +10,15 @@ use sysinfo::{Disks, Networks, System};
 
 use super::{Disk, SysSnapshot};
 
-/// Interfaces que não são "a rede" da máquina: laço local e as virtuais (Hyper-V, WSL,
-/// Docker, VirtualBox, VMware).
+/// Interfaces that are not the machine's "network": loopback and the virtual ones (Hyper-V,
+/// WSL, Docker, VirtualBox, VMware).
 const SKIP_NET: &[&str] = &["loopback", "vethernet", "virtualbox", "vmware", "bluetooth"];
 
 pub struct SysProvider {
     sys: Option<System>,
     nets: Option<Networks>,
     disks: Option<Disks>,
-    /// Quando foi a leitura anterior (as taxas são o que mudou desde então).
+    /// When the previous reading was (rates are what changed since then).
     prev: Option<Instant>,
 }
 
@@ -37,7 +37,7 @@ impl SysProvider {
     pub fn collect(&mut self) -> SysSnapshot {
         let mut s = SysSnapshot::default();
         let now = Instant::now();
-        // segundos desde a leitura anterior; a primeira não tem com o que comparar
+        // seconds since the previous reading; the first one has nothing to compare with
         let dt = self.prev.map(|at| now.duration_since(at).as_secs_f64().max(0.001));
         self.prev = Some(now);
 
@@ -45,7 +45,7 @@ impl SysProvider {
             sys.refresh_cpu_usage();
             sys.refresh_cpu_frequency();
             sys.refresh_memory();
-            // o uso é medido entre duas leituras: a primeira não vale
+            // usage is measured between two readings: the first one doesn't count
             if dt.is_some() {
                 s.cpu = sys.global_cpu_usage().clamp(0.0, 100.0);
             }
@@ -71,7 +71,7 @@ impl SysProvider {
                 }
                 rx += data.received();
                 tx += data.transmitted();
-                // a interface da rota padrão é a que tem o endereço por onde saímos
+                // the default route's interface is the one holding the address we go out through
                 if local.is_some_and(|ip| data.ip_networks().iter().any(|n| n.addr == ip)) {
                     s.net_wireless = ["wi-fi", "wifi", "wireless", "wlan"].iter().any(|w| lower.contains(w));
                     s.net_ip = local.map(|ip| ip.to_string()).unwrap_or_default();
@@ -112,8 +112,9 @@ impl SysProvider {
     }
 }
 
-/// IPv4 por onde a máquina sai para a internet. "Conectar" um socket UDP não manda nada:
-/// só faz o sistema escolher a interface da rota padrão, e o endereço local é o dela.
+/// IPv4 the machine uses to reach the internet. "Connecting" a UDP socket sends nothing:
+/// it only makes the system pick the default route's interface, and the local address is
+/// that interface's.
 fn default_ipv4() -> Option<IpAddr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("192.0.2.1:9").ok()?;

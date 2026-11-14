@@ -1,4 +1,4 @@
-//! Páginas do painel: barra lateral, página aberta e edição (criar, renomear, mover).
+//! Panel pages: sidebar, open page and editing (create, rename, move).
 
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -9,7 +9,7 @@ use crate::skin;
 use crate::ui::PageInfo;
 
 impl Hub {
-    /// Página aberta, sempre válida (a config pode ter perdido páginas).
+    /// Open page, always valid (the config may have lost pages).
     pub(super) fn current_page(&self) -> usize {
         let n = self.host.config.borrow().pages.len().max(1);
         let p = self.page.get().min(n - 1);
@@ -17,8 +17,8 @@ impl Hub {
         p
     }
 
-    /// Abre uma aba pelo nome: "apps" (configurações), "store" (loja), "panel" ou uma página
-    /// (pelo nome ou por um app que está nela, ver `Config::find_page`).
+    /// Opens a tab by name: "apps" (settings), "store", "panel" or a page (by name or by an
+    /// app on it, see `Config::find_page`).
     pub(super) fn open_tab(&self, tab: &str) {
         if tab == "apps" || tab == "store" {
             self.ui.set_current(tab.into());
@@ -34,7 +34,7 @@ impl Hub {
         self.ui.set_current("panel".into());
     }
 
-    /// Humor da página: o pior dos apps ligados dela.
+    /// Mood of the page: the worst of its enabled apps.
     pub(super) fn page_mood(&self, page: usize) -> Mood {
         let ids = self.host.config.borrow().page_apps(page);
         ids.iter()
@@ -43,8 +43,8 @@ impl Hub {
             .fold(Mood::Sleep, Mood::worst)
     }
 
-    /// Barra lateral e nomes das páginas. Sem `force`, só refaz se algo visível mudou
-    /// (nome, mascote, humor): é chamada a cada leitura dos provedores.
+    /// Sidebar and page names. Without `force`, only redone if something visible changed
+    /// (name, mascot, mood): it is called on every provider reading.
     pub(super) fn rebuild_pages(&self, force: bool) {
         let current = self.current_page();
         let (pages, skin_key) = {
@@ -54,7 +54,7 @@ impl Hub {
             (pages, cfg.skin.clone())
         };
         let moods: Vec<Mood> = (0..pages.len()).map(|i| self.page_mood(i)).collect();
-        // a geração das importadas: a pasta de mascotes mudou, a lista do seletor também
+        // the generation of the imported ones: the mascots folder changed, so did the picker list
         let fingerprint = format!("{pages:?}|{moods:?}|{skin_key}|{current}|{}", sprites::generation());
         if !force && *self.pages_fingerprint.borrow() == fingerprint {
             return;
@@ -75,7 +75,7 @@ impl Hub {
             })
             .collect();
         let names: Vec<SharedString> = pages.iter().map(|(n, _, _)| SharedString::from(n.as_str())).collect();
-        let mascots: Vec<SharedString> = all.iter().map(|s| s.label.into()).collect();
+        let mascots: Vec<SharedString> = all.iter().map(|s| s.name().into()).collect();
         self.ui.set_pages(ModelRc::new(VecModel::from(infos)));
         self.ui.set_page_names(ModelRc::new(VecModel::from(names)));
         self.ui.set_mascots(ModelRc::new(VecModel::from(mascots)));
@@ -83,13 +83,13 @@ impl Hub {
         self.ui.set_page(current as i32);
     }
 
-    /// Abre a página `i` no painel.
+    /// Opens page `i` on the panel.
     pub(super) fn select_page(&self, i: usize) {
         if i >= self.host.config.borrow().pages.len() {
             return;
         }
         let changed = self.page.replace(i) != i;
-        // edição em curso fica na página onde começou
+        // an edit in progress stays on the page where it started
         if changed {
             self.drag.borrow_mut().take();
             self.set_ghost(None);
@@ -101,7 +101,7 @@ impl Hub {
         self.schedule_backdrop();
     }
 
-    /// Muda a config das páginas, salva e redesenha grade, barra e configurações.
+    /// Changes the pages config, saves it and redraws grid, sidebar and settings.
     pub(super) fn edit_pages(&self, f: impl FnOnce(&mut Config) -> bool) {
         {
             let mut cfg = self.host.config.borrow_mut();
@@ -123,7 +123,7 @@ impl Hub {
         self.select_page(added);
     }
 
-    /// Apaga a página `i`; a aberta continua a mesma (ou a anterior, se foi ela que saiu).
+    /// Deletes page `i`; the open one stays the same (or the previous one, if it was the one removed).
     pub(super) fn remove_page(&self, i: usize) {
         if self.host.config.borrow().pages.len() <= 1 {
             return;
@@ -157,7 +157,7 @@ impl Hub {
         });
     }
 
-    /// Sobe (`-1`) ou desce (`+1`) a página na barra lateral; a aberta continua aberta.
+    /// Moves the page up (`-1`) or down (`+1`) in the sidebar; the open one stays open.
     pub(super) fn move_page(&self, i: usize, delta: i32) {
         let j = i as i64 + delta as i64;
         let n = self.host.config.borrow().pages.len() as i64;

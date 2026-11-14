@@ -7,15 +7,15 @@ export struct UsageLine {
     value: float,
     detail: string,
     reset: string,
-    // "alarm" | "busy" | "idle": quem decide os limites é o Rust (um lugar só)
+    // "alarm" | "busy" | "idle": Rust decides the thresholds (a single place)
     level: string,
-    // uso da última hora (caminho SVG 1000×100); vazio = sem leituras para desenhar
+    // usage over the last hour (SVG path 1000×100); empty = no readings to draw
     spark: string,
 }
 
 export struct UsageCard {
     name: string,
-    // id na conversa entre mascotes (vem do Rust)
+    // id in the mascot chatter (comes from Rust)
     voice: string,
     status: string,
     plan: string,
@@ -24,7 +24,7 @@ export struct UsageCard {
     mascot: image,
     mood: string,
     reaction: string,
-    // botão de terminal na cor da mascote: corpo e contorno
+    // terminal button in the mascot colours: body and outline
     button: color,
     button-edge: color,
 }
@@ -32,21 +32,21 @@ export struct UsageCard {
 export global AiUsageApp {
     in property <Colors> theme;
     in property <[UsageCard]> cards;
-    // modo compacto (config): sem status nem renovação
+    // compact mode (config): no status or reset
     in property <bool> compact;
     callback refresh();
     callback mascot-poked(int);
-    // abre o programa do cartão (linha) num terminal
+    // opens the program of the card (row) in a terminal
     callback launch(int);
 }
 
-// É um layout (e não um Rectangle) porque as duas formas são `if`: num Rectangle a
-// altura dos filhos condicionais não conta, e as barras se sobrepunham.
+// A layout (not a Rectangle) because both shapes are `if`s: in a Rectangle the height
+// of conditional children does not count, and the bars overlapped.
 component Meter inherits VerticalLayout {
     in property <UsageLine> entry;
     in property <Colors> t;
-    in property <bool> dense;   // uma linha só: rótulo · barra · valor
-    in property <bool> reset;   // no denso, a renovação embaixo da linha (quando cabe)
+    in property <bool> dense;   // a single row: label · bar · value
+    in property <bool> reset;   // in dense mode, the reset below the row (when it fits)
     property <bool> hot: entry.level == "alarm" || entry.level == "busy";
     property <color> tint: entry.level == "alarm" ? t.alarm : t.warn;
     property <float> fill: min(max(entry.value, 0), 100) / 100;
@@ -101,9 +101,9 @@ component AccountCard inherits Rectangle {
     in property <UsageCard> account;
     in property <Colors> t;
     in property <int> index;
-    // lista (app com uma célula de largura): cartão baixo, para os quatro caberem num 1x2
+    // list (app one cell wide): short card, so all four fit in a 1x2
     in property <bool> dense;
-    // no denso, mostra a renovação embaixo de cada linha (o meio-termo, quando cabe)
+    // in dense mode, shows the reset below each row (the middle ground, when it fits)
     in property <bool> reset;
     property <length> mascot-w: dense ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
     border-width: 1px;
@@ -131,7 +131,7 @@ component AccountCard inherits Rectangle {
                     px: dense ? 2px : 3px;
                     tint: account.button;
                     edge: account.button-edge;
-                    label: "Abrir " + account.name + " no terminal";
+                    label: @tr("Open {} in the terminal", account.name);
                     clicked => { AiUsageApp.launch(root.index); }
                 }
             }
@@ -146,7 +146,7 @@ component AccountCard inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: account.plan; color: t.visor; font-family: Skin.font-mono; font-size: 12px * Skin.text-scale; overflow: elide; vertical-alignment: center; }
             }
-            // no denso, o status só aparece quando não há leitura (é o que explica o vazio)
+            // in dense mode, the status shows only when there is no reading (it explains the gap)
             if account.lines.length == 0 || (!dense && !AiUsageApp.compact): Text {
                 text: account.status;
                 color: account.stale ? t.warn : t.muted;
@@ -160,13 +160,13 @@ component AccountCard inherits Rectangle {
 }
 
 export component AiUsageView inherits Rectangle {
-    // largura do app na grade, em células: 1 = lista; 2 ou mais = cartões lado a lado,
-    // um por célula, e os que sobram vão para a linha de baixo
+    // app width in the grid, in cells: 1 = list; 2 or more = cards side by side,
+    // one per cell, and the rest wrap to the next row
     in property <int> span: 1;
     property <Colors> t: AiUsageApp.theme;
-    // cópia invisível dos cartões (forma cheia) só para medir a largura mínima deles.
-    // Fica num Flickable porque ele não repassa o mínimo do conteúdo: solta no
-    // Rectangle, a medida viraria o mínimo da tela inteira.
+    // invisible copy of the cards (full shape) only to measure their minimum width.
+    // It sits in a Flickable because that does not pass the content minimum up: loose in
+    // the Rectangle, the measurement would become the minimum of the whole view.
     Flickable {
         width: 0;
         height: 0;
@@ -176,8 +176,8 @@ export component AiUsageView inherits Rectangle {
                 for card[i] in AiUsageApp.cards: AccountCard { account: card; index: i; t: root.t; }
             }
         }
-        // altura do cartão mais alto em cada forma, na largura de verdade (um HorizontalLayout
-        // tem a altura do filho mais alto): é o que decide qual forma cabe sem rolar
+        // height of the tallest card in each shape, at the real width (a HorizontalLayout
+        // is as tall as its tallest child): this decides which shape fits without scrolling
         tall-full := HorizontalLayout {
             for card[i] in AiUsageApp.cards: AccountCard { account: card; index: i; t: root.t; width: scroll.cw; }
         }
@@ -188,21 +188,21 @@ export component AiUsageView inherits Rectangle {
     VerticalLayout {
         spacing: 8px;
         HorizontalLayout {
-            Text { text: "ASSINATURAS DE IA"; color: t.text; font-family: Skin.font-mono; font-size: 14px * Skin.text-scale; font-weight: 700; vertical-alignment: center; }
+            Text { text: @tr("AI SUBSCRIPTIONS"); color: t.text; font-family: Skin.font-mono; font-size: 14px * Skin.text-scale; font-weight: 700; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
-            TextButton { text: "Atualizar"; ink: t.visor; height: 30px; font-size: 13px * Skin.text-scale; clicked => { AiUsageApp.refresh(); } }
+            TextButton { text: @tr("Refresh"); ink: t.visor; height: 30px; font-size: 13px * Skin.text-scale; clicked => { AiUsageApp.refresh(); } }
         }
         scroll := ScrollView {
             vertical-stretch: 1;
             property <length> gap: 8px;
             property <length> area: self.visible-width;
             property <int> n: AiUsageApp.cards.length;
-            // um cartão por célula, mas só quantos cabem na largura sem cortar o conteúdo
+            // one card per cell, but only as many as fit the width without clipping the content
             property <int> fit: floor((area + gap) / (probe.min-width + gap));
             property <int> cols: max(1, min(n, min(root.span, fit)));
             property <length> cw: (area - (cols - 1) * gap) / cols;
-            // altura que cada linha de cartões teria sem rolar. Forma cheia se ela cabe; senão
-            // densa com a renovação embaixo (2x2 com quatro cartões); senão densa só com a barra
+            // height each row of cards would have without scrolling. Full shape if it fits; otherwise
+            // dense with the reset below (2x2 with four cards); otherwise dense with just the bar
             property <int> rows: max(1, ceil(n / cols));
             property <length> row-h: (self.visible-height - (rows - 1) * gap) / rows;
             property <bool> dense: row-h < tall-full.preferred-height;
@@ -216,14 +216,14 @@ export component AiUsageView inherits Rectangle {
                     for c in scroll.cols: Rectangle {
                         property <int> i: r * scroll.cols + c;
                         width: scroll.cw;
-                        // o layout passa a altura do cartão para a linha; cartões da linha ficam iguais
+                        // the layout passes the card height to the row; cards in a row get the same height
                         VerticalLayout {
                             if i < scroll.n: AccountCard { account: AiUsageApp.cards[i]; index: i; t: root.t; dense: scroll.dense; reset: scroll.reset; }
                         }
                     }
                 }
                 if scroll.n == 0: Text {
-                    text: "Nenhuma fonte para mostrar. Ligue alguma nas configurações do app.";
+                    text: @tr("No sources to show. Turn one on in the app settings.");
                     color: t.muted;
                     font-size: 13px * Skin.text-scale;
                     wrap: word-wrap;

@@ -1,32 +1,32 @@
-// Conversa entre mascotes: a fala atual (preenchida pelo Rust, src/hub/chatter.rs) e a
-// caixa de diálogo que aparece no app de quem fala.
+// Chatter between mascots: the current line (filled by Rust, src/hub/chatter.rs) and the
+// dialog box that shows up in the speaker's app.
 import { Colors, Anim, Skin } from "theme.slint";
 
 export global Chatter {
-    in property <string> app;        // id do app de quem fala ("" = ninguém falando)
-    in property <int> seq;           // muda a cada fala nova
+    in property <string> app;        // id of the speaker's app ("" = nobody talking)
+    in property <int> seq;           // changes with every new line
     in property <string> name;       // "CPU", "Docker", "Claude"
-    in property <string> text;       // parte já "digitada"
-    in property <bool> done;         // terminou de digitar
-    in property <image> portrait;    // retrato da mascote
-    in property <Colors> theme;      // tema do app de quem fala
-    // quem fala e quem ouve, como "app:nome" (ex.: "cyber.vitals:CPU"): a mascote com esse
-    // id na tela pula enquanto fala, ou mostra que está ouvindo
+    in property <string> text;       // the part already "typed"
+    in property <bool> done;         // finished typing
+    in property <image> portrait;    // the mascot's portrait
+    in property <Colors> theme;      // theme of the speaker's app
+    // who speaks and who listens, as "app:name" (e.g. "cyber.vitals:CPU"): the on-screen
+    // mascot with that id bounces while speaking, or shows that it is listening
     in property <string> speaker;
     in property <string> listener;
-    callback skip();                 // clique na caixa: pula a fala
+    callback skip();                 // click on the box: skips the line
 }
 
-// Caixa de diálogo em pixel, estilo RPG: borda dupla, retrato da mascote numa moldura,
-// nome e a fala sendo digitada. Quando termina, um triângulo pisca no canto. Entra
-// subindo; clique pula a fala.
+// Pixel dialog box, RPG style: double border, the mascot's portrait in a frame, the name
+// and the line being typed. When it finishes, a triangle blinks in the corner. Slides in
+// from below; a click skips the line.
 export component SpeechBox inherits Rectangle {
     property <Colors> t: Chatter.theme;
     property <length> line: 2px;
     property <length> face: 44px;
     height: 66px;
 
-    // entrada: sobe alguns pixels e aparece
+    // entrance: rises a few pixels and fades in
     in-out property <length> rise: 10px;
     init => { rise = 0; }
     animate rise { duration: 160ms; easing: ease-out; }
@@ -35,7 +35,7 @@ export component SpeechBox inherits Rectangle {
     accessible-role: text;
     accessible-label: Chatter.name + ": " + Chatter.text;
 
-    // sombra dura
+    // hard shadow
     Rectangle {
         x: 3px;
         y: 3px + rise;
@@ -48,14 +48,14 @@ export component SpeechBox inherits Rectangle {
         y: rise;
         width: parent.width - 3px;
         height: parent.height - 3px;
-        background: t.text;           // borda de fora (clara)
+        background: t.text;           // outer border (light)
         Rectangle {
             x: line;
             y: line;
             width: parent.width - 2 * line;
             height: parent.height - 2 * line;
             background: t.bg0;
-            // borda de dentro (fina), a segunda linha da borda dupla
+            // inner border (thin), the second line of the double border
             Rectangle {
                 x: 2px;
                 y: 2px;
@@ -65,7 +65,7 @@ export component SpeechBox inherits Rectangle {
                 border-color: t.muted.with-alpha(0.7);
             }
 
-            // retrato: moldura quadrada; a mascote balança enquanto "fala"
+            // portrait: square frame; the mascot wobbles while "talking"
             Rectangle {
                 x: 8px;
                 y: (parent.height - face) / 2;
@@ -81,7 +81,7 @@ export component SpeechBox inherits Rectangle {
                     Image {
                         source: Chatter.portrait;
                         image-rendering: pixelated;
-                        // mascote importada pode não ser 16×14: cabe sem deformar
+                        // an imported mascot may not be 16×14: fit without distorting
                         image-fit: contain;
                         width: parent.width - 4px;
                         height: self.width * 14 / 16;
@@ -116,7 +116,7 @@ export component SpeechBox inherits Rectangle {
                 }
             }
 
-            // terminou: triângulo em pixel piscando no canto
+            // finished: pixel triangle blinking in the corner
             if Chatter.done: Path {
                 x: parent.width - 16px;
                 y: parent.height - 11px;

@@ -1,0 +1,211 @@
+# Mascots: names of the built-in mascots and themes, imported mascot packs
+# (src/mascot/pack.rs) and the --preview subcommand (src/mascot/preview.rs).
+
+# ---- themes (src/mascot/themes.rs) ----
+
+msgid "Neon (magenta / cyan)"
+msgstr "Neon (magenta / ciano)"
+
+msgid "Matrix (terminal green)"
+msgstr "Matrix (verde terminal)"
+
+msgid "Synthwave (purple / orange)"
+msgstr "Synthwave (roxo / laranja)"
+
+msgid "Akira (red / white)"
+msgstr "Akira (vermelho / branco)"
+
+msgid "Ghost (ice blue)"
+msgstr "Ghost (azul gelo)"
+
+msgid "Cozy (paper / terracotta)"
+msgstr "Aconchego (papel / terracota)"
+
+msgid "Night (blue / amber)"
+msgstr "Noite (azul / âmbar)"
+
+# ---- mascots (src/mascot/sprites.rs) ----
+
+msgid "Cyborg Neko"
+msgstr "Neko ciborgue"
+
+msgid "Lumi, little moth"
+msgstr "Lumi, mariposinha"
+
+msgid "Unit-7 robot"
+msgstr "Robô Unit-7"
+
+msgid "Kitsune (fox)"
+msgstr "Kitsune (raposa)"
+
+msgid "Usagi (rabbit)"
+msgstr "Usagi (coelha)"
+
+msgid "Yūrei (ghost)"
+msgstr "Yūrei (fantasma)"
+
+msgid "Frog"
+msgstr "Sapo"
+
+msgid "Microprocessor"
+msgstr "Microprocessador"
+
+msgid "NVIDIA GPU"
+msgstr "GPU NVIDIA"
+
+msgid "AMD GPU"
+msgstr "GPU AMD"
+
+msgid "Floppy disk"
+msgstr "Disquete"
+
+msgid "Disc (CD)"
+msgstr "Disco (CD)"
+
+msgid "Network rat"
+msgstr "Rato de rede"
+
+msgid "On-call owl"
+msgstr "Coruja de plantão"
+
+msgid "Cable octopus"
+msgstr "Polvo de cabos"
+
+msgid "Cache ghost"
+msgstr "Fantasminha de cache"
+
+msgid "Zen capybara"
+msgstr "Capivara zen"
+
+msgid "Disk turtle"
+msgstr "Tartaruga de disco"
+
+msgid "Bit bee"
+msgstr "Abelha de bits"
+
+msgid "Download snail"
+msgstr "Caracol de download"
+
+msgid "Clock rabbit"
+msgstr "Coelho relógio"
+
+msgid "Doorman hedgehog"
+msgstr "Ouriço porteiro"
+
+msgid "Kettle"
+msgstr "Chaleira"
+
+msgid "Sleepy mushroom"
+msgstr "Cogumelo soneca"
+
+msgid "Bread cat"
+msgstr "Gato pão"
+
+msgid "RAM slime"
+msgstr "Slime de RAM"
+
+msgid "Night bat"
+msgstr "Morcego noturno"
+
+msgid "Aquarium fish"
+msgstr "Peixinho de aquário"
+
+msgid "Little cloud"
+msgstr "Nuvenzinha"
+
+msgid "DJ frog"
+msgstr "Sapo DJ"
+
+msgid "Firefly"
+msgstr "Vaga-lume"
+
+msgid "Rubber duck"
+msgstr "Pato de borracha"
+
+# ---- imported mascots (src/mascot/pack.rs) ----
+
+msgid "the folder name becomes the mascot's key: use only lowercase letters, digits and hyphens (up to 32)"
+msgstr "o nome da pasta vira a chave da mascote: use só minúsculas, números e hífen (até 32)"
+
+msgid "\"{}\" is already a built-in mascot; rename the folder"
+msgstr "\"{}\" já é uma mascote embutida; renomeie a pasta"
+
+msgid "no animations (no sprite.toml, and no PNG named like Name_Animation_N.png)"
+msgstr "nenhuma animação (nem sprite.toml, nem PNG no formato Nome_Animação_N.png)"
+
+msgid "too many animations ({}; up to {})"
+msgstr "animações demais ({}; até {})"
+
+msgid "facing = \"{}\": use \"right\" or \"left\""
+msgstr "facing = \"{}\": use \"right\" ou \"left\""
+
+msgid "{} = \"{}\": there is no such animation"
+msgstr "{} = \"{}\": não há essa animação"
+
+msgid "[moods] unknown mood: {}"
+msgstr "[moods] humor desconhecido: {}"
+
+msgid "[reactions] unknown reaction: {}"
+msgstr "[reactions] reação desconhecida: {}"
+
+msgid "[anim] {}: \"{}\" must be a file in this folder"
+msgstr "[anim] {}: \"{}\" tem de ser um arquivo desta pasta"
+
+msgid "{}: {}×{} doesn't split into {} equal frames (up to {})"
+msgstr "{}: {}×{} não se divide em {} quadros iguais (até {})"
+
+msgid "{}: {}×{} frame; the maximum is {}×{}"
+msgstr "{}: quadro de {}×{}; o máximo é {}×{}"
+
+msgid "{}: {}×{} frame, but the other animations are {}×{}"
+msgstr "{}: quadro de {}×{}, mas as outras animações são {}×{}"
+
+msgid "[anim] {}: fps {} (use 1 to 30)"
+msgstr "[anim] {}: fps {} (use de 1 a 30)"
+
+msgid "the frames are all transparent"
+msgstr "os quadros são todos transparentes"
+
+msgid "{}: {} KiB; the maximum is {} KiB"
+msgstr "{}: {} KiB; o máximo é {} KiB"
+
+msgid "{}: {}×{} is too large"
+msgstr "{}: {}×{} é grande demais"
+
+msgid "{}: too large"
+msgstr "{}: grande demais"
+
+msgid "{}: indexed PNG not converted"
+msgstr "{}: PNG indexado não convertido"
+
+msgid "{}: already exists in {} (delete the folder to import it again)"
+msgstr "{}: já existe em {} (apague a pasta para importar de novo)"
+
+msgid "{}: {} ({} animations, {}×{} frame after trimming)"
+msgstr "{}: {} ({} animações, quadro {}×{} depois de aparar)"
+
+msgid "{}: copied, but it doesn't load: {}"
+msgstr "{}: copiada, mas não carrega: {}"
+
+msgid "{}: no sheet named like Name_Animation_N.png (at least two animations)"
+msgstr "{}: nenhuma folha no formato Nome_Animação_N.png (pelo menos duas animações)"
+
+# ---- --preview (src/mascot/preview.rs) ----
+
+msgid "usage: miniutils --preview <mascot> [animation] [--output file.gif]\n\nMakes a GIF of the animation (or of all of them, one after another) in every theme.\nWithout --output, writes <mascot>[-<animation>].gif in the current folder.\nWith MINIUTILS_CLIPS=<folder>, reads the animations from that folder instead of the built-in ones."
+msgstr "uso: miniutils --preview <mascote> [animação] [--output arquivo.gif]\n\nGera um GIF da animação (ou de todas, uma depois da outra) em todos os temas.\nSem --output, grava <mascote>[-<animação>].gif na pasta atual.\nCom MINIUTILS_CLIPS=<pasta>, lê as animações da pasta em vez das embutidas."
+
+msgid "--output needs a file name"
+msgstr "--output precisa do nome de um arquivo"
+
+msgid "unknown option: {}\n\n{}"
+msgstr "opção desconhecida: {}\n\n{}"
+
+msgid "there is no mascot \"{}\" in sprites.rs"
+msgstr "não há mascote \"{}\" em sprites.rs"
+
+msgid "the mascot \"{}\" has no animations"
+msgstr "a mascote \"{}\" não tem animações"
+
+msgid "\"{}\" has no animation \"{}\"; it has: {}"
+msgstr "\"{}\" não tem a animação \"{}\"; tem: {}"

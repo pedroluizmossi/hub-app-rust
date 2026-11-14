@@ -1,4 +1,4 @@
-//! Iniciar com o sistema no Linux: um `.desktop` em `~/.config/autostart/`.
+//! Start with the system on Linux: a `.desktop` file in `~/.config/autostart/`.
 
 use std::path::{Path, PathBuf};
 
@@ -6,7 +6,7 @@ fn file() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("autostart").join("miniutils.desktop"))
 }
 
-/// O conteúdo do arquivo, se existe e está ativo.
+/// The content of the file, if it exists and is active.
 pub fn current() -> Option<String> {
     let text = std::fs::read_to_string(file()?).ok()?;
     let off = text.lines().any(|l| {
@@ -17,7 +17,7 @@ pub fn current() -> Option<String> {
 }
 
 pub fn enable(exe: &Path) -> Result<(), String> {
-    let path = file().ok_or("sem pasta de configuração")?;
+    let path = file().ok_or(crate::tr!("no configuration folder"))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -32,13 +32,13 @@ pub fn disable() -> Result<(), String> {
     }
 }
 
-/// O `.desktop` que abre `exe` só na bandeja.
+/// The `.desktop` entry that opens `exe` in the tray only.
 pub fn entry_for(exe: &Path) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=MiniUtils\n\
-         Comment=Hub de mini-apps na bandeja\n\
+         Comment=Mini-app hub in the tray\n\
          Exec={} --hidden\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n\
@@ -47,9 +47,9 @@ pub fn entry_for(exe: &Path) -> String {
     )
 }
 
-/// Caminho entre aspas para a linha `Exec` (especificação Desktop Entry): dentro das
-/// aspas, `"`, `` ` ``, `$` e `\` levam `\` antes; como o valor do arquivo também trata
-/// `\` como escape, cada `\` vira `\\` de novo. `%` é `%%` (senão vira código de campo).
+/// Quoted path for the `Exec` line (Desktop Entry specification): inside the quotes, `"`,
+/// `` ` ``, `$` and `\` get a `\` in front; since the file value also treats `\` as an
+/// escape, each `\` becomes `\\` again. `%` is `%%` (otherwise it is a field code).
 fn quote_exec(path: &str) -> String {
     let mut out = String::from("\"");
     for c in path.chars() {
@@ -72,14 +72,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exec_entre_aspas() {
+    fn exec_in_quotes() {
         assert_eq!(quote_exec("/opt/mini utils/miniutils"), "\"/opt/mini utils/miniutils\"");
         assert_eq!(quote_exec("/a/$b/100%"), "\"/a/\\\\$b/100%%\"");
         assert_eq!(quote_exec("/a\\b"), "\"/a\\\\\\\\b\"");
     }
 
     #[test]
-    fn arquivo_abre_escondido() {
+    fn file_opens_hidden() {
         let e = entry_for(Path::new("/home/x/bin/miniutils"));
         assert!(e.contains("\nExec=\"/home/x/bin/miniutils\" --hidden\n"));
         assert!(e.starts_with("[Desktop Entry]\n"));

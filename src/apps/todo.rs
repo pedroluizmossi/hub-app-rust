@@ -1,5 +1,5 @@
-//! Mini-app To-do rápido: lista curta de tarefas, salva em `todo.json` na pasta de dados do
-//! app (`core/appdata.rs`: `~/.local/share/miniutils/app-data/cyber.todo/`).
+//! Quick To-do mini-app: a short task list, saved in `todo.json` in the app's data folder
+//! (`core/appdata.rs`: `~/.local/share/miniutils/app-data/cyber.todo/`).
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -15,9 +15,10 @@ use crate::core::miniapp::{Host, MiniApp};
 use super::kit::{HeaderMascot, unix_now};
 use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
+use crate::tr;
 use crate::ui::{HubWindow, TodoApp, TodoRow};
 
-/// Tamanho máximo de uma tarefa (o resto é cortado).
+/// Maximum length of a task (the rest is cut).
 const MAX_LEN: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,11 +26,11 @@ pub struct Item {
     pub id: u64,
     pub text: String,
     pub done: bool,
-    /// Quando foi criada (segundos Unix).
+    /// When it was created (Unix seconds).
     pub created: i64,
 }
 
-/// A lista e as operações sobre ela, sem tela (é o que os testes usam).
+/// The list and the operations on it, without a screen (what the tests use).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct List {
     pub items: Vec<Item>,
@@ -40,7 +41,7 @@ impl List {
         std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
-    /// Grava num arquivo temporário e troca: um desligamento no meio não corrompe a lista.
+    /// Writes to a temporary file and swaps it in: a shutdown halfway doesn't corrupt the list.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -50,7 +51,7 @@ impl List {
         std::fs::rename(tmp, path)
     }
 
-    /// Acrescenta uma tarefa; devolve `false` se o texto estava vazio.
+    /// Adds a task; returns `false` if the text was empty.
     pub fn add(&mut self, text: &str, now: i64) -> bool {
         let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_LEN).collect();
         if text.is_empty() {
@@ -61,7 +62,7 @@ impl List {
         true
     }
 
-    /// Marca/desmarca; devolve o novo estado (ou `None` se o id não existe).
+    /// Checks/unchecks; returns the new state (or `None` if the id doesn't exist).
     pub fn toggle(&mut self, id: u64) -> Option<bool> {
         let it = self.items.iter_mut().find(|i| i.id == id)?;
         it.done = !it.done;
@@ -88,7 +89,7 @@ impl List {
         self.items.len() - self.pending()
     }
 
-    /// Na ordem da tela: com `done_last`, as feitas descem (a ordem de criação se mantém).
+    /// In screen order: with `done_last`, done ones go down (creation order is kept).
     pub fn ordered(&self, done_last: bool, hide_done: bool) -> Vec<&Item> {
         let mut v: Vec<&Item> = self.items.iter().filter(|i| !hide_done || !i.done).collect();
         if done_last {
@@ -103,7 +104,7 @@ pub struct TodoMini {
     manifest: Manifest,
     path: PathBuf,
     list: List,
-    /// Última falha ao gravar (aparece na tela).
+    /// Last failure when saving (shown on screen).
     error: String,
     mood: Mood,
     rows: Rc<VecModel<TodoRow>>,
@@ -113,8 +114,8 @@ pub struct TodoMini {
 impl TodoMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest =
-            Manifest::parse(include_str!("../../miniapps/todo/manifest.toml")).expect("manifesto do To-do inválido");
-        // pasta de dados do app (`core/appdata.rs`; a de antes, na config, vem em `migrate_legacy`)
+            Manifest::parse(include_str!("../../miniapps/todo/manifest.toml")).expect("invalid To-do manifest");
+        // the app's data folder (`core/appdata.rs`; the old one, in the config, comes over in `migrate_legacy`)
         let path = appdata::dir(&manifest.id).join("todo.json");
         let rows = Rc::new(VecModel::default());
         ui.global::<TodoApp>().set_rows(ModelRc::from(rows.clone()));
@@ -166,7 +167,7 @@ impl TodoMini {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 let mut a = a.borrow_mut();
                 if a.list.toggle(id as u64) == Some(true) && a.list.pending() == 0 {
-                    // zerou a lista: comemora
+                    // the list is cleared: celebrate
                     a.face.react(Reaction::Celebrate);
                 }
                 a.changed(&ui);
@@ -196,11 +197,11 @@ impl TodoMini {
         });
     }
 
-    /// A lista mudou: grava, recalcula o humor e redesenha.
+    /// The list changed: save, recompute the mood and redraw.
     fn changed(&mut self, ui: &HubWindow) {
         self.error = match self.list.save(&self.path) {
             Ok(()) => String::new(),
-            Err(e) => format!("Não consegui salvar: {e}"),
+            Err(e) => tr!("Couldn't save: {}", e),
         };
         self.mood = self.compute_mood();
         self.refresh(ui);
@@ -248,16 +249,16 @@ impl TodoMini {
         g.set_error_text(self.error.as_str().into());
         g.set_speech(
             match (pending, done) {
-                (0, 0) => "Nada para fazer… zzz".to_string(),
-                (0, _) => "Tudo feito! Bom trabalho.".into(),
-                (1, _) => "Falta só 1 tarefa.".into(),
-                (n, _) => format!("{n} tarefas pendentes."),
+                (0, 0) => tr!("Nothing to do… zzz").to_string(),
+                (0, _) => tr!("All done! Good job.").into(),
+                (1, _) => tr!("Just 1 task left.").into(),
+                (n, _) => tr!("{} tasks pending.", n),
             }
             .into(),
         );
     }
 
-    /// Redesenha a mascote; `true` se mudou.
+    /// Redraws the mascot; `true` if it changed.
     fn refresh_mascot(&mut self) -> bool {
         let sprite = sprites::get(&self.mascot_key());
         self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
@@ -271,13 +272,13 @@ impl TodoMini {
     }
 }
 
-/// Idade de uma tarefa: "agora", "há 5 min", "há 3 h", "há 2 d".
+/// Age of a task: "just now", "5 min ago", "3 h ago", "2 d ago".
 pub fn age_text(secs: i64) -> String {
     match secs.max(0) {
-        s if s < 60 => "agora".into(),
-        s if s < 3600 => format!("há {} min", s / 60),
-        s if s < 86400 => format!("há {} h", s / 3600),
-        s => format!("há {} d", s / 86400),
+        s if s < 60 => tr!("just now").into(),
+        s if s < 3600 => tr!("{} min ago", s / 60),
+        s if s < 86400 => tr!("{} h ago", s / 3600),
+        s => tr!("{} d ago", s / 86400),
     }
 }
 
@@ -294,7 +295,7 @@ impl MiniApp for TodoMini {
     }
 
     fn enable(&mut self, ui: &HubWindow) {
-        // relê: a lista pode ter sido editada à mão com o app desligado
+        // read again: the list may have been edited by hand while the app was off
         self.list = List::load(&self.path);
         ui.global::<TodoApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.mood = self.compute_mood();
@@ -309,7 +310,7 @@ impl MiniApp for TodoMini {
     fn on_event(&mut self, _ev: &Event, _ui: &HubWindow) {}
 
     fn tick(&mut self, frame: u32, ui: &HubWindow) {
-        // a idade das tarefas ("há 5 min") anda sozinha; ~1 vez por minuto basta
+        // the age of the tasks ("5 min ago") moves on its own; about once a minute is enough
         if frame.is_multiple_of(400) {
             self.refresh(ui);
         }
@@ -334,9 +335,9 @@ impl MiniApp for TodoMini {
 
     fn summary(&self) -> String {
         match self.list.pending() {
-            0 => "To-do: tudo feito".into(),
-            1 => "To-do: 1 pendente".into(),
-            n => format!("To-do: {n} pendentes"),
+            0 => tr!("To-do: all done").into(),
+            1 => tr!("To-do: 1 pending").into(),
+            n => tr!("To-do: {} pending", n),
         }
     }
 }
@@ -346,17 +347,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn adiciona_marca_remove_e_limpa() {
+    fn adds_checks_removes_and_clears() {
         let mut l = List::default();
-        assert!(!l.add("   ", 0), "texto vazio não entra");
-        assert!(l.add("  comprar   café ", 0));
-        assert!(l.add("revisar PR", 0));
-        assert_eq!(l.items[0].text, "comprar café");
+        assert!(!l.add("   ", 0), "empty text isn't added");
+        assert!(l.add("  buy   coffee ", 0));
+        assert!(l.add("review PR", 0));
+        assert_eq!(l.items[0].text, "buy coffee");
         assert_eq!((l.items[0].id, l.items[1].id), (1, 2));
         assert_eq!(l.toggle(1), Some(true));
         assert_eq!(l.toggle(99), None);
         assert_eq!((l.pending(), l.done()), (1, 1));
-        // feitas descem; escondidas somem
+        // done ones go down; hidden ones disappear
         assert_eq!(l.ordered(true, false).iter().map(|i| i.id).collect::<Vec<_>>(), [2, 1]);
         assert_eq!(l.ordered(false, false).iter().map(|i| i.id).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(l.ordered(true, true).len(), 1);
@@ -364,7 +365,7 @@ mod tests {
         assert!(l.remove(2));
         assert!(!l.remove(2));
         assert!(l.items.is_empty());
-        // id novo não reaproveita um que ainda existe
+        // a new id doesn't reuse one that still exists
         l.add("a", 0);
         l.add("b", 0);
         l.remove(1);
@@ -373,30 +374,30 @@ mod tests {
     }
 
     #[test]
-    fn corta_texto_longo() {
+    fn cuts_long_text() {
         let mut l = List::default();
         l.add(&"x".repeat(500), 0);
         assert_eq!(l.items[0].text.chars().count(), MAX_LEN);
     }
 
     #[test]
-    fn grava_e_le_de_volta() {
+    fn saves_and_reads_back() {
         let dir = std::env::temp_dir().join(format!("miniutils-todo-{}", std::process::id()));
         let path = dir.join("todo.json");
         let mut l = List::default();
-        l.add("tarefa", 42);
+        l.add("task", 42);
         l.toggle(1);
         l.save(&path).unwrap();
         assert_eq!(List::load(&path), l);
-        assert_eq!(List::load(&dir.join("nao-existe.json")), List::default());
+        assert_eq!(List::load(&dir.join("missing.json")), List::default());
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn idade() {
-        assert_eq!(age_text(5), "agora");
-        assert_eq!(age_text(300), "há 5 min");
-        assert_eq!(age_text(7200), "há 2 h");
-        assert_eq!(age_text(3 * 86400), "há 3 d");
+    fn age() {
+        assert_eq!(age_text(5), "just now");
+        assert_eq!(age_text(300), "5 min ago");
+        assert_eq!(age_text(7200), "2 h ago");
+        assert_eq!(age_text(3 * 86400), "3 d ago");
     }
 }

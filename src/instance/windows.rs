@@ -1,8 +1,8 @@
-//! Instância única no Windows: um named pipe por usuário (`\\.\pipe\miniutils-<usuário>`).
+//! Single instance on Windows: a named pipe per user (`\\.\pipe\miniutils-<user>`).
 //!
-//! O pipe some sozinho quando o processo termina, então não há "socket velho" para limpar.
-//! Quem cria primeiro (`FILE_FLAG_FIRST_PIPE_INSTANCE`) é a instância principal; as outras
-//! abrem o pipe como um arquivo, escrevem a linha e saem.
+//! The pipe goes away by itself when the process ends, so there is no "stale socket" to
+//! clean up. Whoever creates it first (`FILE_FLAG_FIRST_PIPE_INSTANCE`) is the main
+//! instance; the others open the pipe as a file, write the line and exit.
 
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
@@ -20,23 +20,23 @@ use windows::core::HSTRING;
 
 use super::{Command, Role, clean, parse, stem};
 
-/// `ERROR_PIPE_BUSY`: a principal existe, mas está atendendo outro pedido agora.
+/// `ERROR_PIPE_BUSY`: the main instance exists, but is serving another request right now.
 const PIPE_BUSY: i32 = 231;
 
-/// `\\.\pipe\miniutils-<usuário>` (ou `miniutils-<nome>-<usuário>` com `MINIUTILS_INSTANCE`).
-/// O nome leva o usuário porque os pipes são vistos por todas as sessões da máquina.
+/// `\\.\pipe\miniutils-<user>` (or `miniutils-<name>-<user>` with `MINIUTILS_INSTANCE`).
+/// The name includes the user because pipes are visible to every session on the machine.
 pub fn socket_path() -> PathBuf {
     let user = std::env::var("USERNAME").unwrap_or_default();
     let instance = std::env::var("MINIUTILS_INSTANCE").ok();
     PathBuf::from(format!(r"\\.\pipe\{}-{}", stem(instance.as_deref()), clean(&user)))
 }
 
-/// Avisa a instância rodando (se houver) que os plugins mudaram. `false` = nenhuma ouviu.
+/// Tells the running instance (if any) that the plugins changed. `false` = nobody listened.
 pub fn notify_plugins_changed() -> bool {
     matches!(send(&socket_path(), "plugins"), Ok(true))
 }
 
-/// Entrega uma linha à instância principal. `Ok(false)` = não há instância escutando.
+/// Hands a line to the main instance. `Ok(false)` = no instance is listening.
 fn send(path: &Path, message: &str) -> io::Result<bool> {
     for _ in 0..20 {
         match OpenOptions::new().write(true).open(path) {
@@ -49,18 +49,18 @@ fn send(path: &Path, message: &str) -> io::Result<bool> {
             Err(e) => return Err(e),
         }
     }
-    Err(io::Error::new(ErrorKind::TimedOut, "a instância principal não atendeu"))
+    Err(io::Error::new(ErrorKind::TimedOut, "the main instance did not answer"))
 }
 
-/// Uma ponta (do servidor) do pipe. Fecha ao sair.
+/// The (server) end of the pipe. Closed on drop.
 struct Pipe(HANDLE);
 
-// SAFETY: um identificador de pipe pode ser usado de qualquer thread; só uma o usa por vez.
+// SAFETY: a pipe handle may be used from any thread; only one uses it at a time.
 unsafe impl Send for Pipe {}
 
 impl Drop for Pipe {
     fn drop(&mut self) {
-        // SAFETY: o identificador é nosso e não é usado depois daqui.
+        // SAFETY: the handle is ours and is not used after this.
         unsafe {
             let _ = CloseHandle(self.0);
         }
@@ -70,51 +70,51 @@ impl Drop for Pipe {
 impl Read for &Pipe {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut read = 0u32;
-        // SAFETY: `buf` e `read` vivem até a chamada voltar (leitura síncrona).
+        // SAFETY: `buf` and `read` live until the call returns (synchronous read).
         match unsafe { ReadFile(self.0, Some(buf), Some(&mut read), None) } {
             Ok(()) => Ok(read as usize),
-            // o cliente fechou a ponta dele: fim da linha
+            // the client closed its end: end of the line
             Err(_) => Ok(0),
         }
     }
 }
 
-/// Cria o pipe. Com `first`, falha se outro processo já o criou.
+/// Creates the pipe. With `first`, fails if another process already created it.
 fn create(path: &Path, first: bool) -> io::Result<Pipe> {
     let name = HSTRING::from(path.as_os_str());
     let mut open = PIPE_ACCESS_INBOUND;
     if first {
         open |= FILE_FLAG_FIRST_PIPE_INSTANCE;
     }
-    // só clientes desta máquina; uma conexão por vez (o pedido é uma linha curta)
+    // only clients on this machine; one connection at a time (the request is a short line)
     let mode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
-    // SAFETY: `name` vive até a chamada voltar; o identificador devolvido passa a ser do `Pipe`.
+    // SAFETY: `name` lives until the call returns; the returned handle is owned by the `Pipe`.
     let handle = unsafe { CreateNamedPipeW(&name, open, mode, 1, 0, 512, 0, None) };
     if handle.is_invalid() { Err(io::Error::last_os_error()) } else { Ok(Pipe(handle)) }
 }
 
-/// Pipe da instância principal.
+/// Pipe of the main instance.
 pub struct Server {
-    /// Fica aqui até o `serve` levar para a thread que atende.
+    /// Kept here until `serve` takes it to the serving thread.
     pipe: Mutex<Option<Pipe>>,
 }
 
 impl Server {
-    /// Atende os pedidos numa thread própria; `on_command` roda nessa thread.
+    /// Serves requests on a thread of its own; `on_command` runs on that thread.
     pub fn serve<F>(&self, on_command: F) -> io::Result<()>
     where
         F: Fn(Command) + Send + 'static,
     {
         let pipe = self.pipe.lock().ok().and_then(|mut p| p.take());
-        let pipe = pipe.ok_or_else(|| io::Error::other("o pipe já está sendo atendido"))?;
+        let pipe = pipe.ok_or_else(|| io::Error::other("the pipe is already being served"))?;
         std::thread::spawn(move || {
             let mut failures = 0;
-            // desiste só se o pipe quebrou de vez (várias falhas seguidas)
+            // gives up only if the pipe broke for good (several failures in a row)
             while failures < 10 {
-                // SAFETY: o identificador é do `pipe`, que vive durante todo o laço.
+                // SAFETY: the handle belongs to `pipe`, which lives for the whole loop.
                 let connected = unsafe { ConnectNamedPipe(pipe.0, None) };
-                // O cliente é rápido (abre, escreve, fecha) e pode ter chegado antes desta
-                // chamada, ou até já ter saído: nos dois casos a linha dele está no pipe.
+                // The client is quick (open, write, close) and may have arrived before this
+                // call, or even left already: either way its line is in the pipe.
                 let early = |e: &windows::core::Error| e.code() == ERROR_PIPE_CONNECTED.to_hresult() || e.code() == ERROR_NO_DATA.to_hresult();
                 if connected.as_ref().is_err_and(|e| !early(e)) {
                     failures += 1;
@@ -123,13 +123,13 @@ impl Server {
                 }
                 failures = 0;
                 let mut line = String::new();
-                // limite de 256 bytes: uma linha de comando nunca passa disso
+                // 256-byte limit: a command line is never longer
                 if BufReader::new((&pipe).take(256)).read_line(&mut line).is_ok()
                     && let Some(cmd) = parse(&line)
                 {
                     on_command(cmd);
                 }
-                // SAFETY: como acima; solta este cliente para o próximo poder entrar.
+                // SAFETY: as above; releases this client so the next one can connect.
                 unsafe {
                     let _ = DisconnectNamedPipe(pipe.0);
                 }
@@ -139,21 +139,21 @@ impl Server {
     }
 }
 
-/// Tenta ser a instância principal em `path`. Se já houver uma, entrega `message` a ela.
+/// Tries to be the main instance at `path`. If there already is one, hands it `message`.
 pub fn claim(path: &Path, message: &str) -> io::Result<Role> {
-    // duas tentativas: a 2ª cobre o caso de outra instância ter subido bem na hora
+    // two attempts: the 2nd covers another instance starting at that very moment
     for _ in 0..2 {
         if send(path, message)? {
             return Ok(Role::Second);
         }
         match create(path, true) {
             Ok(pipe) => return Ok(Role::First(Server { pipe: Mutex::new(Some(pipe)) })),
-            // outro processo criou primeiro: volta e entrega o pedido a ele
+            // another process created it first: go back and hand it the request
             Err(e) if e.kind() == ErrorKind::PermissionDenied => continue,
             Err(e) => return Err(e),
         }
     }
-    Err(io::Error::new(ErrorKind::AddrInUse, "pipe ocupado"))
+    Err(io::Error::new(ErrorKind::AddrInUse, "pipe in use"))
 }
 
 #[cfg(test)]
@@ -162,10 +162,10 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
-    fn segunda_instancia_entrega_o_comando_e_sai() {
+    fn second_instance_delivers_the_command_and_exits() {
         let path = PathBuf::from(format!(r"\\.\pipe\miniutils-test-{}", std::process::id()));
         let Role::First(server) = claim(&path, "show apps").unwrap() else {
-            panic!("a primeira instância devia virar a principal");
+            panic!("the first instance should become the main one");
         };
         let (tx, rx) = mpsc::channel();
         server
@@ -175,7 +175,7 @@ mod tests {
             .unwrap();
         for _ in 0..2 {
             assert!(matches!(claim(&path, "show apps").unwrap(), Role::Second));
-            let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("comando não chegou");
+            let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("command did not arrive");
             assert_eq!(cmd, Command::Show(Some("apps".into())));
         }
     }

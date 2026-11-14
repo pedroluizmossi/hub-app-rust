@@ -1,7 +1,7 @@
-// Tela do mini-app Docker. Responsiva: se adapta à célula do painel em que está.
-//   estreita (< 560 px): sem contadores grandes e sem coluna de uso; botões menores
-//   muito estreita (< 420 px): só as ações iniciar/parar/retomar e logs
-//   baixa (< 260 px): mascote menor
+// View of the Docker mini-app. Responsive: adapts to the panel cell it is in.
+//   narrow (< 560 px): no big counters and no usage column; smaller buttons
+//   very narrow (< 420 px): only the start/stop/resume and logs actions
+//   short (< 260 px): smaller mascot
 import { ListView } from "std-widgets.slint";
 import { Colors, Moods, Skin, Icons } from "../../ui/theme.slint";
 import { Mascot, Icon, IconButton, TextButton, Counter, SearchBox, SqSwitch } from "../../ui/widgets.slint";
@@ -12,30 +12,30 @@ export struct ContainerRow {
     status: string,
     project: string,
     running: bool,
-    // pausado (docker pause): "iniciar" não serve, só "retomar"
+    // paused (docker pause): "start" does not apply, only "resume"
     paused: bool,
     problem: bool,
-    // texto do estado: "rodando", "parado (1)", "unhealthy"…
+    // state text: "running", "stopped (1)", "unhealthy"…
     state-text: string,
-    // CPU acima do limite configurado em "busy_cpu" (quem decide é o Rust)
+    // CPU above the limit set in "busy_cpu" (Rust decides)
     busy: bool,
     usage-text: string,
     port-text: string,
     url: string,
-    // há quanto tempo está no estado atual: "há 3 d" ("" se não sei)
+    // how long it has been in the current state: "3 d ago" ("" if unknown)
     age-text: string,
-    // reinícios feitos pela política de restart ("2 reinícios"; "" se 0)
+    // restarts done by the restart policy ("2 restarts"; "" if 0)
     restarts: int,
     restarts-text: string,
-    // cabeçalho de grupo (stack do Compose): name = título, project = stack ("" = avulsos),
-    // state-text = contagem, running/problem = da stack
+    // group header (Compose stack): name = title, project = stack ("" = standalone),
+    // state-text = count, running/problem = of the stack
     header: bool,
     collapsed: bool,
-    // cabeçalho: algum container da stack rodando, pausado ou reiniciando (habilita "parar stack")
+    // header: some container of the stack running, paused or restarting (enables "stop stack")
     active: bool,
 }
 
-// Estado do mini-app, preenchido pelo Rust (src/apps/docker.rs).
+// Mini-app state, filled in by Rust (src/apps/docker.rs).
 export global DockerApp {
     in property <Colors> theme;
     in property <[ContainerRow]> rows;
@@ -43,28 +43,28 @@ export global DockerApp {
     in property <int> stopped;
     in property <int> errors;
     in property <bool> ok: true;
-    // o comando `docker` não existe nesta máquina: não é falha, só não há o que mostrar
+    // the `docker` command does not exist on this machine: not a failure, just nothing to show
     in property <bool> missing;
     in property <string> error-text;
     in property <image> mascot;
     in property <string> mood: "sleep";
-    in property <string> reaction;          // reação curta por cima do humor
-    // o que a mascote está dizendo (último evento)
+    in property <string> reaction;          // short reaction on top of the mood
+    // what the mascot is saying (last event)
     in property <string> speech;
-    // id da mascote na conversa entre mascotes (vem do Rust)
+    // mascot id in the mascot chatter (comes from Rust)
     in property <string> voice;
     in property <string> usage-text;
     in property <bool> hide-stopped;
     in property <string> sort: "estado";
-    // lista agrupada por stack (há ao menos um projeto do Compose)
+    // list grouped by stack (there is at least one Compose project)
     in property <bool> grouped;
     in-out property <string> search;
 
-    callback action(string /* verbo */, string /* container */);
-    // start|stop|restart da stack inteira (docker compose -p)
-    callback stack-action(string /* verbo */, string /* projeto */);
-    callback toggle-group(string /* projeto */);
-    // clicaram na mascote (easter egg)
+    callback action(string /* verb */, string /* container */);
+    // start|stop|restart of the whole stack (docker compose -p)
+    callback stack-action(string /* verb */, string /* project */);
+    callback toggle-group(string /* project */);
+    // the mascot was clicked (easter egg)
     callback mascot-poked();
     callback search-edited(string);
     callback toggle-hide-stopped();
@@ -86,7 +86,7 @@ component Row inherits Rectangle {
 
     hover := TouchArea { }
 
-    // divisória
+    // divider
     Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
 
     HorizontalLayout {
@@ -94,7 +94,7 @@ component Row inherits Rectangle {
         padding-right: 12px;
         spacing: 12px;
 
-        // estado: quadrado com brilho
+        // state: square with a glow
         Rectangle {
             width: 18px;
             if c.running || c.paused || c.problem: Rectangle {
@@ -136,7 +136,7 @@ component Row inherits Rectangle {
                 }
                 Rectangle { horizontal-stretch: 1; }
             }
-            // "rodando há 3 d · 2 reinícios · imagem" (muito estreita: sem reinícios)
+            // "running 3 d ago · 2 restarts · image" (very narrow: no restarts)
             HorizontalLayout {
                 Text {
                     text: c.age-text != "" ? c.state-text + " " + c.age-text : c.state-text;
@@ -164,7 +164,7 @@ component Row inherits Rectangle {
             }
         }
 
-        // uso e porta
+        // usage and port
         if !narrow: VerticalLayout {
             alignment: center;
             spacing: 4px;
@@ -189,24 +189,24 @@ component Row inherits Rectangle {
             }
         }
 
-        // ações: encostadas à direita, para as colunas de botões baterem entre as linhas
+        // actions: pushed to the right, so the button columns line up across rows
         HorizontalLayout {
             alignment: end;
             horizontal-stretch: 0;
             spacing: 6px;
             padding-top: (root.height - btn) / 2;
             padding-bottom: (root.height - btn) / 2;
-            // pausado: retomar (docker start não despausa)
+            // paused: resume (docker start does not unpause)
             IconButton {
                 width: btn;
                 height: btn;
                 icon: c.running ? Icons.stop : Icons.play;
                 ink: c.running ? t.fur : t.ok;
                 edge: c.running ? t.fur : t.ok;
-                label: c.paused ? "Retomar" : c.running ? "Parar" : "Iniciar";
+                label: c.paused ? @tr("Resume") : c.running ? @tr("Stop") : @tr("Start");
                 clicked => { DockerApp.action(c.paused ? "unpause" : c.running ? "stop" : "start", c.name); }
             }
-            // rodando: pausar; pausado: parar (fica desativado nos demais para alinhar as colunas)
+            // running: pause; paused: stop (disabled otherwise, to keep the columns aligned)
             if !tiny: IconButton {
                 width: btn;
                 height: btn;
@@ -214,7 +214,7 @@ component Row inherits Rectangle {
                 ink: c.paused ? t.fur : t.warn;
                 edge: c.paused ? t.fur : act-edge;
                 enabled: c.running || c.paused;
-                label: c.paused ? "Parar" : "Pausar";
+                label: c.paused ? @tr("Stop") : @tr("Pause");
                 clicked => { DockerApp.action(c.paused ? "stop" : "pause", c.name); }
             }
             if !tiny: IconButton {
@@ -223,7 +223,7 @@ component Row inherits Rectangle {
                 icon: Icons.refresh;
                 ink: t.visor;
                 edge: act-edge;
-                label: "Reiniciar";
+                label: @tr("Restart");
                 clicked => { DockerApp.action("restart", c.name); }
             }
             IconButton {
@@ -232,7 +232,7 @@ component Row inherits Rectangle {
                 icon: Icons.logs;
                 ink: t.visor;
                 edge: act-edge;
-                label: "Logs";
+                label: @tr("Logs");
                 clicked => { DockerApp.action("logs", c.name); }
             }
             if !tiny: IconButton {
@@ -242,14 +242,14 @@ component Row inherits Rectangle {
                 ink: t.visor;
                 edge: act-edge;
                 enabled: c.running;
-                label: "Terminal";
+                label: @tr("Terminal");
                 clicked => { DockerApp.action("shell", c.name); }
             }
         }
     }
 }
 
-// Cabeçalho de grupo: stack do Compose com contagem e ações da stack inteira.
+// Group header: Compose stack with its count and whole-stack actions.
 component GroupHeader inherits Rectangle {
     in property <ContainerRow> g;
     in property <bool> narrow;
@@ -260,8 +260,8 @@ component GroupHeader inherits Rectangle {
     height: 40px;
     background: g.problem ? t.alarm.with-alpha(0.1) : toggle.has-hover ? t.fur.with-alpha(0.12) : t.fur.with-alpha(0.07);
 
-    // clicar no cabeçalho recolhe/expande o grupo
-    // não cobre os botões da stack: clique em botão desativado não deve recolher o grupo
+    // clicking the header collapses/expands the group
+    // it does not cover the stack buttons: a click on a disabled button must not collapse the group
     toggle := TouchArea {
         x: 0;
         width: g.project == "" ? parent.width : parent.width - (tiny ? 2 : 3) * btn - (tiny ? 6px : 12px) - 22px;
@@ -304,8 +304,8 @@ component GroupHeader inherits Rectangle {
             horizontal-stretch: 1;
         }
 
-        // ações da stack (avulsos não têm)
-        // encostadas à direita, alinhadas com os botões das linhas
+        // stack actions (standalone containers have none)
+        // pushed to the right, aligned with the row buttons
         if g.project != "": HorizontalLayout {
             alignment: end;
             horizontal-stretch: 0;
@@ -319,7 +319,7 @@ component GroupHeader inherits Rectangle {
                 icon: Icons.play;
                 ink: t.ok;
                 edge: act-edge;
-                label: "Subir stack " + g.project;
+                label: @tr("Start stack {}", g.project);
                 clicked => { DockerApp.stack-action("start", g.project); }
             }
             IconButton {
@@ -330,7 +330,7 @@ component GroupHeader inherits Rectangle {
                 ink: t.fur;
                 edge: act-edge;
                 enabled: g.active;
-                label: "Parar stack " + g.project;
+                label: @tr("Stop stack {}", g.project);
                 clicked => { DockerApp.stack-action("stop", g.project); }
             }
             if !tiny: IconButton {
@@ -340,7 +340,7 @@ component GroupHeader inherits Rectangle {
                 icon: Icons.refresh;
                 ink: t.visor;
                 edge: act-edge;
-                label: "Reiniciar stack " + g.project;
+                label: @tr("Restart stack {}", g.project);
                 clicked => { DockerApp.stack-action("restart", g.project); }
             }
         }
@@ -353,18 +353,18 @@ export component DockerView inherits Rectangle {
     property <bool> tiny: self.width < 420px;
     property <bool> short: self.height < 260px;
     property <bool> bad: (!DockerApp.ok && !DockerApp.missing) || DockerApp.errors > 0;
-    // mascote: tamanho de referência (Skin.mascot-size); na versão baixa, 2/3 dele
+    // mascot: reference size (Skin.mascot-size); in the short version, 2/3 of it
     property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
     property <length> mascot-h: mascot-w * 14 / 16;
 
   VerticalLayout {
     spacing: 12px;
 
-    // mascote + fala + contadores
+    // mascot + speech + counters
     HorizontalLayout {
         spacing: 16px;
         Rectangle {
-            // moldura: a mascote com 4px de respiro em cada lado
+            // frame: the mascot with 4px of breathing room on each side
             width: mascot-w + 8px;
             height: mascot-h + 8px;
             background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
@@ -384,7 +384,7 @@ export component DockerView inherits Rectangle {
             horizontal-stretch: 1;
             spacing: 4px;
             Text {
-                text: DockerApp.missing ? "Docker não instalado" : !DockerApp.ok ? "Docker fora do ar" : DockerApp.speech;
+                text: DockerApp.missing ? @tr("Docker not installed") : !DockerApp.ok ? @tr("Docker is down") : DockerApp.speech;
                 color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
                 font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
@@ -392,7 +392,7 @@ export component DockerView inherits Rectangle {
             }
             Text {
                 text: !DockerApp.ok ? DockerApp.error-text
-                    : narrow ? DockerApp.running + " rodando · " + DockerApp.stopped + " parados · " + DockerApp.errors + " com erro"
+                    : narrow ? @tr("{} running · {} stopped · {} with errors", DockerApp.running, DockerApp.stopped, DockerApp.errors)
                     : DockerApp.usage-text;
                 color: DockerApp.errors > 0 && narrow ? t.alarm : t.sub;
                 font-family: Skin.font-mono;
@@ -409,13 +409,13 @@ export component DockerView inherits Rectangle {
         }
     }
 
-    // busca e filtros
+    // search and filters
     HorizontalLayout {
         spacing: 12px;
         SearchBox {
             theme: t;
             text <=> DockerApp.search;
-            placeholder: narrow ? "buscar…" : "buscar por nome, imagem ou stack";
+            placeholder: narrow ? @tr("search…") : @tr("search by name, image or stack");
             horizontal-stretch: 1;
             edited(text) => { DockerApp.search-edited(text); }
         }
@@ -428,7 +428,7 @@ export component DockerView inherits Rectangle {
                 height: 18px;
                 knob: 12px;
                 accent: t.fur;
-                label: "Só ativos";
+                label: @tr("Active only");
                 off-track: t.bg1;
                 off-edge: t.muted;
                 off-knob: t.sub;
@@ -436,10 +436,11 @@ export component DockerView inherits Rectangle {
                 checked: DockerApp.hide-stopped;
                 toggled => { DockerApp.toggle-hide-stopped(); }
             }
-            if !tiny: Text { text: "só ativos"; color: t.sub; font-size: 14px * Skin.text-scale; vertical-alignment: center; }
+            if !tiny: Text { text: @tr("active only"); color: t.sub; font-size: 14px * Skin.text-scale; vertical-alignment: center; }
         }
         TextButton {
-            text: "ordem: " + DockerApp.sort;
+            // the sort option values are config keys (pt); show them translated
+            text: @tr("sort: {}", DockerApp.sort == "estado" ? @tr("state") : DockerApp.sort == "nome" ? @tr("name") : DockerApp.sort);
             icon: Icons.logs;
             ink: t.sub;
             compact: narrow;
@@ -448,7 +449,7 @@ export component DockerView inherits Rectangle {
             clicked => { DockerApp.cycle-sort(); }
         }
         TextButton {
-            text: "atualizar";
+            text: @tr("refresh");
             icon: Icons.refresh;
             ink: t.visor;
             compact: narrow;
@@ -458,7 +459,7 @@ export component DockerView inherits Rectangle {
         }
     }
 
-    // lista
+    // list
     Rectangle {
         vertical-stretch: 1;
         min-height: 56px;
@@ -467,7 +468,7 @@ export component DockerView inherits Rectangle {
         background: t.bg1.mix(t.bg0, 0.6);
 
         if DockerApp.rows.length == 0: Text {
-            text: DockerApp.missing ? "Instale o Docker para ver os containers aqui." : !DockerApp.ok ? "Sem conexão com o Docker." : DockerApp.search != "" ? "Nenhum container bate com esse filtro." : "Nenhum container.";
+            text: DockerApp.missing ? @tr("Install Docker to see the containers here.") : !DockerApp.ok ? @tr("No connection to Docker.") : DockerApp.search != "" ? @tr("No container matches this filter.") : @tr("No containers.");
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 13px * Skin.text-scale;
@@ -476,7 +477,7 @@ export component DockerView inherits Rectangle {
         }
 
         ListView {
-            // modelo achatado: cabeçalhos de stack e containers na mesma lista
+            // flat model: stack headers and containers in the same list
             for c in DockerApp.rows: Rectangle {
                 height: c.header ? 40px : narrow ? 56px : 62px;
                 if c.header: GroupHeader { width: parent.width; g: c; narrow: narrow; tiny: tiny; }

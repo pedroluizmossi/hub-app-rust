@@ -1,0 +1,568 @@
+# Built-in mini-apps and plugin host (src/apps/**)
+
+# src/apps/ai_usage.rs
+msgid "Couldn't open {}"
+msgstr "Não deu para abrir o {}"
+
+msgid "{} · {} at {}%"
+msgstr "{} · {} em {}%"
+
+msgid "{}% used"
+msgstr "{}% usado"
+
+msgid "just now"
+msgstr "agora"
+
+msgid "{} min ago"
+msgstr "há {} min"
+
+msgid "{} h ago"
+msgstr "há {} h"
+
+msgid "Resets in {}"
+msgstr "Renova em {}"
+
+msgid "Resets %m/%d at %H:%M"
+msgstr "Renova %d/%m às %H:%M"
+
+msgid "%m/%d %H:%M"
+msgstr "%d/%m %H:%M"
+
+msgid "Runs out in ~{} · resets in {}"
+msgstr "Acaba em ~{} · renova em {}"
+
+msgid "Runs out ~{} · resets {}"
+msgstr "Acaba ~{} · renova {}"
+
+msgid "AI subscriptions: {}/{} sources available"
+msgstr "Assinaturas de IA: {}/{} fontes disponíveis"
+
+# src/apps/agents.rs
+msgid "Couldn't find the folder {}."
+msgstr "Não achei a pasta {}."
+
+msgid "Couldn't open the terminal: {}"
+msgstr "Não deu para abrir o terminal: {}"
+
+msgid "Resuming in the terminal: {}"
+msgstr "Retomando no terminal: {}"
+
+msgid "Couldn't open {}: {}"
+msgstr "Não deu para abrir o {}: {}"
+
+msgid "Agent waiting for you"
+msgstr "Agente esperando você"
+
+msgid "{} is waiting for you: {}"
+msgstr "{} espera por você: {}"
+
+msgid "Agent finished"
+msgstr "Agente terminou"
+
+msgid "{} finished: {}"
+msgstr "{} terminou: {}"
+
+msgid "Agent stopped"
+msgstr "Agente parou"
+
+msgid "{} stopped ({}): {}"
+msgstr "{} parou ({}): {}"
+
+msgid "1 agent waiting for you!"
+msgstr "1 agente esperando por você!"
+
+msgid "{} agents waiting for you!"
+msgstr "{} agentes esperando por você!"
+
+msgid "1 agent working."
+msgstr "1 agente trabalhando."
+
+msgid "{} agents working."
+msgstr "{} agentes trabalhando."
+
+msgid "All quiet around here."
+msgstr "Tudo parado por aqui."
+
+msgid "No agents around… zzz"
+msgstr "Nenhum agente por perto… zzz"
+
+msgid "subagent"
+msgstr "subagente"
+
+msgid "subagents"
+msgstr "subagentes"
+
+msgid "active subagent"
+msgstr "subagente ativo"
+
+msgid "active subagents"
+msgstr "subagentes ativos"
+
+msgid "{} of {} subagents active"
+msgstr "{} de {} subagentes ativos"
+
+msgid "{} messages"
+msgstr "{} mensagens"
+
+msgid "complete reply"
+msgstr "resposta completa"
+
+msgid "stopped at a tool"
+msgstr "parou numa ferramenta"
+
+msgid "hit the token limit"
+msgstr "bateu no limite de tokens"
+
+msgid "stopped at a stop sequence"
+msgstr "parou numa sequência de parada"
+
+msgid "refused the request"
+msgstr "recusou o pedido"
+
+msgid "turn paused"
+msgstr "turno pausado"
+
+msgid "stopped by {}"
+msgstr "parou por {}"
+
+msgid "working"
+msgstr "trabalhando"
+
+msgid "just started"
+msgstr "começou agora"
+
+msgid "working for {}"
+msgstr "trabalhando há {}"
+
+msgid "waiting for you"
+msgstr "esperando você"
+
+msgid "waiting for you: {}"
+msgstr "esperando você: {}"
+
+msgid "stopped"
+msgstr "parado"
+
+msgid "{} {} ago"
+msgstr "{} há {}"
+
+msgid "just finished"
+msgstr "terminou agora"
+
+msgid "{} just now"
+msgstr "{} agora"
+
+msgid "in {} · out {} · cache {}"
+msgstr "entrada {} · saída {} · cache {}"
+
+msgid "Agents: {} waiting for you · {} working"
+msgstr "Agentes: {} esperando você · {} trabalhando"
+
+msgid "Agents: {} working"
+msgstr "Agentes: {} trabalhando"
+
+# src/apps/cdplayer.rs
+msgid "No thread for the command: {}"
+msgstr "Sem thread para o comando: {}"
+
+msgid "NO DISC"
+msgstr "SEM DISCO"
+
+msgid "NO BUS"
+msgstr "SEM BARRAMENTO"
+
+msgid "PLAYING"
+msgstr "TOCANDO"
+
+msgid "PAUSED"
+msgstr "PAUSADO"
+
+msgid "STOPPED"
+msgstr "PARADO"
+
+# src/apps/docker.rs
+msgid "Starting {}…"
+msgstr "Iniciando {}…"
+
+msgid "Stopping {}…"
+msgstr "Parando {}…"
+
+msgid "Pausing {}…"
+msgstr "Pausando {}…"
+
+msgid "Resuming {}…"
+msgstr "Retomando {}…"
+
+msgid "Restarting {}…"
+msgstr "Reiniciando {}…"
+
+msgid "Failed on {}"
+msgstr "Falhou em {}"
+
+msgid "Starting stack {}…"
+msgstr "Subindo stack {}…"
+
+msgid "Stopping stack {}…"
+msgstr "Parando stack {}…"
+
+msgid "Restarting stack {}…"
+msgstr "Reiniciando stack {}…"
+
+msgid "Failed on stack {}"
+msgstr "Falhou na stack {}"
+
+msgid "💥 {} crashed"
+msgstr "💥 {} caiu"
+
+msgid "The container exited with code {}."
+msgstr "O container saiu com código {}."
+
+msgid "🔁 {} is in a restart loop"
+msgstr "🔁 {} está em loop de reinício"
+
+msgid "The container keeps restarting."
+msgstr "O container não para de reiniciar."
+
+msgid "🩺 {} is unhealthy"
+msgstr "🩺 {} está unhealthy"
+
+msgid "The container's healthcheck is failing."
+msgstr "O healthcheck do container está falhando."
+
+msgid "♥ {} is back!"
+msgstr "♥ {} voltou!"
+
+msgid "The container is running normally again."
+msgstr "O container está rodando normalmente de novo."
+
+msgid "The docker command was not found in PATH."
+msgstr "O comando docker não foi encontrado no PATH."
+
+msgid "{} container(s) with problems!"
+msgstr "{} container(s) com problema!"
+
+msgid "No containers running… zzz"
+msgstr "Nenhum container rodando… zzz"
+
+msgid "All good: {} running."
+msgstr "Tudo certo: {} rodando."
+
+msgid "Docker using {}% CPU and {} RAM"
+msgstr "Docker usando {}% de CPU e {} de RAM"
+
+msgid "in a restart loop"
+msgstr "em loop de reinício"
+
+msgid "crashed (code {})"
+msgstr "caiu (código {})"
+
+msgid "running · healthy"
+msgstr "rodando · saudável"
+
+msgid "running"
+msgstr "rodando"
+
+msgid "stopped ({})"
+msgstr "parado ({})"
+
+msgid "paused"
+msgstr "pausado"
+
+msgid "created"
+msgstr "criado"
+
+msgid "{}/{} running"
+msgstr "{}/{} rodando"
+
+msgid "{} with problems"
+msgstr "{} com problema"
+
+msgid "Standalone"
+msgstr "Avulsos"
+
+msgid "{} ago"
+msgstr "há {}"
+
+msgid "1 restart"
+msgstr "1 reinício"
+
+msgid "{} restarts"
+msgstr "{} reinícios"
+
+msgid "Docker: not installed"
+msgstr "Docker: não instalado"
+
+msgid "Docker: down"
+msgstr "Docker: fora do ar"
+
+msgid "Docker: {}/{} running"
+msgstr "Docker: {}/{} rodando"
+
+# src/apps/external.rs
+msgid "the executable {} doesn't exist"
+msgstr "o executável {} não existe"
+
+msgid "couldn't start {}: {}"
+msgstr "não consegui iniciar {}: {}"
+
+msgid "the app exited on its own ({})"
+msgstr "o app saiu sozinho ({})"
+
+msgid "the app sent a line longer than {} MiB"
+msgstr "o app mandou uma linha com mais de {} MiB"
+
+msgid "already ended"
+msgstr "já encerrado"
+
+msgid "killed by the host"
+msgstr "encerrado pelo host"
+
+# src/apps/ports.rs
+msgid "That's me! I won't end myself."
+msgstr "Esse sou eu! Não vou me encerrar."
+
+msgid "Asked {} to end."
+msgstr "Pedi para {} encerrar."
+
+msgid "No permission to end {}."
+msgstr "Sem permissão para encerrar {}."
+
+msgid "Couldn't end {}: {}"
+msgstr "Não consegui encerrar {}: {}"
+
+msgid "Click again to end {} (pid {})."
+msgstr "Clique de novo para encerrar {} (pid {})."
+
+msgid "Some service"
+msgstr "Algum serviço"
+
+msgid "{} opened port {}."
+msgstr "{} abriu a porta {}."
+
+msgid "Port opened"
+msgstr "Porta aberta"
+
+msgid "{} is listening on :{} ({})"
+msgstr "{} está escutando em :{} ({})"
+
+msgid "The ss command (iproute2) was not found."
+msgstr "O comando ss (iproute2) não foi encontrado."
+
+msgid "No open ports… zzz"
+msgstr "Nenhuma porta aberta… zzz"
+
+msgid "1 system port listening."
+msgstr "1 porta do sistema escutando."
+
+msgid "{} system ports listening."
+msgstr "{} portas do sistema escutando."
+
+msgid "port"
+msgstr "porta"
+
+msgid "ports"
+msgstr "portas"
+
+msgid "Watching {}, 1 is yours."
+msgstr "Vigiando {}, 1 sua."
+
+msgid "Watching {}, {} are yours."
+msgstr "Vigiando {}, {} suas."
+
+msgid "whole network"
+msgstr "rede toda"
+
+msgid "local only"
+msgstr "só local"
+
+msgid "(another user)"
+msgstr "(outro usuário)"
+
+msgid "Ports: ss not installed"
+msgstr "Portas: ss não instalado"
+
+msgid "Open ports: {} · yours: {}"
+msgstr "Portas abertas: {} · suas: {}"
+
+# src/apps/todo.rs
+msgid "Couldn't save: {}"
+msgstr "Não consegui salvar: {}"
+
+msgid "Nothing to do… zzz"
+msgstr "Nada para fazer… zzz"
+
+msgid "All done! Good job."
+msgstr "Tudo feito! Bom trabalho."
+
+msgid "Just 1 task left."
+msgstr "Falta só 1 tarefa."
+
+msgid "{} tasks pending."
+msgstr "{} tarefas pendentes."
+
+msgid "{} d ago"
+msgstr "há {} d"
+
+msgid "To-do: all done"
+msgstr "To-do: tudo feito"
+
+msgid "To-do: 1 pending"
+msgstr "To-do: 1 pendente"
+
+msgid "To-do: {} pending"
+msgstr "To-do: {} pendentes"
+
+# src/apps/vitals.rs
+msgid "DISK"
+msgstr "DISCO"
+
+msgid "NETWORK"
+msgstr "REDE"
+
+msgid "load {} {} {}"
+msgstr "carga {} {} {}"
+
+msgid "{} free of {}"
+msgstr "{} livres de {}"
+
+msgid "no swap"
+msgstr "sem swap"
+
+msgid "read {} · write {} · {}"
+msgstr "lê {} · grava {} · {}"
+
+msgid "wired"
+msgstr "cabo"
+
+msgid "no connection"
+msgstr "sem conexão"
+
+msgid "CPU at {}% for 2 minutes"
+msgstr "CPU em {}% há 2 minutos"
+
+msgid "See what is weighing it down in the system monitor."
+msgstr "Veja quem está pesando no monitor do sistema."
+
+msgid "Memory at {}%"
+msgstr "Memória em {}%"
+
+msgid "CPU at {} °C"
+msgstr "CPU a {} °C"
+
+msgid "Critical temperature for 30 seconds."
+msgstr "Temperatura crítica há 30 segundos."
+
+msgid "GPU at {} °C"
+msgstr "GPU a {} °C"
+
+msgid "{} is {}% full"
+msgstr "{} com {}% ocupado"
+
+msgid "{} left."
+msgstr "Restam {}."
+
+# src/apps/plugin/db.rs
+msgid "this app declared no database: add [data] kinds = [\"sqlite\"] to manifest.toml"
+msgstr "este app não declarou banco: ponha [data] kinds = [\"sqlite\"] no manifest.toml"
+
+msgid "database: {}"
+msgstr "banco: {}"
+
+msgid "the query returns more than {} rows: use LIMIT"
+msgstr "a consulta passa de {} linhas: use LIMIT"
+
+msgid "database: the call ended with an open transaction (BEGIN without COMMIT); it was rolled back"
+msgstr "banco: a chamada terminou com uma transação aberta (BEGIN sem COMMIT); ela foi desfeita"
+
+msgid "database: over the {} MB quota ([data] max_mb in manifest.toml)"
+msgstr "banco: passou da cota de {} MB ([data] max_mb no manifest.toml)"
+
+msgid "database: the statement took longer than {} s"
+msgstr "banco: a instrução passou de {} s"
+
+msgid "database: statement not allowed (ATTACH, DETACH and PRAGMAs that change the database are reserved for the host)"
+msgstr "banco: instrução não permitida (ATTACH, DETACH e PRAGMA que muda o banco ficam com o host)"
+
+msgid "database: a parameter of type {} isn't allowed (use a number, text, bool, () or a list/map)"
+msgstr "banco: parâmetro de tipo {} não vale (use número, texto, bool, () ou lista/mapa)"
+
+# src/apps/plugin/view.rs
+msgid "a plugin screen can only import std-widgets.slint, miniutils.slint and ui/*.slint ({})"
+msgstr "a tela de um plugin só importa std-widgets.slint, miniutils.slint e ui/*.slint ({})"
+
+msgid "{}: must be a regular file of up to 1 MiB"
+msgstr "{}: precisa ser um arquivo comum de até 1 MiB"
+
+msgid "{}: @image-url(\"{}\"): images go in the plugin's assets/"
+msgstr "{}: @image-url(\"{}\"): as imagens ficam em assets/ do plugin"
+
+msgid "view.slint must export `component Main`"
+msgstr "view.slint precisa exportar `component Main`"
+
+# src/apps/plugin/script.rs
+msgid "store_set: the data is over {} KiB; it wasn't saved"
+msgstr "store_set: os dados passam de {} KiB; não foram gravados"
+
+msgid "{}: https:// only"
+msgstr "{}: só https://"
+
+msgid "{}: no user or port in the address"
+msgstr "{}: sem usuário nem porta no endereço"
+
+msgid "{} is not in [permissions] net"
+msgstr "{} não está em [permissions] net"
+
+msgid "too many redirects"
+msgstr "redirecionamentos demais"
+
+msgid "redirected outside what is allowed: {}"
+msgstr "redirecionou para fora do permitido: {}"
+
+msgid "{}: the response is over 1 MiB"
+msgstr "{}: a resposta passa de 1 MiB"
+
+msgid "run([]): empty command"
+msgstr "run([]): comando vazio"
+
+msgid "fact: unknown kind \"{}\" (trouble, strain, forecast, recovered, poked)"
+msgstr "fact: tipo \"{}\" desconhecido (trouble, strain, forecast, recovered, poked)"
+
+msgid "store_set: this app didn't declare kv in the [data] of manifest.toml"
+msgstr "store_set: este app não declarou kv no [data] do manifest.toml"
+
+msgid "database: locked"
+msgstr "banco: travado"
+
+msgid "missing fn {}(result) to receive the result"
+msgstr "falta fn {}(result) para receber o resultado"
+
+# src/apps/plugin/mod.rs
+msgid "no thread for the script: {}"
+msgstr "sem thread para o script: {}"
+
+msgid "this app has no version for {}"
+msgstr "este app não tem versão para {}"
+
+msgid "data migrated, but the version wasn't saved: {}"
+msgstr "dados migrados, mas a versão não foi gravada: {}"
+
+msgid "the data migration (version {} → {}) failed and the data was restored as it was: {}"
+msgstr "a migração dos dados (versão {} → {}) falhou e os dados voltaram como estavam: {}"
+
+msgid "the data migration (version {} → {}) failed ({}) and the copy wasn't restored: {}"
+msgstr "a migração dos dados (versão {} → {}) falhou ({}) e a cópia não voltou: {}"
+
+msgid "(no output)"
+msgstr "(sem saída)"
+
+msgid "every {} s"
+msgstr "a cada {} s"
+
+msgid "running {}…"
+msgstr "rodando {}…"
+
+msgid "failed {} s ago · {}"
+msgstr "falhou há {} s · {}"
+
+msgid "updated {} s ago · {}"
+msgstr "atualizado há {} s · {}"

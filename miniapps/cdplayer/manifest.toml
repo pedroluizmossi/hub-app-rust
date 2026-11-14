@@ -1,32 +1,32 @@
 id = "cyber.cd"
 name = "CD Player"
-description = "O que está tocando: disco girando, faixa e controles do player."
+description = "What is playing: spinning disc, track and player controls."
 icon = "cd"
 api = 1
 uses = ["media"]
 
 [[settings]]
 key = "theme"
-label = "Tema"
+label = "Theme"
 type = "choice"
 default = "auto"
-# opções: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
 
 [[settings]]
 key = "notify_track"
-label = "Notificar quando a faixa mudar"
+label = "Notify when the track changes"
 type = "bool"
 default = false
 
 [[settings]]
 key = "tray_controls"
-label = "Mostrar música e controles no menu da bandeja"
+label = "Show music and controls in the tray menu"
 type = "bool"
 default = false
 
 [[settings]]
 key = "seek"
-label = "Pulo de avançar/voltar (s)"
+label = "Skip forward/back step (s)"
 type = "int"
 default = 10
 min = 5

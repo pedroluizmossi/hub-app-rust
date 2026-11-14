@@ -1,13 +1,13 @@
-// Configurações do hub (`current == "apps"`): painel, aparência, sistema, páginas e a
-// lista de apps com as opções de cada um.
+// Hub settings (`current == "apps"`): dashboard, appearance, system, pages and the
+// list of apps with each one's options.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
 import { SettingRow, AppInfo, PageInfo, DataRow } from "models.slint";
 
-// Linhas com altura mínima de 44 px: `max(44px, self.preferred-height)`, nunca só `44px`.
-// Um min-height fixo vira a altura da linha, e um texto que quebra (ou o texto em 125%)
-// invade a linha de baixo.
+// Rows with a minimum height of 44 px: `max(44px, self.preferred-height)`, never just `44px`.
+// A fixed min-height becomes the row's height, and text that wraps (or text at 125%)
+// spills into the row below.
 component SettingLine inherits Rectangle {
     in property <SettingRow> s;
     in property <color> accent;
@@ -17,8 +17,8 @@ component SettingLine inherits Rectangle {
 
     HorizontalLayout {
         spacing: 16px;
-        // a altura mínima vai no rótulo: no Rectangle, ler a altura preferida dele faz um
-        // laço; no layout de dentro, não tem efeito
+        // the minimum height goes on the label: on the Rectangle, reading its preferred height makes a
+        // loop; on the inner layout, it has no effect
         Text {
             min-height: 44px;
             text: s.label;
@@ -53,7 +53,7 @@ component SettingLine inherits Rectangle {
                 label: s.label;
                 chosen(i) => { root.chosen(i); }
             }
-            // escolha de mascote: seletor com o desenho de cada uma
+            // mascot choice: picker with each one's drawing
             if s.kind == "choice" && s.images.length > 0: MascotSelect {
                 width: 220px;
                 options: s.options;
@@ -67,12 +67,12 @@ component SettingLine inherits Rectangle {
     }
 }
 
-/// Uma preferência com título, explicação e um seletor à direita.
+/// A preference with a title, an explanation and a picker on the right.
 component ChoiceRow inherits HorizontalLayout {
     in property <string> title;
     in property <string> hint;
     in property <[string]> options;
-    in property <[image]> images;   // com imagens, vira um seletor de mascote
+    in property <[image]> images;   // with images, it becomes a mascot picker
     in property <int> index;
     callback chosen(int);
     spacing: 16px;
@@ -108,10 +108,10 @@ component ChoiceRow inherits HorizontalLayout {
 
 export component AppsView inherits ScrollView {
     in property <[AppInfo]> apps;
-    in property <[string]> skins;          // visuais da janela (rótulos)
+    in property <[string]> skins;          // window skins (labels)
     in property <int> skin-index;
     callback skin-chosen(int);
-    // ícone da bandeja: mascote e tema (índice 0 = automático)
+    // tray icon: mascot and theme (index 0 = automatic)
     in property <[string]> tray-icons;
     in property <[image]> tray-icon-images;
     in property <int> tray-icon-index;
@@ -119,36 +119,38 @@ export component AppsView inherits ScrollView {
     in property <int> tray-theme-index;
     callback tray-icon-chosen(int);
     callback tray-theme-chosen(int);
-    // onde ficam as páginas (índice em `appearance::NAVS`: esquerda, direita, embaixo, em cima)
+    // where the pages go (index into `appearance::NAVS`: left, right, bottom, top)
     in property <int> nav-index;
     callback nav-chosen(int);
-    // reduzir movimento (mascotes paradas, sem reações)
+    // reduce motion (still mascots, no reactions)
     in property <bool> reduce-motion;
     callback reduce-motion-toggled();
-    // quanto as mascotes conversam (0 nunca, 1 às vezes, 2 bastante)
+    // how much the mascots chat (0 never, 1 sometimes, 2 a lot)
     in property <int> chatter-index;
     callback chatter-chosen(int);
-    // sistema: iniciar junto, versão e pasta dos registros
+    in property <int> language-index;
+    callback language-chosen(int);
+    // system: start with the system, version and log folder
     in property <bool> autostart;
     callback autostart-toggled();
     in property <string> version;
     in property <string> log-dir;
     callback open-logs();
-    // apps locais (ver as propriedades em hub.slint)
+    // local apps (see the properties in hub.slint)
     in property <string> apps-dir;
     in property <string> apps-summary;
     in property <string> apps-skipped;
     callback open-apps-dir();
     callback reload-apps();
-    // dados dos apps: exportar e apagar (de um app, ou que ficaram de um app removido) e o
-    // aviso do último pedido, mostrado na linha do app `data-note-app`
+    // app data: export and delete (of an app, or left over from a removed app) and the
+    // notice of the last request, shown on the row of app `data-note-app`
     in property <[DataRow]> orphan-data;
     in property <string> data-note-app;
     in property <string> data-note;
     in property <bool> data-note-bad;
     callback export-data(string);
     callback delete-data(string);
-    // aparência: destaque, tamanho do texto, fundo animado e a pasta de temas/visuais/fundos
+    // appearance: accent, text size, animated background and the themes/skins/backgrounds folder
     in property <[string]> accents;
     in property <int> accent-index;
     callback accent-chosen(int);
@@ -162,7 +164,7 @@ export component AppsView inherits ScrollView {
     in property <string> looks-skipped;
     callback open-looks-dir();
     callback reload-looks();
-    // páginas: lista, nomes (para o seletor de cada app) e mascotes disponíveis
+    // pages: list, names (for each app's picker) and available mascots
     in property <[PageInfo]> pages;
     in property <[string]> page-names;
     in property <[string]> mascots;
@@ -171,11 +173,11 @@ export component AppsView inherits ScrollView {
     callback page-removed(int);
     callback page-renamed(int, string);
     callback page-icon-chosen(int, int);
-    callback page-moved(int, int /* -1 sobe, +1 desce */);
+    callback page-moved(int, int /* -1 up, +1 down */);
     callback app-page-chosen(string, int);
     callback edit-layout();
     callback toggle-app(string);
-    // app com as opções abertas (um por vez; fica aqui porque a lista é refeita pelo Rust)
+    // app with its options open (one at a time; kept here because Rust rebuilds the list)
     in-out property <string> open-app;
     callback setting-toggled(string, string);
     callback setting-int(string, string, int);
@@ -189,7 +191,7 @@ export component AppsView inherits ScrollView {
         padding-bottom: 16px;
         spacing: 12px;
 
-        // como arrumar o painel
+        // how to arrange the dashboard
         Rectangle {
             background: Skin.edit-bg;
             border-width: 1px;
@@ -207,9 +209,9 @@ export component AppsView inherits ScrollView {
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
-                    Text { text: "Painel"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
+                    Text { text: @tr("Dashboard"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                     Text {
-                        text: "A grade se arruma direto no painel: em Mudar layout, arraste os apps pelo topo e puxe as bordas para mudar o tamanho.";
+                        text: @tr("The grid is arranged right on the dashboard: in Change layout, drag the apps by the top and pull the edges to resize them.");
                         color: Skin.edit-sub;
                         font-size: 13px * Skin.text-scale;
                         wrap: word-wrap;
@@ -218,7 +220,7 @@ export component AppsView inherits ScrollView {
                 VerticalLayout {
                     alignment: center;
                     TextButton {
-                        text: "Mudar layout";
+                        text: @tr("Change layout");
                         icon: Icons.grid;
                         ink: Skin.accent;
                         edge: Skin.edit-line;
@@ -229,7 +231,7 @@ export component AppsView inherits ScrollView {
             }
         }
 
-        // visual da janela
+        // window skin
         Rectangle {
             background: Skin.surface;
             border-width: 1px;
@@ -237,24 +239,24 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                Text { text: "Aparência"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
+                Text { text: @tr("Appearance"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                 ChoiceRow {
-                    title: "Visual da janela";
-                    hint: "Fundo, moldura, fontes e cores. Apps com o tema “Acompanha a janela” mudam junto.";
+                    title: @tr("Window skin");
+                    hint: @tr("Background, frame, fonts and colors. Apps with the “Follows the window” theme change along.");
                     options: skins;
                     index: skin-index;
                     chosen(i) => { root.skin-chosen(i); }
                 }
                 ChoiceRow {
-                    title: "Cor de destaque";
-                    hint: "Botões, foco e o fundo do painel. Ajustada ao visual para continuar legível.";
+                    title: @tr("Accent color");
+                    hint: @tr("Buttons, focus and the dashboard background. Adjusted to the skin to stay readable.");
                     options: accents;
                     index: accent-index;
                     chosen(i) => { root.accent-chosen(i); }
                 }
                 ChoiceRow {
-                    title: "Tamanho do texto";
-                    hint: "Letras da janela e dos apps embutidos (plugins seguem se usarem theme.text-scale).";
+                    title: @tr("Text size");
+                    hint: @tr("Text of the window and the built-in apps (plugins follow if they use theme.text-scale).");
                     options: text-sizes;
                     index: text-size-index;
                     chosen(i) => { root.text-size-chosen(i); }
@@ -266,9 +268,9 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Fundo animado"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text { text: @tr("Animated background"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
-                            text: "Chuva, estrelas e varredura no fundo do painel. Desligado também com Reduzir movimento.";
+                            text: @tr("Rain, stars and a scan line behind the dashboard. Also off with Reduce motion.");
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -278,16 +280,16 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         SqSwitch {
                             checked: ambient-on;
-                            label: "Fundo animado";
+                            label: @tr("Animated background");
                             toggled => { root.ambient-toggled(); }
                         }
                     }
                 }
                 ChoiceRow {
-                    title: "Páginas";
-                    hint: "Onde as páginas aparecem: numa barra à esquerda, à direita ou embaixo, ou como abas no cabeçalho.";
-                    // mesma ordem de `appearance::NAVS`
-                    options: ["Barra à esquerda", "Barra à direita", "Barra embaixo", "Abas em cima"];
+                    title: @tr("Pages");
+                    hint: @tr("Where the pages show up: in a bar on the left, on the right or at the bottom, or as tabs in the header.");
+                    // same order as `appearance::NAVS`
+                    options: [@tr("Bar on the left"), @tr("Bar on the right"), @tr("Bar at the bottom"), @tr("Tabs on top")];
                     index: nav-index;
                     chosen(i) => { root.nav-chosen(i); }
                 }
@@ -298,9 +300,9 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Reduzir movimento"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text { text: @tr("Reduce motion"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
-                            text: "Mascotes sem pulos nem tremores, e sem comemorações nem surpresas.";
+                            text: @tr("Mascots without bounces or shakes, and without celebrations or surprises.");
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -310,44 +312,51 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         SqSwitch {
                             checked: reduce-motion;
-                            label: "Reduzir movimento";
+                            label: @tr("Reduce motion");
                             toggled => { root.reduce-motion-toggled(); }
                         }
                     }
                 }
                 ChoiceRow {
-                    title: "Mascotes conversam";
-                    hint: "As mascotes comentam o que acontece nos apps e, com tudo calmo, puxam papo. Clique numa mascote para ela falar.";
-                    options: ["Nunca", "Às vezes", "Bastante"];
+                    title: @tr("Language");
+                    hint: @tr("Language of the interface. Automatic follows the system. Some texts change only after restarting MiniUtils.");
+                    options: [@tr("Automatic"), "English", "Português (Brasil)"];
+                    index: language-index;
+                    chosen(i) => { root.language-chosen(i); }
+                }
+                ChoiceRow {
+                    title: @tr("Mascot chatter");
+                    hint: @tr("The mascots comment on what happens in the apps and, when all is calm, make small talk. Click a mascot to make it speak.");
+                    options: [@tr("Never"), @tr("Sometimes"), @tr("A lot")];
                     index: chatter-index;
                     chosen(i) => { root.chatter-chosen(i); }
                 }
                 ChoiceRow {
-                    title: "Ícone da bandeja";
-                    hint: "Mascote mostrada na bandeja. No automático, é a do app em pior estado.";
+                    title: @tr("Tray icon");
+                    hint: @tr("Mascot shown in the tray. On automatic, it is the one of the app in the worst state.");
                     options: tray-icons;
                     images: tray-icon-images;
                     index: tray-icon-index;
                     chosen(i) => { root.tray-icon-chosen(i); }
                 }
                 ChoiceRow {
-                    title: "Cores do ícone";
-                    hint: "Tema da mascote na bandeja. No automático, segue o tema do app mostrado.";
+                    title: @tr("Icon colors");
+                    hint: @tr("Theme of the mascot in the tray. On automatic, it follows the theme of the app shown.");
                     options: tray-themes;
                     index: tray-theme-index;
                     chosen(i) => { root.tray-theme-chosen(i); }
                 }
-                // temas, visuais e fundos por arquivo (src/skin/user.rs). Sem min-height:
-                // um valor fixo vira a altura da linha, e o texto mais alto vaza
+                // themes, skins and backgrounds from files (src/skin/user.rs). No min-height:
+                // a fixed value becomes the row's height, and taller text spills out
                 HorizontalLayout {
                     spacing: 16px;
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Temas, visuais e fundos seus"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text { text: @tr("Your themes, skins and backgrounds"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
-                            text: "Arquivos .toml em temas/, visuais/ e fundos/ desta pasta (exemplos em examples/aparencia). Depois de mudar, clique em Recarregar.";
+                            text: @tr(".toml files in themes/, skins/ and backdrops/ in this folder (examples in examples/appearance). After changing them, click Reload.");
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -377,12 +386,12 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         spacing: 6px;
                         TextButton {
-                            text: "Abrir pasta";
+                            text: @tr("Open folder");
                             font-size: 13px * Skin.text-scale;
                             clicked => { root.open-looks-dir(); }
                         }
                         TextButton {
-                            text: "Recarregar";
+                            text: @tr("Reload");
                             icon: Icons.refresh;
                             ink: Skin.accent;
                             font-size: 13px * Skin.text-scale;
@@ -393,7 +402,7 @@ export component AppsView inherits ScrollView {
             }
         }
 
-        // sistema
+        // system
         Rectangle {
             background: Skin.surface;
             border-width: 1px;
@@ -401,7 +410,7 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
-                Text { text: "Sistema"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
+                Text { text: @tr("System"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                 HorizontalLayout {
                     spacing: 16px;
                     min-height: max(44px, self.preferred-height);
@@ -409,9 +418,9 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Iniciar com o sistema"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text { text: @tr("Start with the system"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
-                            text: "Abre só na bandeja ao entrar na sessão.";
+                            text: @tr("Opens only in the tray when you log in.");
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -421,7 +430,7 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         SqSwitch {
                             checked: autostart;
-                            label: "Iniciar com o sistema";
+                            label: @tr("Start with the system");
                             toggled => { root.autostart-toggled(); }
                         }
                     }
@@ -433,9 +442,9 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Versão " + version; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text { text: @tr("Version {}", version); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
-                            text: log-dir == "" ? "Sem pasta para os registros." : "Registros (avisos e erros): " + log-dir;
+                            text: log-dir == "" ? @tr("No folder for the logs.") : @tr("Logs (warnings and errors): {}", log-dir);
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -444,23 +453,23 @@ export component AppsView inherits ScrollView {
                     VerticalLayout {
                         alignment: center;
                         if log-dir != "": TextButton {
-                            text: "Abrir registros";
+                            text: @tr("Open logs");
                             font-size: 13px * Skin.text-scale;
                             clicked => { root.open-logs(); }
                         }
                     }
                 }
-                // apps locais: o que estiver nesta pasta entra na lista abaixo. Sem
-                // min-height: um valor fixo vira a altura da linha, e o texto mais alto vaza
+                // local apps: whatever is in this folder joins the list below. No
+                // min-height: a fixed value becomes the row's height, and taller text spills out
                 HorizontalLayout {
                     spacing: 16px;
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Apps locais"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                        Text { text: @tr("Local apps"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                         Text {
-                            text: "Um app por pasta, com o nome do id do manifest.toml. Depois de pôr ou mudar um app, clique em Recarregar.";
+                            text: @tr("One app per folder, named after the id in manifest.toml. After adding or changing an app, click Reload.");
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -490,12 +499,12 @@ export component AppsView inherits ScrollView {
                         alignment: center;
                         spacing: 6px;
                         TextButton {
-                            text: "Abrir pasta";
+                            text: @tr("Open folder");
                             font-size: 13px * Skin.text-scale;
                             clicked => { root.open-apps-dir(); }
                         }
                         TextButton {
-                            text: "Recarregar";
+                            text: @tr("Reload");
                             icon: Icons.refresh;
                             ink: Skin.accent;
                             font-size: 13px * Skin.text-scale;
@@ -503,12 +512,12 @@ export component AppsView inherits ScrollView {
                         }
                     }
                 }
-                // dados que ficaram de apps removidos (a remoção pergunta; quem guardou, apaga aqui)
+                // data left over from removed apps (removal asks; whoever kept it deletes it here)
                 if orphan-data.length > 0: VerticalLayout {
                     spacing: 6px;
-                    Text { text: "Dados de apps removidos"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                    Text { text: @tr("Data of removed apps"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                     Text {
-                        text: "Ficaram guardados ao remover. Reinstalar o mesmo app os traz de volta.";
+                        text: @tr("Kept when the app was removed. Reinstalling the same app brings them back.");
                         color: Skin.sub;
                         font-size: 12px * Skin.text-scale;
                         wrap: word-wrap;
@@ -537,7 +546,7 @@ export component AppsView inherits ScrollView {
                         VerticalLayout {
                             alignment: center;
                             TextButton {
-                                text: "Exportar";
+                                text: @tr("Export");
                                 font-size: 13px * Skin.text-scale;
                                 clicked => { root.export-data(d.id); }
                             }
@@ -545,12 +554,12 @@ export component AppsView inherits ScrollView {
                         VerticalLayout {
                             alignment: center;
                             TextButton {
-                                text: armed ? "Confirmar" : "Apagar";
+                                text: armed ? @tr("Confirm") : @tr("Delete");
                                 icon: Icons.close;
                                 ink: Skin.danger;
                                 edge: Skin.danger-edge;
                                 font-size: 13px * Skin.text-scale;
-                                accessible-label: (armed ? "Confirmar: apagar os dados de " : "Apagar os dados de ") + d.id;
+                                accessible-label: armed ? @tr("Confirm: delete the data of {}", d.id) : @tr("Delete the data of {}", d.id);
                                 clicked => {
                                     if armed {
                                         armed = false;
@@ -561,7 +570,7 @@ export component AppsView inherits ScrollView {
                                 }
                             }
                         }
-                        // o segundo clique vale por pouco tempo
+                        // the second click is valid only for a short time
                         Timer {
                             interval: 6s;
                             running: armed;
@@ -572,7 +581,7 @@ export component AppsView inherits ScrollView {
             }
         }
 
-        // páginas da barra lateral
+        // sidebar pages
         Rectangle {
             background: Skin.surface;
             border-width: 1px;
@@ -585,9 +594,9 @@ export component AppsView inherits ScrollView {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: "Páginas"; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
+                        Text { text: @tr("Pages"); color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; }
                         Text {
-                            text: "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo.";
+                            text: @tr("Each page has its own grid and shows in the page bar. To move an app to another page, open its options below.");
                             color: Skin.sub;
                             font-size: 12px * Skin.text-scale;
                             wrap: word-wrap;
@@ -596,7 +605,7 @@ export component AppsView inherits ScrollView {
                     VerticalLayout {
                         alignment: center;
                         TextButton {
-                            text: "Nova página";
+                            text: @tr("New page");
                             font-size: 13px * Skin.text-scale;
                             clicked => { root.page-added(); }
                         }
@@ -630,7 +639,7 @@ export component AppsView inherits ScrollView {
                                 font-size: 14px * Skin.text-scale;
                                 vertical-alignment: center;
                                 single-line: true;
-                                accessible-label: "Nome da página " + (i + 1);
+                                accessible-label: @tr("Name of page {}", i + 1);
                                 accepted => { root.page-renamed(i, self.text); }
                                 changed has-focus => {
                                     if !self.has-focus && self.text != p.name { root.page-renamed(i, self.text); }
@@ -646,7 +655,7 @@ export component AppsView inherits ScrollView {
                             images: mascot-images;
                             index: p.icon-index;
                             accent: Skin.accent;
-                            label: "Ícone da página " + p.name;
+                            label: @tr("Icon of page {}", p.name);
                             chosen(k) => { root.page-icon-chosen(i, k); }
                         }
                     }
@@ -655,7 +664,7 @@ export component AppsView inherits ScrollView {
                         height: 34px;
                         icon: Icons.chevron-up;
                         enabled: i > 0;
-                        label: "Subir " + p.name;
+                        label: @tr("Move {} up", p.name);
                         clicked => { root.page-moved(i, -1); }
                     }
                     IconButton {
@@ -663,7 +672,7 @@ export component AppsView inherits ScrollView {
                         height: 34px;
                         icon: Icons.chevron;
                         enabled: i < pages.length - 1;
-                        label: "Descer " + p.name;
+                        label: @tr("Move {} down", p.name);
                         clicked => { root.page-moved(i, 1); }
                     }
                     IconButton {
@@ -672,7 +681,7 @@ export component AppsView inherits ScrollView {
                         icon: Icons.close;
                         ink: Skin.danger;
                         enabled: pages.length > 1;
-                        label: "Apagar " + p.name + " (os apps vão para a página anterior)";
+                        label: @tr("Delete {} (its apps go to the previous page)", p.name);
                         clicked => { root.page-removed(i); }
                     }
                 }
@@ -690,13 +699,13 @@ export component AppsView inherits ScrollView {
             VerticalLayout {
                 padding: 16px;
                 spacing: 14px;
-                // cabeçalho do app: clicar abre/fecha as opções (o interruptor tem o próprio clique)
+                // app header: a click opens/closes the options (the switch has its own click)
                 head := Rectangle {
                     min-height: head-row.preferred-height;
                     TouchArea {
                         mouse-cursor: pointer;
                         accessible-role: button;
-                        accessible-label: (open ? "Fechar opções de " : "Abrir opções de ") + app.name;
+                        accessible-label: open ? @tr("Close options of {}", app.name) : @tr("Open options of {}", app.name);
                         accessible-action-default => { root.open-app = open ? "" : app.id; }
                         clicked => { root.open-app = open ? "" : app.id; }
                     }
@@ -731,18 +740,19 @@ export component AppsView inherits ScrollView {
                         HorizontalLayout {
                             spacing: 8px;
                             Text { text: app.name; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; overflow: elide; }
-                            // de onde veio: "loja", "local" ou "dev" (vazio nos embutidos)
+                            // where it came from: "loja"/"store", "local" or "dev" (empty for built-ins)
                             if app.origin != "": VerticalLayout {
+                                property <bool> from-store: app.origin == "loja" || app.origin == "store";
                                 alignment: center;
                                 Rectangle {
                                     border-width: 1px;
-                                    border-color: app.origin == "loja" ? Skin.surface-edge : Skin.accent;
+                                    border-color: from-store ? Skin.surface-edge : Skin.accent;
                                     HorizontalLayout {
                                         padding-left: 6px;
                                         padding-right: 6px;
                                         Text {
-                                            text: app.origin;
-                                            color: app.origin == "loja" ? Skin.dim : Skin.accent;
+                                            text: from-store ? @tr("store") : app.origin;
+                                            color: from-store ? Skin.dim : Skin.accent;
                                             font-family: Skin.font-mono;
                                             font-size: 11px * Skin.text-scale;
                                         }
@@ -753,7 +763,7 @@ export component AppsView inherits ScrollView {
                         }
                         Text { text: app.description; color: Skin.sub; font-size: 13px * Skin.text-scale; wrap: word-wrap; }
                         if !open: Text {
-                            text: app.settings.length + (app.settings.length == 1 ? " opção" : " opções") + " · clique para abrir";
+                            text: app.settings.length == 1 ? @tr("1 option · click to open") : @tr("{} options · click to open", app.settings.length);
                             color: Skin.dim;
                             font-family: Skin.font-mono;
                             font-size: 11px * Skin.text-scale;
@@ -767,7 +777,7 @@ export component AppsView inherits ScrollView {
                             knob: 18px;
                             accent: accent;
                             checked: app.enabled;
-                            label: "Ativar " + app.name;
+                            label: @tr("Enable {}", app.name);
                             toggled => { root.toggle-app(app.id); }
                         }
                     }
@@ -779,7 +789,7 @@ export component AppsView inherits ScrollView {
                         spacing: 16px;
                         min-height: max(44px, self.preferred-height);
                         Text {
-                            text: "Página";
+                            text: @tr("Page");
                             color: Skin.ink;
                             font-size: 14px * Skin.text-scale;
                             horizontal-stretch: 1;
@@ -792,7 +802,7 @@ export component AppsView inherits ScrollView {
                                 options: page-names;
                                 index: app.page;
                                 accent: accent;
-                                label: "Página de " + app.name;
+                                label: @tr("Page of {}", app.name);
                                 chosen(k) => { root.app-page-chosen(app.id, k); }
                             }
                         }
@@ -804,7 +814,7 @@ export component AppsView inherits ScrollView {
                         int-edited(v) => { root.setting-int(s.app, s.key, v); }
                         chosen(i) => { root.setting-chosen(s.app, s.key, i); }
                     }
-                    // o que o app guarda (core/appdata.rs): exportar e apagar com dois cliques
+                    // what the app stores (core/appdata.rs): export and delete with two clicks
                     if app.data != "": HorizontalLayout {
                         property <bool> armed;
                         spacing: 16px;
@@ -813,7 +823,7 @@ export component AppsView inherits ScrollView {
                             alignment: center;
                             horizontal-stretch: 1;
                             spacing: 2px;
-                            Text { text: "Dados"; color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text { text: @tr("Data"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
                             Text {
                                 text: app.data;
                                 color: Skin.sub;
@@ -822,7 +832,7 @@ export component AppsView inherits ScrollView {
                                 wrap: word-wrap;
                             }
                             if armed: Text {
-                                text: "Clique de novo para apagar: o app volta a começar do zero.";
+                                text: @tr("Click again to delete: the app starts over from scratch.");
                                 color: Skin.danger;
                                 font-size: 12px * Skin.text-scale;
                                 wrap: word-wrap;
@@ -837,22 +847,22 @@ export component AppsView inherits ScrollView {
                         if app.has-data: VerticalLayout {
                             alignment: center;
                             TextButton {
-                                text: "Exportar";
+                                text: @tr("Export");
                                 ink: accent;
                                 font-size: 13px * Skin.text-scale;
-                                accessible-label: "Exportar os dados de " + app.name;
+                                accessible-label: @tr("Export the data of {}", app.name);
                                 clicked => { root.export-data(app.id); }
                             }
                         }
                         if app.has-data: VerticalLayout {
                             alignment: center;
                             TextButton {
-                                text: armed ? "Confirmar" : "Apagar dados";
+                                text: armed ? @tr("Confirm") : @tr("Delete data");
                                 icon: Icons.close;
                                 ink: Skin.danger;
                                 edge: Skin.danger-edge;
                                 font-size: 13px * Skin.text-scale;
-                                accessible-label: (armed ? "Confirmar: apagar os dados de " : "Apagar os dados de ") + app.name;
+                                accessible-label: armed ? @tr("Confirm: delete the data of {}", app.name) : @tr("Delete the data of {}", app.name);
                                 clicked => {
                                     if armed {
                                         armed = false;
@@ -874,7 +884,7 @@ export component AppsView inherits ScrollView {
         }
 
         Text {
-            text: "Mascotes e temas do CyberDock · Interface feita com Slint (slint.dev)";
+            text: @tr("Mascots and themes from CyberDock · Interface built with Slint (slint.dev)");
             color: Skin.dim;
             font-size: 11px * Skin.text-scale;
             horizontal-alignment: center;

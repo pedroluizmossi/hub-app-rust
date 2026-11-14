@@ -1,11 +1,12 @@
-# Plugin de exemplo com tela e script próprios: os processos mais pesados do momento.
-# Formato: topo de src/core/plugins.rs e src/apps/plugin/mod.rs no repositório do MiniUtils.
+# Example plugin with its own view and script: the heaviest processes right now.
+# Format: top of src/core/plugins.rs and src/apps/plugin/mod.rs in the MiniUtils repository.
+# Texts (name, description) are in English; i18n/pt-BR.po translates them.
 id = "io.github.pedroluizmossi.top-processes"
-name = "Top processos"
-description = "Os processos que mais usam CPU ou memória, com tela e script próprios. Funciona no Linux e no Windows. Plugin de exemplo da loja do MiniUtils."
+name = "Top processes"
+description = "The processes using the most CPU or memory, with its own view and script. Works on Linux and Windows. Example plugin from the MiniUtils store."
 icon = "robo"
 api = 1
-# a lista de processos chega em fn on_event("procs", dados); não executa nada
+# the process list arrives in fn on_event("procs", data); runs nothing
 uses = ["procs"]
 
 [ui]

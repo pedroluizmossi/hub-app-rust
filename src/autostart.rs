@@ -1,9 +1,9 @@
-//! Iniciar com o sistema (só na bandeja, com `--hidden`).
+//! Start with the system (in the tray only, with `--hidden`).
 //!
-//! Quem guarda se está ligado é o próprio sistema, não a config: o arquivo em
-//! `~/.config/autostart/` no Linux (`linux.rs`, padrão XDG, que KDE, GNOME, XFCE, Cinnamon
-//! e MATE seguem) e o valor em `HKCU\…\CurrentVersion\Run` no Windows (`windows.rs`).
-//! Assim, desligar pelas ferramentas do sistema também aparece desligado aqui.
+//! The system itself keeps whether it is on, not the config: the file in
+//! `~/.config/autostart/` on Linux (`linux.rs`, the XDG standard that KDE, GNOME, XFCE,
+//! Cinnamon and MATE follow) and the value in `HKCU\…\CurrentVersion\Run` on Windows
+//! (`windows.rs`). So turning it off with the system's tools also shows as off here.
 
 #[cfg(target_os = "linux")]
 #[path = "autostart/linux.rs"]
@@ -14,39 +14,39 @@ mod imp;
 
 use std::path::PathBuf;
 
-/// Está ligado?
+/// Is it on?
 pub fn is_enabled() -> bool {
     imp::current().is_some()
 }
 
-/// Liga ou desliga.
+/// Turns it on or off.
 pub fn set(on: bool) -> Result<(), String> {
     let r = if on { imp::enable(&program()?) } else { imp::disable() };
     match &r {
-        Ok(()) => log::info!("iniciar com o sistema: {}", if on { "ligado" } else { "desligado" }),
-        Err(e) => log::warn!("iniciar com o sistema: {e}"),
+        Ok(()) => log::info!("start with the system: {}", if on { "on" } else { "off" }),
+        Err(e) => log::warn!("start with the system: {e}"),
     }
     r
 }
 
-/// Ligado, mas apontando para outro executável (o app mudou de pasta ou foi trocado por
-/// uma versão nova noutro lugar)? Regrava com o de agora. Roda ao abrir o app.
+/// On, but pointing to another executable (the app moved or was replaced by a new version
+/// elsewhere)? Rewrites it with the current one. Runs when the app opens.
 pub fn refresh() {
     let Some(old) = imp::current() else { return };
     let Ok(exe) = program() else { return };
     if old != imp::entry_for(&exe) {
-        log::info!("iniciar com o sistema: atualizado para {}", exe.display());
+        log::info!("start with the system: updated to {}", exe.display());
         if let Err(e) = imp::enable(&exe) {
-            log::warn!("iniciar com o sistema: {e}");
+            log::warn!("start with the system: {e}");
         }
     }
 }
 
-/// O executável a abrir. Num AppImage, o `current_exe` é um ponto de montagem temporário:
-/// vale o arquivo `.AppImage` (variável `APPIMAGE`).
+/// The executable to open. In an AppImage, `current_exe` is a temporary mount point: the
+/// `.AppImage` file counts instead (variable `APPIMAGE`).
 fn program() -> Result<PathBuf, String> {
     if let Some(image) = std::env::var_os("APPIMAGE").filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(image));
     }
-    std::env::current_exe().map_err(|e| format!("não achei o executável ({e})"))
+    std::env::current_exe().map_err(|e| crate::tr!("could not find the executable ({})", e))
 }

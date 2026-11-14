@@ -1,5 +1,6 @@
-# Falas das mascotes dos Sinais vitais ({s} = "CPU", "RAM", "GPU", "DISCO"). Formato:
-# src/core/chatter.rs. O que não estiver aqui vem das falas genéricas (src/hub/lines.toml).
+# Lines of the Vital signs mascots ({s} = the card title: "CPU", "RAM", "GPU", or "DISK"
+# or "DISCO" depending on the language). Format:
+# src/core/chatter.rs. Whatever is not here comes from the generic lines (src/hub/lines.toml).
 
 [strain]
 pt = [

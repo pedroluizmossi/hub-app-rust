@@ -1,4 +1,4 @@
-//! Mini-app Portas: o que está escutando em cada porta, com abrir no navegador e encerrar.
+//! Ports mini-app: what is listening on each port, with open-in-browser and end-process.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -16,24 +16,25 @@ use super::kit::{HeaderMascot, Speech, plural};
 use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
 use crate::providers::ports::{Listener, PortsSnapshot};
+use crate::tr;
 use crate::ui::{HubWindow, PortRow, PortsApp};
 
 const SPEECH_TTL: Duration = Duration::from_secs(30);
-/// Tempo para o segundo clique confirmar o "encerrar".
+/// Time for the second click to confirm "end".
 const ARM_TTL: Duration = Duration::from_secs(4);
-/// Uma porta que abriu há menos que isso aparece marcada como nova.
+/// A port opened less than this ago shows up marked as new.
 const FRESH: Duration = Duration::from_secs(60);
 
 pub struct PortsMini {
     host: Rc<Host>,
     manifest: Manifest,
     snap: PortsSnapshot,
-    /// Portas já vistas (proto, porta): o que não estiver aqui é novo.
+    /// Ports already seen (proto, port): whatever isn't here is new.
     seen: HashSet<(String, u16)>,
-    /// Primeira leitura depois de ligar: não acusa nada como novo.
+    /// First reading after enabling: nothing is reported as new.
     baseline: bool,
     fresh: Vec<((String, u16), Instant)>,
-    /// Pid com o "encerrar" armado, esperando o segundo clique.
+    /// Pid with "end" armed, waiting for the second click.
     armed: Option<(u32, Instant)>,
     search: String,
     speech: Speech,
@@ -45,7 +46,7 @@ pub struct PortsMini {
 impl PortsMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest =
-            Manifest::parse(include_str!("../../miniapps/ports/manifest.toml")).expect("manifesto de Portas inválido");
+            Manifest::parse(include_str!("../../miniapps/ports/manifest.toml")).expect("invalid Ports manifest");
         let rows = Rc::new(VecModel::default());
         ui.global::<PortsApp>().set_rows(ModelRc::from(rows.clone()));
         let app = Rc::new(RefCell::new(PortsMini {
@@ -120,27 +121,27 @@ impl PortsMini {
         });
     }
 
-    /// Primeiro clique arma; o segundo, dentro de `ARM_TTL`, pede para encerrar (`os::terminate`).
+    /// The first click arms; the second, within `ARM_TTL`, asks the process to end (`os::terminate`).
     fn kill(&mut self, pid: u32, ui: &HubWindow) {
-        // só pids que estão na leitura atual (nada de pid vindo de fora) e nunca o próprio hub
+        // only pids in the current reading (no pid from outside) and never the hub itself
         let Some(l) = self.snap.listeners.iter().find(|l| l.pid == pid && pid > 1) else { return };
         let name = l.process.clone();
         if pid == std::process::id() {
-            self.speech.say("Esse sou eu! Não vou me encerrar.".into());
+            self.speech.say(tr!("That's me! I won't end myself.").into());
         } else if self.armed.is_some_and(|(p, at)| p == pid && at.elapsed() < ARM_TTL) {
             self.armed = None;
             match os::terminate(pid) {
                 Ok(()) => {
-                    self.speech.say(format!("Pedi para {name} encerrar."));
+                    self.speech.say(tr!("Asked {} to end.", name));
                     self.face.react(Reaction::Celebrate);
                 }
-                Err(os::KillError::Denied) => self.speech.say(format!("Sem permissão para encerrar {name}.")),
-                Err(os::KillError::Other(e)) => self.speech.say(format!("Não consegui encerrar {name}: {e}")),
+                Err(os::KillError::Denied) => self.speech.say(tr!("No permission to end {}.", name)),
+                Err(os::KillError::Other(e)) => self.speech.say(tr!("Couldn't end {}: {}", name, e)),
             }
             self.host.bus.poke(Topic::Ports);
         } else {
             self.armed = Some((pid, Instant::now()));
-            self.speech.say(format!("Clique de novo para encerrar {name} (pid {pid})."));
+            self.speech.say(tr!("Click again to end {} (pid {}).", name, pid));
         }
         self.refresh_rows(ui);
         self.push_mascot(ui);
@@ -158,13 +159,13 @@ impl PortsMini {
                     continue;
                 }
                 self.fresh.push((key, now));
-                let who = if l.process.is_empty() { "Algum serviço".to_string() } else { l.process.clone() };
-                self.speech.say(format!("{who} abriu a porta {}.", l.port));
+                let who = if l.process.is_empty() { tr!("Some service").to_string() } else { l.process.clone() };
+                self.speech.say(tr!("{} opened port {}.", who, l.port));
                 if notify {
                     self.host.notifier.borrow_mut().send(
                         &format!("ports:{}:{}", l.proto, l.port),
-                        "Porta aberta",
-                        &format!("{who} está escutando em :{} ({})", l.port, l.proto),
+                        tr!("Port opened"),
+                        &tr!("{} is listening on :{} ({})", who, l.port, l.proto),
                         false,
                     );
                 }
@@ -211,7 +212,7 @@ impl PortsMini {
                     || l.cmd.to_lowercase().contains(&q)
             })
             .collect();
-        // os seus primeiro (dá para agir neles), depois por porta
+        // yours first (you can act on them), then by port
         list.sort_by_key(|l| (l.pid == 0, l.port, l.proto.clone()));
         list
     }
@@ -245,7 +246,7 @@ impl PortsMini {
         g.set_ok(self.snap.ok);
         g.set_missing(self.snap.missing);
         g.set_error_text(if self.snap.missing {
-            "O comando ss (iproute2) não foi encontrado.".into()
+            tr!("The ss command (iproute2) was not found.").into()
         } else {
             self.snap.error.as_str().into()
         });
@@ -253,14 +254,16 @@ impl PortsMini {
         g.set_show_udp(self.host.config.borrow().bool(&self.manifest, "show_udp"));
         let speech = match self.speech.current() {
             Some(t) => t.to_string(),
-            _ if tcp.is_empty() => "Nenhuma porta aberta… zzz".into(),
-            _ if mine == 0 => format!("{} do sistema escutando.", plural(tcp.len(), "porta", "portas")),
-            _ => format!("Vigiando {}, {mine} {}.", plural(tcp.len(), "porta", "portas"), if mine == 1 { "sua" } else { "suas" }),
+            _ if tcp.is_empty() => tr!("No open ports… zzz").into(),
+            _ if mine == 0 && tcp.len() == 1 => tr!("1 system port listening.").into(),
+            _ if mine == 0 => tr!("{} system ports listening.", tcp.len()),
+            _ if mine == 1 => tr!("Watching {}, 1 is yours.", plural(tcp.len(), tr!("port"), tr!("ports"))),
+            _ => tr!("Watching {}, {} are yours.", plural(tcp.len(), tr!("port"), tr!("ports")), mine),
         };
         g.set_speech(speech.into());
     }
 
-    /// Redesenha a mascote; `true` se mudou.
+    /// Redraws the mascot; `true` if it changed.
     fn refresh_mascot(&mut self) -> bool {
         let sprite = sprites::get(&self.mascot_key());
         self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
@@ -274,12 +277,12 @@ impl PortsMini {
     }
 }
 
-/// Como o endereço aparece: "só local", "rede toda" ou o IP específico.
+/// How the address shows up: "local only", "whole network" or the specific IP.
 pub fn addr_text(l: &Listener) -> String {
     if l.exposed() {
-        "rede toda".into()
+        tr!("whole network").into()
     } else if l.local_only() {
-        "só local".into()
+        tr!("local only").into()
     } else {
         l.addrs.join(", ")
     }
@@ -289,7 +292,7 @@ fn row(l: &Listener, armed: bool, fresh: bool) -> PortRow {
     PortRow {
         port: l.port as i32,
         proto: l.proto.clone().into(),
-        process: if l.process.is_empty() { "(outro usuário)".into() } else { l.process.clone().into() },
+        process: if l.process.is_empty() { tr!("(another user)").into() } else { l.process.clone().into() },
         cmd: l.cmd.clone().into(),
         pid: l.pid as i32,
         addr_text: addr_text(l).into(),
@@ -328,7 +331,7 @@ impl MiniApp for PortsMini {
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
-        // o "encerrar" armado desarma sozinho, e a fala vence no prazo
+        // an armed "end" disarms on its own, and the speech expires on time
         let disarmed = self.armed.is_some_and(|(_, at)| at.elapsed() >= ARM_TTL);
         if disarmed {
             self.armed = None;
@@ -358,11 +361,11 @@ impl MiniApp for PortsMini {
 
     fn summary(&self) -> String {
         if self.snap.missing {
-            return "Portas: ss não instalado".into();
+            return tr!("Ports: ss not installed").into();
         }
         let tcp: Vec<&Listener> = self.snap.listeners.iter().filter(|l| l.proto == "tcp").collect();
         let mine = tcp.iter().filter(|l| l.pid > 0).count();
-        format!("Portas: {} · {mine} {}", plural(tcp.len(), "aberta", "abertas"), if mine == 1 { "sua" } else { "suas" })
+        tr!("Open ports: {} · yours: {}", tcp.len(), mine)
     }
 }
 
@@ -375,9 +378,9 @@ mod tests {
     }
 
     #[test]
-    fn texto_do_endereco() {
-        assert_eq!(addr_text(&l(&["127.0.0.1", "::1"])), "só local");
-        assert_eq!(addr_text(&l(&["*", "0.0.0.0"])), "rede toda");
+    fn address_text() {
+        assert_eq!(addr_text(&l(&["127.0.0.1", "::1"])), "local only");
+        assert_eq!(addr_text(&l(&["*", "0.0.0.0"])), "whole network");
         assert_eq!(addr_text(&l(&["100.1.2.3"])), "100.1.2.3");
     }
 }

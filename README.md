@@ -78,11 +78,11 @@ app conta fatos sobre si (um problema, uma previsão, uma recuperação) e o hub
 fala e quando. Clique numa mascote para ela falar.
 
 São mais de trinta mascotes, de neko e capivara a chaleira e cogumelo, e cada app escolhe a
-sua em Configurações. Para ver uma animação: `miniutils --previa <mascote>`.
+sua em Configurações. Para ver uma animação: `miniutils --preview <mascote>`.
 
 Dá para trazer as suas, em pixel art de qualquer tamanho (16×16, 32×32, 64×64…): folhas
-PNG com os quadros lado a lado, uma por animação, em `mascotes/<nome>/` na pasta de dados.
-`miniutils --importar-mascote <pasta>` copia um pacote (um personagem por subpasta) e escreve
+PNG com os quadros lado a lado, uma por animação, em `mascots/<nome>/` na pasta de dados.
+`miniutils --import-mascot <pasta>` copia um pacote (um personagem por subpasta) e escreve
 a configuração; elas entram em todo seletor de mascote e andam como subagentes no app de
 agentes. Ficam só na sua máquina: confira a licença do pacote antes de publicar o desenho em
 outro lugar. O formato está no [DESIGN.md](DESIGN.md#mascotes-importadas-png).
@@ -112,9 +112,9 @@ para continuar legível), o **tamanho do texto** (90 a 125%) e desligar o **fund
 (chuva, estrelas que piscam, varredura do tubo).
 
 Temas, visuais e fundos também podem ser seus, sem recompilar: arquivos `.toml` em
-`temas/`, `visuais/` e `fundos/` na pasta de dados (`miniutils --pastas` mostra onde) e
+`themes/`, `skins/` e `backdrops/` na pasta de dados (`miniutils --dirs` mostra onde) e
 **Configurações › Aparência › Recarregar**. Há um exemplo de cada em
-[examples/aparencia](examples/aparencia), e o formato está no
+[examples/appearance](examples/appearance), e o formato está no
 [DESIGN.md](DESIGN.md#temas-visuais-e-fundos-por-arquivo).
 
 ## Instalar
@@ -218,15 +218,15 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --tab <nome>          abre numa página do painel (pelo nome dela ou de um app nela,
                       ex.: Geral, docker), em apps (configurações) ou em store (loja)
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
---previa <mascote> [animação] [--saida arquivo.gif]
+--preview <mascote> [animação] [--output arquivo.gif]
                       GIF de uma animação de mascote em todos os temas
---importar-mascote <pasta>
+--import-mascot <pasta>
                       copia folhas PNG (Nome_Animação_N.png) para a pasta de mascotes
---pastas              onde ficam os apps locais, os dados dos apps, a configuração e os registros
+--dirs                onde ficam os apps locais, os dados dos apps, a configuração e os registros
 --version             mostra a versão (também em Configurações › Sistema)
 ```
 
-`miniutils --help` mostra também os comandos da loja de plugins (e `--recarregar`, que faz o
+`miniutils --help` mostra também os comandos da loja de plugins (e `--reload`, que faz o
 MiniUtils aberto reler a pasta dos apps).
 
 ```text
@@ -298,7 +298,10 @@ mesmo, a mascote fica agitada mesmo abaixo do percentual configurado e avisa as 
 Plugins e apps da comunidade se instalam pela
 [loja](https://github.com/pedroluizmossi/miniutils-store), sem recompilar o hub. O índice é
 assinado, cada plugin aponta para um commit revisado, e antes de instalar o hub mostra o que
-o plugin vai executar, os domínios que acessa e os dados que lê.
+o plugin vai executar, os domínios que acessa e os dados que lê. Também pelo terminal:
+`miniutils --store` lista o índice, e `--install <id>`, `--update <id>` e `--remove <id>`
+instalam, atualizam e removem (`miniutils --help` mostra todas as opções; os nomes antigos,
+como `--store` e `--install`, continuam valendo).
 
 Há quatro jeitos de estender o hub; comece pelo mais simples que resolve:
 

@@ -1,36 +1,36 @@
-// Tela do mini-app Sinais vitais: um cartão por recurso (CPU, RAM, GPU, disco, rede),
-// cada um com sua mascote. Responsiva: os cartões ficam numa linha, em 2 colunas ou em
-// 1 coluna conforme o formato da célula (o último ocupa o que sobrar da linha), e ficam
-// compactos (sem histórico) quando baixos.
+// View of the Vital signs mini-app: one card per resource (CPU, RAM, GPU, disk, network),
+// each with its own mascot. Responsive: the cards sit in one row, in 2 columns or in
+// 1 column depending on the cell shape (the last one takes the rest of its row), and turn
+// compact (no history) when short.
 import { Colors, Moods, Skin } from "../../ui/theme.slint";
 import { Mascot, SegBar, Sparkline } from "../../ui/widgets.slint";
 
 export struct VitalCard {
     title: string,
-    voice: string,       // id na conversa entre mascotes (vem do Rust)
+    voice: string,       // id in the mascot chatter (comes from Rust)
     mascot: image,
     mood: string,
-    reaction: string,    // reação curta por cima do humor (src/mascot/anim.rs)
+    reaction: string,    // short reaction on top of the mood (src/mascot/anim.rs)
     available: bool,
     value: float,        // 0..100
     value-text: string,  // "37%"
     detail: string,      // "5.1G / 15.5G"
-    temp-text: string,   // "61 °C" ou ""
+    temp-text: string,   // "61 °C" or ""
     hot: bool,
-    spark: string,       // caminho SVG 1000×100
+    spark: string,       // SVG path 1000×100
 }
 
-// Estado do mini-app, preenchido pelo Rust (src/apps/vitals.rs).
+// Mini-app state, filled in by Rust (src/apps/vitals.rs).
 export global VitalsApp {
     in property <Colors> theme;
     in property <[VitalCard]> cards;
-    // clicaram na mascote do cartão (easter egg)
+    // the card mascot was clicked (easter egg)
     callback mascot-poked(int);
 }
 
 component Card inherits Rectangle {
     in property <VitalCard> v;
-    in property <int> index;      // posição do cartão (para o clique na mascote)
+    in property <int> index;      // card position (for the click on the mascot)
     property <Colors> t: VitalsApp.theme;
     property <bool> compact: self.height < 150px;
     property <bool> slim: self.width < 220px;
@@ -56,7 +56,7 @@ component Card inherits Rectangle {
                 reaction: v.reaction;
                 voice: v.voice;
                 poked => { VitalsApp.mascot-poked(index); }
-                // compacto (cartão baixo ou estreito): 2/3 da referência
+                // compact (short or narrow card): 2/3 of the reference size
                 width: compact || slim ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
                 height: compact || slim ? Skin.mascot-size * 2 / 3 * 14 / 16 : Skin.mascot-size * 14 / 16;
             }
@@ -94,9 +94,9 @@ component Card inherits Rectangle {
             }
             SegBar { theme: t; value: v.value; tint: tint; off: t.muted.with-alpha(0.35); segments: slim ? 10 : 20; }
             if !compact: Sparkline { commands: v.spark; tint: tint.with-alpha(0.7); height: 22px; }
-            // o detalhe (GHz, swap, partições, IP…) aparece sempre que couber; só o gráfico some
+            // the detail (GHz, swap, partitions, IP…) shows whenever it fits; only the chart goes away
             if root.height >= 88px: Text {
-                text: v.available ? v.detail : "não encontrado";
+                text: v.available ? v.detail : @tr("not found");
                 color: t.sub;
                 font-family: Skin.font-mono;
                 font-size: 11px * Skin.text-scale;
@@ -110,7 +110,7 @@ export component VitalsView inherits Rectangle {
     property <Colors> t: VitalsApp.theme;
     property <int> n: VitalsApp.cards.length;
     property <length> gap: 10px;
-    // todos numa linha se for bem largo, 2 colunas se couber, senão 1
+    // all in one row when very wide, 2 columns if they fit, otherwise 1
     property <int> cols: self.width >= n * 170px + (n - 1) * gap && self.width / self.height > 2.4 ? n
         : self.width >= 2 * 190px + gap ? 2 : 1;
     property <int> rows: ceil(n / cols);
@@ -119,7 +119,7 @@ export component VitalsView inherits Rectangle {
 
     for v[i] in VitalsApp.cards: Card {
         property <int> c: mod(i, cols);
-        // o último cartão se estica pelo resto da linha
+        // the last card stretches over the rest of its row
         property <int> span: i == n - 1 ? cols - c : 1;
         v: v;
         index: i;

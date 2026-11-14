@@ -1,5 +1,5 @@
-//! Os dados de cada app nas Configurações (`core/appdata.rs`): o que guarda e quanto,
-//! exportar, apagar, e os dados que ficaram de apps removidos.
+//! Each app's data in Settings (`core/appdata.rs`): what it keeps and how much, export,
+//! delete, and the data left over from removed apps.
 
 use std::time::Duration;
 
@@ -7,33 +7,34 @@ use slint::{ModelRc, VecModel};
 
 use super::{Hub, with_hub};
 use crate::core::appdata::{self, DataSpec};
+use crate::tr;
 use crate::ui::DataRow;
 
-/// Quanto esperar o app soltar os arquivos (thread do script ou processo) antes de apagar.
+/// How long to wait for the app to release its files (script thread or process) before deleting.
 const RELEASE_WAIT: Duration = Duration::from_secs(5);
 const RELEASE_POLL: Duration = Duration::from_millis(100);
 
-/// A linha "Dados" de um app: "banco SQLite e chave-valor · 1,2 MB (até 10 MB)", "arquivos ·
-/// vazio"; vazio se o app não guarda nada. E se há algo para exportar ou apagar.
+/// An app's "Data" row: "SQLite database and key-value · 1.2 MB (database up to 10 MB)",
+/// "files · empty"; empty if the app keeps nothing. And whether there is something to export or delete.
 pub(super) fn describe(id: &str, spec: &DataSpec) -> (String, bool) {
     let dir = appdata::dir(id);
     let has = appdata::has_data(&dir);
     if spec.kinds.is_empty() && !has {
         return (String::new(), false);
     }
-    let what = if spec.kinds.is_empty() { "dados".to_string() } else { spec.describe() };
+    let what = if spec.kinds.is_empty() { tr!("data").to_string() } else { spec.describe() };
     let size = if has {
         let (bytes, cut) = appdata::size(&dir);
-        format!("{}{}", if cut { "mais de " } else { "" }, appdata::human(bytes))
+        if cut { tr!("over {}", appdata::human(bytes)) } else { appdata::human(bytes) }
     } else {
-        "vazio".into()
+        tr!("empty").into()
     };
-    let quota = if spec.has(appdata::Kind::Sqlite) { format!(" (banco até {} MB)", spec.max_mb) } else { String::new() };
+    let quota = if spec.has(appdata::Kind::Sqlite) { format!(" ({})", tr!("database up to {} MB", spec.max_mb)) } else { String::new() };
     (format!("{what} · {size}{quota}"), has)
 }
 
 impl Hub {
-    /// Abriu as Configurações: tamanhos novos e a lista dos dados sem app.
+    /// Settings opened: new sizes and the list of data without an app.
     pub(super) fn refresh_data(&self) {
         self.settings_fingerprint.replace(String::new());
         self.rebuild_settings();
@@ -56,37 +57,37 @@ impl Hub {
         self.ui.set_data_note_bad(bad);
     }
 
-    /// Copia os dados para `Downloads/miniutils-dados/<id>-<data>/` (numa thread) e abre a pasta.
+    /// Copies the data to `<export folder>/<id>-<date>/` (see `appdata::export_dir`), in a thread, and opens the folder.
     pub(super) fn export_data(&self, id: &str) {
-        self.data_note(id, "exportando…".into(), false);
+        self.data_note(id, tr!("exporting…").into(), false);
         let id = id.to_string();
-        let spawned = std::thread::Builder::new().name("exportar".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("export".into()).spawn(move || {
             let r = appdata::export(&appdata::root(), &id, &appdata::export_dir());
             let _ = slint::invoke_from_event_loop(move || {
                 with_hub(|h| match r {
                     Ok(dir) => {
                         let _ = crate::core::exec::open_dir(&dir);
-                        h.data_note(&id, format!("exportado para {}", dir.display()), false);
+                        h.data_note(&id, tr!("exported to {}", dir.display()), false);
                     }
-                    Err(e) => h.data_note(&id, format!("não exportou: {e}"), true),
+                    Err(e) => h.data_note(&id, tr!("export failed: {}", e), true),
                 })
             });
         });
         if let Err(e) = spawned {
-            self.data_note("", format!("sem thread para exportar: {e}"), true);
+            self.data_note("", tr!("no thread to export: {}", e), true);
         }
     }
 
-    /// Apaga os dados de um app. O app primeiro solta os arquivos (o script fecha o banco,
-    /// o processo sai); depois volta a rodar, se estava ligado, com os dados vazios.
+    /// Deletes an app's data. The app first releases its files (the script closes the database,
+    /// the process exits); then it runs again, if it was on, with empty data.
     pub(super) fn delete_data(&self, id: &str) {
         match self.registry.find(id) {
             Some(app) => {
                 app.borrow_mut().release_data(&self.ui);
-                self.data_note(id, "apagando…".into(), false);
+                self.data_note(id, tr!("deleting…").into(), false);
                 wait_release(id.to_string(), 0);
             }
-            // dados de um app que não está mais aqui
+            // data of an app that is no longer here
             None => {
                 let r = appdata::delete(&appdata::root(), id);
                 self.after_delete(id, r);
@@ -104,7 +105,7 @@ impl Hub {
         let r = if released {
             appdata::delete(&appdata::root(), id)
         } else {
-            Err("o app não parou a tempo; tente de novo".into())
+            Err(tr!("the app did not stop in time; try again").into())
         };
         app.borrow_mut().reload_data(&self.ui);
         self.after_delete(id, r);
@@ -113,12 +114,12 @@ impl Hub {
     fn after_delete(&self, id: &str, r: Result<(), String>) {
         match r {
             Ok(()) => {
-                log::info!("dados de {id} apagados");
-                self.data_note(id, "dados apagados".into(), false);
+                log::info!("data of {id} deleted");
+                self.data_note(id, tr!("data deleted").into(), false);
             }
             Err(e) => {
-                log::warn!("dados de {id}: {e}");
-                self.data_note(id, format!("não apagou: {e}"), true);
+                log::warn!("data of {id}: {e}");
+                self.data_note(id, tr!("delete failed: {}", e), true);
             }
         }
         self.refresh_data();

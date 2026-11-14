@@ -1,4 +1,4 @@
-//! Docker pela CLI: `docker ps -a`, `docker stats` e `docker events`, tudo em JSON.
+//! Docker through the CLI: `docker ps -a`, `docker stats` and `docker events`, all in JSON.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -37,16 +37,16 @@ pub struct Container {
     /// healthy | unhealthy | starting | ""
     pub health: String,
     pub ports: Vec<Port>,
-    /// Projeto do Docker Compose (stack), se houver.
+    /// Docker Compose project (stack), if any.
     pub project: String,
-    /// Quando subiu / parou pela última vez (segundos Unix; 0 = não sei). Vem do `docker inspect`.
+    /// When it last started / stopped (Unix seconds; 0 = unknown). Comes from `docker inspect`.
     pub started_at: i64,
     pub finished_at: i64,
-    /// Quantas vezes o Docker reiniciou o container (política de restart).
+    /// How many times Docker restarted the container (restart policy).
     pub restarts: u32,
 }
 
-/// O que o `docker inspect` acrescenta ao `docker ps`.
+/// What `docker inspect` adds to `docker ps`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Inspect {
     pub started_at: i64,
@@ -64,38 +64,38 @@ pub struct Stats {
 pub struct DockerSnapshot {
     pub ok: bool,
     pub error: String,
-    /// O comando `docker` não existe nesta máquina (não é falha: não há o que vigiar).
+    /// The `docker` command doesn't exist on this machine (not a failure: nothing to watch).
     pub missing: bool,
     pub containers: Vec<Container>,
-    /// Por nome do container.
+    /// By container name.
     pub stats: HashMap<String, Stats>,
 }
 
-/// `docker ps` vira só rede de segurança: as mudanças vêm do `docker events`.
+/// `docker ps` is only a safety net: changes come from `docker events`.
 const PS_EVERY: Duration = Duration::from_secs(15);
-/// `docker stats` roda à parte, e só quando há container rodando.
+/// `docker stats` runs separately, and only when some container is running.
 const STATS_EVERY: Duration = Duration::from_secs(5);
-/// Com a janela escondida os dados só alimentam o humor da bandeja: cada chamada é um
-/// processo da CLI (e o `stats` ainda espera a segunda amostra), então coleta mais devagar.
-/// As mudanças de estado continuam chegando na hora pelo `docker events`.
+/// With the window hidden the data only feeds the tray's mood: each call is a CLI process
+/// (and `stats` also waits for the second sample), so it collects more slowly. State
+/// changes still arrive right away through `docker events`.
 const PS_EVERY_HIDDEN: Duration = Duration::from_secs(60);
 const STATS_EVERY_HIDDEN: Duration = Duration::from_secs(30);
-/// Prazo de uma chamada da CLI: daemon travado ou `DOCKER_HOST` inalcançável não prendem
-/// a thread do provedor (o `stats --no-stream` leva 1 a 2 s por si só).
+/// Deadline of a CLI call: a stuck daemon or an unreachable `DOCKER_HOST` doesn't hold the
+/// provider thread (`stats --no-stream` takes 1 to 2 s on its own).
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 const STATS_TIMEOUT: Duration = Duration::from_secs(15);
-/// Espera antes de reconectar o `docker events`: cresce de 2 s até 30 s.
+/// Wait before reconnecting `docker events`: grows from 2 s up to 30 s.
 const RETRY_FIRST: Duration = Duration::from_secs(2);
 const RETRY_MAX: Duration = Duration::from_secs(30);
-/// Eventos em rajada (ex.: `compose up`) viram uma única leitura.
+/// Bursts of events (e.g. `compose up`) become a single reading.
 const DEBOUNCE: Duration = Duration::from_millis(300);
-/// Ações de container que mudam o que o mini-app mostra.
+/// Container actions that change what the mini-app shows.
 const RELEVANT: &[&str] = &[
     "create", "start", "restart", "die", "stop", "kill", "oom", "pause", "unpause", "destroy", "rename", "update",
     "health_status",
 ];
 
-/// Estado do provedor Docker entre as leituras.
+/// State of the Docker provider between readings.
 #[derive(Default)]
 pub struct DockerProvider {
     containers: Vec<Container>,
@@ -105,21 +105,21 @@ pub struct DockerProvider {
     missing: bool,
     last_ps: Option<Instant>,
     last_stats: Option<Instant>,
-    /// Cache do `docker inspect` por id, junto com o estado em que foi lido.
+    /// `docker inspect` cache by id, along with the state it was read in.
     inspected: HashMap<String, (String, Inspect)>,
-    /// A thread do `docker events` está viva (ela se encerra sozinha sem assinantes).
+    /// The `docker events` thread is alive (it ends by itself with no subscribers).
     watching: Arc<AtomicBool>,
 }
 
 impl DockerProvider {
-    /// Chamado a cada segundo enquanto há assinantes. Devolve um snapshot só se algo foi lido.
+    /// Called every second while there are subscribers. Returns a snapshot only if something was read.
     pub fn collect(&mut self, poker: &Poker, poked: bool) -> Option<DockerSnapshot> {
         let now = Instant::now();
         let (ps_every, stats_every) =
             if poker.visible() { (PS_EVERY, STATS_EVERY) } else { (PS_EVERY_HIDDEN, STATS_EVERY_HIDDEN) };
         let mut changed = false;
 
-        // pedido de leitura (evento, ação do usuário, janela abrindo) força tudo
+        // a read request (event, user action, window opening) forces everything
         if poked || self.last_ps.is_none_or(|t| now - t >= ps_every) {
             self.last_ps = Some(now);
             changed = true;
@@ -140,13 +140,13 @@ impl DockerProvider {
             }
         }
 
-        // sem o comando não há o que vigiar; a thread sobe quando ele aparecer
+        // without the command there is nothing to watch; the thread starts once it shows up
         if !self.missing && !self.watching.swap(true, Ordering::Relaxed) {
             let (p, flag) = (poker.clone(), self.watching.clone());
             std::thread::Builder::new()
                 .name("docker-events".into())
                 .spawn(move || watch(p, flag))
-                .expect("não consegui criar a thread do docker events");
+                .expect("could not spawn the docker events thread");
         }
 
         if self.containers.iter().any(|c| c.state == "running") {
@@ -175,8 +175,8 @@ impl DockerProvider {
         })
     }
 
-    /// Completa os containers com início/fim e reinícios. Só reinspeciona (num único
-    /// `docker inspect`) os novos, os que mudaram de estado, ou todos quando chegou evento.
+    /// Fills the containers with start/end and restarts. Only re-inspects (in a single
+    /// `docker inspect`) the new ones, the ones whose state changed, or all when an event arrived.
     fn inspect(&mut self, all: bool) {
         let stale: Vec<String> = self
             .containers
@@ -188,7 +188,7 @@ impl DockerProvider {
         if !stale.is_empty() {
             let mut args = vec!["inspect", "--format", INSPECT_FORMAT, "--"];
             args.extend(stale.iter().map(String::as_str));
-            // um id que sumiu faz o inspect sair com erro, mas os outros vêm no stdout
+            // an id that vanished makes inspect exit with an error, but the others come on stdout
             if let Ok(out) = exec::output_timeout("docker", &args, CLI_TIMEOUT) {
                 let got = parse_inspect(&out.stdout);
                 for c in &self.containers {
@@ -198,7 +198,7 @@ impl DockerProvider {
                 }
             }
         }
-        // esquece os que não existem mais
+        // forget the ones that no longer exist
         let ids: std::collections::HashSet<&str> = self.containers.iter().map(|c| c.id.as_str()).collect();
         self.inspected.retain(|id, _| ids.contains(id.as_str()));
         for c in &mut self.containers {
@@ -211,15 +211,15 @@ impl DockerProvider {
     }
 }
 
-/// Uma linha por container: "<id> <reinícios> <início> <fim>".
+/// One line per container: "<id> <restarts> <start> <end>".
 const INSPECT_FORMAT: &str = "{{.Id}} {{.RestartCount}} {{.State.StartedAt}} {{.State.FinishedAt}}";
 
-/// Ids do Docker são hexadecimais (com --no-trunc, 64 dígitos).
+/// Docker ids are hexadecimal (with --no-trunc, 64 digits).
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// Saída do `docker inspect --format INSPECT_FORMAT` -> por id.
+/// Output of `docker inspect --format INSPECT_FORMAT` -> by id.
 pub fn parse_inspect(out: &str) -> HashMap<String, Inspect> {
     out.lines()
         .filter_map(|line| {
@@ -233,8 +233,8 @@ pub fn parse_inspect(out: &str) -> HashMap<String, Inspect> {
         .collect()
 }
 
-/// RFC 3339 do Docker -> segundos Unix. "0001-01-01T00:00:00Z" (nunca) vira `None`.
-/// Ex.: "2026-11-09T15:02:34.006791228Z", "2026-11-09T12:02:34-03:00".
+/// Docker's RFC 3339 -> Unix seconds. "0001-01-01T00:00:00Z" (never) becomes `None`.
+/// E.g. "2026-11-09T15:02:34.006791228Z", "2026-11-09T12:02:34-03:00".
 pub fn parse_time(s: &str) -> Option<i64> {
     let (date, time) = s.trim().split_once('T')?;
     let mut d = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
@@ -242,7 +242,7 @@ pub fn parse_time(s: &str) -> Option<i64> {
     if y < 1970 || !(1..=12).contains(&mo) || !(1..=31).contains(&day) {
         return None;
     }
-    // separa o fuso: "Z", "+hh:mm" ou "-hh:mm"
+    // split off the offset: "Z", "+hh:mm" or "-hh:mm"
     let (clock, offset) = if let Some(c) = time.strip_suffix('Z') {
         (c, 0)
     } else {
@@ -258,7 +258,7 @@ pub fn parse_time(s: &str) -> Option<i64> {
     Some(days_from_civil(y, mo, day) * 86400 + h * 3600 + mi * 60 + se - offset)
 }
 
-/// Dias desde 1970-01-01 (algoritmo de Howard Hinnant).
+/// Days since 1970-01-01 (Howard Hinnant's algorithm).
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
@@ -268,7 +268,7 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 
-/// Segundos -> "40 s", "5 min", "3 h", "2 d" (curto, arredondado para baixo).
+/// Seconds -> "40 s", "5 min", "3 h", "2 d" (short, rounded down).
 pub fn format_age(secs: i64) -> String {
     let s = secs.max(0);
     match s {
@@ -279,7 +279,7 @@ pub fn format_age(secs: i64) -> String {
     }
 }
 
-/// Lê `docker events` enquanto o provedor tem assinantes; se cair, tenta de novo com espera.
+/// Reads `docker events` while the provider has subscribers; if it drops, retries with a wait.
 fn watch(poker: Poker, watching: Arc<AtomicBool>) {
     let mut retry = RETRY_FIRST;
     let mut first = true;
@@ -293,7 +293,7 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
             .spawn();
         let mut child = match spawned {
             Ok(child) => child,
-            // o comando sumiu: quem decide voltar a vigiar é o `collect`, quando o ps responder
+            // the command vanished: `collect` decides to watch again, once ps answers
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
             Err(_) => {
                 if !sleep_subscribed(&poker, retry) {
@@ -303,7 +303,7 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
                 continue;
             }
         };
-        // reconectou: eventos perdidos enquanto estava fora são lidos num ps
+        // reconnected: events missed while it was down are picked up by a ps
         if !first {
             poker.poke();
         }
@@ -330,7 +330,7 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
                         }
                     }
                     Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => break, // docker events terminou
+                    Err(RecvTimeoutError::Disconnected) => break, // docker events ended
                 }
                 if due.is_some_and(|t| Instant::now() >= t) {
                     due = None;
@@ -341,7 +341,7 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
         let _ = child.kill();
         let _ = child.wait();
 
-        // rodou um bom tempo: a próxima queda começa a espera de novo em 2 s
+        // it ran for a good while: the next drop starts waiting from 2 s again
         if started.elapsed() >= RETRY_MAX {
             retry = RETRY_FIRST;
         }
@@ -353,9 +353,9 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
     watching.store(false, Ordering::Relaxed);
 }
 
-/// Argumentos do `docker events`: o filtro vai para o daemon, para que os eventos que não
-/// interessam (cada `exec_*` de um healthcheck, por exemplo) nem cheguem a acordar a thread.
-/// O daemon casa `health_status` por prefixo ("health_status: healthy").
+/// Arguments of `docker events`: the filter goes to the daemon, so irrelevant events (every
+/// `exec_*` of a healthcheck, for example) don't even wake the thread up.
+/// The daemon matches `health_status` by prefix ("health_status: healthy").
 fn events_args() -> Vec<String> {
     let mut a: Vec<String> = vec!["events".into(), "--filter".into(), "type=container".into()];
     for action in RELEVANT {
@@ -366,7 +366,7 @@ fn events_args() -> Vec<String> {
     a
 }
 
-/// Dorme `d`, a menos que o provedor perca os assinantes. `false` se perdeu.
+/// Sleeps `d`, unless the provider loses its subscribers. `false` if it lost them.
 fn sleep_subscribed(poker: &Poker, d: Duration) -> bool {
     let end = Instant::now() + d;
     while Instant::now() < end {
@@ -378,14 +378,14 @@ fn sleep_subscribed(poker: &Poker, d: Duration) -> bool {
     poker.subscribed()
 }
 
-/// Diz se uma linha do `docker events` muda o que o mini-app mostra.
+/// Tells whether a `docker events` line changes what the mini-app shows.
 fn relevant(line: &str) -> bool {
     let Ok(j) = serde_json::from_str::<Value>(line) else { return false };
     if j.get("Type").and_then(Value::as_str).is_some_and(|t| t != "container") {
         return false;
     }
     let action = j.get("Action").or(j.get("status")).and_then(Value::as_str).unwrap_or_default();
-    // "health_status: healthy" -> "health_status"; "exec_start: sh" fica de fora
+    // "health_status: healthy" -> "health_status"; "exec_start: sh" is left out
     let name = action.split(':').next().unwrap_or_default().trim();
     RELEVANT.contains(&name)
 }
@@ -469,8 +469,8 @@ pub fn parse_bytes(text: &str) -> u64 {
     (n * mult) as u64
 }
 
-/// "127.0.0.1:8090->8080/tcp, [::]:5432->5432/tcp, 6379/tcp" -> portas TCP publicadas,
-/// sem duplicar IPv4/IPv6, ordenadas.
+/// "127.0.0.1:8090->8080/tcp, [::]:5432->5432/tcp, 6379/tcp" -> published TCP ports,
+/// without IPv4/IPv6 duplicates, sorted.
 pub fn parse_ports(text: &str) -> Vec<Port> {
     let mut out: Vec<Port> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -496,7 +496,7 @@ pub fn parse_ports(text: &str) -> Vec<Port> {
     out
 }
 
-/// Bytes -> "184M" / "1.4G" (compacto, base 1024).
+/// Bytes -> "184M" / "1.4G" (compact, base 1024).
 pub fn format_bytes(bytes: f64) -> String {
     if bytes <= 0.0 {
         return "0".into();
@@ -510,14 +510,14 @@ pub fn format_bytes(bytes: f64) -> String {
     format!("{bytes:.0}B")
 }
 
-/// Nomes seguros para passar como argumento (não podem começar com "-").
+/// Names safe to pass as an argument (they can't start with "-").
 pub fn valid_container_name(n: &str) -> bool {
     let mut chars = n.chars();
     chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
         && chars.all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
 }
 
-/// Nome de projeto do Compose: minúsculas, dígitos, `-` e `_`, começando por letra ou dígito.
+/// Compose project name: lowercase letters, digits, `-` and `_`, starting with a letter or digit.
 pub fn valid_project_name(n: &str) -> bool {
     let mut chars = n.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
@@ -529,19 +529,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nome_de_projeto() {
-        assert!(valid_project_name("loja"));
+    fn project_name() {
+        assert!(valid_project_name("shop"));
         assert!(valid_project_name("1app_dev-2"));
         assert!(!valid_project_name(""));
         assert!(!valid_project_name("-p"));
-        assert!(!valid_project_name("Loja"));
+        assert!(!valid_project_name("Shop"));
         assert!(!valid_project_name("a b"));
         assert!(!valid_project_name("a;rm"));
         assert!(!valid_project_name("a.b"));
     }
 
     #[test]
-    fn portas() {
+    fn ports() {
         let p = parse_ports("127.0.0.1:8090->8080/tcp, 0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp, 6379/tcp, 0.0.0.0:53->53/udp");
         assert_eq!(p, vec![
             Port { host: "localhost".into(), port: 5432 },
@@ -553,16 +553,16 @@ mod tests {
     fn bytes() {
         assert_eq!(parse_bytes("1.5GiB"), 1610612736);
         assert_eq!(parse_bytes("18.5kB"), 18500);
-        assert_eq!(parse_bytes("lixo"), 0);
+        assert_eq!(parse_bytes("garbage"), 0);
         assert_eq!(format_bytes(1610612736.0), "1.5G");
         assert_eq!(format_bytes(184.0 * 1048576.0), "184M");
     }
 
     #[test]
     fn ps_json() {
-        let line = r#"{"ID":"abc","Names":"web","Image":"nginx","State":"exited","Status":"Exited (1) 3 minutes ago","Ports":"","Labels":"a=b,com.docker.compose.project=loja"}"#;
+        let line = r#"{"ID":"abc","Names":"web","Image":"nginx","State":"exited","Status":"Exited (1) 3 minutes ago","Ports":"","Labels":"a=b,com.docker.compose.project=shop"}"#;
         let c = &parse_ps(line)[0];
-        assert_eq!((c.name.as_str(), c.exit_code, c.project.as_str()), ("web", 1, "loja"));
+        assert_eq!((c.name.as_str(), c.exit_code, c.project.as_str()), ("web", 1, "shop"));
         let h = &parse_ps(r#"{"Names":"db","State":"running","Status":"Up 2 hours (unhealthy)"}"#)[0];
         assert_eq!(h.health, "unhealthy");
     }
@@ -574,39 +574,39 @@ mod tests {
     }
 
     #[test]
-    fn eventos_que_disparam_leitura() {
-        // ações de container que mudam a tela
+    fn events_that_trigger_a_reading() {
+        // container actions that change the screen
         assert!(relevant(r#"{"Type":"container","Action":"start","status":"start"}"#));
         assert!(relevant(r#"{"Type":"container","Action":"die"}"#));
         assert!(relevant(r#"{"Type":"container","Action":"health_status: unhealthy"}"#));
         assert!(relevant(r#"{"Type":"container","Action":"oom"}"#));
-        // sem "Action", usa "status"
+        // without "Action", uses "status"
         assert!(relevant(r#"{"status":"stop","Type":"container"}"#));
-        // exec, anexos e o resto ficam de fora
+        // exec, attach and the rest are left out
         assert!(!relevant(r#"{"Type":"container","Action":"exec_start: sh -c ls"}"#));
         assert!(!relevant(r#"{"Type":"container","Action":"attach"}"#));
         assert!(!relevant(r#"{"Type":"image","Action":"start"}"#));
         assert!(!relevant(r#"{"Type":"container"}"#));
-        assert!(!relevant("lixo"));
+        assert!(!relevant("garbage"));
         assert!(!relevant(""));
     }
 
     #[test]
-    fn horarios() {
+    fn times() {
         assert_eq!(parse_time("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(parse_time("2026-11-09T15:02:34.006791228Z"), Some(1794236554));
-        // mesmo instante com fuso de -03:00
+        // same instant with a -03:00 offset
         assert_eq!(parse_time("2026-11-09T12:02:34.5-03:00"), Some(1794236554));
         assert_eq!(parse_time("2024-02-29T00:00:00+01:00"), Some(1709161200));
         assert_eq!(parse_time("0001-01-01T00:00:00Z"), None);
-        assert_eq!(parse_time("lixo"), None);
+        assert_eq!(parse_time("garbage"), None);
         assert_eq!(parse_time(""), None);
     }
 
     #[test]
     fn inspect() {
         let out = "abc123 2 2026-11-09T15:02:34.006791228Z 0001-01-01T00:00:00Z\n\
-                   def 0 2026-11-09T15:00:00Z 2026-11-09T16:00:00Z\nlixo\n";
+                   def 0 2026-11-09T15:00:00Z 2026-11-09T16:00:00Z\ngarbage\n";
         let i = parse_inspect(out);
         assert_eq!(i.len(), 2);
         assert_eq!(i["abc123"], Inspect { started_at: 1794236554, finished_at: 0, restarts: 2 });
@@ -617,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn idade() {
+    fn age() {
         assert_eq!(format_age(-5), "0 s");
         assert_eq!(format_age(42), "42 s");
         assert_eq!(format_age(60), "1 min");
@@ -627,7 +627,7 @@ mod tests {
     }
 
     #[test]
-    fn nomes() {
+    fn names() {
         assert!(valid_container_name("my_app-1.web"));
         assert!(!valid_container_name("-rf"));
         assert!(!valid_container_name("a b"));

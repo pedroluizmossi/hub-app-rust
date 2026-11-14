@@ -1,0 +1,22 @@
+# Example plugin with a database: quick notes kept in the app's own SQLite.
+# Format: top of src/core/plugins.rs; script and database API: top of
+# src/apps/plugin/mod.rs and src/apps/plugin/db.rs (in the MiniUtils repository).
+# Texts (name, description) are in English; i18n/pt-BR.po translates them.
+id = "io.github.pedroluizmossi.notas"
+name = "Notes"
+description = "Quick notes that survive turning off and updating, kept in the app's own SQLite database. MiniUtils example plugin."
+icon = "coruja"
+api = 1
+
+[ui]
+view = "view.slint"
+script = "main.rhai"
+
+# what the app stores: a database (data.sqlite in the app's data folder), up to 5 MB.
+# version: the data format. Version 2 added the "done" column; version 3 renamed the table
+# and columns to English. Older data goes through fn migrate(from, to) in main.rhai (the
+# hub copies the data first and puts it back if that fails).
+[data]
+kinds = ["sqlite"]
+version = 3
+max_mb = 5

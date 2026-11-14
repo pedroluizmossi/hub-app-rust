@@ -1,33 +1,34 @@
-//! Ícone na área de notificação do Windows (crate `tray-icon`).
+//! Icon in the Windows notification area (crate `tray-icon`).
 //!
-//! O ícone e o menu vivem na thread da UI: é o laço de eventos da janela que entrega os
-//! cliques. Por isso o `Tray` não sai dela (o hub já o guarda lá).
+//! The icon and the menu live on the UI thread: the window's event loop delivers the
+//! clicks. So the `Tray` never leaves it (the hub already keeps it there).
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::core::miniapp::TrayMedia;
+use crate::tr;
 use crate::mascot::{Mood, render, sprites::Sprite, themes::Theme};
 use crate::ui::HubWindow;
 
-/// O Windows corta a dica do ícone em 127 caracteres.
+/// Windows cuts the icon tooltip at 127 characters.
 const TOOLTIP_MAX: usize = 120;
 
 pub struct Tray {
     icon: TrayIcon,
     pinned: std::cell::Cell<bool>,
-    /// O que o menu mostra agora (só é refeito quando muda).
+    /// What the menu shows now (rebuilt only when it changes).
     media: std::cell::RefCell<Option<TrayMedia>>,
 }
 
 impl Tray {
-    /// Cria o ícone. Tem de ser chamado na thread da UI.
+    /// Creates the icon. Must be called on the UI thread.
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
         let icon = TrayIconBuilder::new()
             .with_icon(icon(sprite, theme, mood)?)
             .with_tooltip(crate::core::config::display_name())
             .with_menu(Box::new(menu(false, None)?))
-            // clique esquerdo abre o popup; o menu fica no direito
+            // left click opens the popup; the menu is on the right click
             .with_menu_on_left_click(false)
             .build()?;
 
@@ -39,7 +40,7 @@ impl Tray {
                 MouseButton::Left => {
                     let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_toggle_requested(x, y));
                 }
-                // clique do meio: liga/desliga o modo fixar
+                // middle click: toggles pin mode
                 MouseButton::Middle => {
                     let _ = weak.upgrade_in_event_loop(|ui| ui.invoke_toggle_pin());
                 }
@@ -56,7 +57,7 @@ impl Tray {
             "quit" => {
                 let _ = ui.upgrade_in_event_loop(|ui| ui.invoke_quit());
             }
-            // o hub leva o comando ao app dono da mídia
+            // the hub takes the command to the app that owns the media
             "prev" => crate::hub::tray_media_command("prev"),
             "play-pause" => crate::hub::tray_media_command("play-pause"),
             "next" => crate::hub::tray_media_command("next"),
@@ -65,14 +66,14 @@ impl Tray {
         Ok(Tray { icon, pinned: Default::default(), media: Default::default() })
     }
 
-    /// O ícone está visível (dá para esconder a janela e voltar por ele). No Windows a
-    /// área de notificação existe sempre.
+    /// The icon is visible (the window can be hidden and brought back through it). On
+    /// Windows the notification area always exists.
     pub fn online(&self) -> bool {
         true
     }
 
-    /// Atualiza dica e menu; o ícone só é redesenhado quando `icon` vem (a mascote, o
-    /// tema ou o humor mudaram).
+    /// Updates the tooltip and menu; the icon is only redrawn when `icon` is given (the
+    /// mascot, theme or mood changed).
     pub fn update(&self, new_icon: Option<(&Sprite, &Theme, Mood)>, tooltip: String, media: Option<TrayMedia>) {
         if let Some((sprite, theme, mood)) = new_icon
             && let Ok(image) = icon(sprite, theme, mood)
@@ -88,7 +89,7 @@ impl Tray {
         }
     }
 
-    /// Atualiza a marca de "Fixar janela" no menu.
+    /// Updates the "Pin window" check mark in the menu.
     pub fn set_pinned(&self, pinned: bool) {
         if self.pinned.replace(pinned) != pinned {
             self.rebuild_menu();
@@ -98,34 +99,34 @@ impl Tray {
     fn rebuild_menu(&self) {
         match menu(self.pinned.get(), self.media.borrow().as_ref()) {
             Ok(menu) => self.icon.set_menu(Some(Box::new(menu))),
-            Err(e) => log::warn!("menu da bandeja falhou: {e}"),
+            Err(e) => log::warn!("tray menu failed: {e}"),
         }
     }
 }
 
-/// O menu inteiro, no estado dado. Os itens são achados pelo id no `MenuEvent`.
+/// The whole menu, in the given state. Items are found by id in the `MenuEvent`.
 fn menu(pinned: bool, media: Option<&TrayMedia>) -> anyhow::Result<Menu> {
     let menu = Menu::new();
-    menu.append(&MenuItem::with_id("toggle", "Mostrar / esconder", true, None))?;
-    menu.append(&CheckMenuItem::with_id("pin", "Fixar janela", true, pinned, None))?;
+    menu.append(&MenuItem::with_id("toggle", tr!("Show / hide"), true, None))?;
+    menu.append(&CheckMenuItem::with_id("pin", tr!("Pin window"), true, pinned, None))?;
     if let Some(media) = media {
         menu.append(&PredefinedMenuItem::separator())?;
-        // no menu do Windows, `&` marca a letra de atalho: dobrado, vira texto
+        // in a Windows menu, `&` marks the shortcut letter: doubled, it is plain text
         menu.append(&MenuItem::new(media.summary.replace('&', "&&"), false, None))?;
         for (label, verb, enabled) in [
-            ("Faixa anterior", "prev", media.can_previous),
-            (if media.playing { "Pausar" } else { "Tocar" }, "play-pause", media.can_play_pause),
-            ("Próxima faixa", "next", media.can_next),
+            (tr!("Previous track"), "prev", media.can_previous),
+            (if media.playing { tr!("Pause") } else { tr!("Play") }, "play-pause", media.can_play_pause),
+            (tr!("Next track"), "next", media.can_next),
         ] {
             menu.append(&MenuItem::with_id(verb, label, enabled, None))?;
         }
     }
     menu.append(&PredefinedMenuItem::separator())?;
-    menu.append(&MenuItem::with_id("quit", "Sair", true, None))?;
+    menu.append(&MenuItem::with_id("quit", tr!("Quit"), true, None))?;
     Ok(menu)
 }
 
-/// A mascote em 32×32 (o Windows reduz para 16 em telas sem escala).
+/// The mascot at 32×32 (Windows scales it down to 16 on unscaled screens).
 fn icon(sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Icon> {
     let (side, rgba) = render::rgba_square(sprite, theme, mood, 1, 2);
     Ok(Icon::from_rgba(rgba, side as u32, side as u32)?)

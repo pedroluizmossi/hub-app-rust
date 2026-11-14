@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
-# Abre um MiniUtils de desenvolvimento e o controla pelo servidor MCP embutido do Slint
-# (recurso `dev-mcp`, ver Cargo.toml). Serve para um agente (Claude Code, Codex) ver a
-# interface: captura em PNG, achar elementos, clicar. Só Linux; precisa de curl e jq.
-# Ver AGENTS.md › "Ver e mexer na interface".
+# Opens a development MiniUtils and drives it through Slint's built-in MCP server (feature
+# `dev-mcp`, see Cargo.toml). It lets an agent (Claude Code, Codex) see the interface: PNG
+# screenshots, finding elements, clicking. Linux only; needs curl and jq.
+# See AGENTS.md › "Interface (Slint)".
 #
-#   tools/dev-ui.sh abrir [--live] [--minha-config] [-- args do app]
-#       compila e abre uma instância isolada (fecha a anterior). --live: recarrega os
-#       .slint ao salvar (recurso live-preview). --minha-config: começa da sua config real.
-#   tools/dev-ui.sh recarregar            (--live) recarrega os .slint agora; ver abaixo
-#   tools/dev-ui.sh foto [arquivo.png]    captura da janela (padrão: target/dev-ui/tela.png)
-#   tools/dev-ui.sh achar <texto>         elementos cujo rótulo ou id contém o texto
-#   tools/dev-ui.sh clicar <texto> [n]    clica no n-ésimo elemento achado (padrão: 1º)
-#   tools/dev-ui.sh mcp [ferramenta [json]]  qualquer ferramenta do MCP (sem nome: lista)
-#   tools/dev-ui.sh log                   saída do app (erros do Slint, do live-preview)
-#   tools/dev-ui.sh fechar                encerra a instância aberta por `abrir`
+#   tools/dev-ui.sh open [--live] [--my-config] [-- app args]
+#       builds and opens an isolated instance (closes the previous one). --live: reloads
+#       the .slint files on save (feature live-preview). --my-config: starts from your
+#       real config.
+#   tools/dev-ui.sh reload                (--live) reloads the .slint files now; see below
+#   tools/dev-ui.sh shot [file.png]       screenshot of the window (default: target/dev-ui/screen.png)
+#   tools/dev-ui.sh find <text>           elements whose label or id contains the text
+#   tools/dev-ui.sh click <text> [n]      clicks the n-th element found (default: the 1st)
+#   tools/dev-ui.sh mcp [tool [json]]     any MCP tool (without a name: lists them)
+#   tools/dev-ui.sh log                   the app's output (Slint and live-preview errors)
+#   tools/dev-ui.sh close                 ends the instance started by `open`
 #
-# A instância usa MINIUTILS_INSTANCE=dev-ui (não conversa com o MiniUtils que você usa) e
-# XDG_CONFIG_HOME/XDG_STATE_HOME em target/dev-ui (não mexe na sua config nem no seu
-# registro). Os plugins instalados são os seus, de verdade; os dados deles não:
-# MINIUTILS_DADOS=target/dev-ui/app-data (começam vazios e não mexem nos seus).
+# The instance uses MINIUTILS_INSTANCE=dev-ui (it does not talk to the MiniUtils you use)
+# and XDG_CONFIG_HOME/XDG_STATE_HOME in target/dev-ui (it does not touch your config or
+# your logs). The installed plugins are your real ones; their data is not:
+# MINIUTILS_DATA=target/dev-ui/app-data (starts empty and leaves yours alone).
 #
-# Limites do live-preview do Slint 1.18 (conferidos): (1) ele só percebe arquivo gravado
-# no lugar (VS Code, `cat >`); gravar trocando o arquivo (a ferramenta Edit do agente,
-# `sed -i`, vim) passa batido: depois de editar, rode `recarregar`. (2) Depois de uma
-# recarga, `achar`/`clicar` ainda veem a árvore antiga; a `foto` mostra a nova. Para clicar
-# na tela nova, `abrir --live` de novo. (3) A janela volta à largura mínima ao recarregar.
+# Limits of Slint 1.18's live-preview (verified): (1) it only notices a file written in
+# place (VS Code, `cat >`); writing by replacing the file (the agent's Edit tool, `sed -i`,
+# vim) goes unnoticed: after editing, run `reload`. (2) After a reload, `find`/`click`
+# still see the old tree; `shot` shows the new one. To click on the new screen, run
+# `open --live` again. (3) The window goes back to its minimum width on reload.
+#
+# The Portuguese command names of older versions (abrir, recarregar, foto, achar, clicar,
+# fechar, --minha-config) still work.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DIR=target/dev-ui
@@ -33,13 +37,13 @@ URL="http://127.0.0.1:$PORT/mcp"
 
 die() { echo "dev-ui: $*" >&2; exit 1; }
 
-rpc() { # <método> <params json>
+rpc() { # <method> <params json>
     curl -sS -m 30 "$URL" -H 'Content-Type: application/json' \
         -d "$(jq -nc --arg m "$1" --argjson p "$2" '{jsonrpc: "2.0", id: 1, method: $m, params: $p}')" \
-        || die "sem resposta em $URL (o app está aberto? rode: tools/dev-ui.sh abrir)"
+        || die "no answer at $URL (is the app open? run: tools/dev-ui.sh open)"
 }
 
-tool() { # <ferramenta> [args json] → resposta inteira; erro do MCP vira erro do script
+tool() { # <tool> [args json] → the whole answer; an MCP error becomes a script error
     local args=${2:-'{}'} out
     out=$(rpc tools/call "$(jq -nc --arg n "$1" --argjson a "$args" '{name: $n, arguments: $a}')")
     if jq -e '.error or .result.isError' <<<"$out" >/dev/null; then
@@ -50,13 +54,13 @@ tool() { # <ferramenta> [args json] → resposta inteira; erro do MCP vira erro 
 
 text() { jq -r '.result.content[] | select(.type == "text") | .text'; }
 
-# 1ª janela aberta (a principal). O identificador muda a cada recarga: pergunte sempre.
+# The 1st open window (the main one). Its handle changes on every reload: always ask.
 window() { tool list_windows | text | jq -c '.windowHandles[0] // empty'; }
 
-# elementos da janela cujo rótulo acessível ou id contém o texto (sem diferenciar maiúsculas)
+# elements of the window whose accessible label or id contains the text (case-insensitive)
 find_elements() {
     local w root
-    w=$(window); [ -n "$w" ] || die "nenhuma janela aberta"
+    w=$(window); [ -n "$w" ] || die "no window open"
     root=$(tool get_window_properties "{\"windowHandle\": $w}" | text | jq -c .rootElementHandle)
     tool get_element_tree "{\"elementHandle\": $root, \"maxElements\": 1000}" | text \
         | jq -c --arg q "$1" '.elements[]
@@ -64,7 +68,7 @@ find_elements() {
                      | any(ascii_downcase | contains($q | ascii_downcase)))'
 }
 
-running_pid() { # pid da instância aberta por `abrir`, se ainda estiver de pé
+running_pid() { # pid of the instance started by `open`, if it is still up
     local pid
     pid=$(cat "$DIR/pid" 2>/dev/null) || return 1
     grep -q miniutils "/proc/$pid/cmdline" 2>/dev/null && echo "$pid"
@@ -80,15 +84,24 @@ close() {
 }
 
 cmd=${1:-}; shift || true
+# the Portuguese names of older versions
 case "$cmd" in
-abrir)
+    abrir) cmd=open ;;
+    recarregar) cmd=reload ;;
+    foto) cmd=shot ;;
+    achar) cmd=find ;;
+    clicar) cmd=click ;;
+    fechar) cmd=close ;;
+esac
+case "$cmd" in
+open)
     features=dev-mcp mine=
     while [ $# -gt 0 ]; do
         case "$1" in
             --live) features=dev-mcp,live-preview ;;
-            --minha-config) mine=1 ;;
+            --my-config|--minha-config) mine=1 ;;
             --) shift; break ;;
-            *) die "abrir: opção desconhecida $1" ;;
+            *) die "open: unknown option $1" ;;
         esac
         shift
     done
@@ -100,35 +113,35 @@ abrir)
     fi
     SLINT_MCP_PORT=$PORT MINIUTILS_INSTANCE=dev-ui \
         XDG_CONFIG_HOME="$PWD/$DIR/config" XDG_STATE_HOME="$PWD/$DIR/state" \
-        MINIUTILS_DADOS="$PWD/$DIR/app-data" \
+        MINIUTILS_DATA="$PWD/$DIR/app-data" \
         setsid target/debug/miniutils "$@" >"$DIR/app.log" 2>&1 </dev/null &
     echo $! >"$DIR/pid"
     for _ in $(seq 60); do
-        grep -q "MCP server listening" "$DIR/app.log" && { echo "aberto (pid $(cat "$DIR/pid"), $features)"; exit 0; }
-        running_pid >/dev/null || { tail -20 "$DIR/app.log" >&2; die "o app saiu ao abrir"; }
+        grep -q "MCP server listening" "$DIR/app.log" && { echo "open (pid $(cat "$DIR/pid"), $features)"; exit 0; }
+        running_pid >/dev/null || { tail -20 "$DIR/app.log" >&2; die "the app exited while opening"; }
         sleep 0.5
     done
     tail -20 "$DIR/app.log" >&2
-    die "o MCP não respondeu em 30 s"
+    die "MCP did not answer within 30 s"
     ;;
-recarregar)
-    # regrava o hub.slint no mesmo arquivo (conteúdo igual): o live-preview percebe e relê
-    # todos os .slint, inclusive os que a Edit trocou
+reload)
+    # rewrites hub.slint in the same file (same content): live-preview notices and rereads
+    # every .slint, including the ones the Edit tool replaced
     tmp=$(mktemp)
     cat ui/hub.slint >"$tmp" && cat "$tmp" >ui/hub.slint
     rm -f "$tmp"
-    sleep 2 # o live-preview espera um pouco e recompila a interface
+    sleep 2 # live-preview waits a little and recompiles the interface
     grep "Reloaded\|error" "$DIR/app.log" | tail -3
     ;;
-foto)
-    out=${1:-$DIR/tela.png}
-    w=$(window); [ -n "$w" ] || die "nenhuma janela aberta"
+shot|screenshot)
+    out=${1:-$DIR/screen.png}
+    w=$(window); [ -n "$w" ] || die "no window open"
     tool take_screenshot "{\"windowHandle\": $w}" \
         | jq -r '.result.content[] | select(.type == "image") | .data' | base64 -d >"$out"
     echo "$out"
     ;;
-achar)
-    [ $# -ge 1 ] || die "achar <texto>"
+find)
+    [ $# -ge 1 ] || die "find <text>"
     find_elements "$1" | jq -r '[
             (.accessibleLabel // "-"),
             ([.typeNamesAndIds[] | .typeName + (if .id then "#" + .id else "" end)] | join(" < ")),
@@ -136,12 +149,12 @@ achar)
             (.accessibleRole // "")
         ] | join(" | ")' | nl -w2 -s') '
     ;;
-clicar)
-    [ $# -ge 1 ] || die "clicar <texto> [n]"
+click)
+    [ $# -ge 1 ] || die "click <text> [n]"
     handle=$(find_elements "$1" | sed -n "${2:-1}p" | jq -c .handle)
-    [ -n "$handle" ] || die "nenhum elemento com \"$1\" (veja: tools/dev-ui.sh achar \"$1\")"
+    [ -n "$handle" ] || die "no element with \"$1\" (see: tools/dev-ui.sh find \"$1\")"
     tool click_element "{\"elementHandle\": $handle}" >/dev/null
-    echo "clicado"
+    echo "clicked"
     ;;
 mcp)
     if [ $# -eq 0 ]; then
@@ -151,6 +164,6 @@ mcp)
     fi
     ;;
 log) cat "$DIR/app.log" ;;
-fechar) close; echo "fechado" ;;
-*) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+close) close; echo "closed" ;;
+*) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -1,38 +1,38 @@
-//! Animações das mascotes: poses desenhadas, quadro a quadro.
+//! Mascot animations: drawn poses, frame by frame.
 //!
-//! Sem animação, a mascote é um desenho só (`Sprite::grid`) e o que muda é calculado em
-//! cima dele (piscada, LED, glitch). Uma animação troca o desenho por uma sequência de
-//! quadros; os efeitos continuam valendo por cima de cada quadro. Quem decide qual quadro
-//! mostrar é o `Player` de cada mascote (`anim.rs`).
+//! Without an animation, a mascot is a single drawing (`Sprite::grid`) and what changes is
+//! computed on top of it (blink, LED, glitch). An animation swaps the drawing for a sequence
+//! of frames; the effects still apply on top of each frame. Each mascot's `Player`
+//! (`anim.rs`) decides which frame to show.
 //!
-//! Cada mascote pode ter um arquivo `src/mascot/clips/<chave>.toml` (registre em `SOURCES`):
+//! Each mascot can have a file `src/mascot/clips/<key>.toml` (register it in `SOURCES`):
 //!
 //! ```toml
-//! [idle]                         # nome da animação
-//! fps = 4                        # quadros por segundo (ou `durations`)
-//! durations = [900, 120, 120]    # ms de cada quadro (no lugar de `fps`)
-//! loop = true                    # repete (padrão: true para humor, false para o resto)
-//! enter = "boceja"               # toca uma vez ao entrar neste humor, antes do loop
-//! exit = "acorda"                # toca uma vez ao sair dele
-//! variants = ["coca", "olha"]    # de vez em quando, uma delas no lugar do loop
-//! every = [8, 20]                # segundos entre variações (sorteado no intervalo)
+//! [idle]                         # animation name
+//! fps = 4                        # frames per second (or `durations`)
+//! durations = [900, 120, 120]    # ms of each frame (instead of `fps`)
+//! loop = true                    # repeats (default: true for a mood, false otherwise)
+//! enter = "yawn"                 # plays once when entering this mood, before the loop
+//! exit = "wake"                  # plays once when leaving it
+//! variants = ["scratch", "look"] # now and then, one of these instead of the loop
+//! every = [8, 20]                # seconds between variants (drawn from the range)
 //! frames = [
 //! """
-//! ... 14 linhas de 16 caracteres, com os mesmos papéis de cor de `sprites.rs` ...
+//! ... 14 rows of 16 characters, with the same color roles as `sprites.rs` ...
 //! """,
 //! ]
 //! ```
 //!
-//! Quando toca:
-//! - com o nome de uma reação (`celebrate`, `surprised`): enquanto a reação durar;
-//! - com o nome de um humor (`sleep`, `idle`, `happy`, `busy`, `alarm`): sempre que a
-//!   mascote estiver nele, com `enter`/`exit`/`variants`;
-//! - outros nomes: quando alguém pede (transições, variações, um jogo).
+//! When it plays:
+//! - named after a reaction (`celebrate`, `surprised`): while the reaction lasts;
+//! - named after a mood (`sleep`, `idle`, `happy`, `busy`, `alarm`): whenever the mascot is
+//!   in it, with `enter`/`exit`/`variants`;
+//! - other names: when something asks for it (transitions, variants, a game).
 //!
-//! Para desenhar sem recompilar: `MINIUTILS_CLIPS=src/mascot/clips cargo run` lê os
-//! `.toml` dessa pasta e recarrega ao salvar (ver `watch`).
-//! Para converter um PNG: `cargo run -p sprite-import -- --help`.
-//! Para ver em GIF: `miniutils --previa <mascote> <animação>`.
+//! To draw without recompiling: `MINIUTILS_CLIPS=src/mascot/clips cargo run` reads the
+//! `.toml` files in that folder and reloads on save (see `watch`).
+//! To convert a PNG: `cargo run -p sprite-import -- --help`.
+//! To see it as a GIF: `miniutils --preview <mascot> <animation>`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,43 +41,43 @@ use std::time::{Duration, SystemTime};
 
 use super::sprites::{self, SPRITES, Sprite};
 
-/// Um quadro: 14 linhas, como `Sprite::grid`.
+/// A frame: 14 rows, like `Sprite::grid`.
 pub type Grid = [&'static str; 14];
 
-/// Arquivos de animação embutidos no binário: (chave da mascote, conteúdo).
+/// Animation files built into the binary: (mascot key, content).
 const SOURCES: &[(&str, &str)] = &[
     ("neko", include_str!("clips/neko.toml")),
     ("lumi", include_str!("clips/lumi.toml")),
 ];
 
-/// Nomes das animações que tocam sozinhas pelo humor (repetem por padrão).
+/// Names of the animations that play by themselves for the mood (they repeat by default).
 pub const MOODS: [&str; 5] = ["sleep", "idle", "happy", "busy", "alarm"];
 
 #[derive(Debug)]
 pub struct Clip {
     pub frames: Vec<Grid>,
-    /// Quanto cada quadro fica na tela, em ms.
+    /// How long each frame stays on screen, in ms.
     pub durations: Vec<u32>,
     pub looping: bool,
     pub enter: Option<String>,
     pub exit: Option<String>,
     pub variants: Vec<String>,
-    /// Segundos entre variações: (mínimo, máximo).
+    /// Seconds between variants: (minimum, maximum).
     pub every: (u32, u32),
 }
 
 impl Clip {
-    /// Duração de uma volta inteira, em ms.
+    /// Length of one full lap, in ms.
     pub fn total_ms(&self) -> u32 {
         self.durations.iter().sum()
     }
 
-    /// O quadro mais curto (o hub acelera o timer para não pular quadros).
+    /// The shortest frame (the hub speeds its timer up so as not to skip frames).
     pub fn shortest_ms(&self) -> u32 {
         self.durations.iter().copied().min().unwrap_or(1000)
     }
 
-    /// Índice do quadro depois de `ms` tocando. Sem repetir, para no último.
+    /// Index of the frame after playing for `ms`. Without looping, it stops on the last one.
     pub fn index_at(&self, ms: u64) -> usize {
         let total = self.total_ms().max(1) as u64;
         let mut t = if self.looping { ms % total } else { ms.min(total - 1) };
@@ -94,13 +94,13 @@ impl Clip {
         &self.frames[self.index_at(ms)]
     }
 
-    /// Terminou de tocar (só faz sentido sem `loop`).
+    /// Finished playing (only meaningful without `loop`).
     pub fn done_at(&self, ms: u64) -> bool {
         !self.looping && ms >= self.total_ms() as u64
     }
 }
 
-/// Animações de uma mascote, por nome.
+/// A mascot's animations, by name.
 pub type Clips = HashMap<String, Clip>;
 
 type Library = HashMap<String, Arc<Clips>>;
@@ -119,7 +119,7 @@ fn library() -> &'static RwLock<Arc<Library>> {
     })
 }
 
-/// Animações da mascote `key`, se tiver.
+/// Animations of mascot `key`, if it has any.
 pub fn of(key: &str) -> Option<Arc<Clips>> {
     library().read().ok()?.get(key).cloned()
 }
@@ -131,31 +131,31 @@ fn load_embedded() -> Library {
             Ok(clips) => {
                 lib.insert(key.to_string(), Arc::new(clips));
             }
-            Err(e) => log::warn!("animações de {key} inválidas: {e}"),
+            Err(e) => log::warn!("invalid animations for {key}: {e}"),
         }
     }
     lib
 }
 
-// ---- desenvolvimento: ler da pasta e recarregar ao salvar ---------------------------
+// ---- development: read from the folder and reload on save ---------------------------
 
-/// Pasta das animações para desenvolvimento (`MINIUTILS_CLIPS`), se definida.
+/// Animation folder for development (`MINIUTILS_CLIPS`), if set.
 fn dev_dir() -> Option<PathBuf> {
     std::env::var_os("MINIUTILS_CLIPS").filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
-/// Lê todo `<chave>.toml` da pasta (chave = uma mascote de `sprites.rs`). Arquivo com erro
-/// fica de fora, com o erro no terminal.
+/// Reads every `<key>.toml` in the folder (key = a mascot of `sprites.rs`). A file with an
+/// error is left out, with the error in the log.
 fn load_dir(dir: &Path) -> Library {
     let mut lib = Library::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
-        log::warn!("MINIUTILS_CLIPS={} não é uma pasta legível", dir.display());
+        log::warn!("MINIUTILS_CLIPS={} is not a readable folder", dir.display());
         return lib;
     };
     for path in entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "toml")) {
         let Some(key) = path.file_stem().and_then(|s| s.to_str()) else { continue };
         let Some(sprite) = SPRITES.iter().find(|s| s.key == key) else {
-            log::warn!("{}: não há mascote \"{key}\" em sprites.rs", path.display());
+            log::warn!("{}: no mascot \"{key}\" in sprites.rs", path.display());
             continue;
         };
         let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|src| parse(sprite, &src));
@@ -169,9 +169,9 @@ fn load_dir(dir: &Path) -> Library {
     lib
 }
 
-/// Olha a pasta a cada meio segundo e recarrega quando um `.toml` muda. Só existe com
-/// `MINIUTILS_CLIPS` definida (uso de quem está desenhando), e cada recarga deixa os quadros
-/// antigos na memória (são `'static`): não é para o uso normal.
+/// Checks the folder every half second and reloads when a `.toml` changes. Only exists with
+/// `MINIUTILS_CLIPS` set (for whoever is drawing), and each reload leaves the old frames in
+/// memory (they are `'static`): not meant for normal use.
 fn watch(dir: PathBuf) {
     let stamp = |dir: &Path| -> Vec<(PathBuf, SystemTime)> {
         let mut v: Vec<_> = std::fs::read_dir(dir)
@@ -186,7 +186,7 @@ fn watch(dir: PathBuf) {
     };
     let spawned = std::thread::Builder::new().name("miniutils-clips".into()).spawn(move || {
         let mut last = stamp(&dir);
-        log::info!("animações de {} (recarregam ao salvar)", dir.display());
+        log::info!("animations from {} (reloaded on save)", dir.display());
         loop {
             std::thread::sleep(Duration::from_millis(500));
             let now = stamp(&dir);
@@ -195,20 +195,20 @@ fn watch(dir: PathBuf) {
             }
             last = now;
             let lib = load_dir(&dir);
-            log::info!("animações recarregadas ({} mascote(s))", lib.len());
+            log::info!("animations reloaded ({} mascot(s))", lib.len());
             if let Ok(mut l) = library().write() {
                 *l = Arc::new(lib);
             }
         }
     });
     if let Err(e) = spawned {
-        log::warn!("sem thread para recarregar animações ({e})");
+        log::warn!("no thread to reload animations ({e})");
     }
 }
 
-// ---- formato ------------------------------------------------------------------------
+// ---- format -------------------------------------------------------------------------
 
-/// Papéis de cor válidos numa mascote comum (ver o topo de `sprites.rs`).
+/// Valid color roles in a regular mascot (see the top of `sprites.rs`).
 const ROLES: &[u8] = b".KPSHMCEWBTFDA";
 
 #[derive(serde::Deserialize)]
@@ -226,55 +226,56 @@ struct RawClip {
     frames: Vec<String>,
 }
 
-/// Lê um arquivo de animações e confere cada quadro contra o desenho base de `sprite`.
+/// Reads an animation file and checks each frame against `sprite`'s base drawing. The
+/// errors are for whoever is drawing (they go to the log), so they are not translated.
 pub fn parse(sprite: &Sprite, src: &str) -> Result<Clips, String> {
     let raw: HashMap<String, RawClip> = toml::from_str(src).map_err(|e| e.to_string())?;
     let mut clips = HashMap::new();
     for (name, c) in &raw {
         let err = |e: String| format!("[{name}]: {e}");
         if c.frames.is_empty() {
-            return Err(err("nenhum quadro".into()));
+            return Err(err("no frames".into()));
         }
         let durations = match (&c.durations, c.fps) {
-            (Some(_), Some(_)) => return Err(err("use `fps` ou `durations`, não os dois".into())),
+            (Some(_), Some(_)) => return Err(err("use `fps` or `durations`, not both".into())),
             (Some(d), None) => {
                 if d.len() != c.frames.len() {
-                    return Err(err(format!("{} durações para {} quadros", d.len(), c.frames.len())));
+                    return Err(err(format!("{} durations for {} frames", d.len(), c.frames.len())));
                 }
                 if let Some(bad) = d.iter().find(|&&ms| !(16..=60_000).contains(&ms)) {
-                    return Err(err(format!("duração {bad} ms fora de 16..60000")));
+                    return Err(err(format!("duration {bad} ms outside 16..60000")));
                 }
                 d.clone()
             }
             (None, fps) => {
                 let fps = fps.unwrap_or(4);
                 if !(1..=30).contains(&fps) {
-                    return Err(err(format!("fps {fps} fora de 1..30")));
+                    return Err(err(format!("fps {fps} outside 1..30")));
                 }
                 vec![1000 / fps; c.frames.len()]
             }
         };
         let mood = MOODS.contains(&name.as_str());
         if !mood && (c.enter.is_some() || c.exit.is_some() || !c.variants.is_empty()) {
-            return Err(err("enter/exit/variants só valem numa animação de humor".into()));
+            return Err(err("enter/exit/variants only apply to a mood animation".into()));
         }
-        // os nomes citados precisam existir no mesmo arquivo e tocar uma vez
+        // the names it mentions must exist in the same file and play once
         for other in c.enter.iter().chain(&c.exit).chain(&c.variants) {
             match raw.get(other) {
-                None => return Err(err(format!("cita \"{other}\", que não existe neste arquivo"))),
+                None => return Err(err(format!("mentions \"{other}\", which is not in this file"))),
                 Some(o) if o.looping == Some(true) || MOODS.contains(&other.as_str()) => {
-                    return Err(err(format!("\"{other}\" repete: transição e variação tocam uma vez")));
+                    return Err(err(format!("\"{other}\" loops: transitions and variants play once")));
                 }
                 Some(_) => {}
             }
         }
         let every = c.every.unwrap_or([8, 20]);
         if every[0] == 0 || every[0] > every[1] {
-            return Err(err(format!("every = {every:?}: use [mínimo, máximo] em segundos, mínimo ≥ 1")));
+            return Err(err(format!("every = {every:?}: use [minimum, maximum] in seconds, minimum ≥ 1")));
         }
         let mut frames = Vec::new();
         for (i, text) in c.frames.iter().enumerate() {
-            frames.push(grid(sprite, text).map_err(|e| err(format!("quadro {}: {e}", i + 1)))?);
+            frames.push(grid(sprite, text).map_err(|e| err(format!("frame {}: {e}", i + 1)))?);
         }
         clips.insert(
             name.clone(),
@@ -292,22 +293,22 @@ pub fn parse(sprite: &Sprite, src: &str) -> Result<Clips, String> {
     Ok(clips)
 }
 
-/// Converte o texto de um quadro em `Grid`, conferindo tamanho e cores.
+/// Turns a frame's text into a `Grid`, checking size and colors.
 fn grid(sprite: &Sprite, text: &str) -> Result<Grid, String> {
     let rows: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
     if rows.len() != sprite.grid.len() {
-        return Err(format!("{} linhas, esperava {}", rows.len(), sprite.grid.len()));
+        return Err(format!("{} rows, expected {}", rows.len(), sprite.grid.len()));
     }
     let mut out: Grid = [""; 14];
     for (y, row) in rows.iter().enumerate() {
         let want = sprite.grid[y].len();
         if row.len() != want {
-            return Err(format!("linha {} com {} colunas, esperava {want}", y + 1, row.len()));
+            return Err(format!("row {} has {} columns, expected {want}", y + 1, row.len()));
         }
         if let Some(bad) = row.bytes().find(|&c| !valid_cell(sprite, c)) {
-            return Err(format!("linha {}: cor '{}' que esta mascote não tem", y + 1, bad as char));
+            return Err(format!("row {}: color '{}' that this mascot doesn't have", y + 1, bad as char));
         }
-        // dados estáticos: carregados uma vez e usados até o fim do programa
+        // static data: loaded once and used until the program ends
         out[y] = Box::leak(row.to_string().into_boxed_str());
     }
     Ok(out)
@@ -315,7 +316,7 @@ fn grid(sprite: &Sprite, text: &str) -> Result<Grid, String> {
 
 fn valid_cell(sprite: &Sprite, c: u8) -> bool {
     match &sprite.pixel {
-        // mascote "pixel": as letras da paleta dela, o olho `e` e o transparente
+        // "pixel" mascot: the letters of its palette, the eye `e` and transparent
         Some(px) => c == b'.' || c == b'e' || px.color(c).is_some(),
         None => ROLES.contains(&c),
     }
@@ -330,38 +331,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn arquivos_de_animacao_validos() {
+    fn embedded_animation_files_are_valid() {
         for (key, src) in SOURCES {
             let sprite = sprites::get(key);
-            assert_eq!(sprite.key, *key, "mascote {key} não existe em sprites.rs");
+            assert_eq!(sprite.key, *key, "mascot {key} is not in sprites.rs");
             parse(sprite, src).unwrap_or_else(|e| panic!("{key}: {e}"));
         }
     }
 
     #[test]
-    fn recusa_quadro_errado() {
+    fn rejects_bad_frame() {
         let neko = sprites::get("neko");
-        let curto = "[x]\nframes = [\"\"\"\nKKKK\n\"\"\"]";
-        assert!(parse(neko, curto).unwrap_err().contains("linhas"));
-        let linha = "Z".repeat(16);
-        let cor = format!("[x]\nframes = [{}]", frame(&[linha.as_str(); 14]));
-        assert!(parse(neko, &cor).unwrap_err().contains("cor 'Z'"));
+        let short = "[x]\nframes = [\"\"\"\nKKKK\n\"\"\"]";
+        assert!(parse(neko, short).unwrap_err().contains("rows"));
+        let row = "Z".repeat(16);
+        let color = format!("[x]\nframes = [{}]", frame(&[row.as_str(); 14]));
+        assert!(parse(neko, &color).unwrap_err().contains("color 'Z'"));
     }
 
     #[test]
-    fn recusa_referencia_e_duracao_erradas() {
+    fn rejects_bad_reference_and_duration() {
         let neko = sprites::get("neko");
         let base = frame(&neko.grid);
-        let sem_nome = format!("[idle]\nenter = \"boceja\"\nframes = [{base}]");
-        assert!(parse(neko, &sem_nome).unwrap_err().contains("\"boceja\""));
-        let duracoes = format!("[idle]\ndurations = [100]\nframes = [{base}, {base}]");
-        assert!(parse(neko, &duracoes).unwrap_err().contains("1 durações para 2 quadros"));
-        let fora = format!("[x]\nenter = \"y\"\nframes = [{base}]\n[y]\nframes = [{base}]");
-        assert!(parse(neko, &fora).unwrap_err().contains("só valem numa animação de humor"));
+        let missing = format!("[idle]\nenter = \"yawn\"\nframes = [{base}]");
+        assert!(parse(neko, &missing).unwrap_err().contains("\"yawn\""));
+        let durations = format!("[idle]\ndurations = [100]\nframes = [{base}, {base}]");
+        assert!(parse(neko, &durations).unwrap_err().contains("1 durations for 2 frames"));
+        let not_mood = format!("[x]\nenter = \"y\"\nframes = [{base}]\n[y]\nframes = [{base}]");
+        assert!(parse(neko, &not_mood).unwrap_err().contains("only apply to a mood animation"));
     }
 
     #[test]
-    fn duracao_por_quadro() {
+    fn duration_per_frame() {
         let neko = sprites::get("neko");
         let base = frame(&neko.grid);
         let src = format!(

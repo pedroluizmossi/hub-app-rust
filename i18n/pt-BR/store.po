@@ -1,0 +1,342 @@
+# Plugin store: command line (src/store.rs, src/store/entry.rs) and the errors the Store tab
+# shows.
+
+# --help (store part)
+msgid "plugin store:"
+msgstr "loja de plugins:"
+
+msgid "lists the plugins and the state of each"
+msgstr "lista os plugins e o estado de cada um"
+
+msgid "installs (asks first, without --yes)"
+msgstr "instala (pergunta antes, sem --yes)"
+
+msgid "updates to the index's commit"
+msgstr "atualiza para o commit do índice"
+
+msgid "removes an installed plugin; if it has\ndata, asks whether to delete it (or follows the option)"
+msgstr "remove um plugin instalado; se ele tiver\ndados, pergunta se apaga (ou siga a opção)"
+
+msgid "lists the installed ones (from the store and local)"
+msgstr "lista os instalados (da loja e locais)"
+
+msgid "the running MiniUtils rereads the apps and themes"
+msgstr "o MiniUtils aberto relê os apps e os temas"
+
+msgid "  --key <hex>     public key that signs the index (default: store_key from the config)"
+msgstr "  --key <hex>     chave pública que assina o índice (padrão: store_key da config)"
+
+msgid "Without an index, uses the config's store_index or, if it is empty, the official store\n(github.com/pedroluizmossi/miniutils-store). The index is a registry.json (path or\nhttps://), with the signature in registry.json.sig."
+msgstr "Sem índice, usa o store_index da config ou, se ele estiver vazio, a loja oficial\n(github.com/pedroluizmossi/miniutils-store). O índice é um registry.json (caminho ou\nhttps://), com a assinatura em registry.json.sig."
+
+msgid "index maintainers:"
+msgstr "quem mantém um índice:"
+
+msgid "generates a key pair (prints the public one)"
+msgstr "gera um par de chaves (imprime a pública)"
+
+msgid "writes registry.json.sig"
+msgstr "grava registry.json.sig"
+
+msgid "adds or updates the app of the repository\n(https://… or owner/repo) at that tag: reads the\nmanifest at the commit and, for an external app,\nchecks the executables of the tag's Release"
+msgstr "inclui ou atualiza o app do repositório\n(https://… ou dono/repo) naquela tag: lê o\nmanifesto do commit e, num app externo,\nconfere os executáveis do Release da tag"
+
+msgid "The running miniutils rereads the plugins by itself after installing, updating or removing.\nLocal app (no store): create the folder <id>/ inside the apps folder (miniutils --dirs)\nand run miniutils --reload, or use Settings › System › Reload."
+msgstr "O miniutils aberto relê os plugins sozinho depois de instalar, atualizar ou remover.\nApp local (sem loja): crie a pasta <id>/ dentro da pasta dos apps (miniutils --dirs)\ne rode miniutils --reload, ou use Configurações › Sistema › Recarregar."
+
+# command answers
+msgid "installed in {}"
+msgstr "instalado em {}"
+
+msgid "the running MiniUtils reread the apps ({}) and the themes, skins and backdrops ({})\n{}"
+msgstr "o MiniUtils aberto releu os apps ({}) e os temas, visuais e fundos ({})\n{}"
+
+msgid "no MiniUtils running: the apps in {} load when it opens"
+msgstr "nenhum MiniUtils aberto: os apps de {} entram quando ele abrir"
+
+msgid "{} plugin(s) in {} ({}):"
+msgstr "{} plugin(s) em {} ({}):"
+
+msgid "signature checked"
+msgstr "assinatura conferida"
+
+msgid "local index, signature not checked"
+msgstr "índice local, sem assinatura conferida"
+
+msgid "not installed"
+msgstr "não instalado"
+
+msgid "installed {} · update to {}"
+msgstr "instalado {} · atualização para {}"
+
+msgid "installed {}"
+msgstr "instalado {}"
+
+msgid "no author"
+msgstr "sem autor"
+
+msgid "Install?"
+msgstr "Instalar?"
+
+msgid "[y/N]"
+msgstr "[s/N]"
+
+msgid "no plugins installed in {}"
+msgstr "nenhum plugin instalado em {}"
+
+msgid "installed in {}:"
+msgstr "instalados em {}:"
+
+msgid "{}  (store, commit {})"
+msgstr "{}  (loja, commit {})"
+
+msgid "(local)"
+msgstr "(local)"
+
+msgid "skipped: {}/  {}"
+msgstr "ignorado: {}/  {}"
+
+# permissions
+msgid "FULL ACCESS"
+msgstr "ACESSO TOTAL"
+
+msgid "network: {}"
+msgstr "rede: {}"
+
+msgid "reads: {}"
+msgstr "lê: {}"
+
+# index and signature
+msgid "{}: index too large"
+msgstr "{}: índice grande demais"
+
+msgid "{}: remote index with no key to check the signature (configure the store key)"
+msgstr "{}: índice remoto sem chave para conferir a assinatura (configure a chave da loja)"
+
+msgid "invalid store key (64 hex characters)"
+msgstr "chave da loja inválida (64 caracteres hex)"
+
+msgid "no index signature: {}"
+msgstr "sem assinatura do índice: {}"
+
+msgid "unreadable index signature"
+msgstr "assinatura do índice ilegível"
+
+msgid "{}: the signature does not match (tampered index or wrong key)"
+msgstr "{}: a assinatura não confere (índice adulterado ou chave errada)"
+
+msgid "{}: invalid index: {}"
+msgstr "{}: índice inválido: {}"
+
+msgid "{}: index is version {} (this miniutils understands 1)"
+msgstr "{}: índice na versão {} (este miniutils entende a 1)"
+
+msgid "{} already exists: I don't overwrite a key"
+msgstr "{} já existe: não sobrescrevo uma chave"
+
+msgid "could not generate the key"
+msgstr "não consegui gerar a chave"
+
+msgid "generated key is invalid"
+msgstr "chave gerada inválida"
+
+msgid "unreadable key file"
+msgstr "arquivo de chave ilegível"
+
+msgid "invalid key file"
+msgstr "arquivo de chave inválido"
+
+msgid "{}\npublic key: {}"
+msgstr "{}\nchave pública: {}"
+
+# installation
+msgid "\"{}\" is not in the index"
+msgstr "\"{}\" não está no índice"
+
+msgid "{} is already installed at this version ({})"
+msgstr "{} já está instalado nesta versão ({})"
+
+msgid "{}: the index must pin the commit (40-character SHA)"
+msgstr "{}: o índice precisa fixar o commit (SHA de 40 caracteres)"
+
+msgid "{}: the repository must be https:// (or a local folder, for tests)"
+msgstr "{}: repositório precisa ser https:// (ou uma pasta local, para testes)"
+
+msgid "{}: invalid path in the index: {}"
+msgstr "{}: path inválido no índice: {}"
+
+msgid "{}: the index does not declare the license"
+msgstr "{}: o índice não declara a licença"
+
+msgid "{}: only an app with full_access brings an executable (binaries)"
+msgstr "{}: só um app com full_access traz executável (binaries)"
+
+msgid "{}: binaries.{}: use linux or windows"
+msgstr "{}: binaries.{}: use linux ou windows"
+
+msgid "{}: binaries.{}: the address must be https:// (or a local path, for tests)"
+msgstr "{}: binaries.{}: o endereço precisa ser https:// (ou um caminho local, para testes)"
+
+msgid "{}: binaries.{}: sha256 must have 64 hex characters"
+msgstr "{}: binaries.{}: sha256 precisa ter 64 caracteres hex"
+
+msgid "{}: the executable is over {} MiB"
+msgstr "{}: o executável passa de {} MiB"
+
+msgid "the downloaded executable has SHA-256 {}, not the index's {}"
+msgstr "o executável baixado tem SHA-256 {}, não o {} do índice"
+
+msgid "{}: the repository delivered commit {}, not the index's {}"
+msgstr "{}: o repositório entregou o commit {}, não o {} do índice"
+
+msgid "{}: no manifest.toml ({})"
+msgstr "{}: sem manifest.toml ({})"
+
+msgid "{}: invalid manifest: {}"
+msgstr "{}: manifesto inválido: {}"
+
+msgid "{}: this app has no version for {}"
+msgstr "{}: este app não tem versão para {}"
+
+msgid "executable {}, sha256 {}…"
+msgstr "executável {}, sha256 {}…"
+
+msgid "own view and script ({}, {})"
+msgstr "tela própria e script ({}, {})"
+
+msgid "every {} s: {}"
+msgstr "a cada {} s: {}"
+
+msgid "  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author and the store.\n"
+msgstr "  ATENÇÃO: ACESSO TOTAL. Este app roda um programa próprio com as permissões do seu\n  usuário: lê e grava seus arquivos, usa a rede e roda outros programas. Instale só\n  se confia no autor e na loja.\n"
+
+msgid "author: {}   license: {}"
+msgstr "autor: {}   licença: {}"
+
+msgid "repository: {}"
+msgstr "repositório: {}"
+
+msgid "index: {}"
+msgstr "índice: {}"
+
+msgid "local, signature not checked"
+msgstr "local, sem assinatura conferida"
+
+msgid "update from {} to {}"
+msgstr "atualização de {} para {}"
+
+msgid "WARNING, new permission: {}"
+msgstr "ATENÇÃO, permissão nova: {}"
+
+msgid "installation cancelled"
+msgstr "instalação cancelada"
+
+msgid " (turn the app off in the hub and try again)"
+msgstr " (desligue o app no hub e tente de novo)"
+
+msgid "the manifest says id \"{}\", the index \"{}\""
+msgstr "o manifesto diz id \"{}\", o índice \"{}\""
+
+msgid "{}: the manifest is of an app with full access ([app]), but the index does not announce full_access"
+msgstr "{}: o manifesto é de um app com acesso total ([app]), mas o índice não anuncia full_access"
+
+msgid "{}: the index announces full_access, but the manifest is not of an external app ([app])"
+msgstr "{}: o índice anuncia full_access, mas o manifesto não é de um app externo ([app])"
+
+msgid "{}: the index brings an executable for {}, which the manifest does not declare"
+msgstr "{}: o índice traz executável para {}, que o manifesto não declara"
+
+msgid "{}: the index announces sqlite, but the manifest asks for no database ([data] kinds)"
+msgstr "{}: o índice anuncia sqlite, mas o manifesto não pede banco ([data] kinds)"
+
+msgid "{}: the manifest stores data in a database ([data] kinds = [\"sqlite\"]), but the index does not announce sqlite"
+msgstr "{}: o manifesto guarda dados num banco ([data] kinds = [\"sqlite\"]), mas o índice não anuncia sqlite"
+
+msgid "to run"
+msgstr "executar"
+
+msgid "to query (net)"
+msgstr "consultar (net)"
+
+msgid "to read (uses)"
+msgstr "ler (uses)"
+
+msgid "{}: the index announces {} {}, but the manifest asks for {}"
+msgstr "{}: o índice anuncia {} {}, mas o manifesto pede {}"
+
+# removal
+msgid "\"{}\" is not installed"
+msgstr "\"{}\" não está instalado"
+
+msgid "{} removed, but the data stayed: {}"
+msgstr "{} removido, mas os dados ficaram: {}"
+
+msgid "{} removed, with its data"
+msgstr "{} removido, com os dados"
+
+msgid "{} removed; its data is kept for when you reinstall"
+msgstr "{} removido; os dados ficaram guardados para quando você reinstalar"
+
+msgid "{} removed"
+msgstr "{} removido"
+
+msgid "{} has {} of data in {}."
+msgstr "{} tem {} de dados em {}."
+
+msgid "Delete the data too? (no: it is kept for when you reinstall)"
+msgstr "Apagar os dados também? (não: ficam guardados para quando você reinstalar)"
+
+# --store-entry (index maintainers)
+msgid "{} updated; review it and sign with --store-sign"
+msgstr "{} atualizado; revise e assine com --store-sign"
+
+msgid "{}: the tag does not end in v<version> (e.g. repos-v0.2.0); give the version with --app-version"
+msgstr "{}: a tag não termina em v<versão> (ex.: repos-v0.2.0); informe a versão com --app-version"
+
+msgid "{} ({}): no {} ({}); the app subfolder goes in --path"
+msgstr "{} ({}): sem {} ({}); a subpasta do app vai em --path"
+
+msgid "{} is already in the index at that commit ({})"
+msgstr "{} já está no índice nesse commit ({})"
+
+msgid "could not recognize the license from the LICENSE file; give it with --license (e.g. MIT)"
+msgstr "não reconheci a licença pelo arquivo LICENSE; informe com --license (ex.: MIT)"
+
+msgid "{}: an external app needs the Release of tag {} with registry-entry.json (the release workflow makes it): {}"
+msgstr "{}: app externo precisa do Release da tag {} com registry-entry.json (o workflow de release gera): {}"
+
+msgid "{}: it belongs to another app ({} in \"{}\")"
+msgstr "{}: é de outro app ({} em \"{}\")"
+
+msgid "{}: the Release was built from commit {}, but the tag points to {}"
+msgstr "{}: o Release foi compilado do commit {}, mas a tag aponta para {}"
+
+msgid "{}: no executables"
+msgstr "{}: sem executáveis"
+
+msgid "{}: the {} executable is not from this Release ({})"
+msgstr "{}: o executável de {} não é deste Release ({})"
+
+msgid "compare: {}/compare/{}...{}"
+msgstr "comparar: {}/compare/{}...{}"
+
+msgid "{} {} (new in the index)"
+msgstr "{} {} (novo no índice)"
+
+msgid " (folder {})"
+msgstr " (pasta {})"
+
+msgid "permissions: {}"
+msgstr "permissões: {}"
+
+msgid "executables checked (SHA-256 from the Release): {}"
+msgstr "executáveis conferidos (SHA-256 do Release): {}"
+
+msgid "{}: invalid reference"
+msgstr "{}: referência inválida"
+
+msgid "{}: no such tag, branch or commit in the repository (was the tag pushed?) [{}]"
+msgstr "{}: não há essa tag, branch ou commit no repositório (a tag foi enviada?) [{}]"
+
+msgid "{}: use https://… or owner/repository (on GitHub)"
+msgstr "{}: use https://… ou dono/repositório (no GitHub)"

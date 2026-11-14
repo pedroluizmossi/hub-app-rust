@@ -1,8 +1,8 @@
-//! Processos no Windows, pelo crate `sysinfo`.
+//! Processes on Windows, through the `sysinfo` crate.
 //!
-//! O `sysinfo` dá o uso de CPU de cada processo somando os núcleos (passa de 100 numa
-//! máquina com vários); aqui é dividido pelo número de núcleos, para ficar na mesma
-//! escala do Linux.
+//! `sysinfo` gives each process's CPU usage summed over the cores (above 100 on a machine
+//! with several); here it is divided by the number of cores, to be on the same scale as
+//! Linux.
 
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
@@ -36,7 +36,7 @@ impl ProcsProvider {
             .filter_map(|(pid, p)| {
                 let pid = pid.as_u32();
                 let mem_bytes = p.memory();
-                // pid 0 é o "Processo ocioso do sistema": a CPU livre, não um programa
+                // pid 0 is the "System Idle Process": the free CPU, not a program
                 if pid == 0 || mem_bytes == 0 {
                     return None;
                 }

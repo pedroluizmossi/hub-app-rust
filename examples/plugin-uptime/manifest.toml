@@ -1,8 +1,9 @@
-# Plugin de exemplo do MiniUtils: mostra há quanto tempo o computador está ligado.
-# Formato: topo de src/core/plugins.rs no repositório do MiniUtils.
+# MiniUtils example plugin: shows how long the computer has been on.
+# Format: top of src/core/plugins.rs in the MiniUtils repository.
+# Texts (name, description, title) are in English; i18n/pt-BR.po translates them.
 id = "io.github.exemplo.uptime"
-name = "Tempo ligado"
-description = "Há quanto tempo o computador está ligado (uptime -p). Plugin de exemplo da loja."
+name = "Uptime"
+description = "How long the computer has been on (uptime -p). Example plugin from the store."
 icon = "coruja"
 api = 1
 
@@ -14,10 +15,11 @@ command = ["uptime", "-p"]
 every = 30
 
 [display]
-title = "Ligado há"
+title = "Up for"
 lines = 2
 
-# a coruja fica contente depois de um dia ligado, e cansada depois de uma semana
+# the owl is happy after a day on, and tired after a week
+# (the words are matched against the output of uptime -p, which is in English)
 [[mood]]
 contains = "week"
 mood = "busy"

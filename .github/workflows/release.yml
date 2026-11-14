@@ -1,12 +1,12 @@
-# Entrega: uma tag `vX.Y.Z` compila a versão final para Linux e Windows, empacota e publica
-# um Release no GitHub com os arquivos e as somas SHA-256.
+# Delivery: a `vX.Y.Z` tag builds the release version for Linux and Windows, packages it and
+# publishes a GitHub Release with the files and their SHA-256 sums.
 #
 #   git tag v0.2.0 && git push origin v0.2.0
 #
-# A tag tem de bater com a `version` do Cargo.toml. Tag com hífen (`v0.2.0-rc1`) sai como
-# pré-lançamento. Os testes não rodam aqui, e sim no CI (ci.yml) a cada push no master:
-# crie a tag num commit que passou nele. Rodar à mão (aba Actions › Release › Run workflow)
-# só gera os pacotes, como artefatos da execução, sem publicar nada: serve para testar um
+# The tag must match the `version` in Cargo.toml. A tag with a hyphen (`v0.2.0-rc1`) goes out as
+# a pre-release. Tests do not run here but in CI (ci.yml) on every push to master: create
+# the tag on a commit that passed it. Running it by hand (Actions tab › Release › Run workflow)
+# only builds the packages, as run artifacts, without publishing anything: useful to test an
 # `.exe`.
 name: Release
 
@@ -23,13 +23,13 @@ env:
 
 jobs:
   build:
-    name: Pacote ${{ matrix.name }}
+    name: Package ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu mais antigo ainda suportado: o binário roda em distros com glibc mais velha
+          # oldest Ubuntu still supported: the binary runs on distros with an older glibc
           - os: ubuntu-22.04
             name: linux-x86_64
             binary: miniutils
@@ -44,29 +44,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Versão
+      - name: Version
         id: version
         run: |
-          # `cargo pkgid` devolve "…#miniutils@0.2.0" (ou "…#0.2.0"): fica o que vem depois
+          # `cargo pkgid` returns "…#miniutils@0.2.0" (or "…#0.2.0"): keep what comes after
           id=$(cargo pkgid -p miniutils --locked)
           version="${id##*[#@]}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          # numa tag, ela tem de ser a versão do Cargo.toml
+          # on a tag, it must be the version in Cargo.toml
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::a tag $GITHUB_REF_NAME não bate com a versão $version do Cargo.toml"
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
             exit 1
           fi
 
-      - name: Dependências do sistema (Linux)
+      - name: System dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
 
-      - name: Compilar (release)
+      - name: Build (release)
         run: cargo build --release --locked
 
-      - name: Empacotar
+      - name: Package
         id: package
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -97,9 +97,9 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publicar o Release
+    name: Publish the Release
     needs: build
-    # só numa tag; rodando à mão os pacotes ficam como artefatos
+    # only on a tag; run by hand, the packages stay as artifacts
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -109,7 +109,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Criar o Release
+      - name: Create the Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -117,7 +117,7 @@ jobs:
         run: |
           ls -l dist
           flags=(--generate-notes --verify-tag)
-          # v0.2.0-rc1, v0.2.0-beta…: pré-lançamento
+          # v0.2.0-rc1, v0.2.0-beta…: pre-release
           if [[ "$TAG" == *-* ]]; then
             flags+=(--prerelease)
           fi

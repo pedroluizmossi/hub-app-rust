@@ -1,4 +1,4 @@
-# Lumi: poses em grade de 16 × 14; cores em sprites.rs.
+# Lumi: poses on a 16 × 14 grid; colors in sprites.rs.
 
 [idle]
 durations = [900, 250]

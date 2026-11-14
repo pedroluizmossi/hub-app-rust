@@ -1,0 +1,41 @@
+# Brazilian Portuguese for the "Notes" example plugin: the manifest texts and the @tr("…")
+# of view.slint. msgid is the English text, msgstr its translation.
+
+msgid "Notes"
+msgstr "Notas"
+
+msgid "Quick notes that survive turning off and updating, kept in the app's own SQLite database. MiniUtils example plugin."
+msgstr "Notas rápidas que sobrevivem a desligar e a atualizar, guardadas num banco SQLite só do app. Plugin de exemplo do MiniUtils."
+
+msgid "opening…"
+msgstr "abrindo…"
+
+msgid "no notes"
+msgstr "nenhuma nota"
+
+msgid "{} to do · {} done"
+msgstr "{} para fazer · {} feita(s)"
+
+msgid "Clear done"
+msgstr "Limpar feitas"
+
+msgid "new note… (Enter saves)"
+msgstr "nova nota… (Enter guarda)"
+
+msgid "New note"
+msgstr "Nova nota"
+
+msgid "now"
+msgstr "agora"
+
+msgid "{} min ago"
+msgstr "há {} min"
+
+msgid "{} h ago"
+msgstr "há {} h"
+
+msgid "{} d ago"
+msgstr "há {} d"
+
+msgid "{} to do"
+msgstr "{} a fazer"

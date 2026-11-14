@@ -26,7 +26,7 @@ Regras que mantêm as camadas separadas:
 ## 2. Visuais da janela (skins)
 
 Um visual é uma entrada na tabela `BUILTIN` (`src/skin/mod.rs`) ou um arquivo
-`visuais/<chave>.toml` da pessoa (ver [Temas, visuais e fundos por arquivo](#temas-visuais-e-fundos-por-arquivo)).
+`skins/<chave>.toml` da pessoa (ver [Temas, visuais e fundos por arquivo](#temas-visuais-e-fundos-por-arquivo)).
 Nada de layout muda. Por cima do visual, a pessoa escolhe em Configurações › Aparência:
 
 - **Cor de destaque** (`skin::ACCENTS`): troca `accent` e `accent_ink`. `skin::effective`
@@ -112,14 +112,14 @@ Regras:
 
 ### Temas, visuais e fundos por arquivo
 
-Quem usa pode criar os três sem recompilar, em `<dados>/miniutils/` (`miniutils --pastas`
-mostra o caminho; `MINIUTILS_APARENCIA` troca a pasta):
+Quem usa pode criar os três sem recompilar, em `<dados>/miniutils/` (`miniutils --dirs`
+mostra o caminho; `MINIUTILS_APPEARANCE` troca a pasta):
 
 | Pasta | Arquivo | Começa de |
 |---|---|---|
-| `temas/` | `<chave>.toml` com `label`, `base` (um tema; padrão `neon`) e as cores de `COLOR_FIELDS` (`fur`, `visor`… ver [Tema de um app](#tema-de-um-app-colors)) em `"#RRGGBB"` | o tema `base` |
-| `visuais/` | `<chave>.toml` com `label`, `base` (um visual; padrão `neon`), `app_theme`, `backdrop` e qualquer campo da tabela de [Criar um visual](#criar-um-visual) | o visual `base` |
-| `fundos/` | `<chave>.toml` com `label` e `[[layer]]` (de 1 a 32), cada uma com `kind` e os campos da tabela de [Fundos](#fundos) | — |
+| `themes/` | `<chave>.toml` com `label`, `base` (um tema; padrão `neon`) e as cores de `COLOR_FIELDS` (`fur`, `visor`… ver [Tema de um app](#tema-de-um-app-colors)) em `"#RRGGBB"` | o tema `base` |
+| `skins/` | `<chave>.toml` com `label`, `base` (um visual; padrão `neon`), `app_theme`, `backdrop` e qualquer campo da tabela de [Criar um visual](#criar-um-visual) | o visual `base` |
+| `backdrops/` | `<chave>.toml` com `label` e `[[layer]]` (de 1 a 32), cada uma com `kind` e os campos da tabela de [Fundos](#fundos) | — |
 
 - A chave é o nome do arquivo: `a-z`, `0-9`, `-`, `_`, até 32. Não pode repetir um embutido.
 - Num visual: cores em `"#RRGGBB"` (`panel_top` e `edge_inner` aceitam `"none"`); medidas
@@ -128,10 +128,10 @@ mostra o caminho; `MINIUTILS_APARENCIA` troca a pasta):
   `icon`/`bracket`/`chunky`.
 - Um visual pode citar um tema e um fundo de arquivo; um tema pode partir de outro de arquivo.
 - Arquivo com erro fica de fora, com o motivo em Configurações › Aparência (e no
-  registro). Depois de mudar, **Recarregar** (ou `miniutils --recarregar`).
+  registro). Depois de mudar, **Recarregar** (ou `miniutils --reload`).
 - O contraste não é conferido: siga as [regras de contraste](#regras-de-contraste).
 
-Exemplos comentados (um de cada) em [`examples/aparencia/`](examples/aparencia); o teste
+Exemplos comentados (um de cada) em [`examples/appearance/`](examples/appearance); o teste
 `exemplos_carregam_sem_erro` os lê.
 
 ### Fontes
@@ -356,10 +356,10 @@ frames = [ ... ]
 
 [sleep]
 fps = 1                        # ou quadros por segundo, todos iguais
-enter = "boceja"               # toca uma vez ao entrar, antes do loop
+enter = "yawn"                 # toca uma vez ao entrar, antes do loop
 frames = [ ... ]
 
-[boceja]                       # transição: toca uma vez (sem loop)
+[yawn]                         # transição: toca uma vez (sem loop)
 durations = [200, 400, 200]
 frames = [ ... ]
 ```
@@ -381,17 +381,17 @@ citados de todos os arquivos (`arquivos_de_animacao_validos`).
 lê os `.toml` da pasta (todos, sem precisar registrar em `SOURCES`) e recarrega ao salvar;
 erros aparecem no terminal e o arquivo com erro fica de fora até ser corrigido.
 
-**Prévia em GIF:** `cargo run -- --previa neko sleep` grava `neko-sleep.gif` com a animação
-em todos os temas, ampliada (sem o nome da animação, todas em sequência; `--saida` escolhe
+**Prévia em GIF:** `cargo run -- --preview neko sleep` grava `neko-sleep.gif` com a animação
+em todos os temas, ampliada (sem o nome da animação, todas em sequência; `--output` escolhe
 o arquivo). Funciona junto com `MINIUTILS_CLIPS`.
 
 **Desenhar num editor** (Aseprite, LibreSprite, Piskel): exporte uma folha PNG com quadros
 de 16 × 14 lado a lado e converta:
 
 ```sh
-cargo run -p sprite-import -- sleep.png > paleta.toml        # modelo com as cores do PNG
-# troque cada ? em paleta.toml pelo papel da cor (K contorno, P principal, E olho…)
-cargo run -p sprite-import -- sleep.png --paleta paleta.toml --fps 2 >> src/mascot/clips/neko.toml
+cargo run -p sprite-import -- sleep.png > palette.toml        # modelo com as cores do PNG
+# troque cada ? em palette.toml pelo papel da cor (K contorno, P principal, E olho…)
+cargo run -p sprite-import -- sleep.png --palette palette.toml --fps 2 >> src/mascot/clips/neko.toml
 ```
 
 A paleta é por cor, então desenhe com uma cor por papel (a cor real vem do tema do app).
@@ -411,8 +411,8 @@ OpenGameArt, Kenney) funcionam do mesmo jeito se o quadro for 16 × 14; confira 
 ### Mascotes importadas (PNG)
 
 Pixel art de qualquer tamanho (16 × 16, 32 × 32, 64 × 64…), lida de PNG em tempo de
-execução, **da pasta da pessoa**: `mascotes/<chave>/` dentro da pasta de aparência
-(`miniutils --pastas`; Linux `~/.local/share/miniutils/mascotes/`). O código está em
+execução, **da pasta da pessoa**: `mascots/<chave>/` dentro da pasta de aparência
+(`miniutils --dirs`; Linux `~/.local/share/miniutils/mascots/`). O código está em
 `src/mascot/pack.rs`, e o formato completo, comentado, no topo dele.
 
 - **Uma folha por animação**, quadros lado a lado (`Pink_Monster_Walk_6.png` = 6 quadros).
@@ -447,9 +447,9 @@ execução, **da pasta da pessoa**: `mascotes/<chave>/` dentro da pasta de apar�
 
   A opção "Subagentes andando com as mascotes importadas" desliga (andam com a mascote da
   ferramenta).
-- Entra com `miniutils --importar-mascote <pasta>` (copia as folhas de cada personagem da
+- Entra com `miniutils --import-mascot <pasta>` (copia as folhas de cada personagem da
   pasta e das subpastas e escreve o `sprite.toml`) e sai apagando a pasta. Depois de mudar
-  a pasta: **Configurações › Aparência › Recarregar** ou `miniutils --recarregar`.
+  a pasta: **Configurações › Aparência › Recarregar** ou `miniutils --reload`.
 - Limites: quadro de até 256 × 256, até 64 quadros por animação e 32 animações, PNG de até
   4 MiB. A pasta com erro fica de fora com o motivo (Aparência e registro). Só lê PNG e TOML.
 

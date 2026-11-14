@@ -1,4 +1,4 @@
-//! Aba Configurações: a lista de apps e o formulário gerado do manifesto de cada um.
+//! Settings tab: the list of apps and the form generated from each one's manifest.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -10,16 +10,17 @@ use crate::core::manifest::{Manifest, SettingKind};
 use crate::core::miniapp::AppRef;
 use crate::mascot::themes::Theme;
 use crate::mascot::{Mood, render, sprites, themes};
+use crate::tr;
 use crate::ui::{AppInfo, SettingRow};
 
 thread_local! {
-    /// Mascotes já desenhadas para os seletores, por tema (a UI só existe nesta thread).
-    /// A chave leva a geração das importadas: a pasta mudou, desenha de novo.
+    /// Mascots already drawn for the pickers, by theme (the UI only exists on this thread).
+    /// The key carries the generation of the imported ones: the folder changed, draw again.
     static GALLERY: RefCell<HashMap<(&'static str, u64), Vec<Image>>> = RefCell::new(HashMap::new());
 }
 
-/// Todas as mascotes desenhadas no tema `theme`, na ordem de `sprites::all`: é o que
-/// os seletores de mascote mostram. Desenha uma vez por tema e reaproveita.
+/// All mascots drawn in theme `theme`, in the order of `sprites::all`: what the mascot
+/// pickers show. Drawn once per theme and reused.
 pub(super) fn mascot_images(theme: &'static Theme) -> Vec<Image> {
     GALLERY.with(|g| {
         g.borrow_mut()
@@ -29,8 +30,8 @@ pub(super) fn mascot_images(theme: &'static Theme) -> Vec<Image> {
     })
 }
 
-/// Desenho de cada alternativa de uma escolha de mascote ("auto" fica sem desenho, e o
-/// seletor mostra um brilho). Vazio se a opção não é de mascote: aí a tela usa a lista.
+/// Drawing of each alternative of a mascot choice ("auto" has no drawing, and the picker
+/// shows a sparkle). Empty if the option is not a mascot one: then the screen uses the list.
 fn option_images(options: &[String], theme: &'static Theme) -> Vec<Image> {
     if !sprites::is_choice(options) {
         return Vec::new();
@@ -43,7 +44,7 @@ fn option_images(options: &[String], theme: &'static Theme) -> Vec<Image> {
         .collect()
 }
 
-/// O que o usuário fez num campo da aba Apps.
+/// What the user did in a field of the Apps tab.
 pub(super) enum Input {
     Toggle,
     Int(i64),
@@ -73,21 +74,21 @@ impl Hub {
         }
     }
 
-    /// Grade do painel, barra lateral e lista da aba Apps.
+    /// Panel grid, sidebar and the Apps tab list.
     pub(super) fn rebuild_lists(&self) {
         self.rebuild_grid();
         self.rebuild_pages(true);
         self.rebuild_settings();
     }
 
-    /// Lista das Configurações, cada app com o formulário gerado do manifesto.
+    /// The Settings list, each app with the form generated from its manifest.
     ///
-    /// Só é refeita quando muda o que ela mostra: refazer a lista recria os campos e
-    /// fecharia um select aberto (era o que acontecia a cada leitura de CPU).
+    /// Only redone when what it shows changes: redoing the list recreates the fields and
+    /// would close an open select (which used to happen on every CPU reading).
     pub(super) fn rebuild_settings(&self) {
         let fingerprint = {
             let cfg = self.host.config.borrow();
-            // os ids carregados também: um app local entra desligado (sem mudar a config)
+            // the loaded ids too: a local app comes in disabled (without changing the config)
             let ids: Vec<String> = self.registry.all().iter().map(|a| a.borrow().manifest().id.clone()).collect();
             format!("{ids:?}|{:?}|{:?}|{}|{:?}", cfg.enabled, cfg.apps, cfg.skin, cfg.pages)
         };
@@ -159,25 +160,25 @@ impl Hub {
             cfg.save();
         }
         app.borrow_mut().settings_changed(&self.ui);
-        // tema ou mascote podem ter mudado: os ícones da tela (a bandeja se compara sozinha)
+        // theme or mascot may have changed: the screen icons (the tray compares by itself)
         self.rebuild_lists();
     }
 }
 
-/// Rótulo de uma opção de `choice`: nome do tema ou da mascote, se for um.
+/// Label of a `choice` option: name of the theme or mascot, if it is one.
 fn option_label(key: &str) -> String {
     if key == "auto" {
-        "Acompanha a janela".into()
+        tr!("Follows the window").into()
     } else if let Some(t) = themes::find(key) {
-        t.label.into()
+        t.name().into()
     } else if let Some(s) = sprites::find(key) {
-        s.label.into()
+        s.name().into()
     } else {
         key.into()
     }
 }
 
-/// Separa a unidade do fim do rótulo: "Temperatura quente (°C)" -> ("Temperatura quente", "°C").
+/// Splits the unit off the end of the label: "Hot temperature (°C)" -> ("Hot temperature", "°C").
 fn split_unit(label: &str) -> (String, String) {
     for unit in ["%", "°C"] {
         if let Some(base) = label.strip_suffix(&format!(" ({unit})")) {
@@ -187,18 +188,18 @@ fn split_unit(label: &str) -> (String, String) {
     (label.to_string(), String::new())
 }
 
-/// De onde veio o app, para o selo da lista: "" (embutido), "dev" (`--plugin-dev`), "loja"
-/// (tem o `installed.json` que a loja grava) ou "local" (posto à mão na pasta dos apps).
+/// Where the app came from, for the list badge: "" (built-in), "dev" (`--plugin-dev`), "store"
+/// (has the `installed.json` the store writes) or "local" (put by hand in the apps folder).
 fn origin(id: &str) -> &'static str {
     use crate::core::plugins::{self, Plugin};
     if id.starts_with("cyber.") {
         return "";
     }
-    // o plugin em desenvolvimento vale no lugar de um instalado de mesmo id
+    // the plugin in development takes the place of an installed one with the same id
     if plugins::dev_dir().and_then(|d| Plugin::load(d).ok()).is_some_and(|p| p.manifest.id == id) {
         return "dev";
     }
-    if crate::store::installed(&plugins::dir(), id).is_some() { "loja" } else { "local" }
+    if crate::store::installed(&plugins::dir(), id).is_some() { "store" } else { "local" }
 }
 
 #[cfg(test)]
@@ -206,12 +207,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reconhece_as_opcoes_de_mascote_dos_manifestos() {
+    fn recognizes_the_mascot_options_of_the_manifests() {
         let docker = Manifest::parse(include_str!("../../miniapps/docker/manifest.toml")).unwrap();
         let vitals = Manifest::parse(include_str!("../../miniapps/vitals/manifest.toml")).unwrap();
         assert!(sprites::is_choice(&docker.setting("mascot").unwrap().options));
-        assert!(!sprites::is_choice(&docker.setting("theme").unwrap().live_options()), "tema não é mascote");
-        // "auto" entre as alternativas continua sendo escolha de mascote, e fica sem desenho
+        assert!(!sprites::is_choice(&docker.setting("theme").unwrap().live_options()), "a theme is not a mascot");
+        // "auto" among the alternatives is still a mascot choice, and has no drawing
         let gpu = &vitals.setting("gpu_mascot").unwrap().options;
         assert!(gpu.iter().any(|o| o == "auto") && sprites::is_choice(gpu));
         let images = option_images(gpu, themes::get("neon"));
@@ -220,7 +221,7 @@ mod tests {
             assert_eq!(img.size().width == 0, o == "auto", "{o}");
         }
         assert!(option_images(&docker.setting("theme").unwrap().live_options(), themes::get("neon")).is_empty());
-        // só "auto" (sem nenhuma mascote) não é escolha de mascote
+        // only "auto" (with no mascot) is not a mascot choice
         assert!(!sprites::is_choice(&["auto".to_string()]));
     }
 }

@@ -1,4 +1,4 @@
-//! O contrato entre o host e um mini-app.
+//! The contract between the host and a mini-app.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use super::wake::Waker;
 use crate::mascot::{Mood, themes::Theme};
 use crate::ui::HubWindow;
 
-/// O que tocando e quais controles de mídia o menu da bandeja mostra.
+/// What is playing and which media controls the tray menu shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayMedia {
     pub summary: String,
@@ -24,22 +24,22 @@ pub struct TrayMedia {
     pub can_next: bool,
 }
 
-/// O que uma ação em segundo plano tem a dizer ao app que a pediu.
+/// What a background action has to tell the app that asked for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Report {
-    /// Terminou bem.
+    /// Finished fine.
     Done,
-    /// Falhou; a mensagem já vem pronta para a tela.
+    /// Failed; the message comes ready for the screen.
     Error(String),
-    /// Terminou bem e devolveu um texto (a saída de um comando).
+    /// Finished fine and returned a text (the output of a command).
     Output(String),
 }
 
-/// Alça que a thread de uma ação leva consigo para avisar o app do resultado.
+/// Handle an action's thread carries to tell the app the result.
 ///
-/// A UI não é `Send`: a thread só deixa o recado, e o hub o entrega na thread da UI por
-/// `MiniApp::on_report`. Assim o resultado passa pelo estado do app, e a próxima leitura
-/// de um provedor não o apaga da tela.
+/// The UI is not `Send`: the thread only leaves the message, and the hub delivers it on the
+/// UI thread through `MiniApp::on_report`. So the result goes through the app's state, and
+/// the next provider reading does not wipe it off the screen.
 #[derive(Clone)]
 pub struct Reporter {
     app: String,
@@ -66,7 +66,7 @@ impl Reporter {
         }
     }
 
-    /// Recado conforme o resultado: `Done`, ou `Error` com "`prefix`: primeira linha do erro".
+    /// Message matching the result: `Done`, or `Error` with "`prefix`: first line of the error".
     pub fn result<T, E: std::fmt::Display>(&self, prefix: &str, r: &Result<T, E>) {
         match r {
             Ok(_) => self.done(),
@@ -75,18 +75,18 @@ impl Reporter {
     }
 }
 
-/// Serviços que o host oferece a todos os mini-apps.
+/// Services the host offers every mini-app.
 pub struct Host {
     pub config: RefCell<Config>,
     pub bus: Bus,
     pub notifier: RefCell<Notifier>,
-    /// Um app mudou a própria configuração: o hub redesenha o formulário da aba Apps.
+    /// An app changed its own settings: the hub redraws the form on the Apps tab.
     pub settings_dirty: Cell<bool>,
-    /// Recados das ações em segundo plano (ver `Reporter`).
+    /// Messages from background actions (see `Reporter`).
     reports: (Sender<AppReport>, Receiver<AppReport>),
 }
 
-/// Recado de um app: id do app e o recado.
+/// A message for an app: the app id and the message.
 type AppReport = (String, Report);
 
 impl Host {
@@ -100,17 +100,17 @@ impl Host {
         }
     }
 
-    /// Alça para uma thread avisar o app `m` de como a ação terminou.
+    /// Handle for a thread to tell app `m` how the action ended.
     pub fn reporter(&self, m: &Manifest) -> Reporter {
         Reporter { app: m.id.clone(), tx: self.reports.0.clone(), waker: self.bus.waker().clone() }
     }
 
-    /// Recados pendentes, com o id do app de cada um (chamado na thread da UI).
+    /// Pending messages, each with its app id (called on the UI thread).
     pub fn drain_reports(&self) -> Vec<(String, Report)> {
         self.reports.1.try_iter().collect()
     }
 
-    /// Tema escolhido pelo mini-app (cada app tem o seu). "auto" acompanha o visual da janela.
+    /// Theme chosen for the mini-app (each app has its own). "auto" follows the window skin.
     pub fn theme_for(&self, m: &Manifest) -> &'static Theme {
         let cfg = self.config.borrow();
         let key = cfg.string(m, "theme");
@@ -118,8 +118,8 @@ impl Host {
         crate::mascot::themes::get(&key)
     }
 
-    /// Muda uma opção do app (ex.: um botão da própria tela), grava e avisa as
-    /// Configurações para redesenhar o formulário.
+    /// Changes an app option (e.g. from a button on its own screen), saves it and tells
+    /// Settings to redraw the form.
     pub fn set_setting(&self, m: &Manifest, key: &str, value: toml::Value) {
         {
             let mut cfg = self.config.borrow_mut();
@@ -129,96 +129,97 @@ impl Host {
         self.settings_dirty.set(true);
     }
 
-    /// Inverte uma opção `bool` do app; devolve o valor novo.
+    /// Flips a `bool` option of the app; returns the new value.
     pub fn toggle_setting(&self, m: &Manifest, key: &str) -> bool {
         let on = !self.config.borrow().bool(m, key);
         self.set_setting(m, key, toml::Value::Boolean(on));
         on
     }
 
-    /// Executor restrito à allowlist do manifesto.
+    /// Executor restricted to the manifest's allowlist.
     pub fn exec_for(&self, m: &Manifest) -> Exec {
         Exec::new(&m.id, &m.permissions.exec)
     }
 }
 
-/// Um mini-app hospedado pelo hub.
+/// A mini-app hosted by the hub.
 ///
-/// Todas as chamadas acontecem na thread da UI. Um app desligado não recebe nada.
+/// Every call happens on the UI thread. A disabled app receives nothing.
 pub trait MiniApp {
     fn manifest(&self) -> &Manifest;
 
-    /// Ligou: prepara o estado e preenche a tela.
+    /// Enabled: prepares the state and fills the screen.
     fn enable(&mut self, _ui: &HubWindow) {}
 
-    /// Desligou: solta o que estiver segurando.
+    /// Disabled: lets go of whatever it holds.
     fn disable(&mut self, _ui: &HubWindow) {}
 
-    /// Chegou uma leitura de um provedor que o app assina.
+    /// A reading arrived from a provider the app subscribes to.
     fn on_event(&mut self, ev: &Event, ui: &HubWindow);
 
-    /// Uma ação em segundo plano do app terminou (ver `Host::reporter`). Chega mesmo com
-    /// a página do app fechada.
+    /// A background action of the app finished (see `Host::reporter`). Arrives even when
+    /// the app's page is closed.
     fn on_report(&mut self, _report: &Report, _ui: &HubWindow) {}
 
-    /// A janela do hub abriu (o app pode pedir uma leitura nova para não mostrar dado velho).
+    /// The hub window opened (the app may ask for a fresh reading so it doesn't show stale data).
     fn window_shown(&mut self, _ui: &HubWindow) {}
 
-    /// Um quadro de animação (4 a 8/s), só com a janela aberta na página do app.
+    /// An animation frame (4 to 8/s), only while the window is open on the app's page.
     fn tick(&mut self, _frame: u32, _ui: &HubWindow) {}
 
-    /// O usuário mudou alguma configuração ou o tema.
+    /// The user changed a setting or the theme.
     fn settings_changed(&mut self, _ui: &HubWindow) {}
 
-    /// O que o app guarda (`[data]`; ver `core/appdata.rs`).
+    /// What the app stores (`[data]`; see `core/appdata.rs`).
     fn data_spec(&self) -> crate::core::appdata::DataSpec {
         self.manifest().data.clone().unwrap_or_else(|| crate::core::appdata::DataSpec::with(&[]))
     }
 
-    /// Vão apagar os dados do app (`core/appdata.rs`): pare de usar os arquivos (feche o
-    /// banco, pare o processo). O hub espera `data_released` e depois chama `reload_data`.
+    /// The app's data is about to be deleted (`core/appdata.rs`): stop using the files
+    /// (close the database, stop the process). The hub waits for `data_released` and then
+    /// calls `reload_data`.
     fn release_data(&mut self, _ui: &HubWindow) {}
 
-    /// Os arquivos de dados já estão soltos (a thread do script ou o processo terminou).
+    /// The data files are no longer in use (the script thread or the process ended).
     fn data_released(&self) -> bool {
         true
     }
 
-    /// Os dados mudaram por fora (apagados): releia, e volte a rodar se estava ligado.
+    /// The data changed from outside (deleted): read it again, and run again if enabled.
     fn reload_data(&mut self, _ui: &HubWindow) {}
 
-    /// Humor do app; a bandeja mostra o app em pior estado.
+    /// Mood of the app; the tray shows the app in the worst state.
     fn mood(&self) -> Mood;
 
-    /// Mascote que representa o app agora (bandeja quando ele é o pior humor).
+    /// Mascot that represents the app now (in the tray when it has the worst mood).
     fn mascot_key(&self) -> String {
         self.manifest().icon.clone()
     }
 
-    /// Uma linha para o tooltip da bandeja.
+    /// One line for the tray tooltip.
     fn summary(&self) -> String;
 
-    /// Informações e controles opcionais de mídia para o menu da bandeja.
+    /// Optional media info and controls for the tray menu.
     fn tray_media(&self) -> Option<TrayMedia> {
         None
     }
 
-    /// Escolheram um controle de mídia no menu da bandeja (só chega ao app cuja
-    /// `tray_media` está no menu). Verbos: `prev`, `play-pause`, `next`.
+    /// A media control was picked in the tray menu (only reaches the app whose
+    /// `tray_media` is in the menu). Verbs: `prev`, `play-pause`, `next`.
     fn tray_command(&mut self, _verb: &str, _ui: &HubWindow) {}
 
-    /// Fatos novos para a conversa entre mascotes (o hub recolhe depois de cada leitura).
+    /// New facts for the mascot chatter (the hub collects them after each reading).
     fn take_facts(&mut self) -> Vec<Fact> {
         Vec::new()
     }
 
-    /// Mascotes deste app que podem responder numa conversa.
+    /// Mascots of this app that may answer in a conversation.
     fn voices(&self) -> Vec<Voice> {
         Vec::new()
     }
 
-    /// Falas próprias das mascotes deste app: o conteúdo de `miniapps/<app>/lines.toml`
-    /// (formato em `core/chatter.rs`). Vazio = só as falas genéricas do hub.
+    /// Own lines of this app's mascots: the content of `miniapps/<app>/lines.toml`
+    /// (format in `core/chatter.rs`). Empty = only the hub's generic lines.
     fn lines(&self) -> &'static str {
         ""
     }

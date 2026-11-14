@@ -2,12 +2,12 @@
 name = "miniutils-ui"
 version = "0.1.0"
 edition = "2024"
-description = "Interface Slint do MiniUtils (ui/hub.slint e as telas dos mini-apps), compilada à parte"
+description = "MiniUtils Slint interface (ui/hub.slint and the mini-app screens), compiled separately"
 license = "MIT"
 publish = false
 
-# Crate só da interface: o código gerado pelo Slint (dezenas de milhares de linhas) fica
-# em cache aqui, e mudar só o Rust do app não o recompila.
+# Interface-only crate: the code Slint generates (tens of thousands of lines) stays cached
+# here, so changing only the app's Rust does not recompile it.
 [lib]
 path = "src/lib.rs"
 
@@ -17,9 +17,9 @@ slint = { workspace = true }
 [build-dependencies]
 slint-build = { workspace = true }
 
-# Só desenvolvimento; ligados pelos recursos de mesmo nome do crate raiz (ver Cargo.toml).
+# Development only; enabled by the root crate's features of the same name (see Cargo.toml).
 [features]
-# servidor MCP do Slint; o build.rs também grava os ids dos elementos para ele achá-los
+# Slint MCP server; build.rs also records element ids so it can find them
 dev-mcp = ["slint/mcp"]
-# o código gerado passa a interpretar os .slint e os recarrega ao salvar (ver build.rs)
+# the generated code interprets the .slint files and reloads them on save (see build.rs)
 live-preview = ["slint/live-preview"]

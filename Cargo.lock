@@ -3341,7 +3341,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniutils"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3362,6 +3362,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-interpreter",
+ "sys-locale",
  "sysinfo",
  "toml 1.2.1+spec-1.1.0",
  "tray-icon",

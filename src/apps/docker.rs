@@ -1,4 +1,4 @@
-//! Mini-app Docker: lista de containers, eventos (queda, loop, unhealthy, volta) e ações.
+//! Docker mini-app: container list, events (crash, loop, unhealthy, back up) and actions.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -15,6 +15,7 @@ use crate::core::miniapp::{Host, MiniApp, Report};
 use super::kit::{HeaderMascot, Speech, unix_now};
 use crate::mascot::anim::Reaction;
 use crate::mascot::{Mood, render, sprites};
+use crate::tr;
 use crate::providers::docker::{
     Container, DockerSnapshot, Stats, format_age, format_bytes, valid_container_name, valid_project_name,
 };
@@ -47,23 +48,23 @@ pub struct DockerMini {
     baseline: bool,
     crashes: HashMap<String, Instant>,
     speech: Speech,
-    /// Fala de uma ação em curso ("Parando web…"): sai quando a ação termina.
+    /// Speech of an action in progress ("Stopping web…"): goes away when the action ends.
     working: Option<String>,
     search: String,
-    /// Projetos com o grupo recolhido ("" = avulsos).
+    /// Projects whose group is collapsed ("" = standalone).
     collapsed: HashSet<String>,
     mood: Mood,
     rows: Rc<VecModel<ContainerRow>>,
-    /// A mascote do cabeçalho (comemora quando um container volta).
+    /// The header mascot (celebrates when a container comes back).
     face: HeaderMascot,
-    /// Fatos para a conversa entre mascotes, até o hub recolher.
+    /// Facts for the chat between mascots, until the hub collects them.
     facts: Vec<Fact>,
 }
 
 impl DockerMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
         let manifest = Manifest::parse(include_str!("../../miniapps/docker/manifest.toml"))
-            .expect("manifesto do Docker inválido");
+            .expect("invalid Docker manifest");
         let rows = Rc::new(VecModel::default());
         ui.global::<DockerApp>().set_rows(ModelRc::from(rows.clone()));
         let app = Rc::new(RefCell::new(DockerMini {
@@ -91,7 +92,7 @@ impl DockerMini {
         let g = ui.global::<DockerApp>();
         let weak_ui = ui.as_weak();
 
-        // easter egg: cutucar a mascote algumas vezes
+        // easter egg: poke the mascot a few times
         let a = Rc::downgrade(app);
         let w = weak_ui.clone();
         g.on_mascot_poked(move || {
@@ -176,7 +177,7 @@ impl DockerMini {
         });
     }
 
-    /// Fala enquanto uma ação roda em segundo plano; o resultado chega por `on_report`.
+    /// Speaks while an action runs in the background; the result arrives through `on_report`.
     fn say_working(&mut self, text: String) {
         self.working = Some(text.clone());
         self.speech.say(text);
@@ -190,15 +191,15 @@ impl DockerMini {
             "start" | "stop" | "restart" | "pause" | "unpause" => {
                 let poker = self.host.bus.poker(Topic::Docker);
                 let reporter = self.host.reporter(&self.manifest);
-                let label = match verb {
-                    "start" => "Iniciando",
-                    "stop" => "Parando",
-                    "pause" => "Pausando",
-                    "unpause" => "Retomando",
-                    _ => "Reiniciando",
+                let text = match verb {
+                    "start" => tr!("Starting {}…", name),
+                    "stop" => tr!("Stopping {}…", name),
+                    "pause" => tr!("Pausing {}…", name),
+                    "unpause" => tr!("Resuming {}…", name),
+                    _ => tr!("Restarting {}…", name),
                 };
-                self.say_working(format!("{label} {name}…"));
-                let prefix = format!("Falhou em {name}");
+                self.say_working(text);
+                let prefix = tr!("Failed on {}", name);
                 self.exec.run_async("docker", &[verb, name], move |r| {
                     poker.poke();
                     reporter.result(&prefix, &r);
@@ -218,22 +219,22 @@ impl DockerMini {
         self.push_header(ui);
     }
 
-    /// Ação na stack inteira: `docker compose -p <projeto> start|stop|restart`.
+    /// Action on the whole stack: `docker compose -p <project> start|stop|restart`.
     fn stack_action(&mut self, verb: &str, project: &str, ui: &HubWindow) {
         if !valid_project_name(project) {
             return;
         }
-        let label = match verb {
-            "start" => "Subindo",
-            "stop" => "Parando",
-            "restart" => "Reiniciando",
+        let text = match verb {
+            "start" => tr!("Starting stack {}…", project),
+            "stop" => tr!("Stopping stack {}…", project),
+            "restart" => tr!("Restarting stack {}…", project),
             _ => return,
         };
-        self.say_working(format!("{label} stack {project}…"));
+        self.say_working(text);
         let poker = self.host.bus.poker(Topic::Docker);
         let reporter = self.host.reporter(&self.manifest);
-        let prefix = format!("Falhou na stack {project}");
-        // start/stop/restart funcionam só com o nome do projeto, sem o arquivo do compose
+        let prefix = tr!("Failed on stack {}", project);
+        // start/stop/restart work with just the project name, without the compose file
         self.exec.run_async("docker", &["compose", "-p", project, verb], move |r| {
             poker.poke();
             reporter.result(&prefix, &r);
@@ -241,7 +242,7 @@ impl DockerMini {
         self.push_header(ui);
     }
 
-    // ---- regras -------------------------------------------------------------
+    // ---- rules ---------------------------------------------------------------
 
     fn crashed(&self, c: &Container) -> bool {
         self.crashes.get(&c.name).is_some_and(|t| t.elapsed() < CRASH_WINDOW)
@@ -253,7 +254,7 @@ impl DockerMini {
 
     fn ingest(&mut self, snap: DockerSnapshot) -> Vec<DockerEvent> {
         let now = Instant::now();
-        // queda = estava rodando e saiu com código de erro (137/143 = parado de propósito)
+        // crash = was running and exited with an error code (137/143 = stopped on purpose)
         for c in &snap.containers {
             let was_running = self.prev.get(&c.name).is_some_and(|p| p.state == "running");
             if was_running && c.state == "exited" && ![0, 137, 143].contains(&c.exit_code) {
@@ -285,36 +286,36 @@ impl DockerMini {
             let cfg = self.host.config.borrow();
             (cfg.bool(&self.manifest, "notify"), cfg.bool(&self.manifest, "notify_recovery"))
         };
-        // a mascote comenta o evento mais grave (problemas antes de recuperações)
+        // the mascot comments on the most serious event (problems before recoveries)
         let mut said = false;
         for ev in &events {
             let (key, title, body, urgent) = match ev {
                 DockerEvent::Crash { name, code } => (
                     format!("crash:{name}"),
-                    format!("💥 {name} caiu"),
-                    format!("O container saiu com código {code}."),
+                    tr!("💥 {} crashed", name),
+                    tr!("The container exited with code {}.", code),
                     true,
                 ),
                 DockerEvent::Restarting(n) => (
                     format!("restarting:{n}"),
-                    format!("🔁 {n} está em loop de reinício"),
-                    "O container não para de reiniciar.".into(),
+                    tr!("🔁 {} is in a restart loop", n),
+                    tr!("The container keeps restarting.").into(),
                     true,
                 ),
                 DockerEvent::Unhealthy(n) => (
                     format!("unhealthy:{n}"),
-                    format!("🩺 {n} está unhealthy"),
-                    "O healthcheck do container está falhando.".into(),
+                    tr!("🩺 {} is unhealthy", n),
+                    tr!("The container's healthcheck is failing.").into(),
                     true,
                 ),
                 DockerEvent::Recovered(n) => (
                     format!("recovered:{n}"),
-                    format!("♥ {n} voltou!"),
-                    "O container está rodando normalmente de novo.".into(),
+                    tr!("♥ {} is back!", n),
+                    tr!("The container is running normally again.").into(),
                     false,
                 ),
             };
-            // conversa entre mascotes: o Docker conta o que houve com o container
+            // chat between mascots: Docker tells what happened to the container
             let (kind, subject) = match ev {
                 DockerEvent::Crash { name, .. } | DockerEvent::Restarting(name) | DockerEvent::Unhealthy(name) => {
                     (FactKind::Trouble, name)
@@ -327,7 +328,7 @@ impl DockerMini {
                 self.speech.say(title.clone());
                 said = true;
             }
-            // container de volta: a mascote comemora (reação curta, não um humor)
+            // container back up: the mascot celebrates (a short reaction, not a mood)
             if !urgent && !self.host.config.borrow().reduce_motion {
                 self.face.react(Reaction::Celebrate);
             }
@@ -337,7 +338,7 @@ impl DockerMini {
         }
     }
 
-    /// A mascote do Docker, para a conversa entre mascotes.
+    /// The Docker mascot, for the chat between mascots.
     fn voice(&self) -> Voice {
         Voice {
             app: self.manifest.id.clone(),
@@ -350,7 +351,7 @@ impl DockerMini {
 
     fn compute_mood(&self) -> Mood {
         let s = &self.snap;
-        // sem Docker na máquina não há o que vigiar: dorme, não alarma
+        // without Docker on the machine there is nothing to watch: sleep, don't alarm
         if s.missing {
             return Mood::Sleep;
         }
@@ -364,20 +365,20 @@ impl DockerMini {
         if s.containers.iter().any(|c| c.state == "running") { Mood::Idle } else { Mood::Sleep }
     }
 
-    /// A partir de quanto de CPU um container conta como "ocupado" (configuração do app).
+    /// From how much CPU a container counts as "busy" (app setting).
     fn busy_cpu(&self) -> f32 {
         self.host.config.borrow().int(&self.manifest, "busy_cpu") as f32
     }
 
-    // ---- tela ---------------------------------------------------------------
+    // ---- screen ---------------------------------------------------------------
 
-    /// Redesenha a mascote agora; `true` se a imagem ou a reação mudou.
+    /// Redraws the mascot now; `true` if the image or the reaction changed.
     fn refresh_mascot(&mut self) -> bool {
         let sprite = sprites::get(&self.mascot_key());
         self.face.refresh(sprite, self.host.theme_for(&self.manifest), self.mood)
     }
 
-    /// Redesenha a mascote e entrega imagem e reação à tela.
+    /// Redraws the mascot and hands image and reaction to the screen.
     fn push_mascot(&mut self, ui: &HubWindow) {
         self.refresh_mascot();
         let g = ui.global::<DockerApp>();
@@ -401,7 +402,7 @@ impl DockerMini {
         g.set_ok(self.snap.ok);
         g.set_missing(self.snap.missing);
         g.set_error_text(if self.snap.missing {
-            "O comando docker não foi encontrado no PATH.".into()
+            tr!("The docker command was not found in PATH.").into()
         } else {
             SharedString::from(self.snap.error.as_str())
         });
@@ -411,9 +412,9 @@ impl DockerMini {
 
         let speech = match self.speech.current() {
             Some(t) => t.to_string(),
-            _ if errors > 0 => format!("{errors} container(s) com problema!"),
-            _ if running == 0 => "Nenhum container rodando… zzz".into(),
-            _ => format!("Tudo certo: {running} rodando."),
+            _ if errors > 0 => tr!("{} container(s) with problems!", errors),
+            _ if running == 0 => tr!("No containers running… zzz").into(),
+            _ => tr!("All good: {} running.", running),
         };
         g.set_speech(speech.into());
         g.set_voice(Voice::id_of(&self.manifest.id, &self.manifest.name).into());
@@ -421,7 +422,7 @@ impl DockerMini {
         let cpu: f32 = self.snap.stats.values().map(|s| s.cpu).sum();
         let mem: u64 = self.snap.stats.values().map(|s| s.mem).sum();
         g.set_usage_text(if running > 0 {
-            format!("Docker usando {cpu:.0}% de CPU e {} de RAM", format_bytes(mem as f64)).into()
+            tr!("Docker using {}% CPU and {} RAM", format!("{cpu:.0}"), format_bytes(mem as f64)).into()
         } else {
             SharedString::default()
         });
@@ -434,7 +435,7 @@ impl DockerMini {
             .snap
             .containers
             .iter()
-            // pausado continua visível: senão não dá para retomar com "só ativos"
+            // paused stays visible: otherwise it can't be resumed with "active only"
             .filter(|c| !hide_stopped || c.state == "running" || c.state == "paused" || self.is_problem(c))
             .filter(|c| {
                 q.is_empty()
@@ -449,14 +450,14 @@ impl DockerMini {
         let sort = self.host.config.borrow().string(&self.manifest, "sort");
         sort_containers(&mut list, &sort, &self.snap.stats, rank);
 
-        // agrupa por stack; sem nenhum projeto, lista simples (sem cabeçalhos)
+        // groups by stack; with no project at all, a plain list (no headers)
         let groups = group_by_project(&self.snap.containers, &list, |c| self.is_problem(c));
         let grouped = groups.iter().any(|g| !g.project.is_empty());
         let mut rows: Vec<ContainerRow> = Vec::with_capacity(list.len() + groups.len());
         let busy_cpu = self.busy_cpu();
         for g in &groups {
             if grouped {
-                // com busca ativa, mostra tudo: senão o resultado fica escondido no grupo recolhido
+                // with an active search, shows everything: otherwise the result stays hidden in a collapsed group
                 let collapsed = q.is_empty() && self.collapsed.contains(g.project);
                 rows.push(header_row(g, collapsed));
                 if collapsed {
@@ -466,7 +467,7 @@ impl DockerMini {
             rows.extend(g.items.iter().map(|c| self.row(c, busy_cpu)));
         }
         ui.global::<DockerApp>().set_grouped(grouped);
-        // só troca o modelo quando algo mudou: evita reconstruir a lista à toa
+        // only replaces the model when something changed: avoids rebuilding the list for nothing
         let same = self.rows.row_count() == rows.len()
             && rows.iter().enumerate().all(|(i, r)| self.rows.row_data(i).as_ref() == Some(r));
         if !same {
@@ -480,16 +481,16 @@ impl DockerMini {
         let state_text = if c.health == "unhealthy" {
             "unhealthy".to_string()
         } else if c.state == "restarting" {
-            "em loop de reinício".into()
+            tr!("in a restart loop").into()
         } else if problem {
-            format!("caiu (código {})", c.exit_code)
+            tr!("crashed (code {})", c.exit_code)
         } else {
             match c.state.as_str() {
-                "running" if c.health == "healthy" => "rodando · saudável".into(),
-                "running" => "rodando".into(),
-                "exited" => format!("parado ({})", c.exit_code),
-                "paused" => "pausado".into(),
-                "created" => "criado".into(),
+                "running" if c.health == "healthy" => tr!("running · healthy").into(),
+                "running" => tr!("running").into(),
+                "exited" => tr!("stopped ({})", c.exit_code),
+                "paused" => tr!("paused").into(),
+                "created" => tr!("created").into(),
                 s => s.to_string(),
             }
         };
@@ -523,30 +524,30 @@ impl DockerMini {
     }
 }
 
-/// Grupo da lista: um projeto do Compose ("" = avulsos) e seus containers visíveis.
+/// Group of the list: a Compose project ("" = standalone) and its visible containers.
 #[derive(Debug, PartialEq)]
 pub struct Group<'a> {
     pub project: &'a str,
     pub items: Vec<&'a Container>,
-    /// Contagens da stack inteira (não só do que passou no filtro).
+    /// Counts of the whole stack (not only what passed the filter).
     pub running: usize,
-    /// Rodando, pausados ou reiniciando: o que `compose stop` ainda tem a parar.
+    /// Running, paused or restarting: what `compose stop` still has to stop.
     pub active: usize,
     pub total: usize,
     pub problems: usize,
 }
 
-/// Modos de ordenação, na ordem do ciclo do botão.
+/// Sort modes, in the order the button cycles through them. They are config values: keep them.
 pub const SORTS: [&str; 4] = ["estado", "nome", "cpu", "ram"];
 
-/// Próximo modo do ciclo (desconhecido volta ao começo).
+/// Next mode in the cycle (an unknown one goes back to the start).
 pub fn next_sort(cur: &str) -> &'static str {
     let i = SORTS.iter().position(|s| *s == cur).map_or(0, |i| i + 1);
     SORTS[i % SORTS.len()]
 }
 
-/// Ordena os visíveis. "estado" usa `rank` (problema primeiro); cpu/ram do maior
-/// para o menor; empate sempre por nome. Os grupos mantêm essa ordem por dentro.
+/// Sorts the visible ones. "estado" (state) uses `rank` (problems first); cpu/ram from
+/// largest to smallest; ties always by name. Groups keep this order inside.
 pub fn sort_containers(list: &mut [&Container], mode: &str, stats: &HashMap<String, Stats>, rank: impl Fn(&Container) -> u8) {
     let st = |c: &Container| stats.get(&c.name).copied().unwrap_or_default();
     list.sort_by(|a, b| {
@@ -560,8 +561,9 @@ pub fn sort_containers(list: &mut [&Container], mode: &str, stats: &HashMap<Stri
     });
 }
 
-/// Agrupa os visíveis (já ordenados) por projeto, mantendo a ordem dentro do grupo.
-/// Stacks com problema primeiro, depois por nome; avulsos no fim. Grupo sem visíveis some.
+/// Groups the visible ones (already sorted) by project, keeping the order inside each group.
+/// Stacks with problems first, then by name; standalone at the end. A group with nothing
+/// visible disappears.
 pub fn group_by_project<'a>(
     all: &'a [Container],
     visible: &[&'a Container],
@@ -589,21 +591,22 @@ pub fn group_by_project<'a>(
     out
 }
 
-/// "2/3 rodando · 1 com problema".
+/// "2/3 running · 1 with problems".
 pub fn group_text(g: &Group) -> String {
-    let mut s = format!("{}/{} rodando", g.running, g.total);
+    let mut s = tr!("{}/{} running", g.running, g.total);
     if g.problems > 0 {
-        s += &format!(" · {} com problema", g.problems);
+        s += " · ";
+        s += &tr!("{} with problems", g.problems);
     }
     s
 }
 
-/// Linha de cabeçalho do grupo (`project` vazio = avulsos, sem ações de stack).
+/// Header row of the group (empty `project` = standalone, no stack actions).
 fn header_row(g: &Group, collapsed: bool) -> ContainerRow {
     ContainerRow {
         header: true,
         collapsed,
-        name: if g.project.is_empty() { "Avulsos".into() } else { g.project.into() },
+        name: if g.project.is_empty() { tr!("Standalone").into() } else { g.project.into() },
         project: g.project.into(),
         running: g.running > 0,
         active: g.active > 0,
@@ -614,26 +617,26 @@ fn header_row(g: &Group, collapsed: bool) -> ContainerRow {
 }
 
 
-/// Há quanto tempo está no estado atual: "há 3 d" (rodando desde / parado desde). "" se não sei.
+/// How long it has been in the current state: "3 d ago" (running since / stopped since). "" if unknown.
 pub fn age_text(c: &Container, now: i64) -> String {
     let since = match c.state.as_str() {
         "running" => c.started_at,
         "exited" | "dead" => c.finished_at,
         _ => 0,
     };
-    if since > 0 { format!("há {}", format_age(now - since)) } else { String::new() }
+    if since > 0 { tr!("{} ago", format_age(now - since)) } else { String::new() }
 }
 
-/// 0 -> "", 1 -> "1 reinício", 2 -> "2 reinícios".
+/// 0 -> "", 1 -> "1 restart", 2 -> "2 restarts".
 pub fn restarts_text(n: u32) -> String {
     match n {
         0 => String::new(),
-        1 => "1 reinício".into(),
-        n => format!("{n} reinícios"),
+        1 => tr!("1 restart").into(),
+        n => tr!("{} restarts", n),
     }
 }
 
-/// Compara a leitura anterior com a atual e devolve o que vale avisar.
+/// Compares the previous reading with the current one and returns what is worth warning about.
 pub fn detect_events(prev: &HashMap<String, Prev>, now: &[Container], cur: &HashMap<String, Prev>) -> Vec<DockerEvent> {
     let mut out = Vec::new();
     for c in now {
@@ -648,7 +651,7 @@ pub fn detect_events(prev: &HashMap<String, Prev>, now: &[Container], cur: &Hash
             out.push(DockerEvent::Recovered(c.name.clone()));
         }
     }
-    // problemas antes de recuperações
+    // problems before recoveries
     out.sort_by_key(|e| matches!(e, DockerEvent::Recovered(_)));
     out
 }
@@ -658,14 +661,14 @@ impl MiniApp for DockerMini {
         &self.manifest
     }
 
-    /// O Docker é o provedor que mais atrasa: ao abrir a janela, lê tudo de novo para a
-    /// tela não nascer velha.
+    /// Docker is the slowest provider: when the window opens, read everything again so the
+    /// screen doesn't start out stale.
     fn window_shown(&mut self, _ui: &HubWindow) {
         self.host.bus.poke(Topic::Docker);
     }
 
     fn enable(&mut self, ui: &HubWindow) {
-        self.baseline = false; // sem histórico: não acusa eventos antigos
+        self.baseline = false; // no history: don't report old events
         ui.global::<DockerApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.push_mascot(ui);
         self.push_header(ui);
@@ -688,9 +691,9 @@ impl MiniApp for DockerMini {
     fn on_report(&mut self, report: &Report, ui: &HubWindow) {
         let working = self.working.take();
         match report {
-            // a falha fica na fala (com o prazo normal), em vez de sumir na próxima leitura
+            // the failure stays in the speech (with the normal expiry), instead of vanishing at the next reading
             Report::Error(msg) => self.speech.say(msg.clone()),
-            // deu certo: tira o "Parando X…", a menos que outra fala já tenha entrado
+            // it worked: remove the "Stopping X…", unless another line has already come in
             Report::Done | Report::Output(_) => {
                 if working.is_some_and(|w| self.speech.is(&w)) {
                     self.speech.clear();
@@ -701,13 +704,13 @@ impl MiniApp for DockerMini {
     }
 
     fn tick(&mut self, _frame: u32, ui: &HubWindow) {
-        // a fala vence no prazo, e o humor muda quando um "caiu agora" envelhece
+        // the speech expires on time, and the mood changes when a "just crashed" gets old
         let mood = self.compute_mood();
         if self.speech.take_expired() || mood != self.mood {
             self.mood = mood;
             self.push_header(ui);
         }
-        // o ritmo vem do relógio do `Animator`, não do quadro do hub
+        // the pace comes from the `Animator` clock, not from the hub frame
         if self.refresh_mascot() {
             self.push_mascot(ui);
         }
@@ -742,15 +745,16 @@ impl MiniApp for DockerMini {
 
     fn summary(&self) -> String {
         if self.snap.missing {
-            return "Docker: não instalado".into();
+            return tr!("Docker: not installed").into();
         }
         if !self.snap.ok {
-            return "Docker: fora do ar".into();
+            return tr!("Docker: down").into();
         }
         let (running, stopped, errors) = self.counts();
-        let mut s = format!("Docker: {running}/{} rodando", running + stopped);
+        let mut s = tr!("Docker: {}/{} running", running, running + stopped);
         if errors > 0 {
-            s += &format!(" · {errors} com problema");
+            s += " · ";
+            s += &tr!("{} with problems", errors);
         }
         s
     }
@@ -772,7 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn ordena() {
+    fn sorts() {
         let (a, b, z) = (c("a", "running", 0, ""), c("b", "exited", 1, ""), c("z", "running", 0, ""));
         let mut stats = HashMap::new();
         stats.insert("a".to_string(), Stats { cpu: 5.0, mem: 300 });
@@ -793,65 +797,65 @@ mod tests {
     }
 
     #[test]
-    fn agrupa_por_projeto() {
+    fn groups_by_project() {
         let all = vec![
-            cp("loja-web", "running", "loja"),
-            cp("loja-db", "exited", "loja"),
+            cp("shop-web", "running", "shop"),
+            cp("shop-db", "exited", "shop"),
             cp("api-app", "running", "api"),
             cp("api-cache", "restarting", "api"),
-            cp("solto", "running", ""),
+            cp("loose", "running", ""),
             cp("blog-web", "exited", "blog"),
         ];
         let problem = |c: &Container| c.state == "restarting";
-        // "esconder parados": blog some inteiro, loja-db some mas conta no total
+        // "hide stopped": blog disappears entirely, shop-db disappears but counts in the total
         let visible: Vec<&Container> = all.iter().filter(|c| c.state != "exited").collect();
         let gs = group_by_project(&all, &visible, problem);
         let names: Vec<(&str, Vec<&str>)> =
             gs.iter().map(|g| (g.project, g.items.iter().map(|c| c.name.as_str()).collect())).collect();
         assert_eq!(names, vec![
-            ("api", vec!["api-app", "api-cache"]), // com problema primeiro
-            ("loja", vec!["loja-web"]),
-            ("", vec!["solto"]),                   // avulsos no fim
+            ("api", vec!["api-app", "api-cache"]), // with problems first
+            ("shop", vec!["shop-web"]),
+            ("", vec!["loose"]),                   // standalone at the end
         ]);
         assert_eq!((gs[0].running, gs[0].total, gs[0].problems), (1, 2, 1));
         assert_eq!((gs[1].running, gs[1].total, gs[1].problems), (1, 2, 0));
-        // reiniciando conta como ativo (dá para parar a stack em crash loop)
+        // restarting counts as active (a stack in a crash loop can be stopped)
         assert_eq!((gs[0].active, gs[1].active), (2, 1));
-        assert_eq!(group_text(&gs[0]), "1/2 rodando · 1 com problema");
-        assert_eq!(group_text(&gs[1]), "1/2 rodando");
+        assert_eq!(group_text(&gs[0]), "1/2 running · 1 with problems");
+        assert_eq!(group_text(&gs[1]), "1/2 running");
 
-        // ordem dentro do grupo é a da lista recebida
+        // order inside the group is the one of the list received
         let visible: Vec<&Container> = vec![&all[1], &all[0]];
         let gs = group_by_project(&all, &visible, problem);
         assert_eq!(gs.len(), 1);
-        assert_eq!(gs[0].items[0].name, "loja-db");
+        assert_eq!(gs[0].items[0].name, "shop-db");
 
-        // nada visível: nenhum grupo
+        // nothing visible: no group
         assert!(group_by_project(&all, &[], problem).is_empty());
     }
 
     #[test]
-    fn idade_e_reinicios() {
+    fn age_and_restarts() {
         let now = 1_000_000;
         let mut r = c("web", "running", 0, "");
         r.started_at = now - 3 * 86400 - 60;
-        assert_eq!(age_text(&r, now), "há 3 d");
+        assert_eq!(age_text(&r, now), "3 d ago");
         let mut x = c("db", "exited", 1, "");
         x.started_at = now - 9000;
         x.finished_at = now - 2 * 3600;
-        assert_eq!(age_text(&x, now), "há 2 h");
-        // sem inspect, ou estados sem tempo útil
+        assert_eq!(age_text(&x, now), "2 h ago");
+        // no inspect, or states without a useful time
         assert_eq!(age_text(&c("a", "running", 0, ""), now), "");
         let mut p = c("p", "paused", 0, "");
         p.started_at = now - 10;
         assert_eq!(age_text(&p, now), "");
         assert_eq!(restarts_text(0), "");
-        assert_eq!(restarts_text(1), "1 reinício");
-        assert_eq!(restarts_text(7), "7 reinícios");
+        assert_eq!(restarts_text(1), "1 restart");
+        assert_eq!(restarts_text(7), "7 restarts");
     }
 
     #[test]
-    fn eventos() {
+    fn events() {
         let prev = HashMap::from([
             ("a".to_string(), p("running", "", false)),
             ("b".to_string(), p("running", "", false)),
@@ -860,10 +864,10 @@ mod tests {
             ("e".to_string(), p("running", "", false)),
         ]);
         let now = vec![
-            c("a", "exited", 1, ""),       // caiu
-            c("b", "exited", 137, ""),     // parado de propósito
+            c("a", "exited", 1, ""),       // crashed
+            c("b", "exited", 137, ""),     // stopped on purpose
             c("c", "running", 0, "unhealthy"),
-            c("d", "running", 0, ""),      // voltou
+            c("d", "running", 0, ""),      // back up
             c("e", "restarting", 0, ""),
         ];
         let cur = HashMap::from([
@@ -883,8 +887,8 @@ mod tests {
     }
 
     #[test]
-    fn pausar_e_retomar_nao_gera_evento() {
-        // rodando -> pausado e pausado -> rodando: nem queda nem "voltou"
+    fn pause_and_resume_raise_no_event() {
+        // running -> paused and paused -> running: neither a crash nor "back up"
         let prev = HashMap::from([
             ("a".to_string(), p("running", "", false)),
             ("b".to_string(), p("paused", "", false)),

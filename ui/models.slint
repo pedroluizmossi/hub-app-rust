@@ -1,7 +1,7 @@
-// Dados que o Rust preenche para a janela do hub (ver hub.slint).
+// Data Rust fills in for the hub window (see hub.slint).
 import { Colors } from "theme.slint";
 
-// Posição de um app na grade do painel (em células).
+// Position of an app on the dashboard grid (in cells).
 export struct GridCell {
     id: string,
     name: string,
@@ -9,10 +9,10 @@ export struct GridCell {
     row: int,
     w: int,
     h: int,
-    theme: Colors,   // tema do app (preenchido pelo Rust)
+    theme: Colors,   // the app's theme (filled by Rust)
 }
 
-// Prévia de onde o app vai parar durante um arrasto no modo de edição.
+// Preview of where the app will land during a drag in edit mode.
 export struct Ghost {
     visible: bool,
     id: string,
@@ -20,24 +20,24 @@ export struct Ghost {
     row: int,
     w: int,
     h: int,
-    ok: bool,        // cabe (os outros acham lugar)
+    ok: bool,        // it fits (the others find a place)
 }
 
-// Uma configuração declarada no manifesto de um app.
+// A setting declared in an app's manifest.
 export struct SettingRow {
     app: string,
     key: string,
     label: string,
-    unit: string,        // "%", "°C" ou vazio (tirado do fim do rótulo)
+    unit: string,        // "%", "°C" or empty (taken from the end of the label)
     kind: string,        // "bool" | "int" | "choice"
     bool-value: bool,
     int-value: int,
     minimum: int,
     maximum: int,
     step: int,
-    options: [string],   // rótulos de um choice
-    index: int,          // opção escolhida
-    images: [image],     // desenho de cada opção, se for uma escolha de mascote (senão vazio)
+    options: [string],   // labels of a choice
+    index: int,          // selected option
+    images: [image],     // drawing of each option, if it is a mascot choice (otherwise empty)
 }
 
 export struct AppInfo {
@@ -49,41 +49,41 @@ export struct AppInfo {
     mood: string,
     theme: Colors,
     settings: [SettingRow],
-    page: int,           // página onde o app está
-    origin: string,      // "" (embutido), "loja", "local" ou "dev" (--plugin-dev)
-    // o que guarda e quanto ("banco SQLite · 1,2 MB (banco até 10 MB)"); "" = não guarda nada
+    page: int,           // page the app is on
+    origin: string,      // "" (built-in), "loja" (store), "local" or "dev" (--plugin-dev)
+    // what it stores and how much ("SQLite database · 1.2 MB (database up to 10 MB)"); "" = stores nothing
     data: string,
-    has-data: bool,      // há algo para exportar ou apagar
+    has-data: bool,      // there is something to export or delete
 }
 
-// Dados guardados de um app que não está mais instalado (Configurações › Sistema).
+// Stored data of an app that is no longer installed (Settings › System).
 export struct DataRow {
     id: string,
-    text: string,        // "io.github.x.app · 1,2 MB"
+    text: string,        // "io.github.x.app · 1.2 MB"
 }
 
-// Uma página do painel (item da barra lateral).
+// A dashboard page (an item of the sidebar).
 export struct PageInfo {
     name: string,
-    icon: image,         // mascote da página, no humor do pior app dela
-    icon-index: int,     // mascote escolhida (índice na lista de mascotes)
-    mood: string,        // pior humor dos apps ligados da página
-    theme: Colors,       // tema usado no ícone (o do visual)
-    apps: int,           // apps ligados na página
+    icon: image,         // the page's mascot, in the mood of its worst app
+    icon-index: int,     // chosen mascot (index in the mascot list)
+    mood: string,        // worst mood of the page's enabled apps
+    theme: Colors,       // theme used for the icon (the skin's)
+    apps: int,           // enabled apps on the page
 }
 
-// Um elemento do fundo animado (src/skin/backdrop.rs › Ambient), em pixels lógicos.
+// An element of the animated background (src/skin/backdrop.rs › Ambient), in logical pixels.
 export struct AmbientItem {
-    kind: string,        // "fall" (desce e volta), "blink" (aparece `on` ms a cada `period`) ou "scan"
+    kind: string,        // "fall" (descends and wraps), "blink" (shows for `on` ms every `period`) or "scan"
     x: float,
     y: float,
     w: float,
     h: float,
     color: color,
     alpha: float,
-    phase: int,          // ms de atraso, para não andarem juntos
+    phase: int,          // ms of delay, so they don't move in sync
     period: int,         // ms
     on: int,             // ms
-    speed: float,        // px por segundo
-    slant: float,        // px para a esquerda por px de queda (chuva inclinada)
+    speed: float,        // px per second
+    slant: float,        // px to the left per px of fall (slanted rain)
 }

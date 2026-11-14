@@ -1,4 +1,4 @@
-//! Aparência: visual da janela, fundo, ícone da bandeja, movimento e relógio.
+//! Appearance: window skin, backdrop, tray icon, motion and clock.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -9,38 +9,40 @@ use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, VecModel};
 use super::Hub;
 use super::chatter::Pace;
 use crate::core::config::Config;
+use crate::core::i18n::{self, Language};
 use crate::core::plugins;
 use crate::mascot::{sprites, themes};
 use crate::skin;
+use crate::tr;
 use crate::ui::{AmbientItem, Anim};
 
-/// Tamanhos de texto oferecidos (em % do design), na ordem do seletor.
+/// Text sizes offered (in % of the design), in the order of the picker.
 pub(super) const TEXT_SIZES: &[u32] = &[90, 100, 110, 125];
 
-/// Onde ficam as páginas (`nav` da config), na ordem da escolha em Aparência › Páginas
-/// (`ui/settings.slint`): barra à esquerda, à direita, embaixo, abas no cabeçalho.
-/// `"side"` é a barra à esquerda (nome antigo, mantido para as configs que já existem).
+/// Where the pages go (`nav` in the config), in the order of the choice in Appearance › Pages
+/// (`ui/settings.slint`): bar on the left, on the right, at the bottom, tabs in the header.
+/// `"side"` is the bar on the left (old name, kept for the configs that already exist).
 pub(super) const NAVS: &[&str] = &["side", "right", "bottom", "top"];
 
-/// Posição de `nav` em `NAVS`; valor desconhecido (config editada à mão) vira a da esquerda.
+/// Position of `nav` in `NAVS`; an unknown value (config edited by hand) becomes the left bar.
 fn nav_index(nav: &str) -> usize {
     NAVS.iter().position(|n| *n == nav).unwrap_or(0)
 }
 
-/// O fundo da área do painel: pedidos em curso e o último desenhado. Compartilhado com a
-/// thread que desenha.
+/// The backdrop of the panel area: requests in progress and the last one drawn. Shared with
+/// the drawing thread.
 #[derive(Default)]
 pub(super) struct BackdropState {
-    /// Sobe a cada pedido; resultado de um pedido velho é descartado.
+    /// Goes up with each request; the result of an old request is dropped.
     generation: AtomicU32,
-    /// Visual (com o destaque), largura e altura em pixels físicos e escala do fundo que
-    /// está na tela.
+    /// Skin (with the accent), width and height in physical pixels, and scale of the backdrop
+    /// on screen.
     last: Mutex<Option<(String, u32, u32, u32)>>,
 }
 
 impl BackdropState {
-    /// Esquece o último fundo: o próximo pedido redesenha mesmo com o mesmo visual (um
-    /// fundo de arquivo pode ter mudado).
+    /// Forgets the last backdrop: the next request redraws even with the same skin (a backdrop
+    /// file may have changed).
     pub(super) fn forget(&self) {
         if let Ok(mut last) = self.last.lock() {
             *last = None;
@@ -49,8 +51,8 @@ impl BackdropState {
 }
 
 impl Hub {
-    /// Aplica o visual da config (com a cor de destaque e o tamanho do texto): tokens da
-    /// tela, listas dos seletores e fundo.
+    /// Applies the config's skin (with the accent color and the text size): screen tokens,
+    /// picker lists and backdrop.
     pub(super) fn apply_skin(&self) {
         let (key, name, accent, scale, ambient) = {
             let cfg = self.host.config.borrow();
@@ -59,11 +61,11 @@ impl Hub {
         let effective = skin::effective(skin::get(&key), &accent);
         skin::apply(&self.ui, &effective, &name, text_scale(scale));
         self.ui.set_app_name(name.into());
-        let labels: Vec<SharedString> = skin::all().iter().map(|s| s.label.into()).collect();
+        let labels: Vec<SharedString> = skin::all().iter().map(|s| s.name().into()).collect();
         self.ui.set_skins(ModelRc::new(VecModel::from(labels)));
         self.ui.set_skin_index(skin::index_of(&key) as i32);
         let accents: Vec<SharedString> =
-            std::iter::once("Do visual".into()).chain(skin::ACCENTS.iter().map(|a| a.1.into())).collect();
+            std::iter::once(tr!("Skin's own").into()).chain(skin::ACCENTS.iter().map(|a| i18n::tr(a.1).into())).collect();
         self.ui.set_accents(ModelRc::new(VecModel::from(accents)));
         self.ui.set_accent_index(skin::ACCENTS.iter().position(|a| a.0 == accent).map_or(0, |i| i as i32 + 1));
         let sizes: Vec<SharedString> = TEXT_SIZES.iter().map(|p| format!("{p}%").into()).collect();
@@ -73,28 +75,30 @@ impl Hub {
         self.apply_nav();
         let chatter = self.host.config.borrow().chatter.clone();
         self.ui.set_chatter_index(Pace::KEYS.iter().position(|k| *k == chatter).unwrap_or(1) as i32);
+        let language = self.host.config.borrow().language.clone();
+        self.ui.set_language_index(Language::KEYS.iter().position(|k| *k == language).unwrap_or(0) as i32);
         self.apply_motion();
         self.apply_tray_choices();
         self.schedule_backdrop();
     }
 
-    /// Opções e escolhas do ícone da bandeja (índice 0 = automático).
+    /// Options and choices of the tray icon (index 0 = automatic).
     pub(super) fn apply_tray_choices(&self) {
         let (icon, theme, skin_key) = {
             let cfg = self.host.config.borrow();
             (cfg.tray_icon.clone(), cfg.tray_theme.clone(), cfg.skin.clone())
         };
-        // desenhos para o seletor: no tema escolhido para a bandeja ou, no automático, no
-        // do visual da janela; o "Automático" (índice 0) fica sem desenho
+        // drawings for the picker: in the theme chosen for the tray or, when automatic, in the
+        // window skin's; "Automatic" (index 0) has no drawing
         let shown = themes::find(&theme).unwrap_or(themes::get(skin::get(&skin_key).app_theme));
         let images: Vec<Image> =
             std::iter::once(Image::default()).chain(super::settings::mascot_images(shown)).collect();
         self.ui.set_tray_icon_images(ModelRc::new(VecModel::from(images)));
         let auto = |label: &str| std::iter::once(SharedString::from(label));
         let icons: Vec<SharedString> =
-            auto("Automático").chain(sprites::all().iter().map(|s| s.label.into())).collect();
+            auto(tr!("Automatic")).chain(sprites::all().iter().map(|s| s.name().into())).collect();
         let themes_: Vec<SharedString> =
-            auto("Automático").chain(themes::all().iter().map(|t| t.label.into())).collect();
+            auto(tr!("Automatic")).chain(themes::all().iter().map(|t| t.name().into())).collect();
         let pos = |found: Option<usize>| found.map_or(0, |i| i as i32 + 1);
         self.ui.set_tray_icons(ModelRc::new(VecModel::from(icons)));
         self.ui.set_tray_icon_index(pos(sprites::all().iter().position(|s| s.key == icon)));
@@ -102,35 +106,35 @@ impl Hub {
         self.ui.set_tray_theme_index(pos(themes::all().iter().position(|t| t.key == theme)));
     }
 
-    /// Troca a mascote do ícone da bandeja. 0 = automático (o app em pior estado).
+    /// Changes the tray icon's mascot. 0 = automatic (the app in the worst state).
     pub(super) fn choose_tray_icon(&self, i: usize) {
         let key = if i == 0 { Some("auto") } else { sprites::all().get(i - 1).map(|s| s.key) };
         self.set_tray_choice(key, |cfg| &mut cfg.tray_icon);
     }
 
-    /// Troca o tema do ícone da bandeja. 0 = automático (o tema do app em pior estado).
+    /// Changes the tray icon's theme. 0 = automatic (the theme of the app in the worst state).
     pub(super) fn choose_tray_theme(&self, i: usize) {
         let key = if i == 0 { Some("auto") } else { themes::all().get(i - 1).map(|t| t.key) };
         self.set_tray_choice(key, |cfg| &mut cfg.tray_theme);
     }
 
-    /// Grava uma escolha do ícone da bandeja; o ícone em si muda no próximo `sync_tray`.
+    /// Saves a tray icon choice; the icon itself changes on the next `sync_tray`.
     fn set_tray_choice(&self, key: Option<&str>, field: impl FnOnce(&mut Config) -> &mut String) {
         let Some(key) = key else { return };
         {
             let mut cfg = self.host.config.borrow_mut();
-            let campo = field(&mut cfg);
-            if campo == key {
+            let slot = field(&mut cfg);
+            if slot == key {
                 return;
             }
-            *campo = key.into();
+            *slot = key.into();
             cfg.save();
         }
         self.apply_tray_choices();
     }
 
-    /// Reduzir movimento: mascotes paradas na tela (`Anim.calm`); os apps deixam de disparar
-    /// reações (eles leem `reduce_motion` da config).
+    /// Reduce motion: mascots stand still on screen (`Anim.calm`); the apps stop firing
+    /// reactions (they read `reduce_motion` from the config).
     pub(super) fn apply_motion(&self) {
         let calm = self.host.config.borrow().reduce_motion;
         crate::mascot::anim::set_calm(calm);
@@ -138,8 +142,8 @@ impl Hub {
         self.ui.global::<Anim>().set_calm(calm);
     }
 
-    /// Cartão "Sistema" das configurações: iniciar com o sistema, versão e registros. Relido
-    /// ao abrir as configurações (o autostart pode ter mudado por fora, no sistema).
+    /// "System" card of the settings: start with the system, version and logs. Read again
+    /// when opening the settings (autostart may have changed outside, in the system).
     pub(super) fn apply_system(&self) {
         self.ui.set_autostart(crate::autostart::is_enabled());
         self.ui.set_version(crate::core::about::version_line().into());
@@ -148,34 +152,34 @@ impl Hub {
         self.apply_apps_dir();
     }
 
-    /// Linha "Apps locais" do cartão Sistema: a pasta, quantos apps há nela e as pastas
-    /// recusadas com o motivo (pasta com nome diferente do id, manifesto com erro…).
+    /// "Local apps" row of the System card: the folder, how many apps it has and the folders
+    /// refused, with the reason (folder named differently from the id, broken manifest…).
     pub(super) fn apply_apps_dir(&self) {
         let root = plugins::dir();
         let (list, skipped) = plugins::scan(&root);
         let from_store = list.iter().filter(|p| crate::store::installed(&root, &p.manifest.id).is_some()).count();
         let local = list.len() - from_store;
         let summary = match (local, from_store) {
-            (0, 0) => "nenhum app na pasta".to_string(),
-            _ => format!("{local} {} · {from_store} da loja", if local == 1 { "app local" } else { "apps locais" }),
+            (0, 0) => tr!("no apps in the folder").to_string(),
+            _ => tr!("local apps: {} · from the store: {}", local, from_store),
         };
-        let skipped: Vec<String> = skipped.iter().map(|s| format!("{}/ ignorada: {}", s.folder, s.reason)).collect();
+        let skipped: Vec<String> = skipped.iter().map(|s| tr!("{}/ skipped: {}", s.folder, s.reason)).collect();
         self.ui.set_apps_dir(root.display().to_string().into());
         self.ui.set_apps_summary(summary.into());
         self.ui.set_apps_skipped(skipped.join("\n").into());
     }
 
-    /// Abre a pasta dos apps no gerenciador de arquivos (cria antes, se ainda não existe).
+    /// Opens the apps folder in the file manager (creating it first, if it doesn't exist yet).
     pub(super) fn open_apps_dir(&self) {
         let dir = plugins::dir();
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            log::warn!("não consegui criar {}: {e}", dir.display());
+            log::warn!("could not create {}: {e}", dir.display());
         } else if !crate::core::exec::open_dir(&dir) {
-            log::warn!("não consegui abrir {}", dir.display());
+            log::warn!("could not open {}", dir.display());
         }
     }
 
-    /// O erro, se houver, vai para o registro; o interruptor mostra o estado de verdade.
+    /// The error, if any, goes to the log; the switch shows the real state.
     pub(super) fn toggle_autostart(&self) {
         let _ = crate::autostart::set(!crate::autostart::is_enabled());
         self.ui.set_autostart(crate::autostart::is_enabled());
@@ -185,7 +189,7 @@ impl Hub {
         if let Some(dir) = crate::core::os::log_dir()
             && !crate::core::exec::open_dir(&dir)
         {
-            log::warn!("não consegui abrir {}", dir.display());
+            log::warn!("could not open {}", dir.display());
         }
     }
 
@@ -198,7 +202,7 @@ impl Hub {
         self.apply_motion();
     }
 
-    /// Onde ficam as páginas: índice em `NAVS`.
+    /// Where the pages go: index in `NAVS`.
     pub(super) fn choose_nav(&self, i: usize) {
         let Some(nav) = NAVS.get(i).copied() else { return };
         {
@@ -209,7 +213,7 @@ impl Hub {
             cfg.nav = nav.into();
             cfg.save();
         }
-        // a área do painel muda de tamanho e avisa sozinha (`backdrop-resized`)
+        // the panel area changes size and reports it by itself (`backdrop-resized`)
         self.apply_nav();
     }
 
@@ -219,7 +223,7 @@ impl Hub {
         self.ui.set_nav_index(i as i32);
     }
 
-    /// Quanto as mascotes conversam (índice em `Pace::KEYS`: nunca, às vezes, bastante).
+    /// How much the mascots chat (index in `Pace::KEYS`: never, sometimes, a lot).
     pub(super) fn choose_chatter(&self, i: usize) {
         let Some(key) = Pace::KEYS.get(i) else { return };
         {
@@ -233,7 +237,29 @@ impl Hub {
         self.ui.set_chatter_index(i as i32);
     }
 
-    /// Troca a cor de destaque (0 = a do visual).
+    /// Interface language (index in `Language::KEYS`: auto, en, pt-BR). The compiled UI
+    /// switches at once; texts built in Rust as the screens refresh; manifests and plugin
+    /// views on the next start.
+    pub(super) fn choose_language(&self, i: usize) {
+        let Some(key) = Language::KEYS.get(i) else { return };
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.language == *key {
+                return;
+            }
+            cfg.language = key.to_string();
+            cfg.save();
+        }
+        crate::core::i18n::set(Language::from_setting(key));
+        self.ui.set_language_index(i as i32);
+        self.apply_skin();
+        self.apply_system();
+        self.apply_tray_choices();
+        self.rebuild_lists();
+        self.rebuild_settings();
+    }
+
+    /// Changes the accent color (0 = the skin's own).
     pub(super) fn choose_accent(&self, i: usize) {
         let key = if i == 0 { "" } else { skin::ACCENTS.get(i - 1).map_or("", |a| a.0) };
         {
@@ -247,7 +273,7 @@ impl Hub {
         self.apply_skin();
     }
 
-    /// Troca o tamanho do texto. Os apps refazem a tela (os plugins recebem a escala no `theme`).
+    /// Changes the text size. The apps redo their screens (plugins get the scale in `theme`).
     pub(super) fn choose_text_size(&self, i: usize) {
         let Some(&pct) = TEXT_SIZES.get(i) else { return };
         {
@@ -264,7 +290,7 @@ impl Hub {
         }
     }
 
-    /// Liga ou desliga o fundo animado.
+    /// Turns the animated backdrop on or off.
     pub(super) fn toggle_ambient(&self) {
         let on = {
             let mut cfg = self.host.config.borrow_mut();
@@ -275,8 +301,8 @@ impl Hub {
         self.ui.set_ambient_on(on);
     }
 
-    /// Lê de novo a pasta de temas, visuais e fundos e mostra o resultado na linha
-    /// "Temas, visuais e fundos seus" (sem aplicar: ver `reload_looks`).
+    /// Reads the folder of themes, skins and backdrops again and shows the result in the
+    /// "Your themes, skins and backdrops" row (without applying it: see `reload_looks`).
     pub(super) fn load_looks(&self) {
         let loaded = skin::user::reload();
         self.ui.set_looks_dir(skin::user::dir().display().to_string().into());
@@ -285,8 +311,8 @@ impl Hub {
         self.ui.set_looks_skipped(skipped.join("\n").into());
     }
 
-    /// Botão Recarregar da Aparência (e `miniutils --recarregar`): relê os arquivos e
-    /// redesenha tudo que usa tema, visual ou fundo.
+    /// Reload button of Appearance (and the reload command line flag): reads the files again
+    /// and redraws everything that uses a theme, skin or backdrop.
     pub(super) fn reload_looks(&self) {
         self.load_looks();
         self.backdrop.forget();
@@ -294,26 +320,28 @@ impl Hub {
         for app in self.registry.enabled() {
             app.borrow_mut().settings_changed(&self.ui);
         }
-        // a lista das Configurações muda mesmo sem mudar a config (opções de tema novas)
+        // the Settings list changes even without a config change (new theme options)
         self.settings_fingerprint.replace(String::new());
         self.rebuild_lists();
     }
 
-    /// Abre a pasta de temas, visuais, fundos e mascotes (cria as subpastas antes).
+    /// Opens the folder of themes, skins, backdrops and mascots (creating the subfolders first).
     pub(super) fn open_looks_dir(&self) {
         let root = skin::user::dir();
-        for sub in [skin::user::TEMAS, skin::user::VISUAIS, skin::user::FUNDOS, crate::mascot::pack::DIR] {
+        // move the old Portuguese folders first: empty new ones would block their migration
+        skin::user::migrate(&root);
+        for sub in [skin::user::THEMES, skin::user::SKINS, skin::user::BACKDROPS, crate::mascot::pack::DIR] {
             if let Err(e) = std::fs::create_dir_all(root.join(sub)) {
-                log::warn!("não consegui criar {}: {e}", root.join(sub).display());
+                log::warn!("could not create {}: {e}", root.join(sub).display());
                 return;
             }
         }
         if !crate::core::exec::open_dir(&root) {
-            log::warn!("não consegui abrir {}", root.display());
+            log::warn!("could not open {}", root.display());
         }
     }
 
-    /// Troca o visual. Os apps com tema "auto" mudam junto.
+    /// Changes the skin. The apps with the "auto" theme change along.
     pub(super) fn choose_skin(&self, i: usize) {
         let all = skin::all();
         let Some(s) = all.get(i) else { return };
@@ -332,9 +360,9 @@ impl Hub {
         self.rebuild_lists();
     }
 
-    /// Pede um fundo novo daqui a pouco (um só, mesmo com vários pedidos seguidos). O
-    /// desenho roda numa thread, e só quando o visual, o tamanho ou a escala mudaram:
-    /// reabrir a janela não redesenha nada.
+    /// Requests a new backdrop shortly (just one, even with several requests in a row). The
+    /// drawing runs in a thread, and only when the skin, the size or the scale changed:
+    /// reopening the window redraws nothing.
     pub(super) fn schedule_backdrop(&self) {
         let state = self.backdrop.clone();
         let id = state.generation.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
@@ -352,7 +380,7 @@ impl Hub {
             let s = skin::effective(skin::get(&key), &accent);
             let window = ui.window();
             let scale = window.scale_factor();
-            // sem o tamanho exato da área ainda: estima pela janela
+            // without the exact size of the area yet: estimate from the window
             let (w, h) = if size.0 > 0.0 && size.1 > 0.0 {
                 size
             } else {
@@ -365,12 +393,12 @@ impl Hub {
             if state.last.lock().is_ok_and(|last| last.as_ref() == Some(&drawn)) {
                 return;
             }
-            let fundo = skin::backdrop::get(s.backdrop);
+            let backdrop = skin::backdrop::get(s.backdrop);
             let spawned = std::thread::Builder::new().name("miniutils-backdrop".into()).spawn(move || {
-                let buf = skin::backdrop::render(fundo, &s, w, h, scale);
-                let ambient = skin::backdrop::ambient(fundo, &s, w, h);
+                let buf = skin::backdrop::render(backdrop, &s, w, h, scale);
+                let ambient = skin::backdrop::ambient(backdrop, &s, w, h);
                 let _ = weak.upgrade_in_event_loop(move |ui| {
-                    // um pedido mais novo já está a caminho: este fundo ficou velho
+                    // a newer request is already on its way: this backdrop is stale
                     if state.generation.load(Ordering::Relaxed) != id {
                         return;
                     }
@@ -383,12 +411,12 @@ impl Hub {
                 });
             });
             if let Err(e) = spawned {
-                log::warn!("sem thread para o fundo ({e})");
+                log::warn!("no thread for the backdrop ({e})");
             }
         });
     }
 
-    /// Relógio e saudação, atualizados quando muda o minuto.
+    /// Clock and greeting, updated when the minute changes.
     pub(super) fn update_clock(&self) {
         let (hour, min) = local_time();
         let text = format!("{hour:02}:{min:02}");
@@ -396,9 +424,9 @@ impl Hub {
             return;
         }
         let part = match hour {
-            5..=11 => "bom dia",
-            12..=17 => "boa tarde",
-            _ => "boa noite",
+            5..=11 => tr!("good morning"),
+            12..=17 => tr!("good afternoon"),
+            _ => tr!("good evening"),
         };
         self.ui.set_greeting(format!("{part} · {text}").into());
         self.ui.set_clock(text.clone().into());
@@ -406,14 +434,14 @@ impl Hub {
     }
 }
 
-/// Hora e minuto locais.
+/// Local hour and minute.
 fn local_time() -> (i32, i32) {
     use chrono::Timelike;
     let now = chrono::Local::now();
     (now.hour() as i32, now.minute() as i32)
 }
 
-/// % da config para o fator da tela, dentro dos tamanhos oferecidos.
+/// % from the config to the screen factor, within the sizes offered.
 fn text_scale(pct: u32) -> f32 {
     pct.clamp(TEXT_SIZES[0], TEXT_SIZES[TEXT_SIZES.len() - 1]) as f32 / 100.0
 }
@@ -440,12 +468,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn posicao_das_paginas() {
+    fn position_of_the_pages() {
         assert_eq!(nav_index("side"), 0);
         assert_eq!(nav_index("right"), 1);
         assert_eq!(nav_index("bottom"), 2);
         assert_eq!(nav_index("top"), 3);
-        // config editada à mão: volta para a barra à esquerda
-        assert_eq!(nav_index("esquerda"), 0);
+        // config edited by hand: back to the bar on the left
+        assert_eq!(nav_index("left"), 0);
     }
 }
