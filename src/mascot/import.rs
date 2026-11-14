@@ -145,7 +145,7 @@ mod tests {
         out.into_inner()
     }
 
-    /// A downloaded pack, zipped: a nested folder with a character's sheets, a code mascot,
+    /// A downloaded pack, zipped: nested folders with two characters' sheets, a code mascot,
     /// Mac junk, a file that isn't a mascot and a path that tries to leave the folder.
     #[test]
     fn imports_both_kinds_from_a_zip_and_nothing_else() {
@@ -156,6 +156,10 @@ mod tests {
         for (name, data) in [
             ("Pack/Characters/Knight/Knight_Idle_2.png", sheet(2)),
             ("Pack/Characters/Knight/Knight_Walk_2.png", sheet(2)),
+            // no frame count in the name: square frames (Tiny RPG packs)
+            ("Pack/Characters/Orc/Orc_Idle.png", sheet(3)),
+            ("Pack/Characters/Orc/Orc_Walk.png", sheet(2)),
+            ("Pack/Characters/Orc/Orc.png", sheet(4)),
             ("__MACOSX/Pack/._Knight_Idle_2.png", b"junk".to_vec()),
             ("Pack/readme.txt", b"hello".to_vec()),
             ("../evil.png", sheet(1)),
@@ -168,7 +172,8 @@ mod tests {
 
         let appearance = d.join("appearance");
         let lines = import(&zip_path, &appearance).unwrap();
-        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(appearance.join("mascots/orc/Orc_Walk.png").is_file());
         assert!(appearance.join("mascots/knight/Knight_Walk_2.png").is_file());
         assert!(appearance.join("mascots/knight/sprite.toml").is_file());
         assert!(appearance.join("sprites/owl.toml").is_file());
@@ -176,7 +181,7 @@ mod tests {
         // the temporary folder is gone, and the hub reads what came in
         assert!(std::fs::read_dir(&appearance).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with(".import")));
         let (arts, skipped) = pack::load(&appearance.join(pack::DIR));
-        assert!(skipped.is_empty() && arts.len() == 1, "{skipped:?}");
+        assert!(skipped.is_empty() && arts.len() == 2, "{skipped:?}");
         // again: nothing is overwritten
         let again = import(&zip_path, &appearance).unwrap();
         assert!(again.iter().all(|l| l.contains("already exists")), "{again:?}");

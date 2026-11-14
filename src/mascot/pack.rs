@@ -30,8 +30,8 @@
 //!
 //! Without `sprite.toml`, each `<Name>_<Animation>_<N>.png` becomes the animation
 //! `<animation>` with N frames (the prefix with the most animations is the mascot's; the
-//! rest, like dust and rocks, is left out). Without the `_N`, frames are square (width =
-//! sheet height). Animation names come from the user's files, so they are matched as they
+//! rest, like dust and rocks, is left out). Without the `_N` (`Orc_Idle.png`), frames are
+//! square (width = sheet height). Animation names come from the user's files, so they are matched as they
 //! are (`idle`, `walk`, `run`…: the usual names of free sprite packs).
 //!
 //! The imported mascot becomes a `Sprite` registered in `sprites` (key = folder name) and
@@ -595,12 +595,17 @@ fn frames_in_name(file: &str) -> Option<usize> {
     stem.rsplit_once('_')?.1.parse().ok()
 }
 
-/// `Pink_Monster_Walk_6` → ("Pink_Monster", "walk", 6).
-fn parse_sheet_name(stem: &str) -> Option<(&str, String, usize)> {
-    let (rest, n) = stem.rsplit_once('_')?;
-    let n: usize = n.parse().ok()?;
+/// `Pink_Monster_Walk_6` → ("Pink_Monster", "walk", Some(6)); `Orc_Idle` → ("Orc", "idle",
+/// None): without the count, the frames are square (as many packs draw them).
+fn parse_sheet_name(stem: &str) -> Option<(&str, String, Option<usize>)> {
+    let (rest, n) = match stem.rsplit_once('_') {
+        Some((rest, n)) if n.parse::<usize>().is_ok() => (rest, n.parse().ok()),
+        _ => (stem, None),
+    };
     let (prefix, anim) = rest.rsplit_once('_')?;
-    (!prefix.is_empty() && !anim.is_empty()).then(|| (prefix, anim.to_lowercase(), n))
+    // `Rock_2` alone is a numbered file, not an animation
+    let valid = !prefix.is_empty() && !anim.is_empty() && !anim.bytes().all(|b| b.is_ascii_digit());
+    valid.then(|| (prefix, anim.to_lowercase(), n))
 }
 
 /// Without `sprite.toml`: the `<Name>_<Animation>_<N>.png` sheets of the most common prefix.
@@ -1109,8 +1114,11 @@ mod tests {
 
     #[test]
     fn names() {
-        assert_eq!(parse_sheet_name("Pink_Monster_Walk+Attack_6"), Some(("Pink_Monster", "walk+attack".into(), 6)));
+        assert_eq!(parse_sheet_name("Pink_Monster_Walk+Attack_6"), Some(("Pink_Monster", "walk+attack".into(), Some(6))));
+        assert_eq!(parse_sheet_name("Orc_Attack01"), Some(("Orc", "attack01".into(), None)));
         assert_eq!(parse_sheet_name("Rock1"), None);
+        assert_eq!(parse_sheet_name("Rock_1_2"), None);
+        assert_eq!(parse_sheet_name("Orc"), None);
         assert_eq!(frames_in_name("A_Run_6.png"), Some(6));
         assert_eq!(slug("Pink Monster"), "pink-monster");
         assert_eq!(slug("  Ação__X "), "a-o-x");
