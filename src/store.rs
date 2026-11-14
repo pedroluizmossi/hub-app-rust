@@ -33,6 +33,8 @@ use crate::core::config::Config;
 use crate::core::exec;
 use crate::core::plugins::{self, Plugin};
 
+mod entry;
+
 pub const USAGE: &str = "\
 loja de plugins:
   miniutils --loja [índice]                     lista os plugins e o estado de cada um
@@ -51,6 +53,11 @@ https://), com a assinatura em registry.json.sig.
 quem mantém um índice:
   miniutils --loja-chave <arquivo>              gera um par de chaves (imprime a pública)
   miniutils --loja-assinar <registry.json> <arquivo>   grava registry.json.sig
+  miniutils --store-entry <registry.json> <repo> <tag> [--path p] [--app-version v] [--license l]
+                                                inclui ou atualiza o app do repositório
+                                                (https://… ou dono/repo) naquela tag: lê o
+                                                manifesto do commit e, num app externo,
+                                                confere os executáveis do Release da tag
 
 O miniutils aberto relê os plugins sozinho depois de instalar, atualizar ou remover.
 App local (sem loja): crie a pasta <id>/ dentro da pasta dos apps (miniutils --pastas)
@@ -89,13 +96,15 @@ impl Source {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Index {
     pub schema: u32,
     pub plugins: Vec<Entry>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// An index entry. Fields are in the order `registry.json` writes them, and empty ones are
+/// not written: `--store-entry` rewrites the index without touching the other entries.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entry {
     pub id: String,
     pub name: String,
@@ -105,39 +114,43 @@ pub struct Entry {
     pub author: String,
     pub license: String,
     pub version: String,
-    /// Repositório git: `https://…` ou uma pasta local (para testes).
+    /// Git repository: `https://…` or a local folder (for tests).
     pub repo: String,
-    /// Commit revisado (SHA completo, 40 caracteres).
-    pub commit: String,
-    /// Subpasta do plugin no repositório (um repo pode ter vários).
-    #[serde(default)]
+    /// Plugin subfolder in the repository (a repo may hold several).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub path: String,
-    /// Programas que o plugin executa (tem de bater com o manifesto).
-    #[serde(default)]
+    /// Reviewed commit (full SHA, 40 characters).
+    pub commit: String,
+    /// Programs the plugin runs (must match the manifest).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<String>,
-    /// Domínios que o plugin consulta (`[permissions] net`).
-    #[serde(default)]
+    /// Domains the plugin queries (`[permissions] net`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub net: Vec<String>,
-    /// Provedores que o plugin lê (`uses`).
-    #[serde(default)]
+    /// Providers the plugin reads (`uses`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<String>,
-    /// App externo (`[app]`): roda um executável próprio com as permissões do usuário.
-    #[serde(default)]
+    /// External app (`[app]`): runs its own executable with the user's permissions.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub full_access: bool,
-    /// Guarda dados num banco SQLite (`[data] kinds` com "sqlite"; tem de bater com o manifesto).
-    #[serde(default)]
+    /// Stores data in a SQLite database (`[data] kinds` with "sqlite"; must match the manifest).
+    #[serde(default, skip_serializing_if = "is_false")]
     pub sqlite: bool,
-    /// Executável de um app externo, por sistema ("linux", "windows").
-    #[serde(default)]
+    /// External app executable, per OS ("linux", "windows").
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub binaries: BTreeMap<String, Binary>,
 }
 
-/// De onde baixar o executável de um app externo e o hash que ele tem de ter.
-#[derive(Debug, Clone, Deserialize)]
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// Where to download an external app executable and the hash it must have.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Binary {
-    /// `https://…` (ou um caminho absoluto, para testes com índice local).
+    /// `https://…` (or an absolute path, for tests with a local index).
     pub url: String,
-    /// SHA-256 do arquivo, em hex (64 caracteres).
+    /// SHA-256 of the file, in hex (64 characters).
     pub sha256: String,
 }
 
@@ -235,6 +248,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
             | "--recarregar"
             | "--loja-chave"
             | "--loja-assinar"
+            | "--store-entry"
     ) {
         return None;
     }
@@ -244,11 +258,15 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
     let mut key = None;
     let mut yes = false;
     let mut purge: Option<bool> = None;
+    let mut entry_opts = entry::Opts::default();
     let mut pos: Vec<&str> = Vec::new();
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--chave" => key = it.next().cloned(),
+            "--path" => entry_opts.path = it.next().cloned(),
+            "--app-version" => entry_opts.version = it.next().cloned(),
+            "--license" => entry_opts.license = it.next().cloned(),
             "--sim" => yes = true,
             "--apagar-dados" => purge = Some(true),
             "--manter-dados" => purge = Some(false),
@@ -300,6 +318,10 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
         ("--loja-assinar", Some(index)) => match pos.get(1) {
             Some(k) => sign(Path::new(index), Path::new(k)),
             None => Err(USAGE.to_string()),
+        },
+        ("--store-entry", Some(index)) => match (pos.get(1), pos.get(2)) {
+            (Some(repo), Some(tag)) => entry::run(Path::new(index), repo, tag, &entry_opts),
+            _ => Err(USAGE.to_string()),
         },
         _ => Err(USAGE.to_string()),
     };
@@ -870,6 +892,38 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// `--store-entry`: the new version from the tag changes only the entry's commit and
+    /// version, the same commit again is refused, and the rewritten index installs.
+    #[test]
+    fn store_entry_from_tag_updates_index_and_installs() {
+        let Some(store) = Loja::new("tagged") else { return };
+        let src = store.index(&store.commit, "0.1.0", r#""uptime""#);
+        let index = PathBuf::from(&src.index);
+        let repo = store.dir.join("repo");
+        let r = repo.to_string_lossy().to_string();
+        std::fs::write(repo.join("README.md"), "# example 2").unwrap();
+        let new_commit = Loja::commit(&repo, "v2");
+        git(&["-C", &r, "tag", "v0.2.0"]).unwrap();
+
+        let report = entry::run(&index, &r, "v0.2.0", &entry::Opts::default()).unwrap();
+        assert!(report.contains("id: io.github.exemplo.uptime"), "{report}");
+        assert!(report.contains("0.1.0 → 0.2.0"), "{report}");
+        let (read, _) = load_index(&src).unwrap();
+        assert_eq!(read.plugins.len(), 1);
+        let e = &read.plugins[0];
+        assert_eq!((e.version.as_str(), e.commit.as_str(), e.license.as_str()), ("0.2.0", new_commit.as_str(), "MIT"));
+        assert_eq!(e.permissions, ["uptime"]);
+
+        let err = entry::run(&index, &r, "v0.2.0", &entry::Opts::default()).unwrap_err();
+        assert!(err.contains("já está no índice"), "{err}");
+        let err = entry::run(&index, &r, "missing-v9.0.0", &entry::Opts::default()).unwrap_err();
+        assert!(err.contains("não há essa tag"), "{err}");
+
+        let root = store.dir.join("plugins");
+        install(&src, "io.github.exemplo.uptime", &root, &mut |_| true).unwrap();
+        assert_eq!(installed(&root, "io.github.exemplo.uptime").unwrap().commit, new_commit);
     }
 
     #[test]
