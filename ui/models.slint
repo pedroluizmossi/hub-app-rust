@@ -87,3 +87,14 @@ export struct AmbientItem {
     speed: float,        // px per second
     slant: float,        // px to the left per px of fall (slanted rain)
 }
+
+// CPU and memory of one process now: the hub, an external app or the total line
+// (Settings › System, src/hub/usage.rs).
+export struct ProcUsage {
+    name: string,
+    cpu: float,          // % of the whole machine (colors the number)
+    cpu-text: string,    // "1.9" (the "%" is drawn apart)
+    mem-text: string,    // "87.8"
+    mem-unit: string,    // "MB"
+    total: bool,         // the sum line (drawn apart)
+}

@@ -185,6 +185,12 @@ pub trait MiniApp {
         true
     }
 
+    /// The app's own process, when it has one running (external app); the others run
+    /// inside the hub. Settings › System shows its CPU and memory.
+    fn process_id(&self) -> Option<u32> {
+        None
+    }
+
     /// The data changed from outside (deleted): read it again, and run again if enabled.
     fn reload_data(&mut self, _ui: &HubWindow) {}
 

@@ -7,7 +7,20 @@
 use std::collections::HashMap;
 use std::fs;
 
-use super::{Proc, ProcsSnapshot, snapshot};
+use super::{Proc, ProcsSnapshot, Usage, snapshot};
+
+/// CPU time and memory of each of `pids` (the ones that exist), from `/proc/<pid>/stat`.
+pub fn usage(pids: &[u32]) -> Vec<(u32, Usage)> {
+    // SAFETY: `sysconf` only queries system values.
+    let (tick, page) = unsafe { (libc::sysconf(libc::_SC_CLK_TCK), libc::sysconf(libc::_SC_PAGESIZE)) };
+    let (tick, page) = (if tick > 0 { tick as u64 } else { 100 }, if page > 0 { page as u64 } else { 4096 });
+    pids.iter()
+        .filter_map(|&pid| {
+            let st = fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|t| parse_stat(&t))?;
+            Some((pid, Usage { cpu_ms: st.ticks * 1000 / tick, mem_bytes: st.rss_pages * page }))
+        })
+        .collect()
+}
 
 #[derive(Default)]
 pub struct ProcsProvider {

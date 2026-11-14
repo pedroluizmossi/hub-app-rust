@@ -110,6 +110,8 @@ hub-app-rust/
       data.rs                 dados de cada app nas Configurações: tamanho, exportar,
                               apagar (espera o app soltar os arquivos), órfãos
       store.rs                a tela da loja: instalar, atualizar, remover (com ou sem dados)
+      usage.rs                Sistema: CPU e memória do hub e de cada app externo, a cada 2 s
+                              e só com a aba de Configurações aberta
       chatter.rs, lines.toml  diretor da conversa entre mascotes e as falas genéricas
       bind.rs                 callbacks da tela e eventos da janela
     instance.rs, instance/    instância única (a 2ª só pede para abrir): socket Unix no Linux,
@@ -160,7 +162,8 @@ hub-app-rust/
                               `netstat -ano` + sysinfo no Windows
       procs.rs, procs/        processos mais pesados (por CPU e por memória), só para
                               plugins (`uses = ["procs"]`): /proc no Linux, sysinfo no
-                              Windows. Existe para plugin nenhum depender do `ps`
+                              Windows. Existe para plugin nenhum depender do `ps`. Também
+                              mede uns poucos pids (`usage`, `Meter`) para o `hub/usage.rs`
       agents/                 sessões dos codificadores de IA e o estado de cada uma, lido dos
                               arquivos que as ferramentas já gravam (só leitura). Uma fonte por
                               ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`) atrás do trait

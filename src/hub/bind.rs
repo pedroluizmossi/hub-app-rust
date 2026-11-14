@@ -25,6 +25,7 @@ impl Hub {
                 if id == "apps" {
                     h.apply_system();
                     h.refresh_data();
+                    h.refresh_usage(true);
                 }
                 h.ui.set_current(id.clone());
                 if id == "store" {

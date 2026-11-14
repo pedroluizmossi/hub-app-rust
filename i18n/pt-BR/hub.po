@@ -231,3 +231,7 @@ msgstr "de 1 a 32 camadas ([[layer]])"
 
 msgid "layer {}: {}"
 msgstr "camada {}: {}"
+
+# Usage of the hub and its external apps (src/hub/usage.rs): the sum line
+msgid "Total"
+msgstr "Total"

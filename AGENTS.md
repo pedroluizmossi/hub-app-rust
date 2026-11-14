@@ -143,6 +143,9 @@ O app é nativo nos dois. Toda mudança tem de compilar e passar nos testes nos 
   funcionaram (nem num caso normal). Não confie neles para listas suspensas.
 - **Tokens, não valores soltos:** cores e medidas vêm de `Skin` (visual da janela) e
   `Colors` (tema do app), em `ui/theme.slint`.
+- **Número em texto que não é para ler (caminho de `Path`):** o Slint escreve `float` no
+  idioma da interface (`0,5` em pt-BR), e o caminho fica inválido. Monte o `commands` com
+  inteiros (`round`, ex.: `ui/frame.slint`) ou gere-o no Rust com `format!`.
 - **Texto escala:** `font-size: 13px * Skin.text-scale;` (tamanho do texto da
   Aparência). Altura mínima de linha é `max(44px, self.preferred-height)`, nunca `44px`
   fixo num layout (corta o texto que quebra). Ver `DESIGN.md › Tamanho do texto`.

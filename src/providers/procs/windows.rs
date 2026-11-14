@@ -6,7 +6,25 @@
 
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
-use super::{Proc, ProcsSnapshot, short_name, snapshot};
+use super::{Proc, ProcsSnapshot, Usage, short_name, snapshot};
+
+/// CPU time and memory of each of `pids` (the ones that exist).
+pub fn usage(pids: &[u32]) -> Vec<(u32, Usage)> {
+    let Ok(mut sys) = System::new() else { return Vec::new() };
+    let wanted: Vec<sysinfo::Pid> = pids.iter().map(|&p| sysinfo::Pid::from_u32(p)).collect();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&wanted),
+        true,
+        ProcessRefreshKind::nothing().with_cpu().with_memory(),
+    );
+    wanted
+        .iter()
+        .filter_map(|pid| {
+            let p = sys.process(*pid)?;
+            Some((pid.as_u32(), Usage { cpu_ms: p.accumulated_cpu_time(), mem_bytes: p.memory() }))
+        })
+        .collect()
+}
 
 pub struct ProcsProvider {
     sys: Option<System>,

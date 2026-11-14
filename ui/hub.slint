@@ -14,7 +14,7 @@ import { AgentDetailWindow, AgentDetail, AgentStep } from "../miniapps/agents/de
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
 import { StoreView, StoreApp, StoreRow } from "store.slint";
-import { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow } from "models.slint";
+import { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow, ProcUsage } from "models.slint";
 import { Ambient } from "ambient.slint";
 import { AppsView } from "settings.slint";
 import { Rail, PageBar, TopTabs } from "nav.slint";
@@ -34,7 +34,7 @@ export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPl
 // windows besides the hub: each has its own globals (Rust applies the skin to them)
 export { AgentDetailWindow }
 // structs Rust fills in (defined in models.slint)
-export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow }
+export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow, ProcUsage }
 
 export component HubWindow inherits Window {
     title: app-name;
@@ -94,6 +94,8 @@ export component HubWindow inherits Window {
     in property <bool> autostart: false;
     in property <string> version;
     in property <string> log-dir;
+    // CPU and memory of the hub and its external apps (src/hub/usage.rs)
+    in property <[ProcUsage]> usage-rows;
     // app data (src/hub/data.rs): that of removed apps and the notice of the last request
     in property <[DataRow]> orphan-data;
     in property <string> data-note-app;
@@ -506,6 +508,7 @@ export component HubWindow inherits Window {
                 autostart-toggled => { root.autostart-toggled(); }
                 version: version;
                 log-dir: log-dir;
+                usage-rows: usage-rows;
                 open-logs => { root.open-logs(); }
                 apps-dir: apps-dir;
                 apps-summary: apps-summary;

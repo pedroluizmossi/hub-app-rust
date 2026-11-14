@@ -237,6 +237,14 @@ impl Process {
         self.ended.clone()
     }
 
+    /// The process id while it runs (Settings › System shows its usage).
+    pub fn pid(&self) -> Option<u32> {
+        if self.ended.load(Ordering::SeqCst) {
+            return None;
+        }
+        self.child.lock().ok()?.as_ref().map(|c| c.id())
+    }
+
     pub fn send(&self, msg: &ToApp) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(msg.line());

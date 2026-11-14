@@ -357,3 +357,16 @@ msgstr "Apagar dados"
 
 msgid "Mascots and themes from CyberDock · Interface built with Slint (slint.dev)"
 msgstr "Mascotes e temas do CyberDock · Interface feita com Slint (slint.dev)"
+
+# Settings › System: usage now (ui/settings.slint)
+msgid "Usage now"
+msgstr "Uso agora"
+
+msgid "live"
+msgstr "ao vivo"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Memory"
+msgstr "Memória"

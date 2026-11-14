@@ -933,6 +933,13 @@ impl MiniApp for PluginMini {
         full.alive.borrow().as_ref().is_none_or(|a| !a.load(Ordering::SeqCst))
     }
 
+    fn process_id(&self) -> Option<u32> {
+        match self.full.as_ref()?.sink.borrow().as_ref()? {
+            Sink::Process(p) => p.pid(),
+            Sink::Script(_) => None,
+        }
+    }
+
     fn reload_data(&mut self, ui: &HubWindow) {
         if self.full.is_some() && self.host.config.borrow().is_enabled(&self.plugin.manifest.id) {
             self.start_logic();

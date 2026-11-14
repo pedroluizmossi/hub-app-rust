@@ -45,11 +45,19 @@ export component Frame inherits Rectangle {
         property <float> b: Skin.border / 2px;   // centered stroke: inset by half the border
         width: 100%;
         height: 100%;
-        viewbox-width: w;
-        viewbox-height: h;
-        commands: "M " + b + " " + b + " L " + (w - c) + " " + b + " L " + (w - b) + " " + c
-            + " L " + (w - b) + " " + (h - b) + " L " + c + " " + (h - b)
-            + " L " + b + " " + (h - c) + " Z";
+        // The path is text, and Slint writes a float in the interface language ("0,5" in
+        // Portuguese), which a path doesn't read. So it goes in half-pixel units, rounded
+        // to whole numbers (an integer has no decimal separator).
+        viewbox-width: round(w * 2);
+        viewbox-height: round(h * 2);
+        commands: "M " + u(b) + " " + u(b) + " L " + u(w - c) + " " + u(b) + " L " + u(w - b) + " " + u(c)
+            + " L " + u(w - b) + " " + u(h - b) + " L " + u(c) + " " + u(h - b)
+            + " L " + u(b) + " " + u(h - c) + " Z";
+
+        // logical pixels -> whole half-pixel units
+        pure function u(v: float) -> int {
+            return round(v * 2);
+        }
         fill: Skin.bg;
         stroke: Skin.edge;
         stroke-width: Skin.border;

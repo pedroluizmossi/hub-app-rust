@@ -15,6 +15,7 @@ mod grid;
 mod pages;
 mod settings;
 mod store;
+mod usage;
 mod window;
 
 use std::cell::{Cell, RefCell};
@@ -116,6 +117,8 @@ pub struct Hub {
     backdrop: std::sync::Arc<appearance::BackdropState>,
     /// Minute shown on the clock ("21:57").
     clock: RefCell<String>,
+    /// CPU and memory of the hub and its external apps (Settings › System, `usage.rs`).
+    usage: RefCell<usage::UsageState>,
     /// What the Settings list shows now (see `rebuild_settings`).
     settings_fingerprint: RefCell<String>,
     /// Page open on the panel (index in `config.pages`).
@@ -198,6 +201,7 @@ impl Hub {
             backdrop_size: Cell::new((0.0, 0.0)),
             backdrop: Default::default(),
             clock: RefCell::new(String::new()),
+            usage: Default::default(),
             settings_fingerprint: RefCell::new(String::new()),
             page: Cell::new(0),
             pages_fingerprint: RefCell::new(String::new()),
@@ -391,6 +395,9 @@ impl Hub {
             for app in ids.iter().filter_map(|id| self.registry.find(id)) {
                 app.borrow_mut().tick(f, &self.ui);
             }
+        } else if self.ui.get_current() == "apps" {
+            // Settings › System: the hub's own CPU and memory
+            self.refresh_usage(false);
         }
         self.frame_wanted.set(crate::mascot::anim::take_requested_frame_ms());
         self.pace_frames();

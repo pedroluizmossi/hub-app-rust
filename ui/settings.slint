@@ -1,9 +1,9 @@
 // Hub settings (`current == "apps"`): dashboard, appearance, system, pages and the
 // list of apps with each one's options.
 import { ScrollView } from "std-widgets.slint";
-import { Skin, Icons } from "theme.slint";
+import { Skin, Icons, Anim } from "theme.slint";
 import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
-import { SettingRow, AppInfo, PageInfo, DataRow } from "models.slint";
+import { SettingRow, AppInfo, PageInfo, DataRow, ProcUsage } from "models.slint";
 
 // Rows with a minimum height of 44 px: `max(44px, self.preferred-height)`, never just `44px`.
 // A fixed min-height becomes the row's height, and text that wraps (or text at 125%)
@@ -135,6 +135,8 @@ export component AppsView inherits ScrollView {
     callback autostart-toggled();
     in property <string> version;
     in property <string> log-dir;
+    // CPU and memory now: the hub, each external app and the total (src/hub/usage.rs)
+    in property <[ProcUsage]> usage-rows;
     callback open-logs();
     // local apps (see the properties in hub.slint)
     in property <string> apps-dir;
@@ -456,6 +458,113 @@ export component AppsView inherits ScrollView {
                             text: @tr("Open logs");
                             font-size: 13px * Skin.text-scale;
                             clicked => { root.open-logs(); }
+                        }
+                    }
+                }
+                // usage now: the hub and each external app (CPU colored by load) and the total
+                if usage-rows.length > 0: VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: @tr("Usage now");
+                            color: Skin.ink;
+                            font-size: 14px * Skin.text-scale;
+                            vertical-alignment: center;
+                        }
+                        // "live" light: blinks with the animation frame (still with "reduce motion")
+                        Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            y: (parent.height - self.height) / 2;
+                            background: Skin.accent;
+                            opacity: Anim.calm || mod(Anim.frame, 8) < 4 ? 1 : 0.2;
+                            animate opacity { duration: 250ms; }
+                        }
+                        Text {
+                            text: @tr("live");
+                            color: Skin.dim;
+                            font-size: 11px * Skin.text-scale;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    Rectangle {
+                        background: Skin.field;
+                        border-width: 1px;
+                        border-color: Skin.field-edge;
+                        VerticalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            spacing: 2px;
+                            // column titles
+                            HorizontalLayout {
+                                spacing: 16px;
+                                Rectangle { horizontal-stretch: 1; }
+                                Text { text: @tr("CPU"); width: 90px; color: Skin.dim; font-size: 10px * Skin.text-scale; horizontal-alignment: right; }
+                                Text { text: @tr("Memory"); width: 110px; color: Skin.dim; font-size: 10px * Skin.text-scale; horizontal-alignment: right; }
+                            }
+                            for u in usage-rows: VerticalLayout {
+                                spacing: 2px;
+                                if u.total: Rectangle { height: 1px; background: Skin.field-edge; }
+                                HorizontalLayout {
+                                    spacing: 16px;
+                                    min-height: max(26px, self.preferred-height);
+                                    Text {
+                                        text: u.name;
+                                        horizontal-stretch: 1;
+                                        color: u.total ? Skin.ink : Skin.sub;
+                                        font-size: 13px * Skin.text-scale;
+                                        font-weight: u.total ? 700 : 400;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                    // number in the load's color (calm, busy, heavy), unit apart
+                                    HorizontalLayout {
+                                        width: 90px;
+                                        alignment: end;
+                                        spacing: 2px;
+                                        Text {
+                                            text: u.cpu-text;
+                                            color: u.cpu >= 40 ? Skin.bad : u.cpu >= 10 ? Skin.accent.mix(Skin.bad, 0.5) : Skin.accent;
+                                            animate color { duration: 400ms; }
+                                            font-family: Skin.font-mono;
+                                            font-size: 16px * Skin.text-scale;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: "%";
+                                            color: Skin.dim;
+                                            font-family: Skin.font-mono;
+                                            font-size: 11px * Skin.text-scale;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        width: 110px;
+                                        alignment: end;
+                                        spacing: 4px;
+                                        Text {
+                                            text: u.mem-text;
+                                            color: Skin.ink;
+                                            font-family: Skin.font-mono;
+                                            font-size: 16px * Skin.text-scale;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: u.mem-unit;
+                                            color: Skin.dim;
+                                            font-family: Skin.font-mono;
+                                            font-size: 11px * Skin.text-scale;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
