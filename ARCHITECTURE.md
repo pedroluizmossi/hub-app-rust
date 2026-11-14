@@ -43,7 +43,8 @@ está em [DESIGN.md](DESIGN.md).
  │  Núcleo        Registro de mini-apps ── manifest.toml, liga/desliga            │
  │                Serviços: Executor (allowlist) · Config (TOML, versionada) ·    │
  │                          Visuais + temas + mascotes · Notificações · Grade     │
- │                Provedores: sys · gpu · docker · media (MPRIS) · ai_usage       │
+ │                Provedores: sys · gpu · docker · media (MPRIS) · ai_usage ·     │
+ │                           ports · agents · procs                               │
  │                           (thread própria, coleta 1×, distribui)               │
  └────────────────────────────────────────────────────────────────────────────────┘
    /proc + /sys + hwmon     nvidia-smi / amdgpu      docker CLI      D-Bus (MPRIS)
@@ -62,8 +63,11 @@ hub-app-rust/
   install.sh, install.ps1     instalação em uma linha (Linux, Windows) a partir do último Release
   tools/sprite-import/        converte PNG (folha de quadros 16×14) em animação de mascote,
                               pela paleta cor -> papel; `cargo run -p sprite-import -- --help`
-  examples/                   plugins de exemplo (plugin-uptime, plugin-top), app externo de
-                              exemplo (app-hello, em Rust) e a loja de teste (loja/preparar.sh)
+  tools/dev-ui.sh             MiniUtils de desenvolvimento isolado com o MCP do Slint: captura,
+                              clique, live-preview (só Linux; ver AGENTS.md)
+  examples/                   plugins de exemplo (plugin-uptime, plugin-top, plugin-notas),
+                              app externo de exemplo (app-hello, em Rust), temas/visuais/fundos
+                              por arquivo (aparencia/) e a loja de teste (loja/preparar.sh)
   ui/                         crate `miniutils-ui`: só a interface, compilada à parte
     Cargo.toml, build.rs      compila hub.slint (e tudo que ele importa, inclusive as telas
                               dos mini-apps); src/lib.rs reexporta os tipos gerados
@@ -71,6 +75,11 @@ hub-app-rust/
     models.slint              structs que o Rust preenche (GridCell, AppInfo, PageInfo…)
     dashboard.slint           painel: grade dos mini-apps e modo de edição
     settings.slint            configurações (painel, aparência, sistema, páginas, apps)
+    store.slint               loja de plugins na janela
+    plugin.slint              tela genérica dos plugins simples (`[run]`)
+    chatter.slint             caixa de diálogo da conversa entre mascotes (estilo RPG)
+    ambient.slint             fundo animado: gotas, estrelas, varredura (gerados em
+                              `skin/backdrop.rs › ambient`), um retângulo pequeno cada
     nav.slint                 navegação entre páginas: barra (esquerda, direita, embaixo) ou abas
     frame.slint               moldura da janela sem borda: alças, fundo, barras, título
     theme.slint               tokens: Skin (visual da janela), Colors (tema de app), Icons, Anim
@@ -80,9 +89,16 @@ hub-app-rust/
   miniapps/
     <app>/manifest.toml       manifesto (id, provedores, permissões, configurações)
     <app>/view.slint          tela do app (global <App>App + componente <App>View)
-    docker/ vitals/ cdplayer/ ai_usage/
+    <app>/lines.toml          falas da mascote na conversa (opcional; ver "Conversa entre mascotes")
+    docker/ vitals/ cdplayer/ ai_usage/ ports/ todo/ agents/ (com detail.slint, a janela
+                              de detalhe de uma sessão)
   src/
-    main.rs                   argumentos (--hidden, --tab) e event loop
+    main.rs                   argumentos (--hidden, --tab, --plugin-dev, --pastas, --previa,
+                              --importar-mascote, comandos da loja) e event loop
+    autostart.rs, autostart/  iniciar com o sistema: `.desktop` XDG no Linux, chave Run no
+                              Windows (ver "Registro e iniciar com o sistema")
+    store.rs                  loja de plugins: índice assinado, instalar, atualizar, remover
+                              (linha de comando e o que a tela da loja chama)
     hub/                      o host, um `impl Hub` dividido por assunto:
       mod.rs                  estado, montagem, `update` (acordado pelo barramento),
                               quadro de animação, bandeja
@@ -94,6 +110,7 @@ hub-app-rust/
       data.rs                 dados de cada app nas Configurações: tamanho, exportar,
                               apagar (espera o app soltar os arquivos), órfãos
       store.rs                a tela da loja: instalar, atualizar, remover (com ou sem dados)
+      chatter.rs, lines.toml  diretor da conversa entre mascotes e as falas genéricas
       bind.rs                 callbacks da tela e eventos da janela
     instance.rs, instance/    instância única (a 2ª só pede para abrir): socket Unix no Linux,
                               named pipe no Windows
@@ -109,6 +126,8 @@ hub-app-rust/
       appdata.rs              pasta de dados de cada app (app-data/<id>/): [data], versão,
                               cópia antes de migrar, tamanho, exportar, apagar, pastas antigas
       registry.rs             liga/desliga mini-apps e distribui eventos
+      plugins.rs              plugins instalados: os três tipos, manifesto, arquivos aceitos
+      chatter.rs              fatos (`Fact`), vozes e o formato dos `lines.toml`
       config.rs               ~/.config/miniutils/config.toml (versão, migrações, nome exibido)
       layout.rs               grade do painel: posições, encaixe ao arrastar (settle), vagas
       exec.rs                 executor com allowlist; todo comando tem prazo (`run_timeout`)
@@ -132,7 +151,11 @@ hub-app-rust/
       docker.rs               docker ps / stats / events
       media.rs, media/        o que está tocando e comandos do player: MPRIS pelo D-Bus no
                               Linux, controles de mídia do sistema no Windows
-      ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go)
+      ai_usage.rs             uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go);
+                              fonte que falha mantém a última leitura, marcada como velha
+      ai_usage_direct.rs      consultas diretas aos serviços (formatos do ai-usagebar, ver
+                              THIRD_PARTY_NOTICES.md); renova a credencial do Claude, nunca
+                              registra token nem resposta bruta
       ports.rs                portas escutando: `ss -lntup` + /proc/<pid>/cmdline no Linux,
                               `netstat -ano` + sysinfo no Windows
       procs.rs, procs/        processos mais pesados (por CPU e por memória), só para
@@ -141,10 +164,18 @@ hub-app-rust/
       agents/                 sessões dos codificadores de IA e o estado de cada uma, lido dos
                               arquivos que as ferramentas já gravam (só leitura). Uma fonte por
                               ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`) atrás do trait
-                              `Source`; o que cada uma sabe a mais vai em `Details` (opcional)
+                              `Source`; o que cada uma sabe a mais vai em `Details` (opcional).
+                              A linha do tempo (`Timeline`: pedidos, respostas e ferramentas,
+                              cortados) só é lida da sessão aberta no detalhe e não vai para
+                              os plugins
     skin/
       mod.rs                  visuais da janela (tabela SKINS) e `apply` para o global Skin
-      backdrop.rs             fundos desenhados em Rust (pontos, CRT, papel, cidade)
+      backdrop.rs             fundos desenhados em Rust (pontos, CRT, papel, cidade) e os
+                              elementos do fundo animado (`ambient`)
+      color.rs                contas de cor: mistura, contraste WCAG, leitura de `#RRGGBB`
+      user.rs                 temas, visuais e fundos da pessoa, lidos de `<dados>/miniutils/`
+                              (`temas/`, `visuais/`, `fundos/`) sem recompilar; `base` herda
+                              de um existente; `MINIUTILS_APARENCIA` troca a pasta
     mascot/
       sprites.rs              sprites: 12 por papéis de cor (16×14, inclui o CD) + 20 "pixel" (12×12)
       themes.rs               temas de cor dos apps
@@ -155,6 +186,12 @@ hub-app-rust/
                               `MINIUTILS_CLIPS=<pasta>` lê do disco e recarrega ao salvar
       preview.rs              `miniutils --previa <mascote> [animação]`: GIF em todos os temas
       disc.rs                 o CD 24×24 do app de música (desenho próprio, não é mascote)
+      pack.rs                 mascotes importadas: folhas PNG de qualquer tamanho em
+                              `<dados>/miniutils/mascotes/<chave>/` (com `sprite.toml`
+                              opcional), sem recompilar; `--importar-mascote` copia para lá
+      stroll.rs               subagentes andando na faixa do app Agentes com as mascotes
+                              importadas: anda, para, faz uma animação, corre chamando
+                              ferramenta, pula ao terminar (só números; o app desenha)
     apps/
       kit.rs                  peças comuns: mascote do cabeçalho (`HeaderMascot`), fala
                               com prazo (`Speech`), `plural`, `unix_now`
@@ -162,9 +199,12 @@ hub-app-rust/
       cdplayer.rs             CD Player: faixa, progresso, comandos e humor
       ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
       ai_pace.rs              previsão de esgotamento pelo ritmo de uso (duas janelas) e gráfico da última hora
+      ai_mascots.rs           mascotes das fontes de IA (Claude, Codex…), usadas pelas
+                              Assinaturas de IA e pelos Agentes
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
       todo.rs                 To-do rápido: lista em todo.json, na pasta de dados do app
-      agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou
+      agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
+                              detalhe de uma sessão com a linha do tempo; subagentes andando
       plugin/                 plugins da comunidade: tela genérica, tela interpretada + Rhai,
                               ou tela interpretada + processo do app externo
         mod.rs                conjunto de plugins carregados e o mini-app; API do script no topo
@@ -393,7 +433,7 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 
 **Fase 1 (atual)** — mini-apps compilados junto, contrato estável:
 - [x] Manifesto, registro, ligar/desligar, configuração em TOML com migrações
-- [x] Provedores sys, gpu, docker, media, ai_usage e ports compartilhados
+- [x] Provedores sys, gpu, docker, media, ai_usage, ports, agents e procs compartilhados
 - [x] Mini-apps Docker e Sinais vitais (com avisos sustentados)
 - [x] Mini-app CD Player (MPRIS: faixa, progresso, comandos, notificação opcional)
 - [x] Mini-app Assinaturas de IA (limites e créditos por conta)
@@ -401,6 +441,8 @@ Na primeira execução, a config de `~/.config/cyberhub/` (nome antigo) é copia
 - [x] Mini-app Agentes de IA (Claude Code, Codex e OpenCode, só leitura)
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
+- [x] Temas, visuais e fundos por arquivo (`skin/user.rs`) e mascotes importadas de PNG
+  (`mascot/pack.rs`), sem recompilar; Configurações › Aparência › Recarregar relê tudo
 
 **Plugins e loja** (feito; detalhes no topo de `src/core/plugins.rs`, `src/apps/plugin/mod.rs`,
 `src/apps/external.rs` e `src/store.rs`; guia para quem cria apps em [APPS.md](APPS.md)):
