@@ -46,7 +46,7 @@ fn help() -> String {
         ),
         (
             tr!("--plugin-dev <folder>"),
-            tr!("loads the plugin in the folder (enabled, on the 1st page) and reloads it\non save; view and script errors go to the terminal"),
+            tr!("loads the plugin in the folder (enabled, on the 1st page) and reloads it\non save; view and script errors go to the terminal. Repeat it to load\nseveral folders"),
         ),
         (
             "--import-mascot",
@@ -182,25 +182,27 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let tab = args.iter().position(|a| a == "--tab").and_then(|i| args.get(i + 1)).cloned();
-    let dev = match args.iter().position(|a| a == "--plugin-dev") {
-        Some(i) => {
-            let Some(dir) = args.get(i + 1) else {
-                eprintln!("{}", tr!("--plugin-dev <folder>: missing the plugin folder"));
-                std::process::exit(2);
-            };
-            let dir = std::fs::canonicalize(dir).unwrap_or_else(|e| {
-                eprintln!("--plugin-dev {dir}: {e}");
-                std::process::exit(2);
-            });
-            if let Err(e) = core::plugins::Plugin::load(&dir) {
-                // stays open: the plugin comes in once the manifest is fixed
-                eprintln!("plugin-dev: {e}");
-            }
-            core::plugins::set_dev(dir);
-            true
+    // --plugin-dev may come more than once: one folder each
+    let mut dev_dirs = Vec::new();
+    for (i, _) in args.iter().enumerate().filter(|(_, a)| *a == "--plugin-dev") {
+        let Some(dir) = args.get(i + 1).filter(|d| !d.starts_with("--")) else {
+            eprintln!("{}", tr!("--plugin-dev <folder>: missing the plugin folder"));
+            std::process::exit(2);
+        };
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|e| {
+            eprintln!("--plugin-dev {dir}: {e}");
+            std::process::exit(2);
+        });
+        if let Err(e) = core::plugins::Plugin::load(&dir) {
+            // stays open: the plugin comes in once the manifest is fixed
+            eprintln!("plugin-dev {}: {e}", dir.display());
         }
-        None => false,
-    };
+        dev_dirs.push(dir);
+    }
+    let dev = !dev_dirs.is_empty();
+    if dev {
+        core::plugins::set_dev(dev_dirs);
+    }
 
     // is there an instance already? it gets the request and this one exits, with no window or tray
     let socket = instance::socket_path();

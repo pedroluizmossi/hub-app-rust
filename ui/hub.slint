@@ -144,6 +144,7 @@ export component HubWindow inherits Window {
     callback setting-toggled(string, string);
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
+    callback setting-text(string, string, string);
     callback hide-window();
     // started dragging an edge/corner ("n", "se", …)
     callback start-resize(string);
@@ -571,6 +572,7 @@ export component HubWindow inherits Window {
                 setting-toggled(a, k) => { root.setting-toggled(a, k); }
                 setting-int(a, k, v) => { root.setting-int(a, k, v); }
                 setting-chosen(a, k, i) => { root.setting-chosen(a, k, i); }
+                setting-text(a, k, t) => { root.setting-text(a, k, t); }
             }
 
             if nav == "right": Rail {

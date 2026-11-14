@@ -6,8 +6,17 @@ use super::appdata::DataSpec;
 use super::bus::Topic;
 use crate::mascot::sprites;
 
-/// Version of the host/mini-app contract this binary understands.
-pub const API_VERSION: u32 = 1;
+/// Newest version of the host/mini-app contract this binary understands. Older ones still
+/// load: 2 only adds the `text` and `secret` settings, and a manifest that uses them must
+/// declare `api = 2` (a hub that only knows 1 then refuses it with a clear message instead of
+/// failing on an unknown setting type).
+pub const API_VERSION: u32 = 2;
+
+/// First version with the `text` and `secret` settings.
+pub const API_TEXT_SETTINGS: u32 = 2;
+
+/// Longest value of a `text` or `secret` setting when the manifest gives no `max_len`.
+pub const TEXT_MAX_LEN: usize = 512;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
@@ -52,6 +61,28 @@ pub enum SettingKind {
     Bool,
     Int,
     Choice,
+    /// One line of free text (a URL, a path, a name).
+    Text,
+    /// Like `Text`, but the field hides what was typed (a token, an API key). It is saved in
+    /// the hub's config file like the other settings, which is written only for the user.
+    Secret,
+}
+
+impl SettingKind {
+    /// Name the settings screen uses for the field.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SettingKind::Bool => "bool",
+            SettingKind::Int => "int",
+            SettingKind::Choice => "choice",
+            SettingKind::Text => "text",
+            SettingKind::Secret => "secret",
+        }
+    }
+
+    pub fn is_text(self) -> bool {
+        matches!(self, SettingKind::Text | SettingKind::Secret)
+    }
 }
 
 /// A setting declared in the manifest; becomes a form field on the "Apps" tab.
@@ -72,9 +103,23 @@ pub struct SettingDef {
     /// ones and come first; `Manifest::parse` completes the list with the other mascots.
     #[serde(default)]
     pub options: Vec<String>,
+    /// Longest value of a `text` or `secret` (characters); `TEXT_MAX_LEN` without it.
+    #[serde(default)]
+    pub max_len: Option<usize>,
 }
 
 impl SettingDef {
+    /// What the user typed in a `text` or `secret` field, as it is saved: one line, no
+    /// surrounding spaces (a pasted token often brings a line break), at most `max_len`
+    /// characters. `None` if the setting is not a text one.
+    pub fn clean_text(&self, typed: &str) -> Option<String> {
+        if !self.kind.is_text() {
+            return None;
+        }
+        let max = self.max_len.unwrap_or(TEXT_MAX_LEN);
+        Some(typed.trim().chars().filter(|c| !c.is_control()).take(max).collect())
+    }
+
     /// The options the screen shows. The theme one (`theme`) is always "auto" plus every
     /// theme, file themes included: a new theme shows up in every app without editing
     /// manifests. The others are the manifest's.
@@ -109,12 +154,25 @@ impl Manifest {
             s.options.extend(rest);
         }
         anyhow::ensure!(
-            m.api == API_VERSION,
-            "mini-app {} uses API {} (this hub understands {})",
+            (1..=API_VERSION).contains(&m.api),
+            "mini-app {} uses API {} (this hub understands up to {})",
             m.id,
             m.api,
             API_VERSION
         );
+        for s in &m.settings {
+            if s.kind.is_text() {
+                anyhow::ensure!(
+                    m.api >= API_TEXT_SETTINGS,
+                    "mini-app {}: setting {} is a {}, which needs api = {API_TEXT_SETTINGS}",
+                    m.id,
+                    s.key,
+                    s.kind.as_str()
+                );
+                anyhow::ensure!(s.default.is_str(), "mini-app {}: setting {} needs a text default", m.id, s.key);
+                anyhow::ensure!(s.max_len != Some(0), "mini-app {}: setting {} has max_len = 0", m.id, s.key);
+            }
+        }
         if let Some(d) = &m.data {
             d.check().map_err(anyhow::Error::msg)?;
         }
@@ -150,6 +208,7 @@ mod tests {
                     SettingKind::Choice => {
                         assert!(s.live_options().contains(&s.default.as_str().unwrap().to_string()), "{}", s.key)
                     }
+                    SettingKind::Text | SettingKind::Secret => assert!(s.default.is_str(), "{}", s.key),
                 }
             }
         }
@@ -183,5 +242,35 @@ mod tests {
     #[test]
     fn rejects_unknown_api() {
         assert!(Manifest::parse("id='x'\nname='x'\napi=99").is_err());
+        assert!(Manifest::parse("id='x'\nname='x'\napi=0").is_err());
+        // the older contract still loads
+        assert!(Manifest::parse("id='x'\nname='x'\napi=1").is_ok());
+        assert!(Manifest::parse("id='x'\nname='x'\napi=2").is_ok());
+    }
+
+    const TEXT_SETTINGS: &str = "id='x'\nname='x'\napi=2\n\
+        [[settings]]\nkey='url'\nlabel='URL'\ntype='text'\ndefault='http://127.0.0.1:8765'\n\
+        [[settings]]\nkey='token'\nlabel='Token'\ntype='secret'\ndefault=''\nmax_len=8\n";
+
+    #[test]
+    fn text_and_secret_settings() {
+        let m = Manifest::parse(TEXT_SETTINGS).unwrap();
+        assert_eq!(m.setting("url").unwrap().kind, SettingKind::Text);
+        let token = m.setting("token").unwrap();
+        assert_eq!(token.kind, SettingKind::Secret);
+        // one line, trimmed, cut at max_len
+        assert_eq!(token.clean_text("  cix_abc\n").as_deref(), Some("cix_abc"));
+        assert_eq!(token.clean_text("cix_\tabcdefgh").as_deref(), Some("cix_abcd"));
+        assert_eq!(m.setting("url").unwrap().clean_text(&"a".repeat(600)).unwrap().len(), TEXT_MAX_LEN);
+        // not a text setting
+        let b = Manifest::parse("id='x'\nname='x'\napi=1\n[[settings]]\nkey='b'\nlabel='B'\ntype='bool'\ndefault=true").unwrap();
+        assert_eq!(b.setting("b").unwrap().clean_text("x"), None);
+    }
+
+    #[test]
+    fn text_settings_need_api_2_and_a_text_default() {
+        assert!(Manifest::parse(&TEXT_SETTINGS.replace("api=2", "api=1")).is_err());
+        assert!(Manifest::parse(&TEXT_SETTINGS.replace("default=''", "default=0")).is_err());
+        assert!(Manifest::parse(&TEXT_SETTINGS.replace("max_len=8", "max_len=0")).is_err());
     }
 }

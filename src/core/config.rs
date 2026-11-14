@@ -417,7 +417,7 @@ fn write_logged(path: &Path, text: &str) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Err(e) = crate::core::os::write_atomic(path, text.as_bytes()) {
+    if let Err(e) = crate::core::os::write_atomic_private(path, text.as_bytes()) {
         log::error!("could not save {}: {e}", path.display());
     }
 }
@@ -779,5 +779,21 @@ mod tests {
         let text = std::fs::read_to_string(t.file()).unwrap();
         assert!(text.contains(&format!("version = {CURRENT_VERSION}")));
         assert!(!with_suffix(&t.file(), ".broken").exists());
+    }
+
+    /// The config can hold `secret` settings (tokens): only the user reads it.
+    #[cfg(unix)]
+    #[test]
+    fn saved_config_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = Tmp::new("private");
+        // an existing file with a looser mode is replaced by a private one
+        std::fs::write(t.file(), "version = 1\n").unwrap();
+        std::fs::set_permissions(t.file(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut cfg = Config::load_from(&t.file());
+        cfg.set("a.b", "token", toml::Value::String("cix_x".into()));
+        cfg.save_to(&t.file());
+        let mode = std::fs::metadata(t.file()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }

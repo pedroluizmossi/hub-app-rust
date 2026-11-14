@@ -62,7 +62,7 @@ mod view;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -105,7 +105,7 @@ struct Loaded {
 struct PluginSet {
     cards: Option<Rc<VecModel<PluginCard>>>,
     loaded: Vec<Loaded>,
-    /// Dev mode: checks the plugin folder every second and reloads when it changes.
+    /// Dev mode: checks the plugin folders every second and reloads when one changes.
     dev_watch: Option<Timer>,
 }
 
@@ -129,7 +129,7 @@ pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool)
         SET.with(|s| {
             let mut s = s.borrow_mut();
             s.cards = Some(cards.clone());
-            s.dev_watch = plugins::dev_dir().map(watch_dev);
+            s.dev_watch = (!plugins::dev_dirs().is_empty()).then(|| watch_dev(plugins::dev_dirs()));
         });
         cards
     });
@@ -162,7 +162,7 @@ pub fn sync(host: &Rc<Host>, ui: &HubWindow, registry: &Registry, startup: bool)
             continue;
         }
         // the plugin under development comes in already enabled, on the first page
-        if plugins::dev_dir() == Some(plugin.dir.as_path()) {
+        if plugins::is_dev(&plugin.dir) {
             log::info!("plugin-dev: {id} loaded from {}", plugin.dir.display());
             let mut cfg = host.config.borrow_mut();
             if cfg.page_of(&id).is_none() {
@@ -203,13 +203,16 @@ fn stamp(dir: &Path) -> u64 {
 
 /// Dev mode: every second, if any of the plugin's files changed, reads the plugins again
 /// (the screen's and the script's errors go to the terminal).
-fn watch_dev(dir: &'static Path) -> Timer {
+fn watch_dev(dirs: &'static [PathBuf]) -> Timer {
     let timer = Timer::default();
-    let last = std::cell::Cell::new(stamp(dir));
+    let last = RefCell::new(dirs.iter().map(|d| stamp(d)).collect::<Vec<_>>());
     timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
-        let now = stamp(dir);
-        if now != last.replace(now) {
-            log::info!("plugin-dev: files changed, reloading");
+        let now: Vec<u64> = dirs.iter().map(|d| stamp(d)).collect();
+        let before = last.replace(now.clone());
+        for (dir, _) in dirs.iter().zip(now.iter().zip(&before)).filter(|(_, (n, b))| n != b) {
+            log::info!("plugin-dev: files changed in {}, reloading", dir.display());
+        }
+        if now != before {
             crate::hub::request_plugin_reload();
         }
     });

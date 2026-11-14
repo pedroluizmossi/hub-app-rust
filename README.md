@@ -218,7 +218,8 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 --hidden              inicia só na bandeja (para o autostart)
 --tab <nome>          abre numa página do painel (pelo nome dela ou de um app nela,
                       ex.: Geral, docker), em apps (configurações) ou em store (loja)
---plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md)
+--plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md);
+                      repita para carregar várias pastas
 --import-mascot <pasta>
                       copia folhas PNG (Nome_Animação_N.png) para a pasta de mascotes
 --check-mascot <pasta ou .toml>

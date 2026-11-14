@@ -258,8 +258,10 @@ options = ["auto", "neon", "matrix", "aconchego"]
   são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`, `ports`, `agents`, `procs`): um nome desconhecido
   faz o manifesto falhar no parse, e no Rust o provedor é sempre `Topic::…`, nunca uma string.
 - `permissions.exec` é a allowlist do executor para aquele app.
-- `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice`). Um
-  rótulo terminado em ` (%)` ou ` (°C)` vira a unidade do stepper.
+- `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice` e, com
+  `api = 2`, `text` e `secret`). Um rótulo terminado em ` (%)` ou ` (°C)` vira a unidade
+  do stepper. O hub aceita manifestos de `api = 1` até `API_VERSION`; `text`/`secret`
+  exigem `api = 2`, e o arquivo de configuração é gravado com modo 0600.
 
 O lado Rust implementa o trait `MiniApp` (`src/core/miniapp.rs`). Todas as chamadas são na
 thread da UI; um app desligado não recebe nada.
@@ -502,9 +504,10 @@ Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se 
   com exportar (o banco sai por `VACUUM INTO`) e apagar (o hub para a lógica, espera ela
   soltar os arquivos, apaga e a religa). Remover pergunta se os dados ficam; os que ficam
   aparecem em Sistema como dados de apps removidos e voltam numa reinstalação.
-- Desenvolvimento: `miniutils --plugin-dev <pasta>` carrega o plugin direto da pasta (já
-  ligado, na primeira página), recarrega ao salvar e mostra no terminal os erros da tela e
-  do script.
+- Desenvolvimento: `miniutils --plugin-dev <pasta>` (repetível, uma pasta por vez que
+  aparece) carrega o plugin direto da pasta (já ligado, na primeira página), recarrega ao
+  salvar e mostra no terminal os erros da tela e do script. Duas pastas com o mesmo `id`:
+  vale a primeira.
 - Loja na janela (Configurações > Loja de plugins, `ui/store.slint`, `src/hub/store.rs`) e
   na linha de comando (`miniutils --help`): listar, instalar, atualizar e remover sem
   reiniciar (o app aberto relê a pasta; a linha de comando avisa pelo socket da instância).

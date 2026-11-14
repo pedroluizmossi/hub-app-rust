@@ -29,7 +29,7 @@ export struct SettingRow {
     key: string,
     label: string,
     unit: string,        // "%", "°C" or empty (taken from the end of the label)
-    kind: string,        // "bool" | "int" | "choice"
+    kind: string,        // "bool" | "int" | "choice" | "text" | "secret"
     bool-value: bool,
     int-value: int,
     minimum: int,
@@ -38,6 +38,7 @@ export struct SettingRow {
     options: [string],   // labels of a choice
     index: int,          // selected option
     images: [image],     // drawing of each option, if it is a mascot choice (otherwise empty)
+    text-value: string,  // value of a text or secret
 }
 
 export struct AppInfo {

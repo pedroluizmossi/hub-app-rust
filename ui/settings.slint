@@ -2,7 +2,7 @@
 // list of apps with each one's options.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons, Anim } from "theme.slint";
-import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect } from "widgets.slint";
+import { Icon, IconButton, TextButton, SqSwitch, Stepper, Select, MascotSelect, TextField } from "widgets.slint";
 import { SettingRow, AppInfo, PageInfo, DataRow, ProcUsage } from "models.slint";
 
 // Header of a settings block that opens and closes (blocks with many options start closed).
@@ -56,6 +56,7 @@ component SettingLine inherits Rectangle {
     callback toggled;
     callback int-edited(int);
     callback chosen(int);
+    callback text-edited(string);
 
     HorizontalLayout {
         spacing: 16px;
@@ -94,6 +95,14 @@ component SettingLine inherits Rectangle {
                 accent: accent;
                 label: s.label;
                 chosen(i) => { root.chosen(i); }
+            }
+            if s.kind == "text" || s.kind == "secret": TextField {
+                width: 220px;
+                value: s.text-value;
+                secret: s.kind == "secret";
+                accent: accent;
+                label: s.label;
+                committed(t) => { root.text-edited(t); }
             }
             // mascot choice: picker with each one's drawing
             if s.kind == "choice" && s.images.length > 0: MascotSelect {
@@ -233,6 +242,7 @@ export component AppsView inherits ScrollView {
     callback setting-toggled(string, string);
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
+    callback setting-text(string, string, string);
 
     VerticalLayout {
         alignment: start;
@@ -1014,6 +1024,7 @@ export component AppsView inherits ScrollView {
                         toggled => { root.setting-toggled(s.app, s.key); }
                         int-edited(v) => { root.setting-int(s.app, s.key, v); }
                         chosen(i) => { root.setting-chosen(s.app, s.key, i); }
+                        text-edited(t) => { root.setting-text(s.app, s.key, t); }
                     }
                     // what the app stores (core/appdata.rs): export and delete with two clicks
                     if app.data != "": HorizontalLayout {

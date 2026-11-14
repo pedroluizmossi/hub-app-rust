@@ -74,6 +74,7 @@ impl Hub {
         ui.on_setting_toggled(|app, key| with_hub(|h| h.change_setting(&app, &key, Input::Toggle)));
         ui.on_setting_int(|app, key, v| with_hub(|h| h.change_setting(&app, &key, Input::Int(v as i64))));
         ui.on_setting_chosen(|app, key, i| with_hub(|h| h.change_setting(&app, &key, Input::Choice(idx(i)))));
+        ui.on_setting_text(|app, key, t| with_hub(|h| h.change_setting(&app, &key, Input::Text(t.to_string()))));
 
         // pages
         ui.on_page_selected(|i| with_hub(|h| h.select_page(idx(i))));

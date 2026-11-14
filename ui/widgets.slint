@@ -343,6 +343,57 @@ export component Stepper inherits Rectangle {
     }
 }
 
+// One line of text for a setting (a URL, a token). Saves with Enter or when the field loses
+// focus, only if it changed; Esc goes back to the saved value. `secret` hides what is typed.
+export component TextField inherits Rectangle {
+    in property <string> value;
+    in property <bool> secret;
+    in property <string> label;
+    in property <color> accent: Skin.accent;
+    in property <color> edge: Skin.field-edge;
+    callback committed(string);
+    height: 34px;
+    border-width: 1px;
+    border-color: input.has-focus ? accent : edge;
+    background: Skin.field;
+    clip: true;
+
+    // the saved value came back (or changed elsewhere): show it, unless the user is typing
+    changed value => {
+        if !input.has-focus { input.text = value; }
+    }
+
+    function commit() {
+        if input.text != value { root.committed(input.text); }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        input := TextInput {
+            text: root.value;
+            input-type: root.secret ? InputType.password : InputType.text;
+            single-line: true;
+            color: Skin.ink;
+            font-family: Skin.font-mono;
+            font-size: 13px * Skin.text-scale;
+            vertical-alignment: center;
+            accessible-label: root.label;
+            accepted => { root.commit(); }
+            changed has-focus => {
+                if !self.has-focus { root.commit(); }
+            }
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    self.text = root.value;
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+}
+
 // Choice list: a button with the current option and a list that opens below.
 export component Select inherits Rectangle {
     in property <[string]> options;

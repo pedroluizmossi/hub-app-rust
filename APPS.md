@@ -38,13 +38,13 @@ id = "io.github.fulano.meu-app"   # único; cyber.* é reservado aos apps embuti
 name = "Meu app"
 description = "Uma frase sobre o que ele faz."
 icon = "coruja"                   # mascote: lista em src/mascot/sprites.rs
-api = 1
+api = 1                           # 2 se usar opções text ou secret (abaixo)
 uses = ["sys"]                    # provedores do hub (abaixo); [ui] e [app]
 
 [[settings]]                      # vira formulário em Configurações
 key = "limite"
 label = "Mascote agitada a partir de (%)"   # " (%)" ou " (°C)" no fim viram a unidade
-type = "int"                      # bool, int ou choice
+type = "int"                      # bool, int, choice, text ou secret
 default = 80
 min = 10
 max = 100
@@ -52,6 +52,31 @@ step = 5
 ```
 
 Plugins e apps externos ganham sozinhos as opções `theme` (tema de cores) e `mascot`.
+
+**Texto e segredo** (`api = 2`): `text` é uma linha de texto livre (um endereço, um
+caminho) e `secret` é igual, mas o campo esconde o que foi digitado (um token, uma chave de
+API). O valor chega ao app como string, salvo com Enter ou ao sair do campo, sem espaços nas
+pontas e com no máximo `max_len` caracteres (padrão 512). O hub guarda tudo no próprio
+arquivo de configuração, que só o usuário lê (modo 0600 no Linux): não é um cofre, então
+peça só o que o app precisa. Um hub que só entende `api = 1` recusa o manifesto com uma
+mensagem clara, em vez de o app sumir sem explicação.
+
+```toml
+api = 2
+
+[[settings]]
+key = "url"
+label = "Server address"
+type = "text"
+default = "http://127.0.0.1:8765"
+
+[[settings]]
+key = "token"
+label = "Access token"
+type = "secret"
+default = ""
+max_len = 200
+```
 
 **Provedores** (`uses`): o hub coleta cada dado uma vez e entrega a quem pediu, só enquanto
 algum app ligado usa aquele provedor.
@@ -313,6 +338,8 @@ com as suas permissões sem conferência de hash. Ponha só o que você escreveu
 
 ```sh
 cargo run -- --plugin-dev <pasta do plugin ou app>
+# vários de uma vez: repita a opção
+cargo run -- --plugin-dev ../miniutils-apps/repos --plugin-dev ../miniutils-apps/codeindex
 ```
 
 O app entra já ligado, na primeira página, e recarrega quando um arquivo muda (num app

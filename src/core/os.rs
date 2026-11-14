@@ -95,12 +95,38 @@ pub fn log_dir() -> Option<std::path::PathBuf> {
 /// Whole new file: writes `<path>.tmp`, syncs it to disk and swaps it in (`rename` is
 /// atomic). A full disk, a power cut or a killed process leave the old file intact.
 pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_atomic_with(path, bytes, false)
+}
+
+/// `write_atomic` for a file only the user may read (the hub's config, which can hold `secret`
+/// settings): mode 0600 on Unix from the moment the file is created. On Windows the user's
+/// profile folder already keeps other users out.
+pub fn write_atomic_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_atomic_with(path, bytes, true)
+}
+
+fn write_atomic_with(path: &std::path::Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
     use std::io::Write;
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = std::path::PathBuf::from(tmp);
     let written = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut f = opts.open(&tmp)?;
+        // a leftover .tmp from an older hub keeps its mode: fix it before writing
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
         f.write_all(bytes)?;
         f.sync_all()?;
         std::fs::rename(&tmp, path)

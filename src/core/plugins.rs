@@ -27,7 +27,7 @@
 //! id = "io.github.someone.uptime"  # unique; `cyber.*` belongs to the built-in apps
 //! name = "Uptime"
 //! icon = "coruja"
-//! api = 1
+//! api = 1                        # 2 for text/secret settings
 //! [permissions]
 //! exec = ["uptime"]                # only these programs may run (no shell)
 //! [run]
@@ -76,8 +76,8 @@
 //! Installed plugins live in `dir()`: `~/.local/share/miniutils/plugins/<id>/` on Linux,
 //! `%APPDATA%\miniutils\plugins\<id>\` on Windows. The store installs there (see `store.rs`)
 //! and anyone may drop an app there by hand (a local app, without `installed.json`); `scan`
-//! says which folders did not become an app and why. With `miniutils --plugin-dev <folder>`,
-//! a plugin under development comes along (`set_dev`).
+//! says which folders did not become an app and why. With `miniutils --plugin-dev <folder>`
+//! (repeatable), the plugins under development come along (`set_dev`).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -492,7 +492,7 @@ fn bin_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     if !meta.is_dir() {
         return Err(tr!("{}/ is not a folder", BIN_DIR));
     }
-    let dev = dev_dir() == Some(dir);
+    let dev = is_dev(dir);
     let mut names: Vec<String> = std::fs::read_dir(&bin)
         .map_err(|e| format!("{BIN_DIR}/: {e}"))?
         .flatten()
@@ -522,28 +522,45 @@ pub fn is_bin(rel: &Path) -> bool {
     rel.starts_with(BIN_DIR)
 }
 
-/// Plugin under development (`miniutils --plugin-dev <folder>`).
-static DEV: OnceLock<PathBuf> = OnceLock::new();
+/// Plugins under development (`miniutils --plugin-dev <folder>`, once per folder).
+static DEV: OnceLock<Vec<PathBuf>> = OnceLock::new();
 
-pub fn set_dev(dir: PathBuf) {
-    let _ = DEV.set(dir);
+/// Sets the development folders (canonical paths; repeated ones count once).
+pub fn set_dev(mut dirs: Vec<PathBuf>) {
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| seen.insert(d.clone()));
+    let _ = DEV.set(dirs);
 }
 
-pub fn dev_dir() -> Option<&'static Path> {
-    DEV.get().map(PathBuf::as_path)
+pub fn dev_dirs() -> &'static [PathBuf] {
+    DEV.get().map_or(&[], Vec::as_slice)
 }
 
-/// The installed plugins and, in dev mode, the plugin in the development folder (which
+/// Is `dir` one of the development folders?
+pub fn is_dev(dir: &Path) -> bool {
+    dev_dirs().iter().any(|d| d == dir)
+}
+
+/// The installed plugins and, in dev mode, the plugins in the development folders (each
 /// replaces an installed one with the same id).
 pub fn load_all(root: &Path) -> Vec<Plugin> {
-    let mut list = load_installed(root);
-    if let Some(dev) = dev_dir() {
-        match Plugin::load(dev) {
+    with_dev(load_installed(root), dev_dirs())
+}
+
+fn with_dev(mut list: Vec<Plugin>, dev: &[PathBuf]) -> Vec<Plugin> {
+    let mut dev_ids: Vec<String> = Vec::new();
+    for dir in dev {
+        match Plugin::load(dir) {
+            // two development folders with the same id: the first one on the command line wins
+            Ok(p) if dev_ids.contains(&p.manifest.id) => {
+                log::warn!("plugin-dev: {}: {} is already loaded from another folder", dir.display(), p.manifest.id)
+            }
             Ok(p) => {
                 list.retain(|o| o.manifest.id != p.manifest.id);
+                dev_ids.push(p.manifest.id.clone());
                 list.push(p);
             }
-            Err(e) => log::warn!("plugin-dev: {}: {e}", dev.display()),
+            Err(e) => log::warn!("plugin-dev: {}: {e}", dir.display()),
         }
     }
     list
@@ -562,6 +579,7 @@ fn add_standard_settings(m: &mut Manifest) {
             max: None,
             step: None,
             options: vec!["auto".into()],
+            max_len: None,
         });
     }
     if m.setting("mascot").is_none() {
@@ -576,6 +594,7 @@ fn add_standard_settings(m: &mut Manifest) {
             max: None,
             step: None,
             options,
+            max_len: None,
         });
     }
 }
@@ -765,5 +784,31 @@ pub(crate) mod tests {
         assert!(!reason("malformed").is_empty());
         assert_eq!(rejected.len(), 3, ".data is left out: {rejected:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn several_dev_folders() {
+        let root = std::env::temp_dir().join(format!("miniutils-devs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let plugin = |name: &str, id: &str| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            let text = include_str!("../../examples/plugin-uptime/manifest.toml");
+            let original = Plugin::parse(text).unwrap().manifest.id;
+            std::fs::write(dir.join("manifest.toml"), text.replace(&original, id)).unwrap();
+            dir
+        };
+        let a = plugin("a", "io.test.a");
+        let b = plugin("b", "io.test.b");
+        let same_as_a = plugin("c", "io.test.a");
+        let broken = root.join("broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        let installed = vec![Plugin::load(&plugin("installed-b", "io.test.b")).unwrap()];
+        let list = with_dev(installed, &[a.clone(), b.clone(), same_as_a, broken]);
+        let got: Vec<(&str, &Path)> = list.iter().map(|p| (p.manifest.id.as_str(), p.dir.as_path())).collect();
+        // every dev folder comes in; one replaces the installed app with its id; the same id
+        // twice keeps the first folder; a broken folder is only logged
+        assert_eq!(got, [("io.test.a", a.as_path()), ("io.test.b", b.as_path())]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

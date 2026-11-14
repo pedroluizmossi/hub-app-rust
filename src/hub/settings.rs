@@ -49,6 +49,8 @@ pub(super) enum Input {
     Toggle,
     Int(i64),
     Choice(usize),
+    /// What was typed in a `text` or `secret` field (Enter or leaving the field).
+    Text(String),
 }
 
 impl Hub {
@@ -129,12 +131,7 @@ impl Hub {
                     key: s.key.clone().into(),
                     label: label.into(),
                     unit: unit.into(),
-                    kind: match s.kind {
-                        SettingKind::Bool => "bool",
-                        SettingKind::Int => "int",
-                        SettingKind::Choice => "choice",
-                    }
-                    .into(),
+                    kind: s.kind.as_str().into(),
                     bool_value: v.as_bool().unwrap_or(false),
                     int_value: v.as_integer().unwrap_or(0) as i32,
                     minimum: s.min.unwrap_or(0) as i32,
@@ -145,6 +142,7 @@ impl Hub {
                     )),
                     index: options.iter().position(|o| Some(o.as_str()) == v.as_str()).unwrap_or(0) as i32,
                     images: ModelRc::new(VecModel::from(option_images(&options, theme))),
+                    text_value: if s.kind.is_text() { v.as_str().unwrap_or_default().into() } else { SharedString::new() },
                 }
             })
             .collect()
@@ -165,6 +163,10 @@ impl Hub {
                 }
                 (SettingKind::Choice, Input::Choice(i)) => match def.live_options().get(i) {
                     Some(o) => toml::Value::String(o.clone()),
+                    None => return,
+                },
+                (SettingKind::Text | SettingKind::Secret, Input::Text(t)) => match def.clean_text(&t) {
+                    Some(t) => toml::Value::String(t),
                     None => return,
                 },
                 _ => return,
@@ -211,8 +213,8 @@ fn origin(id: &str) -> &'static str {
     if id.starts_with("cyber.") {
         return "";
     }
-    // the plugin in development takes the place of an installed one with the same id
-    if plugins::dev_dir().and_then(|d| Plugin::load(d).ok()).is_some_and(|p| p.manifest.id == id) {
+    // a plugin in development takes the place of an installed one with the same id
+    if plugins::dev_dirs().iter().filter_map(|d| Plugin::load(d).ok()).any(|p| p.manifest.id == id) {
         return "dev";
     }
     if crate::store::installed(&plugins::dir(), id).is_some() { "store" } else { "local" }

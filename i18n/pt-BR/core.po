@@ -216,8 +216,8 @@ msgstr "abre numa página do painel (pelo nome dela ou de um app nela,\nex.: Ger
 msgid "--plugin-dev <folder>"
 msgstr "--plugin-dev <pasta>"
 
-msgid "loads the plugin in the folder (enabled, on the 1st page) and reloads it\non save; view and script errors go to the terminal"
-msgstr "carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao\nsalvar; erros da tela e do script saem no terminal"
+msgid "loads the plugin in the folder (enabled, on the 1st page) and reloads it\non save; view and script errors go to the terminal. Repeat it to load\nseveral folders"
+msgstr "carrega o plugin da pasta (ligado, na 1ª página) e recarrega ao\nsalvar; erros da tela e do script saem no terminal. Repita para carregar\nvárias pastas"
 
 msgid "copies the PNG sheets (Name_Animation_N.png) in the folder and its\nsubfolders to the mascots folder, one mascot per character"
 msgstr "copia as folhas PNG (Nome_Animação_N.png) da pasta e das\nsubpastas para a pasta de mascotes, uma mascote por personagem"
