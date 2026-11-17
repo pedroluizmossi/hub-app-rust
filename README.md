@@ -27,7 +27,8 @@ nada.
 
 O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depender do KDE.
 
-- **Leve:** um único binário, ~25 MB na bandeja e ~30 MB com a janela aberta. App desligado
+- **Leve:** um único binário (release), ~50 MB na bandeja e ~60 MB com a janela aberta, dos
+  quais só ~12 MB são memória própria (o resto é o executável, compartilhado). App desligado
   não desenha, não tem timer e não coleta dado.
 - **Nativo no Linux e no Windows:** KDE, XFCE, Cinnamon, MATE e GNOME (com a extensão
   AppIndicator); Windows 10 e 11.

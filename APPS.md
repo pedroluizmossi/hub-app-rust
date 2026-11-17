@@ -227,6 +227,10 @@ mais completo:
 
 - Exporta `component Main`. Pode importar `std-widgets.slint`, `miniutils.slint` (o tipo
   `Theme`) e as telas de `ui/` do próprio plugin; imagens só de `assets/`.
+- **Evite `std-widgets.slint`:** o hub interpreta a tela de cada app, e esse import faz ele
+  compilar a biblioteca de widgets inteira para aquele app (~15 MB de memória a mais, por
+  app). Para listas, use um `Flickable` com um `VerticalLayout` dentro (o componente
+  `Scroller` de `miniutils-apps/codeindex/view.slint` serve de modelo).
 - O hub preenche, se a tela declarar: `in property <Theme> theme` (cores do tema do app,
   fontes do visual: `theme.font-ui`, `font-mono`, `font-title`, e o tamanho do texto
   escolhido pela pessoa: `font-size: 13px * theme.text-scale`), `in property <image>
