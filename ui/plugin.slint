@@ -39,10 +39,18 @@ export component PluginView inherits Rectangle {
     property <Colors> t: theme;
     property <bool> short: self.height < 200px;
     property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+    // The view's factory on its own, assigned (not bound). ComponentContainer rebuilds the
+    // view whenever its binding gets dirty, even for the same factory, and a binding on
+    // `card.view` gets dirty at every change of the card (mascot frame, mood, hover): the
+    // view would lose its scroll position and the text being typed. Assigning an equal
+    // factory (the same Rc) marks nothing dirty, so the view is only rebuilt when it changes.
+    property <component-factory> view;
+    init => { root.view = card.view; }
+    changed card => { root.view = card.view; }
 
     // the plugin's own view, embedded here
     if card.has-view && !card.failed: ComponentContainer {
-        component-factory: card.view;
+        component-factory: root.view;
         width: parent.width;
         height: parent.height;
     }
