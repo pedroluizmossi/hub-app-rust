@@ -392,3 +392,6 @@ msgstr "Mascotes paradas ao passar o mouse"
 
 msgid "Mascots do not hop up when the pointer is over their app. Works without Reduce motion."
 msgstr "As mascotes não pulam quando o mouse passa sobre o app delas. Funciona sem Reduzir movimento."
+
+msgid "unreviewed"
+msgstr "sem revisão"

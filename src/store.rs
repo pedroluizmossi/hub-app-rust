@@ -102,6 +102,11 @@ pub fn usage() -> String {
         "miniutils --store-entry <registry.json> <repo> <tag> [--path p] [--app-version v] [--license l]",
         tr!("adds or updates the app of the repository\n(https://… or owner/repo) at that tag: reads the\nmanifest at the commit and, for an external app,\nchecks the executables of the tag's Release"),
     );
+    usage_line(
+        &mut out,
+        "miniutils --install-from <repo> <tag> [--path p]",
+        tr!("installs straight from the author's repository at a tag,\nwithout a store (not reviewed: you accept the risk)"),
+    );
     out.push('\n');
     out.push_str(tr!("The running miniutils rereads the plugins by itself after installing, updating or removing.\nLocal app (no store): create the folder <id>/ inside the apps folder (miniutils --dirs)\nand run miniutils --reload, or use Settings › System › Reload."));
     out
@@ -254,6 +259,12 @@ pub struct Installed {
     pub full_access: bool,
     #[serde(default)]
     pub sqlite: bool,
+    /// Subfolder in the repository (empty: the root); `--install-from` needs it to update.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// Installed with `--install-from`: no store reviewed it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unreviewed: bool,
 }
 
 /// How the index was checked.
@@ -263,6 +274,9 @@ pub enum Trust {
     Signed,
     /// No key configured: local index, accepted without a check.
     Unsigned,
+    /// Installed straight from the author's repository with `--install-from`; no store
+    /// reviewed or signed it.
+    Unreviewed,
 }
 
 /// A plugin from the index and its state here.
@@ -308,12 +322,14 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
             | "--store-key"
             | "--store-sign"
             | "--store-entry"
+            | "--install-from"
     ) {
         return None;
     }
     // `--key <hex>` and `--yes` may come in any position
     let mut key = None;
     let mut yes = false;
+    let mut accept_risk = false;
     let mut purge: Option<bool> = None;
     let mut entry_opts = entry::Opts::default();
     let mut pos: Vec<&str> = Vec::new();
@@ -325,6 +341,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
             "--app-version" => entry_opts.version = it.next().cloned(),
             "--license" => entry_opts.license = it.next().cloned(),
             "--yes" => yes = true,
+            "--i-accept-the-risk" => accept_risk = true,
             "--delete-data" => purge = Some(true),
             "--keep-data" => purge = Some(false),
             _ => pos.push(a),
@@ -355,6 +372,12 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
             // the running hub rereads apps and appearance (where the mascots go)
             crate::instance::notify_plugins_changed();
         }),
+        ("--install-from", Some(repo)) => match pos.get(1) {
+            Some(tag) => install_from_cli(repo, tag, &entry_opts, yes, accept_risk, &root).inspect(|_| {
+                crate::instance::notify_plugins_changed();
+            }),
+            None => Err(usage()),
+        },
         ("--remove", Some(id)) => remove_cli(id, &root, purge, !yes).inspect(|_| {
             crate::instance::notify_plugins_changed();
         }),
@@ -442,6 +465,30 @@ fn list(src: &Source, root: &Path) -> Result<String, String> {
         ));
     }
     Ok(out)
+}
+
+/// `--install-from <repo> <tag>`: builds the entry from the author's repository and installs
+/// it with no store in between. Without `--yes` the user types the app id to accept.
+fn install_from_cli(repo: &str, tag: &str, opts: &entry::Opts, yes: bool, accept_risk: bool, root: &Path) -> Result<String, String> {
+    if yes && !accept_risk {
+        return Err(tr!("--install-from with --yes also needs --i-accept-the-risk").into());
+    }
+    let entry = entry::from_repo(repo, tag, opts)?;
+    let id = entry.id.clone();
+    let mut always = |_: &str| true;
+    let mut typed = |summary: &str| ask_typed_id(summary, &id);
+    let confirm: &mut dyn FnMut(&str) -> bool = if yes { &mut always } else { &mut typed };
+    let dir = install_entry(&entry, &Trust::Unreviewed, root, confirm)?;
+    Ok(tr!("installed in {} (not reviewed by any store)", dir.display()))
+}
+
+/// Shows the summary and accepts only if the user types the app id exactly.
+fn ask_typed_id(summary: &str, id: &str) -> bool {
+    print!("{summary}\n{} ", tr!("Type the app id ({}) to install it:", id));
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+    line.trim() == id
 }
 
 /// Asks on the terminal whether to install.
@@ -594,6 +641,17 @@ fn install_cli(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str
     if !index.plugins.iter().any(|e| e.id == id) && index.mascots.iter().any(|e| e.id == id) {
         return install_mascot(src, id, &crate::skin::user::dir(), confirm);
     }
+    if !index.plugins.iter().any(|e| e.id == id)
+        && let Some(i) = installed(root, id).filter(|i| i.unreviewed)
+    {
+        let hint = if i.path.is_empty() { String::new() } else { format!(" --path {}", i.path) };
+        return Err(tr!(
+            "{} was installed with --install-from, outside the store: update it with miniutils --install-from {} <tag>{}",
+            id,
+            i.repo,
+            hint
+        ));
+    }
     install(src, id, root, confirm).map(|dir| tr!("installed in {}", dir.display()))
 }
 
@@ -602,6 +660,13 @@ fn install_cli(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str
 pub fn install(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str) -> bool) -> Result<PathBuf, String> {
     let (index, trust) = load_index(src)?;
     let entry = index.plugins.iter().find(|e| e.id == id).ok_or_else(|| tr!("\"{}\" is not in the index", id))?;
+    install_entry(entry, &trust, root, confirm)
+}
+
+/// Installs (or updates) `entry` into `root/<id>/` with the given `trust`: the part of
+/// [`install`] after the entry is found (also used by `--install-from`).
+pub fn install_entry(entry: &Entry, trust: &Trust, root: &Path, confirm: &mut dyn FnMut(&str) -> bool) -> Result<PathBuf, String> {
+    let id = entry.id.as_str();
     plugins::validate_id(&entry.id)?;
     check_entry(entry)?;
     let previous = installed(root, id);
@@ -614,7 +679,7 @@ pub fn install(src: &Source, id: &str, root: &Path, confirm: &mut dyn FnMut(&str
     std::fs::create_dir_all(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let tmp = root.join(format!(".{id}.{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
-    let result = fetch_and_install(entry, &trust, previous.as_ref(), root, &tmp, confirm);
+    let result = fetch_and_install(entry, trust, previous.as_ref(), root, &tmp, confirm);
     let _ = std::fs::remove_dir_all(&tmp);
     result
 }
@@ -775,10 +840,11 @@ fn fetch_and_install(
         (Some(run), None, _) => tr!("every {} s: {}", run.every, run.command.join(" ")),
         (None, None, None) => String::new(),
     };
-    let danger = if plugin.full_access() {
-        tr!("  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author and the store.\n")
-    } else {
-        ""
+    let danger = match (plugin.full_access(), trust) {
+        (false, _) => "",
+        // no store in between: only the author is left to trust
+        (true, Trust::Unreviewed) => tr!("  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author.\n"),
+        (true, _) => tr!("  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author and the store.\n"),
     };
     let mut summary = format!("\n{} {}  ({})\n  {}\n  ", plugin.manifest.name, e.version, e.id, plugin.manifest.description);
     summary += &tr!("author: {}   license: {}", if e.author.is_empty() { "?" } else { &e.author }, e.license);
@@ -789,7 +855,11 @@ fn fetch_and_install(
     summary += "\n  ";
     summary += &tr!(
         "index: {}",
-        if *trust == Trust::Signed { tr!("signature checked") } else { tr!("local, signature not checked") }
+        match trust {
+            Trust::Signed => tr!("signature checked"),
+            Trust::Unsigned => tr!("local, signature not checked"),
+            Trust::Unreviewed => tr!("not reviewed by any store: straight from the author's repository"),
+        }
     );
     summary += "\n  ";
     if let Some(p) = previous {
@@ -801,6 +871,9 @@ fn fetch_and_install(
         summary += "  ";
         summary += &tr!("WARNING, new permission: {}", new_perms.join(", "));
         summary += "\n";
+    }
+    if *trust == Trust::Unreviewed {
+        summary += tr!("  WARNING: NOT REVIEWED. No store checked this code; only its author vouches for it.\n");
     }
     summary += danger;
     if !confirm(&summary) {
@@ -839,6 +912,8 @@ fn fetch_and_install(
         uses: plugin.manifest.uses.iter().map(|t| t.name().to_string()).collect(),
         full_access: plugin.full_access(),
         sqlite: plugin.data().has(Kind::Sqlite),
+        path: e.path.clone(),
+        unreviewed: *trust == Trust::Unreviewed,
     };
     let meta = serde_json::to_string_pretty(&installed).map_err(|err| err.to_string())?;
     std::fs::write(staged.join("installed.json"), meta).map_err(|err| err.to_string())?;
@@ -961,6 +1036,9 @@ fn installed_list(root: &Path) -> String {
     out.push('\n');
     for p in list {
         let origin = match installed(root, &p.manifest.id) {
+            Some(m) if m.unreviewed => {
+                tr!("{}  (not reviewed, commit {})", m.version, m.commit.chars().take(12).collect::<String>())
+            }
             Some(m) => tr!("{}  (store, commit {})", m.version, m.commit.chars().take(12).collect::<String>()),
             None => tr!("(local)").to_string(),
         };
@@ -1239,6 +1317,8 @@ mod tests {
             uses: vec!["sys".into()],
             full_access: false,
             sqlite: false,
+            path: String::new(),
+            unreviewed: false,
         };
         let st = Status { entry: entry(true), installed: Some(before.clone()) };
         assert_eq!(st.new_permissions(), [full_access_grant()]);
@@ -1394,11 +1474,47 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// `install_entry` with `Trust::Unreviewed` warns in the summary and records it.
+    #[test]
+    fn unreviewed_install_warns_and_is_recorded() {
+        let Some(store) = Store::new("unreviewed") else { return };
+        let src = store.index(&store.commit, "0.1.0", r#""uptime""#);
+        let (index, _) = load_index(&src).unwrap();
+        let mut entry = index.plugins[0].clone();
+        entry.path = String::new();
+        let root = store.dir.join("plugins");
+        let mut summary = String::new();
+        install_entry(&entry, &Trust::Unreviewed, &root, &mut |s| {
+            summary = s.to_string();
+            true
+        })
+        .unwrap();
+        assert!(summary.contains("NOT REVIEWED"), "{summary}");
+        assert!(summary.contains("not reviewed by any store"), "{summary}");
+        let i = installed(&root, "io.github.exemplo.uptime").unwrap();
+        assert!(i.unreviewed);
+        assert_eq!(i.path, "");
+        // a store install is not marked
+        install(&src, "io.github.exemplo.uptime", &store.dir.join("plugins2"), &mut |_| true).unwrap();
+        assert!(!installed(&store.dir.join("plugins2"), "io.github.exemplo.uptime").unwrap().unreviewed);
+    }
+
+    /// An `installed.json` written before `path` and `unreviewed` existed still parses.
+    #[test]
+    fn old_installed_json_still_parses() {
+        let json = r#"{"id":"a.b","version":"1","repo":"https://x","commit":"abc","permissions":[],"net":[],"uses":[],"full_access":false,"sqlite":false}"#;
+        let i: Installed = serde_json::from_str(json).unwrap();
+        assert!(!i.unreviewed);
+        assert!(i.path.is_empty());
+        let out = serde_json::to_string(&i).unwrap();
+        assert!(!out.contains("unreviewed") && !out.contains("\"path\""), "{out}");
+    }
+
     /// The help lists the English commands, aligned.
     #[test]
     fn usage_lists_the_commands() {
         let u = USAGE.to_string();
-        for cmd in ["--store", "--install", "--update", "--remove", "--reload", "--store-key", "--store-sign", "--store-entry", "--key"] {
+        for cmd in ["--store", "--install", "--update", "--remove", "--reload", "--store-key", "--store-sign", "--store-entry", "--install-from", "--key"] {
             assert!(u.contains(cmd), "{cmd}: {u}");
         }
         assert!(u.contains("  miniutils --plugins                           lists"), "{u}");

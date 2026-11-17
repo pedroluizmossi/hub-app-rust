@@ -51,7 +51,7 @@ export struct AppInfo {
     theme: Colors,
     settings: [SettingRow],
     page: int,           // page the app is on
-    origin: string,      // "" (built-in), "loja" (store), "local" or "dev" (--plugin-dev)
+    origin: string,      // "" (built-in), "loja" (store), "unreviewed" (--install-from), "local" or "dev" (--plugin-dev)
     // what it stores and how much ("SQLite database · 1.2 MB (database up to 10 MB)"); "" = stores nothing
     data: string,
     has-data: bool,      // there is something to export or delete

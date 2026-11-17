@@ -210,6 +210,9 @@ msgstr "a cada {} s: {}"
 msgid "  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author and the store.\n"
 msgstr "  ATENÇÃO: ACESSO TOTAL. Este app roda um programa próprio com as permissões do seu\n  usuário: lê e grava seus arquivos, usa a rede e roda outros programas. Instale só\n  se confia no autor e na loja.\n"
 
+msgid "  WARNING: FULL ACCESS. This app runs its own program with your user's permissions:\n  it reads and writes your files, uses the network and runs other programs. Install it\n  only if you trust the author.\n"
+msgstr "  ATENÇÃO: ACESSO TOTAL. Este app roda um programa próprio com as permissões do seu\n  usuário: lê e grava seus arquivos, usa a rede e roda outros programas. Instale só\n  se confia no autor.\n"
+
 msgid "author: {}   license: {}"
 msgstr "autor: {}   licença: {}"
 
@@ -386,3 +389,27 @@ msgstr "{}: {}/{} tem arquivos demais (até {})"
 
 msgid "{}: {} already exists (yours or from another entry): rename or delete it first"
 msgstr "{}: {} já existe (seu ou de outra entrada): renomeie ou apague antes"
+
+msgid "not reviewed by any store: straight from the author's repository"
+msgstr "sem revisão de nenhuma loja: direto do repositório do autor"
+
+msgid "  WARNING: NOT REVIEWED. No store checked this code; only its author vouches for it.\n"
+msgstr "  AVISO: SEM REVISÃO. Nenhuma loja conferiu este código; só o autor responde por ele.\n"
+
+msgid "--install-from with --yes also needs --i-accept-the-risk"
+msgstr "--install-from com --yes também exige --i-accept-the-risk"
+
+msgid "installed in {} (not reviewed by any store)"
+msgstr "instalado em {} (sem revisão de nenhuma loja)"
+
+msgid "Type the app id ({}) to install it:"
+msgstr "Digite o id do app ({}) para instalá-lo:"
+
+msgid "{} was installed with --install-from, outside the store: update it with miniutils --install-from {} <tag>{}"
+msgstr "{} foi instalado com --install-from, fora da loja: atualize com miniutils --install-from {} <tag>{}"
+
+msgid "installs straight from the author's repository at a tag,\nwithout a store (not reviewed: you accept the risk)"
+msgstr "instala direto do repositório do autor numa tag,\nsem loja (sem revisão: você assume o risco)"
+
+msgid "{}  (not reviewed, commit {})"
+msgstr "{}  (sem revisão, commit {})"

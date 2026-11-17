@@ -305,6 +305,15 @@ o plugin vai executar, os domínios que acessa e os dados que lê. Também pelo 
 instalam, atualizam e removem (`miniutils --help` mostra todas as opções; os nomes antigos,
 como `--store` e `--install`, continuam valendo).
 
+Sem a loja: `miniutils --install-from <repo> <tag> [--path p]` instala direto do repositório do
+autor. Faz as mesmas conferências de uma instalação da loja (commit exato da tag, clone sem
+hooks, manifesto válido, tela que abre e, em app externo, executáveis só do Release da tag,
+com o SHA-256 do `registry-entry.json` dele apontando para o mesmo commit), mas **ninguém
+revisou nem assinou** o código: só o autor responde por ele, e você assume o risco. Sem
+`--yes` o comando pede para digitar o id do app; com `--yes` é preciso também
+`--i-accept-the-risk`. Para atualizar, rode de novo com a tag nova (o resumo mostra a versão
+e as permissões novas). Em Configurações o app aparece com a etiqueta "sem revisão".
+
 Há quatro jeitos de estender o hub; comece pelo mais simples que resolve:
 
 | Tipo | A lógica é | Chega por |

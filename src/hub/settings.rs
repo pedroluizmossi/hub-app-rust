@@ -207,7 +207,8 @@ fn split_unit(label: &str) -> (String, String) {
 }
 
 /// Where the app came from, for the list badge: "" (built-in), "dev" (`--plugin-dev`), "store"
-/// (has the `installed.json` the store writes) or "local" (put by hand in the apps folder).
+/// (has the `installed.json` the store writes), "unreviewed" (that file says it came from
+/// `--install-from`, no store reviewed it) or "local" (put by hand in the apps folder).
 fn origin(id: &str) -> &'static str {
     use crate::core::plugins::{self, Plugin};
     if id.starts_with("cyber.") {
@@ -217,7 +218,11 @@ fn origin(id: &str) -> &'static str {
     if plugins::dev_dirs().iter().filter_map(|d| Plugin::load(d).ok()).any(|p| p.manifest.id == id) {
         return "dev";
     }
-    if crate::store::installed(&plugins::dir(), id).is_some() { "store" } else { "local" }
+    match crate::store::installed(&plugins::dir(), id) {
+        Some(i) if i.unreviewed => "unreviewed",
+        Some(_) => "store",
+        None => "local",
+    }
 }
 
 #[cfg(test)]

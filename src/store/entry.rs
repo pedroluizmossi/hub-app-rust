@@ -33,6 +33,9 @@ pub struct Opts {
     pub version: Option<String>,
     /// License (SPDX), when the entry is new and `LICENSE` does not tell.
     pub license: Option<String>,
+    /// With no license given or detected, use "unknown" instead of failing (only
+    /// `--install-from`, where there is no store entry to review).
+    pub allow_unknown_license: bool,
 }
 
 /// Adds or updates in `index_path` the app from `repo` at tag (or branch, or commit)
@@ -60,6 +63,20 @@ pub fn run(index_path: &Path, repo: &str, git_ref: &str, opts: &Opts) -> Result<
     json.push('\n');
     std::fs::write(index_path, json).map_err(|e| format!("{}: {e}", index_path.display()))?;
     Ok(format!("{report}{}", tr!("{} updated; review it and sign with --store-sign", index_path.display())))
+}
+
+/// `--install-from`: the entry for `repo` at `git_ref`, built like `--store-entry` does but
+/// against an empty index. Nothing is written; the report is dropped.
+pub fn from_repo(repo: &str, git_ref: &str, opts: &Opts) -> Result<Entry, String> {
+    let repo = normalize_repo(repo)?;
+    let tmp = std::env::temp_dir().join(format!("miniutils-install-from-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let index = Index { schema: 1, plugins: vec![], mascots: vec![] };
+    let opts = Opts { path: opts.path.clone(), version: opts.version.clone(), license: opts.license.clone(), allow_unknown_license: true };
+    let result = build(&index, &repo, git_ref, &opts, &tmp);
+    let _ = std::fs::remove_dir_all(&tmp);
+    result.map(|(entry, _)| entry)
 }
 
 /// Builds the entry from the clone and the Release, plus the report for the reviewer.
@@ -99,9 +116,11 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
     let license = match (&opts.license, old) {
         (Some(l), _) => l.trim().to_string(),
         (None, Some(o)) => o.license.clone(),
-        (None, None) => detect_license(&[&src, &checkout])
-            .ok_or(tr!("could not recognize the license from the LICENSE file; give it with --license (e.g. MIT)"))?
-            .to_string(),
+        (None, None) => match detect_license(&[&src, &checkout]) {
+            Some(l) => l.to_string(),
+            None if opts.allow_unknown_license => "unknown".to_string(),
+            None => return Err(tr!("could not recognize the license from the LICENSE file; give it with --license (e.g. MIT)").into()),
+        },
     };
     let author = match old {
         Some(o) if !o.author.is_empty() => o.author.clone(),
@@ -311,6 +330,33 @@ mod tests {
         assert_eq!(tag_prefix("repos-v0.2.0"), Some("repos"));
         assert_eq!(tag_prefix("v0.2.0"), None);
         assert_eq!(tag_prefix("../x-v1.0"), None);
+    }
+
+    /// `from_repo` on a local repository with a tag: id, version and commit come from the
+    /// code; with no LICENSE the license is "unknown".
+    #[test]
+    fn from_repo_builds_the_entry_from_a_tag() {
+        if !crate::core::exec::which("git") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("miniutils-from-repo-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.toml"), crate::core::plugins::tests::EXAMPLE).unwrap();
+        let r = dir.to_string_lossy().to_string();
+        git(&["-C", &r, "init", "--quiet"]).unwrap();
+        git(&["-C", &r, "add", "."]).unwrap();
+        git(&["-C", &r, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "v1"]).unwrap();
+        git(&["-C", &r, "tag", "v0.1.0"]).unwrap();
+        let commit = git(&["-C", &r, "rev-parse", "HEAD"]).unwrap().trim().to_string();
+
+        let e = from_repo(&r, "v0.1.0", &Opts::default()).unwrap();
+        assert_eq!(e.id, "io.github.exemplo.uptime");
+        assert_eq!((e.version.as_str(), e.commit.as_str(), e.license.as_str()), ("0.1.0", commit.as_str(), "unknown"));
+        // the store's own command still demands a license
+        let err = build(&Index { schema: 1, plugins: vec![], mascots: vec![] }, &r, "v0.1.0", &Opts::default(), &dir.join("tmp")).unwrap_err();
+        assert!(err.contains("license"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

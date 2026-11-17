@@ -364,6 +364,11 @@ o modo dev roda numa instância só dele.
   o endereço e o SHA-256 do executável; o hub só instala se o hash bater. O workflow do
   [miniutils-apps](https://github.com/pedroluizmossi/miniutils-apps) gera essa entrada
   pronta. Precisa do MiniUtils 0.2.0 ou mais novo.
+- **Sem a loja**: o autor também pode distribuir por conta própria. Basta uma tag
+  terminada em `v<versão>` (`v1.2.0`, ou `meuapp-v1.2.0` num repositório com vários apps) (e, num app externo, o Release dessa tag com o
+  `registry-entry.json` gerado pelo workflow do miniutils-apps); quem confia no autor instala
+  com `miniutils --install-from <repo> <tag>`. Nada disso passa por revisão da loja, e o hub
+  avisa o usuário disso.
 - **Mini-app embutido**: pull request neste repositório.
 - **Pacote de mascotes** (só desenhos, sem código): repositório público com
   `sprites/<chave>.toml` (sprites 16 × 14, que seguem o tema;

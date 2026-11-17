@@ -951,19 +951,20 @@ export component AppsView inherits ScrollView {
                         HorizontalLayout {
                             spacing: 8px;
                             Text { text: app.name; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; overflow: elide; }
-                            // where it came from: "loja"/"store", "local" or "dev" (empty for built-ins)
+                            // where it came from: "loja"/"store", "unreviewed", "local" or "dev" (empty for built-ins)
                             if app.origin != "": VerticalLayout {
                                 property <bool> from-store: app.origin == "loja" || app.origin == "store";
+                                property <bool> unreviewed: app.origin == "unreviewed";
                                 alignment: center;
                                 Rectangle {
                                     border-width: 1px;
-                                    border-color: from-store ? Skin.surface-edge : Skin.accent;
+                                    border-color: from-store ? Skin.surface-edge : unreviewed ? Skin.bad : Skin.accent;
                                     HorizontalLayout {
                                         padding-left: 6px;
                                         padding-right: 6px;
                                         Text {
-                                            text: from-store ? @tr("store") : app.origin;
-                                            color: from-store ? Skin.dim : Skin.accent;
+                                            text: from-store ? @tr("store") : unreviewed ? @tr("unreviewed") : app.origin;
+                                            color: from-store ? Skin.dim : unreviewed ? Skin.bad : Skin.accent;
                                             font-family: Skin.font-mono;
                                             font-size: 11px * Skin.text-scale;
                                         }
