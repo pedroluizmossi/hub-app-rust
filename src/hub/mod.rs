@@ -91,6 +91,9 @@ pub struct Hub {
     focus_hidden_at: Cell<Option<Instant>>,
     /// The popup did get focus since it opened (winit reports "unfocused" when mapping).
     had_focus: Cell<bool>,
+    /// The window icon (side, RGBA), kept to set it again when the native window is
+    /// created (it does not exist before the first `show`).
+    window_icon: RefCell<Option<(i32, Vec<u8>)>>,
     /// Pin mode: losing focus does not hide the popup.
     pinned: Cell<bool>,
     /// Last tray point where the popup opened (to reopen in the same place).
@@ -189,6 +192,7 @@ impl Hub {
             positionable,
             focus_hidden_at: Cell::new(None),
             had_focus: Cell::new(false),
+            window_icon: RefCell::new(None),
             pinned: Cell::new(false),
             last_anchor: Cell::new(None),
             resize_until: Cell::new(None),
@@ -368,6 +372,13 @@ impl Hub {
             return;
         }
         self.tray_later.stop();
+        if !same_icon {
+            // the window icon follows the tray's (the taskbar shows it in desktop app mode)
+            let (sprite, theme) = (sprites::get(&now.sprite), themes::get(now.theme));
+            let icon = crate::mascot::render::rgba_square(sprite, theme, now.mood, 1, 4);
+            crate::popup::set_icon(self.ui.window(), &icon);
+            *self.window_icon.borrow_mut() = Some(icon);
+        }
         if let Some(tray) = self.tray.borrow().as_ref() {
             // the icon is only redrawn when the mascot, the theme or the mood change
             let icon = (!same_icon).then(|| (sprites::get(&now.sprite), themes::get(now.theme), now.mood));

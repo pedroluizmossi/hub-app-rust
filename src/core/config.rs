@@ -64,6 +64,15 @@ pub struct Config {
     pub layout: BTreeMap<String, Rect>,
     /// Window size in logical pixels (remembered between launches).
     pub window: Option<(u32, u32)>,
+    /// Where the window opens: `"tray"` (next to the tray icon), `"center"`, a corner
+    /// (`"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`) or `"last"` (where it
+    /// was left, `window_pos`). An unknown value means `"tray"` (`popup::Place`).
+    pub window_place: String,
+    /// Last position of the window (top-left corner, physical pixels), for `"last"`.
+    pub window_pos: Option<(i32, i32)>,
+    /// Desktop app: the window shows up in the taskbar and the window switcher, is not
+    /// above the others and does not hide when it loses focus (the tray icon stays).
+    pub desktop_app: bool,
     /// Enabled mini-apps, in tab order.
     pub enabled: Vec<String>,
     /// Settings of each mini-app: `[apps."cyber.docker"]`.
@@ -133,6 +142,9 @@ impl Default for Config {
             tray_icon: "auto".into(),
             tray_theme: "auto".into(),
             window: None,
+            window_place: "tray".into(),
+            window_pos: None,
+            desktop_app: false,
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
             apps: BTreeMap::new(),

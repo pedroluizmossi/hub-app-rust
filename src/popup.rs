@@ -185,6 +185,78 @@ pub fn position_with(
     Some((fit(x, pw, wk.x, wk.w, gap), fit(y, ph, wk.y, wk.h, gap)))
 }
 
+/// Where the window opens (`window_place` in the config).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// Next to the tray icon (the popup).
+    Tray,
+    Center,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    /// Where the window was left (`window_pos`).
+    Last,
+}
+
+impl Place {
+    /// Config keys, in the order of the Settings list.
+    pub const KEYS: [&'static str; 7] = ["tray", "center", "top-left", "top-right", "bottom-left", "bottom-right", "last"];
+    const ALL: [Place; 7] =
+        [Place::Tray, Place::Center, Place::TopLeft, Place::TopRight, Place::BottomLeft, Place::BottomRight, Place::Last];
+
+    /// An unknown key (config edited by hand) means `Tray`.
+    pub fn from_key(key: &str) -> Place {
+        Self::index_of(key).map_or(Place::Tray, |i| Self::ALL[i])
+    }
+
+    pub fn index_of(key: &str) -> Option<usize> {
+        Self::KEYS.iter().position(|k| *k == key)
+    }
+}
+
+/// Physical position (top-left corner) of the window for `place`. A pure function, for
+/// testing. `Tray` is `position_with`; the others go on the monitor of the anchor (the
+/// clicked tray) or `fallback`, inside its work area. `Last` uses `last` if its corner is on
+/// a monitor (pulled inside that monitor's work area), or falls back to `Tray`.
+pub fn position_for(
+    place: Place,
+    anchor: Option<(i32, i32)>,
+    anchor_logical: bool,
+    win: (i32, i32),
+    monitors: &[Monitor],
+    fallback: usize,
+    last: Option<(i32, i32)>,
+) -> Option<(i32, i32)> {
+    let (pw, ph) = win;
+    if place == Place::Last {
+        if let Some(m) = last.and_then(|p| monitors.iter().find(|m| contains(m, p))) {
+            let (x, y) = last?;
+            let wk = m.work;
+            return Some((fit(x, pw, wk.x, wk.w, 0), fit(y, ph, wk.y, wk.h, 0)));
+        }
+        return position_with(anchor, anchor_logical, win, monitors, fallback);
+    }
+    if place == Place::Tray {
+        return position_with(anchor, anchor_logical, win, monitors, fallback);
+    }
+    let on_anchor = anchor.and_then(|a| {
+        monitors.iter().find(|m| contains(m, if anchor_logical { to_physical(a, m.scale) } else { a }))
+    });
+    let m = on_anchor.or_else(|| monitors.get(fallback))?;
+    let gap = (GAP as f64 * m.scale).round() as i32;
+    let wk = m.work;
+    let (left, right) = (i32::MIN / 2, i32::MAX / 2);
+    let (x, y) = match place {
+        Place::Center => (wk.x + (wk.w - pw) / 2, wk.y + (wk.h - ph) / 2),
+        Place::TopLeft => (left, left),
+        Place::TopRight => (right, left),
+        Place::BottomLeft => (left, right),
+        _ => (right, right),
+    };
+    Some((fit(x, pw, wk.x, wk.w, gap), fit(y, ph, wk.y, wk.h, gap)))
+}
+
 fn to_physical((x, y): (i32, i32), scale: f64) -> (i32, i32) {
     ((x as f64 * scale).round() as i32, (y as f64 * scale).round() as i32)
 }
@@ -193,9 +265,10 @@ fn contains(m: &Monitor, (x, y): (i32, i32)) -> bool {
     x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h
 }
 
-/// Puts the window next to `anchor` (point clicked on the tray, as the tray reports it).
-/// Without an anchor, it goes to the bottom-right corner, where the tray usually is.
-pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
+/// Puts the window where `place` says. `anchor` is the point clicked on the tray, as the
+/// tray reports it; with `Place::Tray` and no anchor, it goes to the bottom-right corner,
+/// where the tray usually is. `last`: where the window was left (`Place::Last`).
+pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>, place: Place, last: Option<(i32, i32)>) {
     window.with_winit_window(|w| {
         let size = w.outer_size();
         let handles: Vec<_> = w.available_monitors().collect();
@@ -213,7 +286,7 @@ pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>) {
         let current = w.current_monitor().or_else(|| w.primary_monitor());
         let fallback = current.and_then(|c| handles.iter().position(|m| m.position() == c.position())).unwrap_or(0);
         let win = (size.width as i32, size.height as i32);
-        if let Some((x, y)) = position_with(anchor, ANCHOR_LOGICAL, win, &monitors, fallback) {
+        if let Some((x, y)) = position_for(place, anchor, ANCHOR_LOGICAL, win, &monitors, fallback, last) {
             w.set_outer_position(PhysicalPosition::new(x, y));
         }
     });
@@ -253,6 +326,12 @@ fn desktop_work_area() -> Option<Rect> {
     None
 }
 
+/// Top-left corner of the window, physical pixels (`None` before it exists, or on native
+/// Wayland, which does not tell).
+pub fn outer_position(window: &slint::Window) -> Option<(i32, i32)> {
+    window.with_winit_window(|w| w.outer_position().ok().map(|p| (p.x, p.y))).flatten()
+}
+
 /// Starts moving the (frameless) window with the mouse pressed, as with the system's
 /// title bar.
 pub fn drag_move(window: &slint::Window) {
@@ -289,6 +368,35 @@ pub fn focus(window: &slint::Window) {
     window.with_winit_window(|w| w.focus_window());
 }
 
+/// Window icon (`side`×`side` RGBA): what the taskbar and the window switcher show. Set
+/// through winit, because Slint's `icon` property ignores an image built from pixels (it
+/// has no cache key, so Slint never sees it change). Before the native window exists it
+/// does nothing: `Hub::show` sets it again.
+pub fn set_icon(window: &slint::Window, (side, rgba): &(i32, Vec<u8>)) {
+    let side = (*side).max(0) as u32;
+    let icon = match winit::window::Icon::from_rgba(rgba.clone(), side, side) {
+        Ok(icon) => icon,
+        Err(e) => {
+            log::warn!("bad window icon: {e}");
+            return;
+        }
+    };
+    window.with_winit_window(|w| {
+        #[cfg(windows)]
+        {
+            use winit::platform::windows::WindowExtWindows;
+            w.set_taskbar_icon(Some(icon.clone()));
+        }
+        w.set_window_icon(Some(icon));
+    });
+}
+
+/// The window is minimized (as the system reports it; it may also be minimized from the
+/// taskbar, not only by the hub).
+pub fn is_minimized(window: &slint::Window) -> bool {
+    window.with_winit_window(|w| w.is_minimized().unwrap_or(false)).unwrap_or(false)
+}
+
 /// The native window already exists (after the first `show`).
 pub fn has_window(window: &slint::Window) -> bool {
     window.has_winit_window()
@@ -318,13 +426,15 @@ pub fn set_opacity(window: &slint::Window, alpha: f32) {
     });
 }
 
-/// Takes the window out of the taskbar and keeps it on top (winit already knows how).
+/// Popup (`desktop` false): out of the taskbar and on top. Desktop app: in the taskbar, a
+/// normal window. winit already knows how.
 #[cfg(windows)]
-pub fn skip_taskbar(window: &slint::Window) {
+pub fn set_taskbar(window: &slint::Window, desktop: bool) {
     use winit::platform::windows::WindowExtWindows;
+    use winit::window::WindowLevel;
     window.with_winit_window(|w| {
-        w.set_skip_taskbar(true);
-        w.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
+        w.set_skip_taskbar(!desktop);
+        w.set_window_level(if desktop { WindowLevel::Normal } else { WindowLevel::AlwaysOnTop });
     });
 }
 
@@ -348,9 +458,10 @@ fn x11_id(w: &winit::window::Window) -> Option<u32> {
     }
 }
 
-/// Takes the window out of the taskbar and the switcher and keeps it on top (EWMH, X11).
+/// Popup (`desktop` false): out of the taskbar and the switcher, on top and on every
+/// workspace. Desktop app: the other way round, a normal window (EWMH, X11).
 #[cfg(target_os = "linux")]
-pub fn skip_taskbar(window: &slint::Window) {
+pub fn set_taskbar(window: &slint::Window, desktop: bool) {
     let done = window.with_winit_window(|w| {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         let Ok(handle) = w.window_handle() else { return };
@@ -359,9 +470,9 @@ pub fn skip_taskbar(window: &slint::Window) {
             RawWindowHandle::Xcb(h) => h.window.get(),
             _ => return, // native Wayland: there is no way to ask for it
         };
-        log::debug!("EWMH states on window 0x{id:x}");
-        if let Err(e) = x11::set_states(id) {
-            log::warn!("could not take the window out of the taskbar: {e}");
+        log::debug!("EWMH states on window 0x{id:x} (desktop app: {desktop})");
+        if let Err(e) = x11::set_states(id, !desktop) {
+            log::warn!("could not change the window's taskbar states: {e}");
         }
     });
     if done.is_none() {
@@ -412,7 +523,9 @@ mod x11 {
         })
     }
 
-    pub fn set_states(window: u32) -> anyhow::Result<()> {
+    /// `popup`: adds the popup states (out of the taskbar and the pager, above, sticky, on
+    /// every desktop); otherwise removes them and puts the window on the current desktop.
+    pub fn set_states(window: u32, popup: bool) -> anyhow::Result<()> {
         let (conn, screen) = x11rb::connect(None)?;
         let root = conn.setup().roots[screen].root;
         let atom = |name: &str| -> anyhow::Result<u32> { Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom) };
@@ -430,17 +543,25 @@ mod x11 {
         // window not managed yet (empty property): the window manager reads it on map.
         // After that the property belongs to the window manager and must not be overwritten.
         let current = conn.get_property(false, window, net_wm_state, AtomEnum::ATOM, 0, 32)?.reply()?;
-        if current.value_len == 0 {
+        if current.value_len == 0 && popup {
             conn.change_property32(PropMode::REPLACE, window, net_wm_state, AtomEnum::ATOM, &states)?;
             conn.change_property32(PropMode::REPLACE, window, net_wm_desktop, AtomEnum::CARDINAL, &[ALL_DESKTOPS])?;
         }
+        // a desktop app lives on the current desktop
+        let desktop = if popup {
+            ALL_DESKTOPS
+        } else {
+            let current = conn.get_property(false, root, atom("_NET_CURRENT_DESKTOP")?, AtomEnum::CARDINAL, 0, 1)?.reply()?;
+            current.value32().and_then(|mut v| v.next()).unwrap_or(0)
+        };
         // window already mapped: the desktop also goes as a message to the root
         // (data: desktop, 1 = request from a normal app)
-        let ev = ClientMessageEvent::new(32, window, net_wm_desktop, [ALL_DESKTOPS, 1, 0, 0, 0]);
+        let ev = ClientMessageEvent::new(32, window, net_wm_desktop, [desktop, 1, 0, 0, 0]);
         conn.send_event(false, root, EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY, ev)?;
-        // and the states, one request per state (1 = add)
+        // and the states, one request per state (1 = add, 0 = remove)
+        let action = u32::from(popup);
         for s in states {
-            let ev = ClientMessageEvent::new(32, window, net_wm_state, [1, s, 0, 1, 0]);
+            let ev = ClientMessageEvent::new(32, window, net_wm_state, [action, s, 0, 1, 0]);
             conn.send_event(
                 false,
                 root,
@@ -465,6 +586,50 @@ mod tests {
     /// 1920x1080 monitor (scale 1) with the given work area.
     fn mon_work(x: i32, y: i32, w: i32, h: i32) -> Monitor {
         Monitor { work: Rect { x, y, w, h }, ..mon(0, 0, 1920, 1080, 1.0) }
+    }
+
+    #[test]
+    fn place_keys_round_trip_and_unknown_is_tray() {
+        for (i, k) in Place::KEYS.iter().enumerate() {
+            assert_eq!(Place::index_of(k), Some(i));
+            assert_eq!(Place::from_key(k), Place::ALL[i]);
+        }
+        assert_eq!(Place::from_key("nowhere"), Place::Tray);
+    }
+
+    #[test]
+    fn center_and_corners_stay_in_the_work_area() {
+        // panel of 40 px at the bottom
+        let m = [mon_work(0, 0, 1920, 1040)];
+        let at = |p| position_for(p, None, true, (400, 500), &m, 0, None);
+        assert_eq!(at(Place::Center), Some((760, 270)));
+        assert_eq!(at(Place::TopLeft), Some((10, 10)));
+        assert_eq!(at(Place::TopRight), Some((1510, 10)));
+        assert_eq!(at(Place::BottomLeft), Some((10, 1040 - 500 - 10)));
+        assert_eq!(at(Place::BottomRight), Some((1510, 530)));
+        // Tray is the popup position
+        assert_eq!(at(Place::Tray), position_with(None, true, (400, 500), &m, 0));
+    }
+
+    #[test]
+    fn center_goes_on_the_monitor_of_the_click() {
+        let m = [mon(0, 0, 1920, 1080, 1.0), mon(1920, 0, 2560, 1440, 1.0)];
+        // the click (tray of the second monitor) picks it, not the fallback
+        assert_eq!(position_for(Place::Center, Some((4000, 1430)), true, (400, 500), &m, 0, None), Some((1920 + 1080, 470)));
+        assert_eq!(position_for(Place::Center, None, true, (400, 500), &m, 0, None), Some((760, 290)));
+    }
+
+    #[test]
+    fn last_position_is_kept_inside_its_monitor_or_falls_back_to_the_tray() {
+        let m = [mon(0, 0, 1920, 1080, 1.0), mon(1920, 0, 1920, 1080, 1.0)];
+        let last = |p| position_for(Place::Last, None, true, (400, 500), &m, 0, p);
+        assert_eq!(last(Some((2100, 300))), Some((2100, 300)));
+        // partly off the right edge: pulled back inside, no margin (it was the user's choice)
+        assert_eq!(last(Some((3700, 900))), Some((3840 - 400, 1080 - 500)));
+        // monitor gone (or never remembered): next to the tray
+        let tray = position_with(None, true, (400, 500), &m, 0);
+        assert_eq!(last(Some((5000, 300))), tray);
+        assert_eq!(last(None), tray);
     }
 
     #[test]

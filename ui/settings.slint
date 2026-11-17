@@ -187,6 +187,12 @@ export component AppsView inherits ScrollView {
     // system: start with the system, version and log folder
     in property <bool> autostart;
     callback autostart-toggled();
+    // window: where it opens (index into `popup::Place::KEYS`) and desktop app mode
+    in property <int> place-index;
+    callback place-chosen(int);
+    in property <bool> desktop-app;
+    callback desktop-app-toggled();
+    in property <bool> can-place: true;
     in property <string> version;
     in property <string> log-dir;
     // CPU and memory now: the hub, each external app and the total (src/hub/usage.rs)
@@ -536,6 +542,40 @@ export component AppsView inherits ScrollView {
                                 toggled => { root.autostart-toggled(); }
                             }
                         }
+                    }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        min-height: max(44px, self.preferred-height);
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: @tr("Desktop app"); color: Skin.ink; font-size: 14px * Skin.text-scale; }
+                            Text {
+                                text: can-place
+                                    ? @tr("Shows up in the taskbar and Alt+Tab like any program: it is not above the other windows and does not hide when you click outside. Closing it leaves it in the tray.")
+                                    : @tr("Shows up as a normal window: does not hide when you click outside. Closing it leaves it in the tray. (On Wayland, the system decides the taskbar.)");
+                                color: Skin.sub;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SqSwitch {
+                                checked: desktop-app;
+                                label: @tr("Desktop app");
+                                toggled => { root.desktop-app-toggled(); }
+                            }
+                        }
+                    }
+                    if can-place: ChoiceRow {
+                        title: @tr("Window opens");
+                        hint: @tr("Where the window shows up each time it opens. \"Where I left it\" remembers where you dragged it.");
+                        // same order as `popup::Place::KEYS`
+                        options: [@tr("Next to the tray icon"), @tr("Center of the screen"), @tr("Top left corner"), @tr("Top right corner"), @tr("Bottom left corner"), @tr("Bottom right corner"), @tr("Where I left it")];
+                        index: place-index;
+                        chosen(i) => { root.place-chosen(i); }
                     }
                     HorizontalLayout {
                         spacing: 16px;

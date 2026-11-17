@@ -44,9 +44,11 @@ export component HubWindow inherits Window {
     preferred-height: 640px;
     min-width: 400px;
     min-height: 300px;
-    // tray popup: no frame and above the other windows
+    // tray popup: no frame and above the other windows; a desktop app (`desktop-app`) is
+    // a normal window, in the taskbar (its icon, the tray's mascot, is set through winit:
+    // `popup::set_icon`)
     no-frame: true;
-    always-on-top: true;
+    always-on-top: !desktop-app;
     // transparent: the cut corners show what is behind
     background: transparent;
     default-font-family: Skin.font-ui;
@@ -99,6 +101,11 @@ export component HubWindow inherits Window {
     in property <int> chatter-index: 1;
     in property <int> language-index;
     in property <bool> autostart: false;
+    // where the window opens (index into `popup::Place::KEYS`) and the desktop app mode;
+    // `can-place`: false on native Wayland, where the system decides both
+    in property <int> place-index;
+    in property <bool> desktop-app: false;
+    in property <bool> can-place: true;
     in property <string> version;
     in property <string> log-dir;
     // CPU and memory of the hub and its external apps (src/hub/usage.rs)
@@ -162,6 +169,8 @@ export component HubWindow inherits Window {
     callback chatter-chosen(int);
     callback language-chosen(int);
     callback autostart-toggled();
+    callback place-chosen(int);
+    callback desktop-app-toggled();
     callback open-logs();
     callback open-apps-dir();
     callback reload-apps();
@@ -232,7 +241,8 @@ export component HubWindow inherits Window {
                         alignment: end;
                         spacing: Skin.buttons == "chunky" ? 6px : Skin.buttons == "bracket" ? 2px : 6px;
                         padding-right: Skin.chamfer > 0 ? 4px : 0;
-                        VerticalLayout {
+                        // pinning keeps the popup open; a desktop app does not hide by itself
+                        if !desktop-app: VerticalLayout {
                             alignment: center;
                             HeaderButton {
                                 text: @tr("Keep open");
@@ -520,6 +530,11 @@ export component HubWindow inherits Window {
                 language-chosen(i) => { root.language-chosen(i); }
                 autostart: autostart;
                 autostart-toggled => { root.autostart-toggled(); }
+                place-index: place-index;
+                place-chosen(i) => { root.place-chosen(i); }
+                desktop-app: desktop-app;
+                desktop-app-toggled => { root.desktop-app-toggled(); }
+                can-place: can-place;
                 version: version;
                 log-dir: log-dir;
                 usage-rows: usage-rows;

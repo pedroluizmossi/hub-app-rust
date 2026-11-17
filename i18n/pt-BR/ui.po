@@ -265,6 +265,42 @@ msgstr "Iniciar com o sistema"
 msgid "Opens only in the tray when you log in."
 msgstr "Abre só na bandeja ao entrar na sessão."
 
+msgid "Desktop app"
+msgstr "App de desktop"
+
+msgid "Shows up in the taskbar and Alt+Tab like any program: it is not above the other windows and does not hide when you click outside. Closing it leaves it in the tray."
+msgstr "Aparece na barra de tarefas e no Alt+Tab como qualquer programa: não fica por cima das outras janelas nem some ao clicar fora. Fechar deixa ele na bandeja."
+
+msgid "Shows up as a normal window: does not hide when you click outside. Closing it leaves it in the tray. (On Wayland, the system decides the taskbar.)"
+msgstr "Aparece como uma janela comum: não some ao clicar fora. Fechar deixa ele na bandeja. (No Wayland, quem decide a barra de tarefas é o sistema.)"
+
+msgid "Window opens"
+msgstr "A janela abre"
+
+msgid "Where the window shows up each time it opens. \"Where I left it\" remembers where you dragged it."
+msgstr "Onde a janela aparece cada vez que abre. \"Onde eu deixei\" lembra onde você a arrastou."
+
+msgid "Next to the tray icon"
+msgstr "Junto do ícone da bandeja"
+
+msgid "Center of the screen"
+msgstr "No centro da tela"
+
+msgid "Top left corner"
+msgstr "Canto superior esquerdo"
+
+msgid "Top right corner"
+msgstr "Canto superior direito"
+
+msgid "Bottom left corner"
+msgstr "Canto inferior esquerdo"
+
+msgid "Bottom right corner"
+msgstr "Canto inferior direito"
+
+msgid "Where I left it"
+msgstr "Onde eu deixei"
+
 msgid "Version {}"
 msgstr "Versão {}"
 

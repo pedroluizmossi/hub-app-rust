@@ -206,6 +206,12 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
   cada app.
 - **Iniciar com o sistema:** **Configurações › Sistema › Iniciar com o sistema** abre só na
   bandeja ao entrar na sessão.
+- **Onde a janela abre:** em **Configurações › Sistema › A janela abre**: junto do ícone da
+  bandeja (padrão), no centro da tela, num canto ou onde você a deixou da última vez.
+- **Como um app de desktop:** **Configurações › Sistema › App de desktop** põe a janela na
+  barra de tarefas e no Alt+Tab, sem ficar por cima das outras nem sumir ao clicar fora; o
+  ícone da bandeja minimiza e restaura, e fechar deixa o MiniUtils na bandeja. (No Wayland
+  nativo, quem decide a posição e a barra de tarefas é o sistema.)
 - **Atalho de teclado:** com o MiniUtils aberto, `miniutils --tab <nome>` traz a janela naquela
   página (pelo nome dela ou de um app nela, ex. `Geral`, `docker`), em `apps` ou em `store`.
   Ligue esse comando a um atalho do sistema.

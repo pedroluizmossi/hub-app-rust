@@ -64,6 +64,8 @@ impl Hub {
         ui.on_reduce_motion_toggled(|| with_hub(|h| h.toggle_motion()));
         ui.on_still_on_hover_toggled(|| with_hub(|h| h.toggle_still_on_hover()));
         ui.on_autostart_toggled(|| with_hub(|h| h.toggle_autostart()));
+        ui.on_place_chosen(|i| with_hub(|h| h.choose_place(idx(i))));
+        ui.on_desktop_app_toggled(|| with_hub(|h| h.toggle_desktop_app()));
         ui.on_open_logs(|| with_hub(|h| h.open_logs()));
 
         // apps: data, local folder and options
@@ -119,7 +121,10 @@ impl Hub {
             })
         });
         ui.on_quit(|| {
-            with_hub(|h| h.remember_size());
+            with_hub(|h| {
+                h.remember_size();
+                h.remember_position();
+            });
             let _ = slint::quit_event_loop();
         });
         ui.on_toggle_requested(|x, y| with_hub(|h| h.toggle((x != 0 || y != 0).then_some((x, y)))));
@@ -147,9 +152,14 @@ impl Hub {
                         WindowEvent::Resized(_) if h.resize_until.get().is_some() => {
                             h.resize_until.set(Some(Instant::now() + RESIZE_QUIET));
                         }
-                        // pinned or in the middle of a resize: does not hide by itself
+                        // pinned, in the middle of a resize or a desktop app: does not hide by itself
                         WindowEvent::Focused(false)
-                            if h.shown.get() && h.has_tray() && h.had_focus.get() && !h.pinned.get() && !h.resizing() =>
+                            if h.shown.get()
+                                && h.has_tray()
+                                && h.had_focus.get()
+                                && !h.pinned.get()
+                                && !h.resizing()
+                                && !h.desktop_app() =>
                         {
                             h.hide();
                             h.focus_hidden_at.set(Some(Instant::now()));
@@ -165,6 +175,7 @@ impl Hub {
         ui.window().on_close_requested(|| {
             let mut hidden = false;
             with_hub(|h| {
+                h.remember_position();
                 if h.has_tray() {
                     h.set_shown(false);
                     hidden = true;

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Timer};
 
-use super::Hub;
+use super::{Hub, with_hub};
 use crate::instance;
 use crate::popup;
 use crate::tray::Tray;
@@ -15,8 +15,15 @@ impl Hub {
         let anchor = anchor.or(self.last_anchor.get());
         self.last_anchor.set(anchor);
         self.had_focus.set(false);
-        // reopening: starts transparent and fades in (the first time the window does not exist yet)
-        let fade_in = self.positionable && popup::has_window(self.ui.window());
+        let desktop = self.desktop_app();
+        // a minimized desktop app comes back where it was: it is not placed again
+        let restoring = desktop && popup::is_minimized(self.ui.window());
+        if restoring {
+            self.ui.window().set_minimized(false);
+        }
+        // reopening the popup: starts transparent and fades in (the first time the window
+        // does not exist yet). A desktop app just shows up, like any window.
+        let fade_in = !desktop && self.positionable && popup::has_window(self.ui.window());
         if fade_in {
             self.fade_gen.set(self.fade_gen.get() + 1); // cancels a pending fade-out
             popup::set_opacity(self.ui.window(), 0.0);
@@ -29,25 +36,52 @@ impl Hub {
             self.fade(0.0, 1.0, false);
         }
         self.set_shown(true);
-        let window = self.ui.window();
+        self.apply_icon();
         if self.positionable {
-            popup::skip_taskbar(window);
-            popup::place(window, anchor);
+            self.place_window(anchor, !restoring);
         }
-        popup::focus(window);
+        popup::focus(self.ui.window());
         // the window manager sometimes repositions on mapping: apply the position again.
         // On the first opening the native window only exists after the event loop runs, and the
-        // calls above found nothing: the states (off the taskbar, on top, on all workspaces)
-        // also go here. Repeating it the other times changes nothing.
-        if self.positionable {
-            let weak = self.ui.as_weak();
-            Timer::single_shot(Duration::from_millis(60), move || {
-                if let Some(ui) = weak.upgrade() {
-                    popup::skip_taskbar(ui.window());
-                    popup::place(ui.window(), anchor);
+        // calls above found nothing: the icon and the states (taskbar, on top, on all
+        // workspaces) also go here. Repeating it the other times changes nothing.
+        let positionable = self.positionable;
+        Timer::single_shot(Duration::from_millis(60), move || {
+            with_hub(|h| {
+                if h.shown.get() {
+                    h.apply_icon();
+                    if positionable {
+                        h.place_window(anchor, !restoring);
+                    }
                 }
             });
+        });
+    }
+
+    /// Sets the last window icon (the tray's mascot) on the native window.
+    pub(super) fn apply_icon(&self) {
+        if let Some(icon) = self.window_icon.borrow().as_ref() {
+            popup::set_icon(self.ui.window(), icon);
         }
+    }
+
+    /// The window as popup or desktop app (taskbar, on top) and, if `move_it`, where the
+    /// config says it opens.
+    pub(super) fn place_window(&self, anchor: Option<(i32, i32)>, move_it: bool) {
+        let (place, last, desktop) = {
+            let cfg = self.host.config.borrow();
+            (popup::Place::from_key(&cfg.window_place), cfg.window_pos, cfg.desktop_app)
+        };
+        let window = self.ui.window();
+        popup::set_taskbar(window, desktop);
+        if move_it {
+            popup::place(window, anchor, place, last);
+        }
+    }
+
+    /// Desktop app mode (`desktop_app` in the config).
+    pub(super) fn desktop_app(&self) -> bool {
+        self.host.config.borrow().desktop_app
     }
 
     /// Request from another instance: opens the popup (on the tab, if any). Already open, just brings it to the front.
@@ -56,7 +90,7 @@ impl Hub {
             self.open_tab(tab);
             self.rebuild_lists();
         }
-        if self.shown.get() {
+        if self.shown.get() && !popup::is_minimized(self.ui.window()) {
             popup::focus(self.ui.window());
         } else {
             self.show(None);
@@ -121,6 +155,21 @@ impl Hub {
         }
     }
 
+    /// Saves where the window is (for "open where it was left"), if it changed. Not while
+    /// minimized: Windows then reports (-32000, -32000).
+    pub(super) fn remember_position(&self) {
+        let window = self.ui.window();
+        if !self.positionable || popup::is_minimized(window) {
+            return;
+        }
+        let Some(pos) = popup::outer_position(window) else { return };
+        let mut cfg = self.host.config.borrow_mut();
+        if cfg.window_pos != Some(pos) {
+            cfg.window_pos = Some(pos);
+            cfg.save();
+        }
+    }
+
     /// Changes the frame interval depending on whether the mouse is over the window.
     pub(super) fn set_hovered(&self, on: bool) {
         if self.hovered.replace(on) != on {
@@ -130,10 +179,12 @@ impl Hub {
 
     pub(super) fn hide(&self) {
         self.remember_size();
+        self.remember_position();
         // no `CursorLeft` arrives when hiding: the next time it shows, `CursorEntered` decides
         self.set_hovered(false);
-        if !self.has_tray() {
-            // without a tray there would be no way back: just minimize
+        // without a tray there would be no way back; a desktop app stays in the taskbar:
+        // just minimize
+        if !self.has_tray() || self.desktop_app() {
             self.ui.window().set_minimized(true);
             return;
         }
@@ -182,6 +233,15 @@ impl Hub {
     }
 
     pub(super) fn toggle(&self, anchor: Option<(i32, i32)>) {
+        // desktop app: the tray icon minimizes and brings back, like its taskbar button
+        if self.desktop_app() {
+            if self.shown.get() && !popup::is_minimized(self.ui.window()) {
+                self.hide();
+            } else {
+                self.show(anchor);
+            }
+            return;
+        }
         // clicking the icon takes focus from the popup before the click gets here: if it just
         // hid because of that, the click was meant to close it, not to reopen it
         let just_hidden = self.focus_hidden_at.take().is_some_and(|t| t.elapsed() < Duration::from_millis(400));

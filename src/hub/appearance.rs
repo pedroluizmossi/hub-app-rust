@@ -12,6 +12,7 @@ use crate::core::config::Config;
 use crate::core::i18n::{self, Language};
 use crate::core::plugins;
 use crate::mascot::{sprites, themes};
+use crate::popup;
 use crate::skin;
 use crate::tr;
 use crate::ui::{AmbientItem, Anim};
@@ -153,6 +154,7 @@ impl Hub {
     /// when opening the settings (autostart may have changed outside, in the system).
     pub(super) fn apply_system(&self) {
         self.ui.set_autostart(crate::autostart::is_enabled());
+        self.apply_window_mode();
         self.ui.set_version(crate::core::about::version_line().into());
         let dir = crate::core::os::log_dir().map(|d| d.display().to_string()).unwrap_or_default();
         self.ui.set_log_dir(dir.into());
@@ -183,6 +185,58 @@ impl Hub {
             log::warn!("could not create {}: {e}", dir.display());
         } else if !crate::core::exec::open_dir(&dir) {
             log::warn!("could not open {}", dir.display());
+        }
+    }
+
+    /// Where the window opens and whether it is a desktop app, on the screen (the System
+    /// card and the window's own "on top").
+    fn apply_window_mode(&self) {
+        let cfg = self.host.config.borrow();
+        let place = popup::Place::index_of(&cfg.window_place).unwrap_or(0);
+        self.ui.set_place_index(place as i32);
+        self.ui.set_desktop_app(cfg.desktop_app);
+        // on native Wayland the system decides where windows go and what the taskbar shows
+        self.ui.set_can_place(self.positionable);
+    }
+
+    /// Where the window opens: index in `popup::Place::KEYS`. The window goes there now,
+    /// so the choice shows at once.
+    pub(super) fn choose_place(&self, i: usize) {
+        let Some(key) = popup::Place::KEYS.get(i).copied() else { return };
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.window_place == key {
+                return;
+            }
+            // "where it was left" starts from where it is now
+            if key == "last" {
+                drop(cfg);
+                self.remember_position();
+                cfg = self.host.config.borrow_mut();
+            }
+            cfg.window_place = key.into();
+            cfg.save();
+        }
+        self.apply_window_mode();
+        if self.positionable && self.shown.get() {
+            self.place_window(self.last_anchor.get(), true);
+        }
+    }
+
+    /// Desktop app on/off: in the taskbar, not on top and not hiding when it loses focus.
+    pub(super) fn toggle_desktop_app(&self) {
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            cfg.desktop_app = !cfg.desktop_app;
+            cfg.save();
+        }
+        self.apply_window_mode();
+        // pin mode only makes sense for the popup
+        if self.desktop_app() {
+            self.set_pinned(false);
+        }
+        if self.positionable && self.shown.get() {
+            self.place_window(self.last_anchor.get(), false);
         }
     }
 
