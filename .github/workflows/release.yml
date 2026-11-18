@@ -4,9 +4,10 @@
 #   git tag v0.2.0 && git push origin v0.2.0
 #
 # The tag must match the `version` in Cargo.toml. A tag with a hyphen (`v0.2.0-rc1`) goes out as
-# a pre-release. The tests run again here before building (a tag on a commit that never went
-# through CI doesn't publish a broken release); still, create the tag on a commit that passed
-# CI (ci.yml), which also runs clippy. Running it by hand (Actions tab › Release › Run workflow)
+# a pre-release. The tests don't run again here (on a tag the Rust cache is cold, and they
+# took longer than the build): the `ci` job instead requires a successful CI run (ci.yml:
+# clippy and tests on both systems) for the tagged commit, waiting for it if it is still
+# running. So push the commit to master first, then tag it. Running it by hand (Actions tab › Release › Run workflow)
 # only builds the packages, as run artifacts, without publishing anything: useful to test an
 # `.exe`.
 name: Release
@@ -23,8 +24,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    name: CI passed on this commit
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the CI run of the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          id=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [[ -z "$id" ]]; then
+            echo "::error::no CI run for $GITHUB_SHA: push the commit to master, wait for CI, then tag it"
+            exit 1
+          fi
+          if ! gh run watch "$id" --exit-status --interval 30 > /dev/null; then
+            echo "::error::CI did not pass on $GITHUB_SHA (run $id)"
+            exit 1
+          fi
+
   build:
     name: Package ${{ matrix.name }}
+    needs: ci
+    # run by hand there is no `ci` job (skipped): build anyway
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -63,9 +89,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
-
-      - name: Tests
-        run: cargo test --workspace --locked
 
       - name: Build (release)
         run: cargo build --release --locked

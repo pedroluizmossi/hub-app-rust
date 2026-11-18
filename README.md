@@ -374,11 +374,12 @@ cargo test
 <summary><b>CI e lançamentos</b></summary>
 
 - **CI** (`.github/workflows/ci.yml`): todo push em `master` e todo pull request roda
-  `cargo check`, `cargo clippy` (aviso reprova) e `cargo test` em Ubuntu e Windows.
+  `cargo clippy` (aviso reprova) e `cargo test` em Ubuntu e Windows.
 - **Lançamento** (`.github/workflows/release.yml`): uma tag `vX.Y.Z` igual à `version` do
   `Cargo.toml` compila a versão final nos dois sistemas e publica um Release com
   `miniutils-<versão>-linux-x86_64.tar.gz`, `miniutils-<versão>-windows-x86_64.zip` e as somas
-  SHA-256. Os testes não rodam nele: crie a tag num commit que passou no CI. O `install.sh` e o
+  SHA-256. Os testes não rodam de novo nele: o lançamento exige que o CI tenha passado no commit
+  da tag (e espera, se ainda estiver rodando). Envie o commit ao `master` antes de criar a tag. O `install.sh` e o
   `install.ps1` dependem desses nomes de arquivo; mudou um, mude os dois.
 
   ```bash
