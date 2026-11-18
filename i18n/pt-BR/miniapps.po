@@ -654,3 +654,146 @@ msgstr "As páginas mudaram: escolha de novo."
 
 msgid "key: {} · from the store (an update would undo changes)"
 msgstr "chave: {} · da loja (uma atualização desfaria as mudanças)"
+
+# Terminal (miniapps/terminal)
+msgid "Your shell in a MiniUtils window, in the app theme's colors."
+msgstr "Seu shell numa janela do MiniUtils, nas cores do tema do app."
+
+msgid "Shell (empty = the system's)"
+msgstr "Shell (vazio = o do sistema)"
+
+msgid "Start folder (empty = home)"
+msgstr "Pasta inicial (vazio = pasta pessoal)"
+
+msgid "Terminal text size (px)"
+msgstr "Tamanho do texto do terminal (px)"
+
+msgid "Use the theme's colors for the 16 terminal colors"
+msgstr "Usar as cores do tema nas 16 cores do terminal"
+
+msgid "Lines kept in the history"
+msgstr "Linhas guardadas no histórico"
+
+msgid "Thin cursor (a bar instead of a block)"
+msgstr "Cursor fino (barra em vez de bloco)"
+
+msgid "Copy the text when selecting it with the mouse"
+msgstr "Copiar o texto ao selecioná-lo com o mouse"
+
+msgid "Close the tab when its shell exits without an error"
+msgstr "Fechar a aba quando o shell dela sair sem erro"
+
+msgid "Show the skin's background behind the terminal"
+msgstr "Mostrar o fundo do visual atrás do terminal"
+
+msgid "Terminal color over the background (%)"
+msgstr "Cor do terminal sobre o fundo (%)"
+
+msgid "CRT effect: scanlines, dark corners and a band going down"
+msgstr "Efeito CRT: linhas de varredura, cantos escuros e uma faixa descendo"
+
+msgid "Rain falling behind the text"
+msgstr "Chuva caindo atrás do texto"
+
+msgid "Mascot in the window, reacting to the shell"
+msgstr "Mascote na janela, reagindo ao shell"
+
+msgid "Keep the shell running when the window closes"
+msgstr "Manter o shell rodando ao fechar a janela"
+
+msgid "Open terminal"
+msgstr "Abrir terminal"
+
+msgid "Start terminal"
+msgstr "Iniciar terminal"
+
+msgid "End session"
+msgstr "Encerrar sessão"
+
+msgid "End all"
+msgstr "Encerrar todos"
+
+msgid "New tab"
+msgstr "Nova aba"
+
+msgid "Not running. Open it to start your shell."
+msgstr "Parado. Abra para iniciar seu shell."
+
+msgid "Shell running."
+msgstr "Shell rodando."
+
+msgid "{} shells running."
+msgstr "{} shells rodando."
+
+msgid "Terminal ready."
+msgstr "Terminal pronto."
+
+msgid "The shell didn't start."
+msgstr "O shell não abriu."
+
+msgid "Couldn't start the shell: {}"
+msgstr "Não deu para iniciar o shell: {}"
+
+msgid "shell not found: {}"
+msgstr "shell não encontrado: {}"
+
+msgid "no session"
+msgstr "sem sessão"
+
+msgid "{}: exited"
+msgstr "{}: encerrado"
+
+msgid "Terminal: 1 shell running"
+msgstr "Terminal: 1 shell rodando"
+
+msgid "Terminal: {} shells running"
+msgstr "Terminal: {} shells rodando"
+
+msgid "Terminal: off"
+msgstr "Terminal: parado"
+
+# Terminal window (miniapps/terminal/window.slint)
+msgid "Restart the shell"
+msgstr "Reiniciar o shell"
+
+msgid "restart"
+msgstr "reiniciar"
+
+msgid "Maximize"
+msgstr "Maximizar"
+
+msgid "maximize"
+msgstr "maximizar"
+
+msgid "Restore size"
+msgstr "Restaurar tamanho"
+
+msgid "restore"
+msgstr "restaurar"
+
+msgid "Copy (Ctrl+Shift+C)"
+msgstr "Copiar (Ctrl+Shift+C)"
+
+msgid "copy"
+msgstr "copiar"
+
+msgid "Paste (Ctrl+Shift+V)"
+msgstr "Colar (Ctrl+Shift+V)"
+
+msgid "paste"
+msgstr "colar"
+
+msgid "history: {} lines up"
+msgstr "histórico: {} linhas acima"
+
+msgid "Session ended"
+msgstr "Sessão encerrada"
+
+msgid "The shell exited"
+msgstr "O shell terminou"
+
+msgid "The shell exited with code {}"
+msgstr "O shell terminou com código {}"
+
+msgid "{} — press Enter to start again"
+msgstr "{} — Enter para começar de novo"

@@ -7,6 +7,7 @@ pub mod external;
 pub mod kit;
 pub mod plugin;
 pub mod ports;
+pub mod terminal;
 pub mod todo;
 pub mod mascots;
 pub mod vitals;

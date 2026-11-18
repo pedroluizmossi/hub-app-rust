@@ -9,6 +9,8 @@ import { CdPlayerApp } from "../miniapps/cdplayer/view.slint";
 import { AiUsageApp, UsageCard, UsageLine } from "../miniapps/ai_usage/view.slint";
 import { PortsApp, PortRow } from "../miniapps/ports/view.slint";
 import { TodoApp, TodoRow } from "../miniapps/todo/view.slint";
+import { TerminalApp } from "../miniapps/terminal/view.slint";
+import { TerminalWindow, TerminalScreen, TermLine, TermRun, TermTab } from "../miniapps/terminal/window.slint";
 import { AgentsApp, AgentRow, AgentSub, AgentWalker } from "../miniapps/agents/view.slint";
 import { AgentDetailWindow, AgentDetail, AgentStep } from "../miniapps/agents/detail.slint";
 import { MascotsApp } from "../miniapps/mascots/view.slint";
@@ -32,9 +34,9 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 // windows besides the hub: each has its own globals (Rust applies the skin to them)
-export { AgentDetailWindow, MascotsWindow }
+export { AgentDetailWindow, MascotsWindow, TerminalWindow }
 // structs Rust fills in (defined in models.slint)
 export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow, ProcUsage }
 

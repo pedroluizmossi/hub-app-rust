@@ -410,9 +410,15 @@ fn is_batch(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
 }
 
+/// The user's shell (`$SHELL`), or `/bin/sh`.
+#[cfg(not(windows))]
+pub fn default_shell() -> PathBuf {
+    std::env::var_os("SHELL").map(PathBuf::from).filter(|p| p.is_file()).unwrap_or_else(|| PathBuf::from("/bin/sh"))
+}
+
 /// Shell for "open terminal here": the new PowerShell, the one bundled with Windows, or `cmd`.
 #[cfg(windows)]
-fn default_shell() -> PathBuf {
+pub fn default_shell() -> PathBuf {
     find("pwsh")
         .or_else(|| find("powershell"))
         .or_else(|| std::env::var_os("COMSPEC").map(PathBuf::from))

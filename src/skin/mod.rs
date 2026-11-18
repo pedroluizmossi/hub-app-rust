@@ -384,6 +384,11 @@ pub fn apply(ui: &HubWindow, s: &Skin, name: &str, text_scale: f32) {
     apply_to(ui, s, name, text_scale);
 }
 
+/// The last skin applied to the hub (with the accent), for windows that draw its backdrop.
+pub fn current() -> Option<Skin> {
+    CURRENT.with(|c| c.borrow().as_ref().map(|(s, _, _)| s.clone()))
+}
+
 /// Passes the last skin applied to the hub to another window (each Slint window has its
 /// own globals). Before the hub, does nothing.
 pub fn apply_current<W>(ui: &W)

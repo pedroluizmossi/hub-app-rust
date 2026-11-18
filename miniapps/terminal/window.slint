@@ -1,0 +1,591 @@
+// Terminal window: the shells' screens, drawn in the app theme inside the skin's frame,
+// one tab per shell. Opened by the Terminal card (src/apps/terminal/mod.rs), outside the
+// hub popup (it shows in the taskbar). Like the agent detail window, it has no system
+// frame: it draws the skin's one, drags by the header and resizes by the edges. Esc goes
+// to the shell, so it closes only with the header button.
+//
+// The grid always uses JetBrains Mono (bundled), whatever the skin's mono font is: a
+// terminal needs every character the same width. Rust (src/apps/terminal/grid.rs) splits
+// each line into runs with one look and their column; here each run is placed at
+// `col × cell-w`.
+//
+// Shortcuts: Ctrl+Shift+T new tab, Ctrl+Shift+W close tab, Ctrl+PageUp/PageDown switch
+// tabs, Ctrl+Shift+C/V copy and paste (Shift+Insert and the middle button paste too).
+import { Colors, Skin, Icons, Anim } from "../../ui/theme.slint";
+import { HeaderButton, Icon, Mascot } from "../../ui/widgets.slint";
+import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
+import { Ambient } from "../../ui/ambient.slint";
+import { AmbientItem } from "../../ui/models.slint";
+
+// Piece of a line with one look, `len` cells from column `col`.
+export struct TermRun {
+    col: int,
+    len: int,
+    text: string,
+    fg: color,
+    // transparent = the window background
+    bg: color,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+}
+
+export struct TermLine {
+    runs: [TermRun],
+}
+
+export struct TermTab {
+    title: string,
+    // the shell exited (or did not start)
+    ended: bool,
+}
+
+// Window state, filled in by Rust.
+export global TerminalScreen {
+    in property <Colors> theme;
+    // background of the grid (default color of the terminal)
+    in property <color> background;
+    // effects (src/apps/terminal/fx.rs), each one a setting of the app:
+    // the skin's backdrop behind the terminal, with the terminal color over it at `veil`
+    in property <bool> backdrop-on;
+    in property <image> backdrop;
+    in property <float> veil: 0.85;
+    // rain behind the text
+    in property <bool> rain-on;
+    in property <[AmbientItem]> rain;
+    // CRT: scanlines and vignette (a fixed image) and a band going down, over the text
+    in property <bool> crt-on;
+    in property <image> crt;
+    in property <[AmbientItem]> scan;
+    // the mascot at the end of the tab bar
+    in property <bool> mascot-on;
+    in property <image> mascot;
+    in property <string> mood: "idle";
+    in property <string> reaction;
+    // of the tab shown
+    in property <string> title;
+    in property <[TermTab]> tabs;
+    in property <int> active;
+    in property <[TermLine]> lines;
+    in property <int> cursor-row;
+    in property <int> cursor-col;
+    in property <bool> cursor-visible;
+    // "block" | "bar" | "underline" (the setting, or what the program asked for)
+    in property <string> cursor-shape: "block";
+    // text size in px (before the interface's text size)
+    in property <int> font-size: 13;
+    // the shell of the tab shown is gone; `ended-text` says why
+    in property <bool> ended;
+    in property <string> ended-text;
+    // lines back in the history (0 = live)
+    in property <int> scrolled;
+    // text of the selection, for copying
+    in property <string> selection;
+    in property <bool> copy-on-select;
+
+    // key press: text (or special key) and modifiers; true = it went to the shell
+    callback key(string, bool, bool, bool) -> bool;
+    callback paste(string);
+    // area in cells
+    callback resized(int /* cols */, int /* rows */);
+    // wheel: lines up (positive) or down
+    callback scroll(int);
+    // selection with the mouse, in cells
+    callback select-start(int /* col */, int /* row */);
+    callback select-to(int, int);
+    callback new-tab();
+    callback select-tab(int);
+    callback close-tab(int);
+    // the window fills the screen (Rust keeps it in step with the system's state)
+    in property <bool> maximized;
+    callback toggle-maximize();
+    callback restart();
+    callback mascot-poked();
+    // size of the screen area (logical px): the effects are drawn for it
+    callback fx-resized(float, float);
+    callback close();
+    callback start-move();
+    callback start-resize(string);
+}
+
+// One tab: the shell's title, a dot for its state and the button that closes it.
+component Tab inherits Rectangle {
+    in property <TermTab> tab;
+    in property <bool> active;
+    in property <bool> only;
+    callback clicked;
+    callback close;
+    property <Colors> t: TerminalScreen.theme;
+    min-width: 90px;
+    max-width: 220px;
+    preferred-width: 180px;
+    horizontal-stretch: 1;
+    background: active ? TerminalScreen.background : area.has-hover ? t.visor.with-alpha(0.06) : transparent;
+    border-width: 1px;
+    border-color: active ? t.muted.with-alpha(0.6) : transparent;
+    area := TouchArea {
+        clicked => { root.clicked(); }
+        // middle click closes, as in browsers
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.middle {
+                root.close();
+            }
+        }
+    }
+    if active: Rectangle {
+        y: 0;
+        height: 2px;
+        background: t.visor;
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 4px;
+        spacing: 7px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                icon: Icons.terminal;
+                ink: tab.ended ? t.sleep : active ? t.ok : t.sub;
+                size: 14px;
+            }
+        }
+        Text {
+            text: tab.title;
+            color: active ? t.text : t.sub;
+            font-size: 12px * Skin.text-scale;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        Rectangle {
+            width: 24px;
+            opacity: only ? 0 : 1;
+            background: x.has-hover ? t.alarm.with-alpha(0.18) : transparent;
+            Icon {
+                icon: Icons.close;
+                ink: x.has-hover ? t.alarm : t.sub;
+                size: 11px;
+            }
+            x := TouchArea {
+                enabled: !only;
+                clicked => { root.close(); }
+            }
+        }
+    }
+}
+
+export component TerminalWindow inherits Window {
+    property <Colors> t: TerminalScreen.theme;
+    property <length> font-px: TerminalScreen.font-size * 1px * Skin.text-scale;
+    // size of a cell, measured on the font itself
+    property <length> cell-w: measure.preferred-width / 20;
+    property <length> cell-h: measure.preferred-height;
+    // the grid in cells (the shell gets it through `resized`)
+    out property <int> term-cols: max(10, floor(area.width / cell-w));
+    out property <int> term-rows: max(2, floor(area.height / cell-h));
+    // size of the screen area, for the effects drawn in Rust
+    out property <length> screen-width: screen.width;
+    out property <length> screen-height: screen.height;
+
+    title: TerminalScreen.title == "" ? @tr("Terminal") : TerminalScreen.title;
+    preferred-width: 820px;
+    preferred-height: 540px;
+    min-width: 420px;
+    min-height: 240px;
+    no-frame: true;
+    // transparent: the cut corners (chamfer) show what is behind
+    background: transparent;
+    default-font-family: Skin.font-ui;
+    default-font-size: 13px * Skin.text-scale;
+
+    changed term-cols => { TerminalScreen.resized(term-cols, term-rows); }
+    changed term-rows => { TerminalScreen.resized(term-cols, term-rows); }
+
+    // Rust calls this when the window is shown again
+    public function focus-grid() {
+        keys.focus();
+    }
+
+    function copy() {
+        if TerminalScreen.selection != "" {
+            clipboard.text = TerminalScreen.selection;
+            clipboard.select-all();
+            clipboard.copy();
+            clipboard.text = "";
+        }
+    }
+
+    function paste() {
+        clipboard.text = "";
+        clipboard.paste();
+        if clipboard.text != "" {
+            TerminalScreen.paste(clipboard.text);
+        }
+        clipboard.text = "";
+    }
+
+    function step-tab(by: int) {
+        if TerminalScreen.tabs.length > 1 {
+            TerminalScreen.select-tab(Math.mod(TerminalScreen.active + by + TerminalScreen.tabs.length, TerminalScreen.tabs.length));
+        }
+    }
+
+    measure := Text {
+        visible: false;
+        text: "MMMMMMMMMMMMMMMMMMMM";
+        font-family: "JetBrains Mono";
+        font-size: font-px;
+    }
+
+    // the clipboard goes through a hidden field (Slint has no other way to reach it)
+    clipboard := TextInput {
+        visible: false;
+        width: 0;
+        height: 0;
+        single-line: false;
+    }
+
+  keys := FocusScope {
+    init => { self.focus(); }
+    key-pressed(e) => {
+        if e.modifiers.control && e.modifiers.shift {
+            if e.text == "c" || e.text == "C" {
+                root.copy();
+                return accept;
+            }
+            if e.text == "v" || e.text == "V" {
+                root.paste();
+                return accept;
+            }
+            if e.text == "t" || e.text == "T" {
+                TerminalScreen.new-tab();
+                return accept;
+            }
+            if e.text == "w" || e.text == "W" {
+                TerminalScreen.close-tab(TerminalScreen.active);
+                return accept;
+            }
+        }
+        if e.modifiers.control && e.text == Key.PageDown {
+            root.step-tab(1);
+            return accept;
+        }
+        if e.modifiers.control && e.text == Key.PageUp {
+            root.step-tab(-1);
+            return accept;
+        }
+        if e.modifiers.shift && e.text == Key.Insert {
+            root.paste();
+            return accept;
+        }
+        if TerminalScreen.key(e.text, e.modifiers.control, e.modifiers.alt, e.modifiers.shift) {
+            return accept;
+        }
+        reject
+    }
+
+    Frame { }
+
+    VerticalLayout {
+        padding: Skin.border;
+
+        // header: title of the tab shown; drags the window
+        Bar {
+            TouchArea {
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        TerminalScreen.start-move();
+                    }
+                }
+                double-clicked => { TerminalScreen.toggle-maximize(); }
+            }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        icon: Icons.terminal;
+                        ink: TerminalScreen.ended ? t.sleep : Skin.accent;
+                        size: 20px;
+                        weight: 2.6;
+                    }
+                }
+                Text {
+                    text: root.title;
+                    color: Skin.panel-ink;
+                    font-family: Skin.font-title;
+                    font-size: 15px * Skin.text-scale;
+                    font-weight: 700;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                if TerminalScreen.scrolled > 0: Text {
+                    text: @tr("history: {} lines up", TerminalScreen.scrolled);
+                    color: Skin.panel-sub;
+                    font-family: Skin.font-mono;
+                    font-size: 11px * Skin.text-scale;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HeaderButton {
+                        text: @tr("Copy (Ctrl+Shift+C)");
+                        short: @tr("copy");
+                        icon: Icons.copy;
+                        px-icon: Icons.px-copy;
+                        clicked => {
+                            root.copy();
+                            keys.focus();
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HeaderButton {
+                        text: @tr("Paste (Ctrl+Shift+V)");
+                        short: @tr("paste");
+                        icon: Icons.paste;
+                        px-icon: Icons.px-paste;
+                        clicked => {
+                            root.paste();
+                            keys.focus();
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HeaderButton {
+                        text: @tr("Restart the shell");
+                        short: @tr("restart");
+                        icon: Icons.refresh;
+                        px-icon: Icons.px-refresh;
+                        clicked => {
+                            TerminalScreen.restart();
+                            keys.focus();
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HeaderButton {
+                        text: TerminalScreen.maximized ? @tr("Restore size") : @tr("Maximize");
+                        short: TerminalScreen.maximized ? @tr("restore") : @tr("maximize");
+                        icon: TerminalScreen.maximized ? Icons.restore : Icons.maximize;
+                        px-icon: TerminalScreen.maximized ? Icons.px-restore : Icons.px-maximize;
+                        active: TerminalScreen.maximized;
+                        clicked => {
+                            TerminalScreen.toggle-maximize();
+                            keys.focus();
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HeaderButton {
+                        text: @tr("Close");
+                        short: @tr("close");
+                        icon: Icons.close;
+                        px-icon: Icons.px-close;
+                        clicked => { TerminalScreen.close(); }
+                    }
+                }
+            }
+        }
+
+        // tabs, and the button that opens another
+        HorizontalLayout {
+            height: 34px;
+            padding-left: 8px;
+            padding-right: 8px;
+            padding-top: 4px;
+            spacing: 2px;
+            for tab[i] in TerminalScreen.tabs: Tab {
+                tab: tab;
+                active: i == TerminalScreen.active;
+                only: TerminalScreen.tabs.length == 1;
+                clicked => {
+                    TerminalScreen.select-tab(i);
+                    keys.focus();
+                }
+                close => { TerminalScreen.close-tab(i); }
+            }
+            Rectangle {
+                width: 32px;
+                background: plus.has-hover ? Skin.accent.with-alpha(0.14) : transparent;
+                Icon { icon: Icons.plus; ink: plus.has-hover ? Skin.accent : Skin.sub; size: 14px; }
+                plus := TouchArea {
+                    clicked => {
+                        TerminalScreen.new-tab();
+                        keys.focus();
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if TerminalScreen.mascot-on: VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                Mascot {
+                    theme: t;
+                    frame: TerminalScreen.mascot;
+                    mood: TerminalScreen.mood;
+                    reaction: TerminalScreen.reaction;
+                    poked => { TerminalScreen.mascot-poked(); }
+                    width: 34px;
+                    height: 34px * 14 / 16;
+                }
+            }
+        }
+
+        // the screen, in the app theme. Layers, bottom to top: the skin's backdrop under
+        // the terminal color, the rain, the text, the CRT overlay and its band.
+        screen := Rectangle {
+            vertical-stretch: 1;
+            background: TerminalScreen.backdrop-on ? transparent : TerminalScreen.background;
+            changed width => { TerminalScreen.fx-resized(self.width / 1px, self.height / 1px); }
+            changed height => { TerminalScreen.fx-resized(self.width / 1px, self.height / 1px); }
+
+            if TerminalScreen.backdrop-on: Image {
+                width: 100%;
+                height: 100%;
+                source: TerminalScreen.backdrop;
+                image-fit: fill;
+            }
+            if TerminalScreen.backdrop-on: Rectangle {
+                background: TerminalScreen.background.with-alpha(TerminalScreen.veil);
+            }
+            if TerminalScreen.rain-on: Ambient {
+                width: 100%;
+                height: 100%;
+                items: TerminalScreen.rain;
+                live: !Anim.calm;
+            }
+
+            area := Rectangle {
+                x: 10px;
+                y: 8px;
+                width: parent.width - 20px;
+                height: parent.height - 16px;
+                clip: true;
+
+                for line[i] in TerminalScreen.lines: Rectangle {
+                    x: 0;
+                    y: i * cell-h;
+                    width: area.width;
+                    height: cell-h;
+                    for r in line.runs: Rectangle {
+                        x: r.col * cell-w;
+                        width: r.len * cell-w;
+                        height: cell-h;
+                        background: r.bg;
+                        Text {
+                            x: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            text: r.text;
+                            color: r.fg;
+                            font-family: "JetBrains Mono";
+                            font-size: font-px;
+                            font-weight: r.bold ? 700 : 400;
+                            font-italic: r.italic;
+                            vertical-alignment: center;
+                            overflow: clip;
+                        }
+                        if r.underline: Rectangle {
+                            y: parent.height - 2px;
+                            height: 1px;
+                            background: r.fg;
+                        }
+                    }
+                }
+
+                // cursor: filled with focus, an outline without it
+                if TerminalScreen.cursor-visible && TerminalScreen.scrolled == 0 && !TerminalScreen.ended: Rectangle {
+                    property <bool> bar: TerminalScreen.cursor-shape == "bar";
+                    property <bool> under: TerminalScreen.cursor-shape == "underline";
+                    x: TerminalScreen.cursor-col * cell-w;
+                    y: TerminalScreen.cursor-row * cell-h + (under ? cell-h - 2px : 0);
+                    width: bar ? 2px : cell-w;
+                    height: under ? 2px : cell-h;
+                    background: keys.has-focus || bar || under ? t.visor.with-alpha(bar || under ? 1 : 0.55) : transparent;
+                    border-width: bar || under ? 0 : 1px;
+                    border-color: t.visor;
+                }
+
+                TouchArea {
+                    mouse-cursor: text;
+                    pointer-event(ev) => {
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                            keys.focus();
+                            TerminalScreen.select-start(floor(self.mouse-x / cell-w), floor(self.mouse-y / cell-h));
+                        }
+                        if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left && TerminalScreen.copy-on-select {
+                            root.copy();
+                        }
+                        // middle click pastes, as in other Linux terminals
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.middle {
+                            keys.focus();
+                            root.paste();
+                        }
+                    }
+                    moved => {
+                        if self.pressed {
+                            TerminalScreen.select-to(floor(self.mouse-x / cell-w), floor(self.mouse-y / cell-h));
+                        }
+                    }
+                    scroll-event(e) => {
+                        TerminalScreen.scroll(e.delta-y > 0 ? max(1, round(e.delta-y / cell-h)) : min(-1, round(e.delta-y / cell-h)));
+                        accept
+                    }
+                }
+            }
+
+            if TerminalScreen.crt-on: Image {
+                width: 100%;
+                height: 100%;
+                source: TerminalScreen.crt;
+                image-fit: fill;
+            }
+            if TerminalScreen.crt-on: Ambient {
+                width: 100%;
+                height: 100%;
+                items: TerminalScreen.scan;
+                live: !Anim.calm;
+            }
+
+            // the shell exited: how, and how to start another
+            if TerminalScreen.ended: Rectangle {
+                y: parent.height - self.height - 12px;
+                x: (parent.width - self.width) / 2;
+                width: min(parent.width - 24px, ended-row.preferred-width + 28px);
+                height: 40px;
+                background: t.bg1.with-alpha(0.95);
+                border-width: 1px;
+                border-color: t.warn;
+                ended-row := HorizontalLayout {
+                    alignment: center;
+                    Text {
+                        text: @tr("{} — press Enter to start again", TerminalScreen.ended-text);
+                        color: t.text;
+                        font-size: 13px * Skin.text-scale;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+
+    // maximized: no edges to pull
+    if !TerminalScreen.maximized: ResizeHandles {
+        start(dir) => { TerminalScreen.start-resize(dir); }
+    }
+  }
+}

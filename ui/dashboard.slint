@@ -8,6 +8,7 @@ import { CdPlayerView } from "../miniapps/cdplayer/view.slint";
 import { AiUsageView } from "../miniapps/ai_usage/view.slint";
 import { PortsView } from "../miniapps/ports/view.slint";
 import { TodoView } from "../miniapps/todo/view.slint";
+import { TerminalView } from "../miniapps/terminal/view.slint";
 import { MascotsView } from "../miniapps/mascots/view.slint";
 import { AgentsView } from "../miniapps/agents/view.slint";
 import { Chatter, SpeechBox } from "chatter.slint";
@@ -149,6 +150,13 @@ export component Dashboard inherits ScrollView {
                 height: parent.height - 28px;
             }
             if c.id == "cyber.todo": TodoView {
+                hovered: cell.hovered;
+                x: 14px;
+                y: 14px;
+                width: parent.width - 28px;
+                height: parent.height - 28px;
+            }
+            if c.id == "cyber.terminal": TerminalView {
                 hovered: cell.hovered;
                 x: 14px;
                 y: 14px;

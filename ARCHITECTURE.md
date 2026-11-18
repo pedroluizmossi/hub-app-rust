@@ -91,7 +91,8 @@ hub-app-rust/
     <app>/view.slint          tela do app (global <App>App + componente <App>View)
     <app>/lines.toml          falas da mascote na conversa (opcional; ver "Conversa entre mascotes")
     docker/ vitals/ cdplayer/ ai_usage/ ports/ todo/ agents/ (com detail.slint, a janela
-                              de detalhe de uma sessão)
+                              de detalhe de uma sessão) terminal/ (com window.slint, a
+                              janela do terminal)
   src/
     main.rs                   argumentos (--hidden, --tab, --plugin-dev, --dirs,
                               --import-mascot, comandos da loja) e event loop
@@ -215,6 +216,9 @@ hub-app-rust/
                               Assinaturas de IA e pelos Agentes
       ports.rs                Portas abertas: lista do `ss`, abrir no navegador, encerrar
       todo.rs                 To-do rápido: lista em todo.json, na pasta de dados do app
+      terminal/               Terminal: abas com o shell num pseudo-terminal (portable-pty;
+                              ConPTY no Windows), emulador VT (vt100) numa thread por aba
+                              (session.rs) e a tela em trechos de texto com cor (grid.rs)
       mascots.rs              Mascotes: importar, janela de gerenciar (renomear, animações,
                               cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;

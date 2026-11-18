@@ -1,0 +1,115 @@
+id = "cyber.terminal"
+name = "Terminal"
+description = "Your shell in a MiniUtils window, in the app theme's colors."
+icon = "hacker"
+# text settings (shell and folder)
+api = 2
+
+[[settings]]
+key = "theme"
+label = "Theme"
+type = "choice"
+default = "auto"
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
+
+[[settings]]
+key = "shell"
+label = "Shell (empty = the system's)"
+type = "text"
+default = ""
+max_len = 300
+
+[[settings]]
+key = "dir"
+label = "Start folder (empty = home)"
+type = "text"
+default = ""
+max_len = 500
+
+[[settings]]
+key = "font_size"
+label = "Terminal text size (px)"
+type = "int"
+default = 13
+min = 9
+max = 24
+step = 1
+
+[[settings]]
+key = "scrollback"
+label = "Lines kept in the history"
+type = "int"
+default = 5000
+min = 500
+max = 50000
+step = 500
+
+[[settings]]
+key = "bar_cursor"
+label = "Thin cursor (a bar instead of a block)"
+type = "bool"
+default = false
+
+[[settings]]
+key = "copy_on_select"
+label = "Copy the text when selecting it with the mouse"
+type = "bool"
+default = false
+
+[[settings]]
+key = "close_on_exit"
+label = "Close the tab when its shell exits without an error"
+type = "bool"
+default = true
+
+[[settings]]
+key = "theme_colors"
+label = "Use the theme's colors for the 16 terminal colors"
+type = "bool"
+default = true
+
+[[settings]]
+key = "skin_background"
+label = "Show the skin's background behind the terminal"
+type = "bool"
+default = true
+
+[[settings]]
+key = "opacity"
+label = "Terminal color over the background (%)"
+type = "int"
+default = 85
+min = 40
+max = 100
+step = 5
+
+[[settings]]
+key = "crt"
+label = "CRT effect: scanlines, dark corners and a band going down"
+type = "bool"
+default = false
+
+[[settings]]
+key = "rain"
+label = "Rain falling behind the text"
+type = "bool"
+default = false
+
+[[settings]]
+key = "window_mascot"
+label = "Mascot in the window, reacting to the shell"
+type = "bool"
+default = true
+
+[[settings]]
+key = "keep_running"
+label = "Keep the shell running when the window closes"
+type = "bool"
+default = true
+
+[[settings]]
+key = "mascot"
+label = "Mascot"
+type = "choice"
+default = "hacker"
+options = ["hacker", "robo", "polvo", "neko", "coruja", "morcego"]

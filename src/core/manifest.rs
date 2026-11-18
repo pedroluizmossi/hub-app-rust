@@ -197,6 +197,7 @@ mod tests {
             include_str!("../../miniapps/ai_usage/manifest.toml"),
             include_str!("../../miniapps/ports/manifest.toml"),
             include_str!("../../miniapps/todo/manifest.toml"),
+            include_str!("../../miniapps/terminal/manifest.toml"),
             include_str!("../../miniapps/agents/manifest.toml"),
             include_str!("../../miniapps/mascots/manifest.toml"),
         ] {

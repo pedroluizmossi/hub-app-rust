@@ -10,6 +10,7 @@
 #       real config.
 #   tools/dev-ui.sh reload                (--live) reloads the .slint files now; see below
 #   tools/dev-ui.sh shot [file.png]       screenshot of the window (default: target/dev-ui/screen.png)
+#                                         DEV_UI_WINDOW=1: of the 2nd window (terminal, details…)
 #   tools/dev-ui.sh find <text>           elements whose label or id contains the text
 #   tools/dev-ui.sh click <text> [n]      clicks the n-th element found (default: the 1st)
 #   tools/dev-ui.sh mcp [tool [json]]     any MCP tool (without a name: lists them)
@@ -51,8 +52,9 @@ tool() { # <tool> [args json] → the whole answer; an MCP error becomes a scrip
 
 text() { jq -r '.result.content[] | select(.type == "text") | .text'; }
 
-# The 1st open window (the main one). Its handle changes on every reload: always ask.
-window() { tool list_windows | text | jq -c '.windowHandles[0] // empty'; }
+# The open window (the main one, or the n-th with DEV_UI_WINDOW=n, counting from 0: a
+# window the app opens besides the hub). Its handle changes on every reload: always ask.
+window() { tool list_windows | text | jq -c --argjson n "${DEV_UI_WINDOW:-0}" '.windowHandles[$n] // empty'; }
 
 # elements of the window whose accessible label or id contains the text (case-insensitive)
 find_elements() {

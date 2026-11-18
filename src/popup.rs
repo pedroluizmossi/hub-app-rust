@@ -391,6 +391,18 @@ pub fn set_icon(window: &slint::Window, (side, rgba): &(i32, Vec<u8>)) {
     });
 }
 
+/// `set_icon` for a window just shown: now, and again shortly after, because on the first
+/// `show` the native window only exists once the event loop has run (as in `Hub::show`).
+pub fn set_icon_after_show<C: slint::ComponentHandle + 'static>(win: &C, icon: (i32, Vec<u8>)) {
+    set_icon(win.window(), &icon);
+    let weak = win.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
+        if let Some(win) = weak.upgrade() {
+            set_icon(win.window(), &icon);
+        }
+    });
+}
+
 /// The window is minimized (as the system reports it; it may also be minimized from the
 /// taskbar, not only by the hub).
 pub fn is_minimized(window: &slint::Window) -> bool {

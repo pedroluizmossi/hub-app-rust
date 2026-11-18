@@ -43,6 +43,10 @@ rhai = { version = "1", features = ["no_module", "sync"] }
 ring = "0.17"
 # system language for `language = "auto"` (core/i18n.rs); already pulled in by Slint
 sys-locale = "0.3"
+# Terminal app: the shell in a pseudo-terminal (Unix PTY, ConPTY on Windows) and the screen
+# it draws (VT100/xterm escape sequences), shown in a window of our own
+portable-pty = "0.9"
+vt100 = "0.18"
 
 # Linux only: tray (StatusNotifierItem), X11 and D-Bus. None of this builds on Windows; the
 # code using them lives in `linux.rs` modules (see "Plataformas" in AGENTS.md).

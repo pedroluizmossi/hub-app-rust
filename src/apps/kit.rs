@@ -99,6 +99,62 @@ pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
+/// A small mark drawn in the corner of a window icon, so the app's windows can be told
+/// apart from the hub's in the taskbar (they may use the same mascot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Badge {
+    /// A prompt, `>_` (the terminal).
+    Prompt,
+}
+
+/// Size of the window icon (the 16×16 mascot frame at 4×).
+const ICON_SCALE: usize = 4;
+
+/// Icon for an app's own window (taskbar and window switcher): the app's mascot, with
+/// `badge` in the corner. Set it after the window is shown (`popup::set_icon`).
+pub fn window_icon(sprite: &Sprite, theme: &Theme, badge: Option<Badge>) -> (i32, Vec<u8>) {
+    let (side, mut rgba) = render::rgba_square(sprite, theme, Mood::Idle, 1, ICON_SCALE);
+    if let Some(b) = badge {
+        draw_badge(&mut rgba, side as usize, b, theme);
+    }
+    (side, rgba)
+}
+
+/// The badge in the bottom right corner: a dark plate with an accent border and the
+/// mark in pixels of 3×3 (the same chunky look as the mascot).
+fn draw_badge(rgba: &mut [u8], side: usize, badge: Badge, theme: &Theme) {
+    // 9×7 cells of 3 px
+    const CELL: usize = 3;
+    const COLS: usize = 9;
+    const ROWS: usize = 7;
+    let mark: &[(usize, usize)] = match badge {
+        Badge::Prompt => &[(2, 2), (3, 3), (2, 4), (4, 4), (5, 4), (6, 4)],
+    };
+    let (x0, y0) = (side.saturating_sub(COLS * CELL), side.saturating_sub(ROWS * CELL));
+    let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8, 255];
+    for row in 0..ROWS {
+        for col in 0..COLS {
+            let edge = row == 0 || col == 0 || row == ROWS - 1 || col == COLS - 1;
+            let px = if edge {
+                rgb(theme.visor)
+            } else if mark.contains(&(col, row)) {
+                rgb(theme.ok)
+            } else {
+                rgb(theme.bg0)
+            };
+            for dy in 0..CELL {
+                for dx in 0..CELL {
+                    let (x, y) = (x0 + col * CELL + dx, y0 + row * CELL + dy);
+                    if x < side && y < side {
+                        let i = (y * side + x) * 4;
+                        rgba[i..i + 4].copy_from_slice(&px);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Seconds since 1970 (0 if the clock is set before that).
 pub fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
@@ -121,6 +177,20 @@ mod tests {
         assert!(s.take_expired());
         assert!(!s.take_expired());
         assert!(!s.is("hi"));
+    }
+
+    #[test]
+    fn window_icon_with_and_without_badge() {
+        let (sprite, theme) = (crate::mascot::sprites::get("hacker"), crate::mascot::themes::get("auto"));
+        let (side, plain) = window_icon(sprite, theme, None);
+        assert_eq!((side, plain.len()), (64, 64 * 64 * 4));
+        let (_, badged) = window_icon(sprite, theme, Some(Badge::Prompt));
+        let at = |img: &[u8], x: usize, y: usize| img[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4].to_vec();
+        // the corner gets the plate's border; the top left keeps the mascot
+        let v = theme.visor;
+        assert_eq!(at(&badged, 63, 63), [(v >> 16) as u8, (v >> 8) as u8, v as u8, 255]);
+        assert_eq!(at(&badged, 0, 0), at(&plain, 0, 0));
+        assert_ne!(badged, plain);
     }
 
     #[test]

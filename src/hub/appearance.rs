@@ -473,7 +473,7 @@ impl Hub {
                         return;
                     }
                     ui.set_backdrop(slint::Image::from_rgb8(buf));
-                    let items: Vec<AmbientItem> = ambient.iter().map(ambient_item).collect();
+                    let items: Vec<AmbientItem> = ambient.iter().map(skin::backdrop::Ambient::item).collect();
                     ui.set_ambient(ModelRc::new(VecModel::from(items)));
                     if let Ok(mut last) = state.last.lock() {
                         *last = Some(drawn);
@@ -514,23 +514,6 @@ fn local_time() -> (i32, i32) {
 /// % from the config to the screen factor, within the sizes offered.
 fn text_scale(pct: u32) -> f32 {
     pct.clamp(TEXT_SIZES[0], TEXT_SIZES[TEXT_SIZES.len() - 1]) as f32 / 100.0
-}
-
-fn ambient_item(a: &skin::backdrop::Ambient) -> AmbientItem {
-    AmbientItem {
-        kind: a.kind.into(),
-        x: a.x,
-        y: a.y,
-        w: a.w,
-        h: a.h,
-        color: crate::mascot::render::color(a.color),
-        alpha: a.alpha,
-        phase: a.phase,
-        period: a.period.max(1),
-        on: a.on,
-        speed: a.speed,
-        slant: if a.kind == "fall" { skin::backdrop::RAIN_SLANT } else { 0.0 },
-    }
 }
 
 #[cfg(test)]

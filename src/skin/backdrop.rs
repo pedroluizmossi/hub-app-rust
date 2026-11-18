@@ -446,6 +446,26 @@ pub struct Ambient {
     pub speed: f32,
 }
 
+impl Ambient {
+    /// The element in the screen's format (`ui/ambient.slint`).
+    pub fn item(&self) -> crate::ui::AmbientItem {
+        crate::ui::AmbientItem {
+            kind: self.kind.into(),
+            x: self.x,
+            y: self.y,
+            w: self.w,
+            h: self.h,
+            color: crate::mascot::render::color(self.color),
+            alpha: self.alpha,
+            phase: self.phase,
+            period: self.period.max(1),
+            on: self.on,
+            speed: self.speed,
+            slant: if self.kind == "fall" { RAIN_SLANT } else { 0.0 },
+        }
+    }
+}
+
 /// Fixed pseudo-random generator (xorshift): the same drops and stars on every redraw.
 struct Rng(u32);
 

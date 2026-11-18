@@ -1,0 +1,132 @@
+// Card of the Terminal mini-app: the mascot, whether the shell is running and the last
+// lines of its screen; the button opens the terminal window (window.slint).
+// Responsive:
+//   short (< 230 px): smaller mascot and no preview
+//   narrow (< 360 px): icon-only buttons
+import { Colors, Skin, Icons } from "../../ui/theme.slint";
+import { Mascot, TextButton } from "../../ui/widgets.slint";
+
+// Mini-app state, filled in by Rust (src/apps/terminal/mod.rs).
+export global TerminalApp {
+    in property <Colors> theme;
+    in property <image> mascot;
+    in property <string> mood: "sleep";
+    in property <string> reaction;
+    in property <string> speech;
+    // "zsh · ~/Projetos" or why it could not start
+    in property <string> status;
+    in property <bool> running;
+    // open tabs (running or not)
+    in property <int> sessions;
+    in property <bool> failed;
+    // last lines of the screen, one per line
+    in property <string> preview;
+
+    callback open();
+    callback new-tab();
+    callback stop();
+    callback mascot-poked();
+}
+
+export component TerminalView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
+    property <Colors> t: TerminalApp.theme;
+    property <bool> narrow: self.width < 360px;
+    property <bool> short: self.height < 230px;
+    property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+    property <length> mascot-h: mascot-w * 14 / 16;
+
+  VerticalLayout {
+    spacing: 12px;
+
+    HorizontalLayout {
+        spacing: 16px;
+        Rectangle {
+            width: mascot-w + 8px;
+            height: mascot-h + 8px;
+            background: TerminalApp.running ? t.ok.with-alpha(0.12) : t.fur.with-alpha(0.1);
+            Mascot {
+                noticed: root.hovered;
+                theme: t;
+                frame: TerminalApp.mascot;
+                mood: TerminalApp.mood;
+                reaction: TerminalApp.reaction;
+                poked => { TerminalApp.mascot-poked(); }
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Text {
+                text: TerminalApp.speech;
+                color: t.text;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+            Text {
+                text: TerminalApp.status;
+                color: TerminalApp.failed ? t.alarm : t.sub;
+                font-family: Skin.font-mono;
+                font-size: 12px * Skin.text-scale;
+                overflow: elide;
+            }
+        }
+    }
+
+    // last lines of the screen
+    if !short: Rectangle {
+        vertical-stretch: 1;
+        min-height: 40px;
+        border-width: 1px;
+        border-color: t.muted.with-alpha(0.45);
+        background: t.bg0.mix(t.bg1, 0.25);
+        clip: true;
+        Text {
+            x: 10px;
+            y: parent.height - self.height - 8px;
+            width: parent.width - 20px;
+            text: TerminalApp.preview != "" ? TerminalApp.preview
+                : TerminalApp.running ? "" : @tr("Not running. Open it to start your shell.");
+            color: TerminalApp.preview != "" ? t.text.with-alpha(0.85) : t.sub;
+            font-family: "JetBrains Mono";
+            font-size: 11px * Skin.text-scale;
+            overflow: elide;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        TextButton {
+            text: TerminalApp.running ? @tr("Open terminal") : @tr("Start terminal");
+            icon: Icons.terminal;
+            ink: t.bg0;
+            fill: t.visor;
+            compact: narrow;
+            font-size: 13px * Skin.text-scale;
+            clicked => { TerminalApp.open(); }
+        }
+        if TerminalApp.sessions > 0: TextButton {
+            text: @tr("New tab");
+            icon: Icons.plus;
+            ink: t.visor;
+            compact: narrow;
+            font-size: 13px * Skin.text-scale;
+            clicked => { TerminalApp.new-tab(); }
+        }
+        if TerminalApp.running: TextButton {
+            text: TerminalApp.sessions > 1 ? @tr("End all") : @tr("End session");
+            icon: Icons.stop;
+            ink: t.sub;
+            compact: narrow;
+            font-size: 13px * Skin.text-scale;
+            clicked => { TerminalApp.stop(); }
+        }
+    }
+  }
+}
