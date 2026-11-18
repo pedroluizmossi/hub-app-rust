@@ -247,17 +247,25 @@ impl AgentsProvider {
         snap
     }
 
-    /// Timeline of the watched session, if it is in `agents`.
+    /// Timeline of the watched session, if it is in `agents`. A session with no readable
+    /// conversation yet (a Claude session that just started has no transcript) gets an
+    /// empty timeline: the window says there is nothing to show instead of waiting forever.
     fn timeline_of(&mut self, agents: &[Agent]) -> Option<Timeline> {
         let Some((tool, id)) = watched() else {
             self.timeline = None;
             return None;
         };
         let a = agents.iter().find(|a| a.tool == tool && a.id == id)?;
+        let steps = self.steps_of(a).unwrap_or_default();
+        Some(Timeline { tool, id, steps })
+    }
+
+    /// Steps of `a`'s conversation; `None` if it has no log or the log can't be read.
+    fn steps_of(&mut self, a: &Agent) -> Option<Vec<Step>> {
         let path = a.log.clone()?;
-        let steps = match tool {
+        let steps = match a.tool {
             // database: the query is small and the main file doesn't even change on every write (WAL)
-            Tool::OpenCode => opencode::timeline(&path, &id),
+            Tool::OpenCode => opencode::timeline(&path, &a.id),
             Tool::Claude | Tool::Codex => {
                 let meta = std::fs::metadata(&path).ok()?;
                 let stamp = (meta.len(), mtime_ms(&meta));
@@ -268,7 +276,7 @@ impl AgentsProvider {
                         // start cut in the middle of a line: that line is left out
                         let text =
                             if meta.len() > TIMELINE_TAIL { text.split_once('\n').map_or("", |(_, r)| r) } else { &text };
-                        let steps = if tool == Tool::Claude {
+                        let steps = if a.tool == Tool::Claude {
                             claude::timeline(text, a.parent.is_some())
                         } else {
                             codex::timeline(text)
@@ -279,7 +287,7 @@ impl AgentsProvider {
                 }
             }
         };
-        Some(Timeline { tool, id, steps })
+        Some(steps)
     }
 }
 
@@ -384,10 +392,13 @@ fn describe(name: &str, input: &Value) -> String {
     if arg.is_empty() { name.to_string() } else { format!("{name}: {arg}") }
 }
 
-/// `https://example.com/a?b` → `example.com`.
+/// `https://example.com/a?b` → `example.com`. Credentials in the URL
+/// (`https://user:token@host`) are left out.
 fn host(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    clip(rest.split(['/', '?', '#']).next().unwrap_or_default(), 40)
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    clip(host, 40)
 }
 
 #[cfg(test)]
@@ -417,9 +428,36 @@ mod tests {
     fn call_summary() {
         assert_eq!(describe("TaskStop", &serde_json::json!({})), "TaskStop");
         assert_eq!(describe("WebFetch", &serde_json::json!({"url":"https://a.b/c?token=x"})), "WebFetch: a.b");
+        assert_eq!(describe("WebFetch", &serde_json::json!({"url":"https://me:s3cret@a.b/c"})), "WebFetch: a.b");
+        assert_eq!(describe("WebFetch", &serde_json::json!({"url":"token@a.b"})), "WebFetch: a.b");
         assert_eq!(describe("bash", &serde_json::json!({"command":"npm run build"})), "bash: npm run");
         assert_eq!(describe("Edit", &serde_json::json!({"file_path":"/home/u/p/src/bus.rs","old_string":"secret"})), "Edit: bus.rs");
         assert_eq!(clip("a  long\ntext", 9), "a long t…");
+    }
+
+    #[test]
+    fn a_watched_session_without_a_log_has_an_empty_timeline() {
+        let agent = Agent {
+            tool: Tool::Claude,
+            id: "no-log-yet".into(),
+            title: "t".into(),
+            cwd: "/x".into(),
+            state: State::Working,
+            since_ms: 1,
+            detail: String::new(),
+            action: String::new(),
+            parent: None,
+            details: Details::default(),
+            log: None,
+        };
+        let mut provider = AgentsProvider { sources: Vec::new(), timeline: None };
+        // the only test that watches: nothing else reads `WATCH` in the tests
+        watch(Some((Tool::Claude, agent.id.clone())));
+        let timeline = provider.timeline_of(std::slice::from_ref(&agent));
+        let other = provider.timeline_of(&[]);
+        watch(None);
+        assert_eq!(timeline, Some(Timeline { tool: Tool::Claude, id: agent.id.clone(), steps: Vec::new() }));
+        assert_eq!(other, None, "a session that is not in the list has no timeline");
     }
 
     #[test]

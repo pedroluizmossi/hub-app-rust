@@ -301,7 +301,7 @@ impl AiUsageMini {
         let levels = self.levels();
         self.rows = self.visible_rows();
         for i in self.rows.clone() { self.refresh_mascot(i); }
-        let cards = self.rows.iter().map(|&i| {
+        let cards: Vec<(UsageCard, Vec<UsageLine>)> = self.rows.iter().map(|&i| {
             let card = &self.snap.cards[i];
             let lines: Vec<UsageLine> = card.windows.iter().enumerate().map(|(k, w)| UsageLine {
                 label: w.label.clone().into(), value: w.used as f32,
@@ -320,13 +320,31 @@ impl AiUsageMini {
                 None => card.status.clone(),
             };
             let tint = ai_mascots::get(&card.name).and_then(ai_mascots::button_colors).unwrap_or((0x9399a4, 0x26282e));
-            UsageCard { name: card.name.clone().into(), voice: Voice::id_of(&self.manifest.id, &card.name).into(), status: status.into(), plan: card.plan.clone().into(),
-                stale: card.stale, lines: ModelRc::new(VecModel::from(lines)),
+            (UsageCard { name: card.name.clone().into(), voice: Voice::id_of(&self.manifest.id, &card.name).into(), status: status.into(), plan: card.plan.clone().into(),
+                stale: card.stale, lines: ModelRc::default(),
                 mascot: self.mascots[i].image(), mood: self.card_mood(i).as_str().into(),
                 button: render::color(tint.0), button_edge: render::color(tint.1),
-                reaction: self.reactions[i].map_or("", Reaction::as_str).into() }
-        }).collect::<Vec<_>>();
-        self.cards.set_vec(cards);
+                reaction: self.reactions[i].map_or("", Reaction::as_str).into() }, lines)
+        }).collect();
+        self.show(cards);
+    }
+
+    /// Puts the cards on screen. Each card exists several times in the view (the measuring
+    /// copies and the visible one), so rebuilding them all on every reading costs and
+    /// flickers: with the same number of rows, only the rows that changed are replaced, and
+    /// a row keeps its lines model when the lines are the same.
+    fn show(&self, cards: Vec<(UsageCard, Vec<UsageLine>)>) {
+        if cards.len() != self.cards.row_count() {
+            self.cards.set_vec(cards.into_iter()
+                .map(|(card, lines)| UsageCard { lines: ModelRc::new(VecModel::from(lines)), ..card }).collect::<Vec<_>>());
+            return;
+        }
+        for (row, (mut card, lines)) in cards.into_iter().enumerate() {
+            let Some(old) = self.cards.row_data(row) else { continue };
+            let same_lines = old.lines.row_count() == lines.len() && old.lines.iter().zip(&lines).all(|(a, b)| a == *b);
+            card.lines = if same_lines { old.lines.clone() } else { ModelRc::new(VecModel::from(lines)) };
+            if card != old { self.cards.set_row_data(row, card); }
+        }
     }
 }
 
@@ -335,9 +353,15 @@ fn now() -> i64 {
 }
 
 fn age(at: i64) -> String {
-    let minutes = now().saturating_sub(at) / 60;
+    age_at(at, now())
+}
+
+/// How long ago `at` was, seen at `now`: minutes, then hours, then days (from 48 h).
+fn age_at(at: i64, now: i64) -> String {
+    let minutes = now.saturating_sub(at) / 60;
     if minutes < 1 { tr!("just now").into() } else if minutes < 60 { tr!("{} min ago", minutes) }
-    else { tr!("{} h ago", minutes / 60) }
+    else if minutes < 48 * 60 { tr!("{} h ago", minutes / 60) }
+    else { tr!("{} d ago", minutes / 1440) }
 }
 
 /// Time left, as short text: "35 min", "2 h 15 min", "3 d 4 h".
@@ -366,7 +390,8 @@ fn reset_text(w: &UsageWindow, relative: bool) -> String {
     if !w.reset_date.is_empty() { return tr!("Resets in {}", w.reset_date); }
     let Some(at) = w.resets_at.filter(|t| *t > 0) else { return String::new() };
     if relative { return tr!("Resets in {}", remaining(at - now())); }
-    let Some(local) = local(at) else { return String::new() };
+    let (Some(local), Some(today)) = (local(at), local(now())) else { return String::new() };
+    if local.date_naive() == today.date_naive() { return tr!("Resets at {}", local.format("%H:%M")); }
     // strftime pattern: the catalog gives each language its own date order
     local.format(tr!("Resets %m/%d at %H:%M")).to_string()
 }
@@ -455,6 +480,15 @@ mod tests {
         assert_eq!(remaining(3 * 86400), "3 d");
         assert_eq!(remaining(3 * 86400 + 4 * 3600), "3 d 4 h");
         assert_eq!(remaining(-10), "0 min");
+    }
+
+    #[test]
+    fn age_of_a_reading() {
+        assert_eq!(age_at(1000, 1030), "just now");
+        assert_eq!(age_at(0, 35 * 60), "35 min ago");
+        assert_eq!(age_at(0, 47 * 3600), "47 h ago");
+        assert_eq!(age_at(0, 50 * 3600), "2 d ago");
+        assert_eq!(age_at(100, 0), "just now");
     }
 
     #[test]

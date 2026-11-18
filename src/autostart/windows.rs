@@ -47,6 +47,11 @@ pub fn disable() -> Result<(), String> {
     r.ok().map_err(|e| crate::tr!("Windows registry: {}", e.message()))
 }
 
+/// Words of the stored command line (the program first).
+pub fn command_words(line: &str) -> Vec<String> {
+    super::split_command_line(line)
+}
+
 /// `"C:\…\miniutils.exe" --hidden`.
 pub fn entry_for(exe: &Path) -> String {
     format!("\"{}\" --hidden", exe.display())

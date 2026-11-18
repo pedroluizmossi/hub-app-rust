@@ -81,13 +81,13 @@ pub fn collect() -> PortsSnapshot {
             let mut listeners = parse(&out);
             for l in &mut listeners {
                 if l.pid > 0
-                    && let Some((name, cmd)) = read_cmdline(l.pid) {
-                        // `ss` cuts the name at 15 characters; the command line has the whole one
-                        if !name.is_empty() {
-                            l.process = name;
-                        }
-                        l.cmd = cmd;
+                    && let Some((name, cmd)) = std::fs::read(format!("/proc/{}/cmdline", l.pid)).ok().and_then(|raw| parse_cmdline(&raw))
+                {
+                    if let Some(name) = full_name(&l.process, &name) {
+                        l.process = name;
                     }
+                    l.cmd = cmd;
+                }
             }
             PortsSnapshot { ok: true, listeners, ..Default::default() }
         }
@@ -164,15 +164,26 @@ pub fn parse_netstat(out: &str) -> Vec<Listener> {
         .collect()
 }
 
-/// Program name and command line, from `/proc/<pid>/cmdline`.
-#[cfg(not(windows))]
-fn read_cmdline(pid: u32) -> Option<(String, String)> {
-    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+/// Program name and command line from the contents of `/proc/<pid>/cmdline`. Programs
+/// that rewrite their title put it all in the first argument (`redis-server *:6379`,
+/// `php-fpm: master process (/etc/php-fpm.conf)`): the name stops at the first space or
+/// `:`.
+#[cfg(any(not(windows), test))]
+fn parse_cmdline(raw: &[u8]) -> Option<(String, String)> {
     let args: Vec<String> =
         raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
     let first = args.first()?;
-    let name = first.rsplit('/').next().unwrap_or(first).to_string();
+    let program = first.split([' ', ':']).next().unwrap_or(first);
+    let name = program.rsplit('/').next().unwrap_or(program).to_string();
     Some((name, args.join(" ")))
+}
+
+/// The command line's name, when it is better than `ss`'s: `ss` gives the kernel's name,
+/// cut at 15 characters, which is otherwise right (the command line can be rewritten).
+#[cfg(any(not(windows), test))]
+fn full_name(ss: &str, cmdline: &str) -> Option<String> {
+    let truncated = ss.chars().count() == 15 && cmdline.len() > ss.len() && cmdline.starts_with(ss);
+    ((ss.is_empty() && !cmdline.is_empty()) || truncated).then(|| cmdline.to_string())
 }
 
 /// Reads the output of `ss -H -l -n -p -t -u`:
@@ -280,6 +291,23 @@ garbage
         assert!(ls.iter().all(|l| l.port != 51234));
         let ssdp = ls.iter().find(|l| l.port == 1900).unwrap();
         assert_eq!((ssdp.proto.as_str(), ssdp.addrs[0].as_str()), ("udp", "fe80::1"));
+    }
+
+    #[test]
+    fn process_name_from_the_command_line() {
+        let name = |raw: &[u8]| parse_cmdline(raw).unwrap();
+        assert_eq!(name(b"/usr/bin/node\0server.js\0"), ("node".into(), "/usr/bin/node server.js".into()));
+        // a rewritten title in a single argument
+        assert_eq!(name(b"redis-server *:6379\0").0, "redis-server");
+        assert_eq!(name(b"php-fpm: master process (/etc/php/php-fpm.conf)\0").0, "php-fpm");
+        assert_eq!(parse_cmdline(b""), None);
+
+        // `ss`'s name only gives way when it was cut at 15 characters
+        assert_eq!(full_name("gnome-remote-de", "gnome-remote-desktop-daemon").as_deref(), Some("gnome-remote-desktop-daemon"));
+        assert_eq!(full_name("redis-server", "redis-server"), None);
+        assert_eq!(full_name("MainThread", "python3"), None);
+        assert_eq!(full_name("abcdefghijklmno", "other-program-name"), None);
+        assert_eq!(full_name("", "node").as_deref(), Some("node"));
     }
 
     #[test]

@@ -10,9 +10,11 @@ use sysinfo::{Disks, Networks, System};
 
 use super::{Disk, SysSnapshot};
 
-/// Interfaces that are not the machine's "network": loopback and the virtual ones (Hyper-V,
-/// WSL, Docker, VirtualBox, VMware).
-const SKIP_NET: &[&str] = &["loopback", "vethernet", "virtualbox", "vmware", "bluetooth"];
+/// Interfaces that are not the machine's "network" (matched in the lowercased name):
+/// loopback, the virtual ones (Hyper-V, WSL, Docker, VirtualBox, VMware) and VPN tunnels,
+/// whose bytes the real adapter carries too.
+const SKIP_NET: &[&str] =
+    &["loopback", "vethernet", "virtualbox", "vmware", "bluetooth", "tailscale", "wireguard", "zerotier", "openvpn", "tap-windows"];
 
 pub struct SysProvider {
     sys: Option<System>,

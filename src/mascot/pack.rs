@@ -271,38 +271,90 @@ impl Art {
 
 // ---- registry -------------------------------------------------------------------
 
-/// Imported mascots and the `Sprite` of each. Each reload leaks the previous ones (the
-/// screens hold `&'static Sprite`); reloading is rare and manual.
-static ARTS: RwLock<Vec<(&'static Sprite, &'static Art)>> = RwLock::new(Vec::new());
+/// Imported mascots and the `Sprite` of each. The screens hold `&'static Sprite`, so a
+/// mascot that changed is leaked again; one whose folder is the same as last time (same
+/// `Fingerprint`) keeps what it had (`reload`), so editing one mascot in the Mascots app
+/// doesn't read and leak every pack again.
+static ARTS: RwLock<Vec<Entry>> = RwLock::new(Vec::new());
+
+#[derive(Clone, Copy)]
+struct Entry {
+    sprite: &'static Sprite,
+    art: &'static Art,
+    /// The folder as it was read (see `fingerprint`).
+    fingerprint: u64,
+}
 
 /// The imported mascot behind `sprite` (by address: a key equal to an app mascot's, like
 /// "claude", doesn't get mixed up).
 pub fn art(sprite: &Sprite) -> Option<&'static Art> {
     let list = ARTS.read().ok()?;
-    list.iter().find(|(s, _)| std::ptr::eq(*s, sprite)).map(|(_, a)| *a)
+    list.iter().find(|e| std::ptr::eq(e.sprite, sprite)).map(|e| e.art)
 }
 
-/// Replaces the program's imported mascots.
-pub fn set(arts: Vec<Art>) {
-    let mut list = Vec::new();
-    for art in arts {
-        let art: &'static Art = Box::leak(Box::new(art));
-        let sprite: &'static Sprite = Box::leak(Box::new(Sprite {
-            key: Box::leak(art.key.clone().into_boxed_str()),
-            label: Box::leak(art.name.clone().into_boxed_str()),
-            eye_bg: b'.',
-            shade_from: usize::MAX,
-            fur: None,
-            ear: None,
-            pixel: None,
-            grid: [EMPTY_ROW; 14],
-        }));
-        list.push((sprite, art));
-    }
-    sprites::set_extra(list.iter().map(|(s, _)| *s).collect());
+/// Puts `art` in the program for good (the screens hold the `Sprite`).
+fn leak_entry(art: Art, fingerprint: u64) -> Entry {
+    let art: &'static Art = Box::leak(Box::new(art));
+    let sprite: &'static Sprite = Box::leak(Box::new(Sprite {
+        key: Box::leak(art.key.clone().into_boxed_str()),
+        label: Box::leak(art.name.clone().into_boxed_str()),
+        eye_bg: b'.',
+        shade_from: usize::MAX,
+        fur: None,
+        ear: None,
+        pixel: None,
+        grid: [EMPTY_ROW; 14],
+    }));
+    Entry { sprite, art, fingerprint }
+}
+
+fn commit(list: Vec<Entry>) {
+    sprites::set_extra(list.iter().map(|e| e.sprite).collect());
     if let Ok(mut l) = ARTS.write() {
         *l = list;
     }
+}
+
+/// Reads `root` (the `mascots/` folder) and replaces the program's imported mascots. A
+/// folder whose files didn't change since the last reload isn't read again: it keeps the
+/// same `Sprite` and `Art`. Returns the keys that got in and the folders that didn't.
+pub fn reload(root: &Path) -> (Vec<String>, Vec<Skipped>) {
+    let before: Vec<Entry> = ARTS.read().map(|l| l.clone()).unwrap_or_default();
+    let (mut list, mut skipped) = (Vec::new(), Vec::new());
+    for dir in pack_dirs(root) {
+        let key = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+        let fp = fingerprint(&dir);
+        if let Some(e) = before.iter().find(|e| e.art.key == key && e.fingerprint == fp) {
+            list.push(*e);
+            continue;
+        }
+        match load_pack(&dir, &key) {
+            Ok(a) => list.push(leak_entry(a, fp)),
+            Err(reason) => skipped.push(Skipped { dir: shown_dir(root, &key), reason }),
+        }
+    }
+    let keys = list.iter().map(|e| e.art.key.clone()).collect();
+    commit(list);
+    (keys, skipped)
+}
+
+/// What a mascot folder holds now: names, sizes and modification times of its files.
+fn fingerprint(dir: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut files: Vec<(String, u64, Option<std::time::SystemTime>)> = std::fs::read_dir(dir)
+        .map(|r| {
+            r.flatten()
+                .filter_map(|e| {
+                    let meta = e.metadata().ok()?;
+                    Some((e.file_name().to_string_lossy().into_owned(), meta.len(), meta.modified().ok()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    files.hash(&mut h);
+    h.finish()
 }
 
 const EMPTY_ROW: &str = "................";
@@ -328,19 +380,30 @@ pub fn read_folder(dir: &Path) -> Result<Art, String> {
 /// touching the program.
 pub fn load(root: &Path) -> (Vec<Art>, Vec<Skipped>) {
     let (mut arts, mut skipped) = (Vec::new(), Vec::new());
-    let Ok(entries) = std::fs::read_dir(root) else { return (arts, skipped) };
-    let folder = root.file_name().and_then(|n| n.to_str()).unwrap_or(DIR).to_string();
-    let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
-    dirs.sort();
-    for dir in dirs {
+    for dir in pack_dirs(root) {
         let key = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-        let shown = format!("{folder}/{key}");
         match load_pack(&dir, &key) {
             Ok(a) => arts.push(a),
-            Err(reason) => skipped.push(Skipped { dir: shown, reason }),
+            Err(reason) => skipped.push(Skipped { dir: shown_dir(root, &key), reason }),
         }
     }
     (arts, skipped)
+}
+
+/// The mascot folders of `root`, in order.
+fn pack_dirs(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
+    // a hidden folder is an import still in progress (`.<key>.partial`), not a mascot
+    let hidden = |p: &Path| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
+    let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir() && !hidden(p)).collect();
+    dirs.sort();
+    dirs
+}
+
+/// `mascots/pink-monster`: how a skipped folder is shown.
+fn shown_dir(root: &Path, key: &str) -> String {
+    let folder = root.file_name().and_then(|n| n.to_str()).unwrap_or(DIR);
+    format!("{folder}/{key}")
 }
 
 /// Valid key: lowercase letters, digits and hyphens, not repeating a built-in mascot.
@@ -721,12 +784,77 @@ fn read_png(path: &Path) -> Result<(usize, usize, Pixels), String> {
 /// the folder and its subfolders (a pack usually has one per character), copies each
 /// character's into `mascots/<name>/` and writes a `sprite.toml` to tweak. Doesn't overwrite
 /// a mascot that already exists. Returns one line per character (shown to the user).
-pub fn import(src: &Path, root: &Path) -> Result<Vec<String>, String> {
+pub fn import(src: &Path, root: &Path) -> Result<Imported, String> {
     let out = import_sheets(src, root)?;
-    if out.is_empty() {
+    if out.lines.is_empty() {
         return Err(tr!("{}: no sheet named like Name_Animation_N.png (at least two animations)", src.display()));
     }
     Ok(out)
+}
+
+/// What an import found: one line per mascot (shown to the user) and how many of them were
+/// actually written (the other lines say why one stayed out).
+#[derive(Debug, Default)]
+pub struct Imported {
+    pub count: usize,
+    pub lines: Vec<String>,
+}
+
+impl Imported {
+    pub fn extend(&mut self, other: Imported) {
+        self.count += other.count;
+        self.lines.extend(other.lines);
+    }
+
+    /// "2 imported · 1 skipped"
+    pub fn summary(&self) -> String {
+        tr!("{} imported · {} skipped", self.count, self.lines.len() - self.count)
+    }
+
+    fn push(&mut self, step: Step) {
+        match step {
+            Step::Imported(line) => {
+                self.count += 1;
+                self.lines.push(line);
+            }
+            Step::Refused(line) => self.lines.push(line),
+        }
+    }
+}
+
+/// One mascot of an import: written, or left out (the line says why).
+enum Step {
+    Imported(String),
+    Refused(String),
+}
+
+/// The "already exists" line when `key` is taken: by a folder in `root` (`mascots/`) or by
+/// a code mascot in `sprites/` next to it (the folder would hide it on the next load).
+pub(crate) fn taken(root: &Path, key: &str) -> Option<String> {
+    let folder = root.join(key);
+    if folder.exists() {
+        return Some(tr!("{}: already exists in {} (delete the folder to import it again)", key, folder.display()));
+    }
+    let code = root.parent()?.join(super::file::DIR).join(format!("{key}.toml"));
+    code.exists().then(|| tr!("{}: already exists in {} (delete the folder to import it again)", key, code.display()))
+}
+
+/// Fills `root/<key>` through a staging folder next to it: `fill` copies the files, the
+/// result must load, and only then does it take its final name. On any error the staging
+/// folder goes away, so a failed copy doesn't leave a half-made mascot behind.
+fn install(root: &Path, key: &str, fill: impl FnOnce(&Path) -> Result<(), String>) -> Result<Art, String> {
+    let stage = root.join(format!(".{key}.partial"));
+    let _ = std::fs::remove_dir_all(&stage);
+    let dest = root.join(key);
+    let result = std::fs::create_dir_all(&stage)
+        .map_err(|e| format!("{}: {e}", stage.display()))
+        .and_then(|()| fill(&stage))
+        .and_then(|()| load_pack(&stage, key))
+        .and_then(|art| std::fs::rename(&stage, &dest).map(|()| art).map_err(|e| format!("{}: {e}", dest.display())));
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+    result
 }
 
 /// The folders under `src` (itself included, a few levels down, as a downloaded pack nests
@@ -761,19 +889,19 @@ pub fn folders(src: &Path) -> Vec<PathBuf> {
 /// Like `import`, but finding nothing is not an error (the Mascots app imports code
 /// mascots from the same folder). A folder that already has a `sprite.toml` (a pack made
 /// for MiniUtils) is copied as it is; the others get one deduced from the sheet names.
-pub fn import_sheets(src: &Path, root: &Path) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
+pub fn import_sheets(src: &Path, root: &Path) -> Result<Imported, String> {
+    let mut out = Imported::default();
     // a folder that fails says why in its own line: the others still come in
     let shown = |dir: &Path| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     for dir in folders(src) {
         if dir.join(SPEC).is_file() {
-            out.push(import_ready(&dir, root).unwrap_or_else(|e| tr!("{}: not imported: {}", shown(&dir), e)));
+            out.push(import_ready(&dir, root).unwrap_or_else(|e| Step::Refused(tr!("{}: not imported: {}", shown(&dir), e))));
             continue;
         }
         match import_inferred(&dir, root) {
-            Ok(Some(line)) => out.push(line),
+            Ok(Some(step)) => out.push(step),
             Ok(None) => {}
-            Err(e) => out.push(tr!("{}: not imported: {}", shown(&dir), e)),
+            Err(e) => out.push(Step::Refused(tr!("{}: not imported: {}", shown(&dir), e))),
         }
     }
     Ok(out)
@@ -781,16 +909,14 @@ pub fn import_sheets(src: &Path, root: &Path) -> Result<Vec<String>, String> {
 
 /// One folder without `sprite.toml`: its sheets copied to `mascots/<key>/` with a
 /// `sprite.toml` deduced from the names. `None` = no character here.
-fn import_inferred(dir: &Path, root: &Path) -> Result<Option<String>, String> {
+fn import_inferred(dir: &Path, root: &Path) -> Result<Option<Step>, String> {
     let spec = infer(dir)?;
     let Some(name) = spec.name.clone().filter(|_| spec.anim.len() >= 2) else { return Ok(None) };
     let key = slug(&name);
-    let dest = root.join(&key);
-    if dest.exists() {
-        return Ok(Some(tr!("{}: already exists in {} (delete the folder to import it again)", key, dest.display())));
+    if let Some(line) = taken(root, &key) {
+        return Ok(Some(Step::Refused(line)));
     }
     check_key(&key)?;
-    std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     // a config file the user edits: its comments are in English, like the format docs
     let mut toml = format!(
         "# Mascot imported from {}\n# Format: top of src/mascot/pack.rs (or DESIGN.md › Imported mascots).\nname = {}\nfps = {DEFAULT_FPS}\nfacing = \"right\"\n# walking subagents: what they do at their stops (without this, only idle)\n# extras = [\"idle\", \"attack1\", \"push\"]\n\n[anim]\n",
@@ -798,16 +924,20 @@ fn import_inferred(dir: &Path, root: &Path) -> Result<Option<String>, String> {
         quoted(&name)
     );
     for (anim, a) in &spec.anim {
-        let file = a.file();
-        std::fs::copy(dir.join(file), dest.join(file)).map_err(|e| format!("{file}: {e}"))?;
-        toml.push_str(&format!("{} = {}\n", toml_key(anim), quoted(file)));
+        toml.push_str(&format!("{} = {}\n", toml_key(anim), quoted(a.file())));
     }
     toml.push_str("\n# mood → animation (sleep, idle, happy, busy, alarm); without this, the usual names apply\n# [moods]\n# busy = \"run\"\n");
-    std::fs::write(dest.join(SPEC), toml).map_err(|e| format!("{SPEC}: {e}"))?;
-    // check right away: what was copied must load
-    Ok(Some(match load_pack(&dest, &key) {
-        Ok(a) => tr!("{}: {} ({} animations, {}×{} frame after trimming)", key, a.name, a.anims.len(), a.w, a.h),
-        Err(e) => tr!("{}: copied, but it doesn't load: {}", key, e),
+    // what was copied must load before it takes the mascot's name
+    let installed = install(root, &key, |stage| {
+        for a in spec.anim.values() {
+            let file = a.file();
+            std::fs::copy(dir.join(file), stage.join(file)).map_err(|e| format!("{file}: {e}"))?;
+        }
+        std::fs::write(stage.join(SPEC), &toml).map_err(|e| format!("{SPEC}: {e}"))
+    });
+    Ok(Some(match installed {
+        Ok(a) => Step::Imported(tr!("{}: {} ({} animations, {}×{} frame after trimming)", key, a.name, a.anims.len(), a.w, a.h)),
+        Err(e) => Step::Refused(tr!("{}: not imported: {}", key, e)),
     }))
 }
 
@@ -842,23 +972,24 @@ pub fn ensure_spec(dir: &Path) -> Result<PathBuf, String> {
 
 /// A folder made for MiniUtils (with `sprite.toml`): checked where it is, then its PNG and
 /// TOML files copied as they are to `mascots/<key>/` (key: the folder name, made valid).
-fn import_ready(dir: &Path, root: &Path) -> Result<String, String> {
+fn import_ready(dir: &Path, root: &Path) -> Result<Step, String> {
     let art = read_folder(dir)?;
-    let dest = root.join(&art.key);
-    if dest.exists() {
-        return Ok(tr!("{}: already exists in {} (delete the folder to import it again)", art.key, dest.display()));
+    if let Some(line) = taken(root, &art.key) {
+        return Ok(Step::Refused(line));
     }
-    std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let keep = entry.file_type().is_ok_and(|t| t.is_file())
-            && !name.starts_with('.')
-            && (name.to_ascii_lowercase().ends_with(".png") || name == SPEC);
-        if keep {
-            std::fs::copy(entry.path(), dest.join(&name)).map_err(|e| format!("{name}: {e}"))?;
+    let art = install(root, &art.key, |stage| {
+        for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let keep = entry.file_type().is_ok_and(|t| t.is_file())
+                && !name.starts_with('.')
+                && (name.to_ascii_lowercase().ends_with(".png") || name == SPEC);
+            if keep {
+                std::fs::copy(entry.path(), stage.join(&name)).map_err(|e| format!("{name}: {e}"))?;
+            }
         }
-    }
-    Ok(tr!("{}: {} ({} animations, {}×{} frame after trimming)", art.key, art.name, art.anims.len(), art.w, art.h))
+        Ok(())
+    })?;
+    Ok(Step::Imported(tr!("{}: {} ({} animations, {}×{} frame after trimming)", art.key, art.name, art.anims.len(), art.w, art.h)))
 }
 
 /// "Pink Monster" → "pink-monster".
@@ -1074,6 +1205,62 @@ mod tests {
     }
 
     #[test]
+    fn reload_keeps_an_unchanged_folder() {
+        let root = temp("reload");
+        for who in ["Ant", "Bee"] {
+            let p = root.join(who.to_lowercase());
+            std::fs::create_dir_all(&p).unwrap();
+            sheet(&p.join(format!("{who}_Idle_2.png")), 2, 16);
+            sheet(&p.join(format!("{who}_Walk_2.png")), 2, 16);
+        }
+        let (keys, skipped) = reload(&root);
+        assert_eq!((keys.len(), skipped.len()), (2, 0));
+        let find = |k: &str| sprites::find(k).unwrap();
+        let (ant, bee) = (find("ant"), find("bee"));
+        // nothing changed: the same sprites
+        reload(&root);
+        assert!(std::ptr::eq(find("ant"), ant) && std::ptr::eq(find("bee"), bee));
+        // a file of one folder changed: only that one is read again
+        std::fs::write(root.join("bee/sprite.toml"), "name = \"Bee\"\n[anim]\nidle = \"Bee_Idle_2.png\"\nwalk = \"Bee_Walk_2.png\"\n").unwrap();
+        reload(&root);
+        assert!(std::ptr::eq(find("ant"), ant));
+        assert!(!std::ptr::eq(find("bee"), bee));
+        assert!(art(find("bee")).is_some());
+        commit(Vec::new());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn failed_copy_leaves_nothing() {
+        let src = temp("install-src");
+        sheet(&src.join("Ghost_Idle_2.png"), 2, 16);
+        sheet(&src.join("Ghost_Walk_2.png"), 2, 16);
+        let root = temp("install-dst");
+        // the copy stops halfway (disk full, permission)
+        let err = install(&root, "ghost", |stage| {
+            std::fs::copy(src.join("Ghost_Idle_2.png"), stage.join("Ghost_Idle_2.png")).map_err(|e| e.to_string())?;
+            Err("disk full".into())
+        });
+        assert_eq!(err.err().as_deref(), Some("disk full"));
+        // the copy ends, but what came out doesn't load
+        assert!(install(&root, "ghost", |_| Ok(())).is_err());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0, "a staging folder was left");
+        // the full copy takes the final name, and the key can't be taken again
+        let ok = install(&root, "ghost", |stage| {
+            for f in ["Ghost_Idle_2.png", "Ghost_Walk_2.png"] {
+                std::fs::copy(src.join(f), stage.join(f)).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        });
+        assert!(ok.is_ok(), "{:?}", ok.err());
+        assert!(root.join("ghost/Ghost_Walk_2.png").is_file());
+        assert!(taken(&root, "ghost").is_some_and(|l| l.contains("already exists")));
+        assert_eq!(load(&root).0.len(), 1);
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn imports_each_character_into_a_folder() {
         let src = temp("import-src");
         for who in ["Pink_Monster", "Dude_Monster"] {
@@ -1085,14 +1272,16 @@ mod tests {
         }
         let root = temp("import-dst");
         let out = import(&src, &root).unwrap();
-        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!((out.count, out.lines.len()), (2, 2), "{out:?}");
         assert!(root.join("pink-monster/Pink_Monster_Walk_6.png").exists());
         assert!(!root.join("pink-monster/Rock1.png").exists());
         assert!(std::fs::read_to_string(root.join("dude-monster/sprite.toml")).unwrap().contains("name = \"Dude Monster\""));
         let (arts, skipped) = load(&root);
         assert_eq!((arts.len(), skipped.len()), (2, 0));
         // again: doesn't overwrite
-        assert!(import(&src, &root).unwrap().iter().all(|l| l.contains("already exists")));
+        let again = import(&src, &root).unwrap();
+        assert_eq!(again.count, 0);
+        assert!(again.lines.iter().all(|l| l.contains("already exists")));
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&root);
     }

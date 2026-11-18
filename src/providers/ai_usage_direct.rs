@@ -118,9 +118,17 @@ pub(super) fn claude() -> Result<UsageCard, Failure> {
     parse_claude(&data, oauth["subscriptionType"].as_str().unwrap_or(""))
 }
 
+/// Rotated Claude login that is not in `.credentials.json` yet (the save failed):
+/// `{"replaces": <refresh token it replaced>, "login": <credentials>}`. Owner-only, next to
+/// the credentials, and only touched under the refresh lock.
+const CLAUDE_PENDING: &str = ".miniutils-credentials.pending";
+
 /// Refreshes the credential in the same file, keeping every unrelated field.
 /// The temporary file is prepared before the request: a rotated token must not be
-/// silently discarded. Never logs the body or the credentials.
+/// silently discarded. Once the service answered, the new login is first kept in
+/// [`CLAUDE_PENDING`]; if saving it to the credentials fails (e.g. Claude Code holds the file
+/// open on Windows), the next call retries before asking for another refresh. Never logs the
+/// body or the credentials.
 fn refresh_claude(path: &Path, endpoint: &str) -> Result<Value, Failure> {
     let parent = path.parent().ok_or(tr!("Invalid Claude path"))?;
     if std::fs::symlink_metadata(path).map_err(|_| auth(tr!("Claude login unavailable")))?.file_type().is_symlink() {
@@ -128,19 +136,28 @@ fn refresh_claude(path: &Path, endpoint: &str) -> Result<Value, Failure> {
     }
     let lock_path = parent.join(".miniutils-refresh.lock");
     let lock = owner_only(std::fs::OpenOptions::new().write(true).create(true)).open(lock_path).map_err(|_| tr!("Claude lock unavailable"))?;
-    // the lock holds while `lock` is open, that is, until the end of the function
     if lock.try_lock().is_err() {
         return Err(tr!("Another Claude refresh in progress").into());
     }
+    // the lock holds until the end of the function; it is released explicitly because a child
+    // process spawned meanwhile by another thread shares the descriptor until its `exec`, and
+    // closing ours alone would leave the lock held for that moment
+    let _unlock = Unlock(lock);
     let original = std::fs::read(path).map_err(|_| auth(tr!("Claude login unavailable")))?;
     let mut data: Value = serde_json::from_slice(&original).map_err(|_| auth(tr!("Invalid Claude login")))?;
+    let pending = parent.join(CLAUDE_PENDING);
+    if let Some(login) = pending_claude(&pending, &data) {
+        data = login;
+        commit_claude(path, &pending, &data, &original);
+    }
     let oauth = &data["claudeAiOauth"];
     if oauth["expiresAt"].as_i64().is_some_and(|t| t / 1000 > epoch() + 60) { return Ok(data); }
     let refresh = nonempty(&oauth["refreshToken"]).ok_or_else(|| auth(tr!("Renew the login in Claude Code")))?.to_string();
     let tmp = parent.join(format!(".miniutils-credentials-{}", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
     let mut file = owner_only(std::fs::OpenOptions::new().write(true).create_new(true)).open(&tmp)
         .map_err(|_| tr!("Could not prepare the Claude refresh"))?;
-    let result = (|| -> Result<Value, Failure> {
+    let requested = (|| -> Result<(), Failure> {
         let response = get_json(client()?.post(endpoint).header("anthropic-beta", "oauth-2025-04-20")
             .header("user-agent", "claude-cli/1.0")
             .json(&json!({"grant_type":"refresh_token","client_id":"9d1c250a-e61b-44d9-88ed-5944d1962f5e","refresh_token":refresh})))?;
@@ -150,16 +167,86 @@ fn refresh_claude(path: &Path, endpoint: &str) -> Result<Value, Failure> {
         updated.insert("accessToken".into(), json!(access));
         if let Some(rotated) = nonempty(&response["refresh_token"]) { updated.insert("refreshToken".into(), json!(rotated)); }
         updated.insert("expiresAt".into(), json!((epoch() + duration as i64) * 1000));
-        serde_json::to_writer(&mut file, &data).map_err(|_| auth(tr!("Could not save the refreshed Claude login")))?;
-        file.write_all(b"\n").and_then(|_| file.sync_all()).map_err(|_| auth(tr!("Could not save the refreshed Claude login")))?;
-        if std::fs::read(path).map_err(|_| auth(tr!("Claude login changed during refresh")))? != original {
-            return Err(auth(tr!("Claude login changed during refresh; check the login")));
-        }
-        std::fs::rename(&tmp, path).map_err(|_| auth(tr!("Could not save the refreshed Claude login")))?;
-        Ok(data)
+        Ok(())
     })();
-    if result.is_err() { let _ = std::fs::remove_file(&tmp); }
-    result
+    if let Err(e) = requested {
+        drop(file);
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    // From here the old refresh token may already be invalid: whatever fails, the new login
+    // is used for this reading and must not be deleted.
+    let staged = write_json(&mut file, &json!({"replaces": refresh, "login": &data}))
+        .and_then(|_| { drop(file); std::fs::rename(&tmp, &pending) });
+    match staged {
+        Ok(()) => commit_claude(path, &pending, &data, &original),
+        Err(e) => log::warn!("ai_usage: couldn't keep the refreshed Claude login in {}: {e}", tmp.display()),
+    }
+    Ok(data)
+}
+
+/// Releases a file lock when dropped (see [`refresh_claude`]).
+struct Unlock(std::fs::File);
+
+impl Drop for Unlock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+/// The login kept by a refresh whose save failed, merged into the `current` credentials.
+/// `None` (and the pending file is removed) when there is none, it is unreadable, or the
+/// credentials no longer hold the refresh token it replaced: someone else (Claude Code, a
+/// new login) wrote a newer login since.
+fn pending_claude(pending: &Path, current: &Value) -> Option<Value> {
+    let bytes = std::fs::read(pending).ok()?;
+    let kept: Option<Value> = serde_json::from_slice(&bytes).ok();
+    let still_current = kept.as_ref().is_some_and(|k| {
+        nonempty(&k["replaces"]).is_some() && k["replaces"] == current["claudeAiOauth"]["refreshToken"]
+    });
+    if !still_current {
+        log::info!("ai_usage: discarding the kept Claude login; the credentials changed since");
+        let _ = std::fs::remove_file(pending);
+        return None;
+    }
+    let kept = kept?;
+    let mut merged = current.clone();
+    let oauth = merged["claudeAiOauth"].as_object_mut()?;
+    for key in ["accessToken", "refreshToken", "expiresAt"] {
+        let value = &kept["login"]["claudeAiOauth"][key];
+        if !value.is_null() { oauth.insert(key.into(), value.clone()); }
+    }
+    Some(merged)
+}
+
+/// Saves `data` over the credentials if they still hold `original`, then drops the pending
+/// copy. On failure the pending copy stays for the next try; only its path is logged.
+fn commit_claude(path: &Path, pending: &Path, data: &Value, original: &[u8]) {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let tmp = parent.join(format!(".miniutils-credentials-{}", std::process::id()));
+    let saved = (|| -> std::io::Result<()> {
+        if std::fs::read(path)? != original {
+            return Err(std::io::Error::other("the credentials changed during the refresh"));
+        }
+        let _ = std::fs::remove_file(&tmp);
+        let mut file = owner_only(std::fs::OpenOptions::new().write(true).create_new(true)).open(&tmp)?;
+        write_json(&mut file, data)?;
+        drop(file);
+        std::fs::rename(&tmp, path)
+    })();
+    match saved {
+        Ok(()) => { let _ = std::fs::remove_file(pending); }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            log::warn!("ai_usage: couldn't save the refreshed Claude login ({e}); kept in {} for the next try", pending.display());
+        }
+    }
+}
+
+fn write_json(file: &mut std::fs::File, value: &Value) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *file, value)?;
+    file.write_all(b"\n")?;
+    file.sync_all()
 }
 
 fn parse_claude(data: &Value, plan: &str) -> Result<UsageCard, Failure> {
@@ -339,21 +426,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("credentials.json");
         std::fs::write(&path, json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-refresh","expiresAt":1},"other":{"keep":true}}).to_string()).unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut buf = [0u8; 4096];
-            let _ = stream.read(&mut buf).unwrap();
-            let body = r#"{"access_token":"new","refresh_token":"rotated","expires_in":3600}"#;
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
-        });
+        let (endpoint, server) = token_server(|| {});
         let result = refresh_claude(&path, &endpoint).unwrap();
         server.join().unwrap();
         assert_eq!(result["claudeAiOauth"]["refreshToken"], "rotated");
         assert_eq!(result["other"]["keep"], true);
         assert_eq!(object(&path).unwrap(), result);
+        assert!(!dir.join(CLAUDE_PENDING).exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -362,6 +441,53 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_file(dir.join(".miniutils-refresh.lock")).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+
+    /// Answers one token request with a rotated login, after running `meanwhile`.
+    fn token_server(meanwhile: impl FnOnce() + Send + 'static) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).unwrap();
+            meanwhile();
+            let body = r#"{"access_token":"new","refresh_token":"rotated","expires_in":3600}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        (endpoint, server)
+    }
+
+    #[test]
+    fn rotated_claude_login_survives_a_failed_save() {
+        let dir = std::env::temp_dir().join(format!("miniutils-refresh-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("credentials.json");
+        let old = json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-refresh","expiresAt":1},"other":{"keep":true}});
+        std::fs::write(&path, old.to_string()).unwrap();
+        // another program rewrites an unrelated field while the request is in flight: the
+        // save is refused, but the rotated login is used and kept
+        let changed = json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-refresh","expiresAt":1},"other":{"keep":false}});
+        let (endpoint, server) = token_server({ let path = path.clone(); let changed = changed.to_string(); move || std::fs::write(&path, changed).unwrap() });
+        let result = refresh_claude(&path, &endpoint).unwrap();
+        server.join().unwrap();
+        assert_eq!(result["claudeAiOauth"]["refreshToken"], "rotated");
+        assert_eq!(object(&path).unwrap(), changed);
+        assert!(dir.join(CLAUDE_PENDING).exists());
+        // the next call saves the kept login (merged into the current file) without a new
+        // request: this endpoint doesn't answer
+        let result = refresh_claude(&path, "http://127.0.0.1:9/token").unwrap();
+        assert_eq!(result["claudeAiOauth"]["refreshToken"], "rotated");
+        assert_eq!(result["other"]["keep"], false);
+        assert_eq!(object(&path).unwrap(), result);
+        assert!(!dir.join(CLAUDE_PENDING).exists());
+        // a kept login for a refresh token that is no longer on disk is discarded
+        std::fs::write(dir.join(CLAUDE_PENDING), json!({"replaces":"gone","login":{"claudeAiOauth":{"refreshToken":"stale"}}}).to_string()).unwrap();
+        assert_eq!(pending_claude(&dir.join(CLAUDE_PENDING), &result), None);
+        assert!(!dir.join(CLAUDE_PENDING).exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

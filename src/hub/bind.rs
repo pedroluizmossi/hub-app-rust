@@ -20,22 +20,7 @@ fn idx(i: i32) -> usize {
 impl Hub {
     pub(super) fn bind(hub: &Rc<Self>) {
         let ui = &hub.ui;
-        ui.on_select_tab(|id| {
-            with_hub(|h| {
-                if id == "apps" {
-                    h.apply_system();
-                    h.refresh_data();
-                    h.refresh_usage(true);
-                }
-                h.ui.set_current(id.clone());
-                if id == "store" {
-                    h.store_reload();
-                }
-                h.rebuild_pages(true);
-                h.anim_tick(); // draw the mascots right on the first frame
-                h.schedule_backdrop();
-            })
-        });
+        ui.on_select_tab(|id| with_hub(|h| h.enter_tab(&id)));
         ui.on_toggle_app(|id| {
             with_hub(|h| {
                 let on = !h.host.config.borrow().is_enabled(&id);
@@ -121,10 +106,7 @@ impl Hub {
             })
         });
         ui.on_quit(|| {
-            with_hub(|h| {
-                h.remember_size();
-                h.remember_position();
-            });
+            with_hub(|h| h.remember_window());
             let _ = slint::quit_event_loop();
         });
         ui.on_toggle_requested(|x, y| with_hub(|h| h.toggle((x != 0 || y != 0).then_some((x, y)))));
@@ -141,6 +123,15 @@ impl Hub {
                     match ev {
                         WindowEvent::CursorEntered { .. } => h.set_hovered(true),
                         WindowEvent::CursorLeft { .. } => h.set_hovered(false),
+                        _ => {}
+                    }
+                    match ev {
+                        // minimized or fully covered (Windows, macOS); back on screen
+                        WindowEvent::Occluded(o) => h.set_covered(*o),
+                        // restored from the taskbar: focus comes back (X11 reports no `Occluded`)
+                        WindowEvent::Focused(true) | WindowEvent::CursorEntered { .. } if h.covered.get() || !h.on_screen.get() => {
+                            h.set_covered(false)
+                        }
                         _ => {}
                     }
                     match ev {
@@ -175,7 +166,8 @@ impl Hub {
         ui.window().on_close_requested(|| {
             let mut hidden = false;
             with_hub(|h| {
-                h.remember_position();
+                // Alt+F4 or the taskbar's Close: keep a resize made since the last hide
+                h.remember_window();
                 if h.has_tray() {
                     h.set_shown(false);
                     hidden = true;

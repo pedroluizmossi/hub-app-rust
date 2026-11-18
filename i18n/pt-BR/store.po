@@ -110,6 +110,9 @@ msgstr "lê: {}"
 msgid "{}: index too large"
 msgstr "{}: índice grande demais"
 
+msgid "--path {}: a folder inside the repository"
+msgstr "--path {}: uma pasta dentro do repositório"
+
 msgid "{}: remote index with no key to check the signature (configure the store key)"
 msgstr "{}: índice remoto sem chave para conferir a assinatura (configure a chave da loja)"
 
@@ -413,3 +416,6 @@ msgstr "instala direto do repositório do autor numa tag,\nsem loja (sem revisã
 
 msgid "{}  (not reviewed, commit {})"
 msgstr "{}  (sem revisão, commit {})"
+
+msgid "Could not load the store. Check the index and key above, then Save and load."
+msgstr "Não foi possível carregar a loja. Confira o índice e a chave acima e clique em Salvar e carregar."

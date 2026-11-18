@@ -103,12 +103,22 @@ pub static MASCOTS: &[Sprite] = &[
     },
 ];
 
+/// Mascot of an AI source by its display name (`providers::ai_usage::SOURCES`).
 pub fn get(name: &str) -> Option<&'static Sprite> {
     let key = match name {
         "Claude" => "claude", "Codex" => "codex", "Kiro" => "kiro",
         "OpenCode Go" => "opencode", _ => return None,
     };
     MASCOTS.iter().find(|sprite| sprite.key == key)
+}
+
+/// Mascot of an Agents tool (OpenCode shares the one of its usage source, OpenCode Go).
+pub fn for_tool(tool: crate::providers::agents::Tool) -> Option<&'static Sprite> {
+    use crate::providers::agents::Tool;
+    get(match tool {
+        Tool::OpenCode => "OpenCode Go",
+        other => other.name(),
+    })
 }
 
 /// Colors of a mascot's terminal button: the body (the palette color used most in the
@@ -124,6 +134,21 @@ pub fn button_colors(sprite: &Sprite) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_source_and_tool_has_a_mascot() {
+        use crate::providers::agents::Tool;
+        for name in crate::providers::ai_usage::SOURCES {
+            assert!(get(name).is_some(), "no mascot for the source {name}");
+        }
+        for tool in [Tool::Claude, Tool::Codex, Tool::OpenCode] {
+            assert!(for_tool(tool).is_some(), "no mascot for the tool {}", tool.name());
+        }
+        let mut keys: Vec<&str> = MASCOTS.iter().map(|s| s.key).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), MASCOTS.len(), "repeated mascot key");
+    }
 
     #[test]
     fn button_has_the_body_color() {

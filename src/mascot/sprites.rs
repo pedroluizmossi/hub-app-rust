@@ -942,9 +942,9 @@ pub static SPRITES: &[Sprite] = &[
 ];
 
 /// Sprites from files (`file.rs`, `sprites/<key>.toml`), after the built-in ones.
-/// `file::set` replaces them.
+/// `file::reload` replaces them.
 static FILES: RwLock<Vec<&'static Sprite>> = RwLock::new(Vec::new());
-/// Imported mascots (`pack.rs`, PNG), after the sprites. `pack::set` replaces them.
+/// Imported mascots (`pack.rs`, PNG), after the sprites. `pack::reload` replaces them.
 static EXTRA: RwLock<Vec<&'static Sprite>> = RwLock::new(Vec::new());
 /// Changes every time the file or imported ones are replaced: drawing caches (pickers)
 /// rebuild.

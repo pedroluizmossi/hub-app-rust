@@ -186,6 +186,7 @@ export component AppsView inherits ScrollView {
     callback language-chosen(int);
     // system: start with the system, version and log folder
     in property <bool> autostart;
+    in property <string> autostart-error;
     callback autostart-toggled();
     // window: where it opens (index into `popup::Place::KEYS`) and desktop app mode
     in property <int> place-index;
@@ -533,6 +534,12 @@ export component AppsView inherits ScrollView {
                                 font-size: 12px * Skin.text-scale;
                                 wrap: word-wrap;
                             }
+                            if autostart-error != "": Text {
+                                text: autostart-error;
+                                color: Skin.danger;
+                                font-size: 12px * Skin.text-scale;
+                                wrap: word-wrap;
+                            }
                         }
                         VerticalLayout {
                             alignment: center;
@@ -856,83 +863,103 @@ export component AppsView inherits ScrollView {
                 if pages-open: VerticalLayout {
                     spacing: 10px;
                     Text {
-                        text: @tr("Each page has its own grid and shows in the page bar. To move an app to another page, open its options below.");
+                        text: @tr("Each page has its own grid and shows in the page bar. To move an app to another page, open its options below. On the dashboard, Ctrl+PgDn and Ctrl+PgUp (or Ctrl+Tab) switch pages, Ctrl+1 to Ctrl+9 open a page and Ctrl+, opens Settings.");
                         color: Skin.sub;
                         font-size: 12px * Skin.text-scale;
                         wrap: word-wrap;
                     }
-                    for p[i] in pages: HorizontalLayout {
-                        spacing: 10px;
-                        min-height: max(44px, self.preferred-height);
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 40px;
-                                height: 35px;
-                                background: p.theme.bg1;
-                                Image { source: p.icon; image-rendering: pixelated; width: 32px; height: 28px; }
+                    for p[i] in pages: VerticalLayout {
+                        // first click on delete arms it, the second (within 6 s) deletes
+                        property <bool> armed;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 10px;
+                            min-height: max(44px, self.preferred-height);
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 40px;
+                                    height: 35px;
+                                    background: p.theme.bg1;
+                                    Image { source: p.icon; image-rendering: pixelated; width: 32px; height: 28px; }
+                                }
                             }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            horizontal-stretch: 1;
-                            Rectangle {
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                // Enter or leaving the field renames; Esc puts the saved name back
+                                TextField {
+                                    value: p.name;
+                                    mono: false;
+                                    label: @tr("Name of page {}", i + 1);
+                                    committed(t) => { root.page-renamed(i, t); }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                MascotSelect {
+                                    width: 150px;
+                                    options: mascots;
+                                    images: mascot-images;
+                                    index: p.icon-index;
+                                    accent: Skin.accent;
+                                    label: @tr("Icon of page {}", p.name);
+                                    chosen(k) => { root.page-icon-chosen(i, k); }
+                                }
+                            }
+                            IconButton {
+                                width: 34px;
                                 height: 34px;
-                                border-width: 1px;
-                                border-color: name.has-focus ? Skin.accent : Skin.field-edge;
-                                background: Skin.field;
-                                name := TextInput {
-                                    x: 10px;
-                                    width: parent.width - 20px;
-                                    text: p.name;
-                                    color: Skin.ink;
-                                    font-size: 14px * Skin.text-scale;
-                                    vertical-alignment: center;
-                                    single-line: true;
-                                    accessible-label: @tr("Name of page {}", i + 1);
-                                    accepted => { root.page-renamed(i, self.text); }
-                                    changed has-focus => {
-                                        if !self.has-focus && self.text != p.name { root.page-renamed(i, self.text); }
+                                icon: Icons.chevron-up;
+                                enabled: i > 0;
+                                label: @tr("Move {} up", p.name);
+                                clicked => { root.page-moved(i, -1); }
+                            }
+                            IconButton {
+                                width: 34px;
+                                height: 34px;
+                                icon: Icons.chevron;
+                                enabled: i < pages.length - 1;
+                                label: @tr("Move {} down", p.name);
+                                clicked => { root.page-moved(i, 1); }
+                            }
+                            if !armed: IconButton {
+                                width: 34px;
+                                height: 34px;
+                                icon: Icons.close;
+                                ink: Skin.danger;
+                                enabled: pages.length > 1;
+                                label: @tr("Delete {} (its apps go to the previous page)", p.name);
+                                clicked => { armed = true; }
+                            }
+                            if armed: VerticalLayout {
+                                alignment: center;
+                                TextButton {
+                                    height: 34px;
+                                    text: @tr("Confirm");
+                                    icon: Icons.close;
+                                    ink: Skin.danger;
+                                    edge: Skin.danger-edge;
+                                    font-size: 13px * Skin.text-scale;
+                                    accessible-label: @tr("Confirm: delete {}", p.name);
+                                    clicked => {
+                                        armed = false;
+                                        root.page-removed(i);
                                     }
                                 }
                             }
                         }
-                        VerticalLayout {
-                            alignment: center;
-                            MascotSelect {
-                                width: 150px;
-                                options: mascots;
-                                images: mascot-images;
-                                index: p.icon-index;
-                                accent: Skin.accent;
-                                label: @tr("Icon of page {}", p.name);
-                                chosen(k) => { root.page-icon-chosen(i, k); }
-                            }
+                        if armed: Text {
+                            text: @tr("Click again to delete {}: its apps go to the previous page.", p.name);
+                            color: Skin.danger;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
                         }
-                        IconButton {
-                            width: 34px;
-                            height: 34px;
-                            icon: Icons.chevron-up;
-                            enabled: i > 0;
-                            label: @tr("Move {} up", p.name);
-                            clicked => { root.page-moved(i, -1); }
-                        }
-                        IconButton {
-                            width: 34px;
-                            height: 34px;
-                            icon: Icons.chevron;
-                            enabled: i < pages.length - 1;
-                            label: @tr("Move {} down", p.name);
-                            clicked => { root.page-moved(i, 1); }
-                        }
-                        IconButton {
-                            width: 34px;
-                            height: 34px;
-                            icon: Icons.close;
-                            ink: Skin.danger;
-                            enabled: pages.length > 1;
-                            label: @tr("Delete {} (its apps go to the previous page)", p.name);
-                            clicked => { root.page-removed(i); }
+                        // the second click is valid only for a short time
+                        Timer {
+                            interval: 6s;
+                            running: armed;
+                            triggered => { armed = false; }
                         }
                     }
                 }
@@ -946,6 +973,8 @@ export component AppsView inherits ScrollView {
             border-color: accent.mix(Skin.surface-edge, 0.3);
             opacity: app.enabled ? 1 : 0.55;
             property <bool> open: root.open-app == app.id;
+            // with no options, no page to choose and no data, there is nothing to open
+            property <bool> expandable: app.settings.length > 0 || page-names.length > 1 || app.data != "";
 
             VerticalLayout {
                 padding: 16px;
@@ -954,8 +983,10 @@ export component AppsView inherits ScrollView {
                 head := Rectangle {
                     min-height: head-row.preferred-height;
                     TouchArea {
-                        mouse-cursor: pointer;
+                        enabled: expandable || open;
+                        mouse-cursor: self.enabled ? pointer : default;
                         accessible-role: button;
+                        accessible-enabled: self.enabled;
                         accessible-label: open ? @tr("Close options of {}", app.name) : @tr("Open options of {}", app.name);
                         accessible-action-default => { root.open-app = open ? "" : app.id; }
                         clicked => { root.open-app = open ? "" : app.id; }
@@ -968,6 +999,8 @@ export component AppsView inherits ScrollView {
                             icon: open ? Icons.chevron : Icons.chevron-right;
                             ink: open ? accent : Skin.dim;
                             size: 16px;
+                            // keeps its room, so the headers stay aligned
+                            opacity: expandable || open ? 1 : 0;
                         }
                     }
                     VerticalLayout {
@@ -991,9 +1024,9 @@ export component AppsView inherits ScrollView {
                         HorizontalLayout {
                             spacing: 8px;
                             Text { text: app.name; color: Skin.ink; font-size: 17px * Skin.text-scale; font-weight: 700; overflow: elide; }
-                            // where it came from: "loja"/"store", "unreviewed", "local" or "dev" (empty for built-ins)
+                            // where it came from: "store", "unreviewed", "local" or "dev" (empty for built-ins)
                             if app.origin != "": VerticalLayout {
-                                property <bool> from-store: app.origin == "loja" || app.origin == "store";
+                                property <bool> from-store: app.origin == "store";
                                 property <bool> unreviewed: app.origin == "unreviewed";
                                 alignment: center;
                                 Rectangle {
@@ -1003,7 +1036,8 @@ export component AppsView inherits ScrollView {
                                         padding-left: 6px;
                                         padding-right: 6px;
                                         Text {
-                                            text: from-store ? @tr("store") : unreviewed ? @tr("unreviewed") : app.origin;
+                                            text: from-store ? @tr("store") : unreviewed ? @tr("unreviewed")
+                                                : app.origin == "dev" ? @tr("dev") : @tr("local");
                                             color: from-store ? Skin.dim : unreviewed ? Skin.bad : Skin.accent;
                                             font-family: Skin.font-mono;
                                             font-size: 11px * Skin.text-scale;
@@ -1015,7 +1049,10 @@ export component AppsView inherits ScrollView {
                         }
                         Text { text: app.description; color: Skin.sub; font-size: 13px * Skin.text-scale; wrap: word-wrap; }
                         if !open: Text {
-                            text: app.settings.length == 1 ? @tr("1 option · click to open") : @tr("{} options · click to open", app.settings.length);
+                            text: !expandable ? @tr("no options")
+                                : app.settings.length == 0 ? @tr("no options · click to open")
+                                : app.settings.length == 1 ? @tr("1 option · click to open")
+                                : @tr("{} options · click to open", app.settings.length);
                             color: Skin.dim;
                             font-family: Skin.font-mono;
                             font-size: 11px * Skin.text-scale;

@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use super::{
     Agent, Details, LIMIT, RECENT, Source, State, Step, StepKind, Tokens, Tool, base_name, clip, describe, home_dir, iso_ms,
-    last_steps, mtime_ms, one_line, push_step, read_tail,
+    last_steps, mtime_ms, one_line, push_step, read_last,
 };
 use crate::tr;
 
@@ -39,7 +39,13 @@ pub(super) struct Claude {
     transcripts: HashMap<String, PathBuf>,
     /// What has already been read from each transcript.
     logs: HashMap<PathBuf, Log>,
+    /// Whether each unfinished subagent transcript ends interrupted, by its (size, mtime):
+    /// the end is only read again when the file changes.
+    interrupts: Interrupts,
 }
+
+/// Subagent transcript → ((size, mtime), ends interrupted).
+type Interrupts = HashMap<PathBuf, ((u64, i64), bool)>;
 
 impl Source for Claude {
     fn tool(&self) -> Tool {
@@ -71,16 +77,19 @@ impl Source for Claude {
 
         let mut subs = Vec::new();
         let mut used = Vec::new();
+        let mut seen = Interrupts::new();
         for a in &mut agents {
             let Some(transcript) = self.transcript(home, &a.id, &a.cwd) else { continue };
             let log = self.logs.entry(transcript.clone()).or_default();
             log.read(&transcript);
             log.fill(a);
             a.log = Some(transcript.clone());
-            subs.extend(subagents(&transcript.with_extension("").join("subagents"), a, now));
+            let dir = transcript.with_extension("").join("subagents");
+            subs.extend(subagents(&dir, a, now, &self.interrupts, &mut seen));
             used.push(transcript);
         }
         self.logs.retain(|p, _| used.contains(p));
+        self.interrupts = seen;
         agents.extend(subs);
         Ok(agents)
     }
@@ -179,7 +188,7 @@ struct Log {
     effort: String,
     branch: String,
     stop_reason: String,
-    /// Last tool called.
+    /// Last tool called in the current turn (cleared when the turn closes).
     action: String,
     last_turn: Option<(i64, u32)>,
     /// Tokens of the replies already closed.
@@ -242,6 +251,9 @@ impl Log {
                 if let Some(ms) = v["durationMs"].as_i64() {
                     self.last_turn = Some((ms, v["messageCount"].as_u64().unwrap_or(0) as u32));
                 }
+                // the turn closed: its last tool isn't what the next turn is doing. Not on
+                // `last-prompt`: Claude Code rewrites that line in the middle of a turn too.
+                self.action.clear();
             }
             // `isSidechain`: a subagent's reply written to the main transcript
             Some("assistant") if v["isSidechain"] != Value::Bool(true) => {
@@ -314,7 +326,9 @@ fn sum(a: Tokens, b: Tokens) -> Tokens {
 
 /// A session's subagents: an `agent-<id>.meta.json` and the transcript `agent-<id>.jsonl`
 /// for each one.
-fn subagents(dir: &Path, parent: &Agent, now: i64) -> Vec<Agent> {
+/// `cache`: what the last collection found about interruptions; `seen` gets what this one
+/// used, so files that went away leave the cache.
+fn subagents(dir: &Path, parent: &Agent, now: i64, cache: &Interrupts, seen: &mut Interrupts) -> Vec<Agent> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut subs = Vec::new();
     for entry in entries.flatten() {
@@ -332,7 +346,7 @@ fn subagents(dir: &Path, parent: &Agent, now: i64) -> Vec<Agent> {
         let Some(sub) = parse_sub_meta(&text) else { continue };
         // a forced stop doesn't get `finished`: either the file says `stoppedByUser`, or
         // the transcript ends with the interruption notice
-        let stopped = sub.stopped || (!sub.finished && interrupted(&log, meta.len()));
+        let stopped = sub.stopped || (!sub.finished && interrupted(&log, (meta.len(), mtime), cache, seen));
         // no end mark and still writing: working since the file was created
         let working = !sub.finished && !stopped && now - mtime < SUB_STALE.as_millis() as i64;
         let born = meta.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
@@ -425,9 +439,15 @@ struct SubMeta {
     stopped: bool,
 }
 
-/// A subagent's transcript ends with Claude Code's interruption notice.
-fn interrupted(log: &Path, len: u64) -> bool {
-    read_tail(log, len).is_some_and(|tail| ends_interrupted(&tail))
+/// A subagent's transcript ends with Claude Code's interruption notice. Only the last line
+/// matters and the notice is short, so only the last few KiB are read, and only when the
+/// file changed since the last collection.
+fn interrupted(log: &Path, stamp: (u64, i64), cache: &Interrupts, seen: &mut Interrupts) -> bool {
+    const END: u64 = 8 * 1024;
+    let hit = cache.get(log).filter(|(s, _)| *s == stamp).map(|(_, v)| *v);
+    let value = hit.unwrap_or_else(|| read_last(log, stamp.0, END).is_some_and(|tail| ends_interrupted(&tail)));
+    seen.insert(log.to_path_buf(), (stamp, value));
+    value
 }
 
 /// The last line is the message Claude Code writes when a turn is interrupted. Unescaped
@@ -519,7 +539,8 @@ mod tests {
 
         let mut a = parse_session(r#"{"pid":1,"cwd":"/x","name":"x-39","status":"busy"}"#).unwrap().2;
         log.fill(&mut a);
-        assert_eq!((a.title.as_str(), a.action.as_str()), ("Monitor agents", "Bash: Run the tests"));
+        // the turn closed (`turn_duration`): its last tool isn't the current action
+        assert_eq!((a.title.as_str(), a.action.as_str()), ("Monitor agents", ""));
         let d = &a.details;
         assert_eq!(d.last_prompt, "write the wrapper");
         assert_eq!((d.model.as_str(), d.effort.as_str(), d.branch.as_str()), ("claude-x", "medium", "master"));
@@ -530,6 +551,22 @@ mod tests {
         let mut idle = parse_session(r#"{"pid":1,"cwd":"/x","status":"idle"}"#).unwrap().2;
         log.fill(&mut idle);
         assert_eq!(idle.action, "");
+
+        // a new turn that is only thinking so far: the previous turn's tool doesn't show
+        let mut log = Log::default();
+        log.feed(&answer("m1", 5, "tool_use", json!({"type":"tool_use","name":"Bash","input":{"description":"Run the tests"}})));
+        log.feed(&json!({"type":"last-prompt","lastPrompt":"go"}).to_string());
+        let mut busy = parse_session(r#"{"pid":1,"cwd":"/x","status":"busy"}"#).unwrap().2;
+        log.fill(&mut busy);
+        // `last-prompt` is rewritten mid-turn: it keeps the action
+        assert_eq!(busy.action, "Bash: Run the tests");
+        log.feed(&json!({"type":"system","subtype":"turn_duration","durationMs":5,"messageCount":2}).to_string());
+        log.feed(&answer("m2", 5, "", json!({"type":"thinking"})));
+        log.fill(&mut busy);
+        assert_eq!(busy.action, "");
+        log.feed(&answer("m2", 5, "tool_use", json!({"type":"tool_use","name":"Read","input":{"file_path":"/x/a.rs"}})));
+        log.fill(&mut busy);
+        assert_ne!(busy.action, "");
 
         // empty transcript: the session name stays and there are no details
         let mut plain = parse_session(r#"{"pid":1,"cwd":"/x","name":"x-39","status":"idle"}"#).unwrap().2;
@@ -594,6 +631,26 @@ mod tests {
         assert!(!ends_interrupted(&[stop, result].join("\n")));
         assert!(!ends_interrupted(&[result, quoted].join("\n")));
         assert!(!ends_interrupted(""));
+    }
+
+    #[test]
+    fn interruption_read_only_when_the_file_changes() {
+        let dir = std::env::temp_dir().join(format!("miniutils-claude-sub-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent-a.jsonl");
+        let stop = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#;
+        std::fs::write(&path, format!("{stop}\n")).unwrap();
+        let stamp = (std::fs::metadata(&path).unwrap().len(), 1);
+        let mut seen = Interrupts::new();
+        assert!(interrupted(&path, stamp, &Interrupts::new(), &mut seen));
+        // same size and time: the cached answer, without reading (the file is gone)
+        std::fs::remove_file(&path).unwrap();
+        let cache = std::mem::take(&mut seen);
+        assert!(interrupted(&path, stamp, &cache, &mut seen));
+        assert_eq!(seen.len(), 1);
+        // changed: read again (now missing, so not interrupted)
+        assert!(!interrupted(&path, (stamp.0 + 1, 2), &cache, &mut seen));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

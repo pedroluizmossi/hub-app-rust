@@ -1,6 +1,8 @@
 //! Each app's data in Settings (`core/appdata.rs`): what it keeps and how much, export,
 //! delete, and the data left over from removed apps.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use slint::{ModelRc, VecModel};
@@ -14,17 +16,34 @@ use crate::ui::DataRow;
 const RELEASE_WAIT: Duration = Duration::from_secs(5);
 const RELEASE_POLL: Duration = Duration::from_millis(100);
 
+thread_local! {
+    /// Each app's data folder as last measured: (bytes, cut short, has data). The Settings
+    /// list is rebuilt on every setting change; the folders are only walked again when
+    /// Settings opens or data is deleted (`refresh_data`).
+    static SIZES: RefCell<HashMap<String, (u64, bool, bool)>> = RefCell::new(HashMap::new());
+}
+
+/// The size of an app's data folder, measured once until `refresh_data` forgets it.
+fn measured(id: &str) -> (u64, bool, bool) {
+    SIZES.with(|c| {
+        *c.borrow_mut().entry(id.to_string()).or_insert_with(|| {
+            let dir = appdata::dir(id);
+            let has = appdata::has_data(&dir);
+            let (bytes, cut) = if has { appdata::size(&dir) } else { (0, false) };
+            (bytes, cut, has)
+        })
+    })
+}
+
 /// An app's "Data" row: "SQLite database and key-value · 1.2 MB (database up to 10 MB)",
 /// "files · empty"; empty if the app keeps nothing. And whether there is something to export or delete.
 pub(super) fn describe(id: &str, spec: &DataSpec) -> (String, bool) {
-    let dir = appdata::dir(id);
-    let has = appdata::has_data(&dir);
+    let (bytes, cut, has) = measured(id);
     if spec.kinds.is_empty() && !has {
         return (String::new(), false);
     }
     let what = if spec.kinds.is_empty() { tr!("data").to_string() } else { spec.describe() };
     let size = if has {
-        let (bytes, cut) = appdata::size(&dir);
         if cut { tr!("over {}", appdata::human(bytes)) } else { appdata::human(bytes) }
     } else {
         tr!("empty").into()
@@ -36,6 +55,7 @@ pub(super) fn describe(id: &str, spec: &DataSpec) -> (String, bool) {
 impl Hub {
     /// Settings opened: new sizes and the list of data without an app.
     pub(super) fn refresh_data(&self) {
+        SIZES.with(|c| c.borrow_mut().clear());
         self.settings_fingerprint.replace(String::new());
         self.rebuild_settings();
         let root = appdata::root();

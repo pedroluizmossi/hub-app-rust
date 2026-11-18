@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::layout::{self, Rect};
-use super::manifest::Manifest;
+use super::manifest::{Manifest, SettingKind};
 use crate::tr;
 
 /// App name (default display name; lowercased for the config folder, socket and binary).
@@ -20,6 +20,10 @@ pub fn display_name() -> String {
     let n = DISPLAY_NAME.read().map(|n| n.clone()).unwrap_or_default();
     if n.trim().is_empty() { APP_NAME.into() } else { n }
 }
+
+/// Range of `text_scale` (the sizes Appearance offers go from one to the other).
+pub const TEXT_SCALE_MIN: u32 = 90;
+pub const TEXT_SCALE_MAX: u32 = 125;
 
 /// Current version of the file format. When the structure changes, bump the number and
 /// add the matching migration in `migrate`.
@@ -40,7 +44,7 @@ pub struct Config {
     pub skin: String,
     /// Accent color on top of the skin: `""` (the skin's own) or one of `skin::ACCENTS`.
     pub accent: String,
-    /// Interface text size, in % of the design (90 to 125).
+    /// Interface text size, in % of the design (`TEXT_SCALE_MIN` to `TEXT_SCALE_MAX`).
     pub text_scale: u32,
     /// Animated background (rain, stars, scanline); "Reduce motion" also turns it off.
     pub ambient: bool,
@@ -319,7 +323,9 @@ impl Config {
                 log::warn!("invalid config ({e}); using the defaults");
                 Config::default()
             });
-            return Config { state: SaveState::ReadOnly, ..cfg };
+            let mut cfg = Config { state: SaveState::ReadOnly, ..cfg };
+            cfg.normalize();
+            return cfg;
         }
 
         if version < OLDEST_VERSION {
@@ -331,13 +337,40 @@ impl Config {
         }
         match deserialize(table) {
             Ok(mut cfg) => {
+                cfg.normalize();
                 // Save the new version only after keeping the original.
-                if old && backup(path) {
+                if old && backup(path, version) {
                     cfg.save_to(path);
                 }
                 cfg
             }
             Err(e) => Self::broken(&e),
+        }
+    }
+
+    /// Brings hand-edited values back into what the app understands: `text_scale` within its
+    /// range (plugin views read it as is), an unknown `language` or `window_place` to the
+    /// default. (`chatter` and `nav` already treat an unknown value as the default where
+    /// they are read.)
+    fn normalize(&mut self) {
+        self.text_scale = self.text_scale.clamp(TEXT_SCALE_MIN, TEXT_SCALE_MAX);
+        if !crate::core::i18n::Language::KEYS.contains(&self.language.as_str()) {
+            log::debug!("unknown language {:?} in the config; using auto", self.language);
+            self.language = "auto".into();
+        }
+        if crate::popup::Place::index_of(&self.window_place).is_none() {
+            log::debug!("unknown window_place {:?} in the config; using tray", self.window_place);
+            self.window_place = "tray".into();
+        }
+    }
+
+    /// Message for the user when the file that was read can't be used as is: from a newer
+    /// MiniUtils (nothing is saved) or unreadable (defaults in use). Shown once at start.
+    pub fn load_notice(&self) -> Option<&'static str> {
+        match self.state {
+            SaveState::Normal => None,
+            SaveState::ReadOnly => Some(tr!("config.toml is from a newer MiniUtils: changes made here won't be saved.")),
+            SaveState::Broken => Some(tr!("config.toml could not be read, so the defaults are in use. It is set aside as config.toml.broken on the next save.")),
         }
     }
 
@@ -393,22 +426,36 @@ impl Config {
         self.enabled.iter().any(|e| e == id)
     }
 
-    /// Value of an app setting, or the manifest default.
+    /// Value of an app setting, or the manifest default. A saved value of the wrong type
+    /// (`alarm = "90"` edited by hand) is ignored in favor of the default.
     pub fn value(&self, m: &Manifest, key: &str) -> toml::Value {
-        self.apps
-            .get(&m.id)
-            .and_then(|t| t.get(key))
-            .cloned()
-            .or_else(|| m.setting(key).map(|s| s.default.clone()))
-            .unwrap_or(toml::Value::Boolean(false))
+        let def = m.setting(key);
+        let saved = self.apps.get(&m.id).and_then(|t| t.get(key));
+        if let Some(v) = saved {
+            let typed = match def.map(|d| d.kind) {
+                None => true,
+                Some(SettingKind::Bool) => v.is_bool(),
+                Some(SettingKind::Int) => v.is_integer(),
+                Some(SettingKind::Choice | SettingKind::Text | SettingKind::Secret) => v.is_str(),
+            };
+            if typed {
+                return v.clone();
+            }
+            log::debug!("{}: setting {key} = {v} has the wrong type; using the default", m.id);
+        }
+        def.map(|s| s.default.clone()).unwrap_or(toml::Value::Boolean(false))
     }
 
     pub fn bool(&self, m: &Manifest, key: &str) -> bool {
         self.value(m, key).as_bool().unwrap_or(false)
     }
 
+    /// An int setting, within the manifest's `min` and `max`.
     pub fn int(&self, m: &Manifest, key: &str) -> i64 {
-        self.value(m, key).as_integer().unwrap_or(0)
+        let v = self.value(m, key).as_integer().unwrap_or(0);
+        let def = m.setting(key);
+        let v = def.and_then(|d| d.min).map_or(v, |min| v.max(min));
+        def.and_then(|d| d.max).map_or(v, |max| v.min(max))
     }
 
     pub fn string(&self, m: &Manifest, key: &str) -> String {
@@ -530,12 +577,10 @@ fn migrate_3_to_4(t: &mut toml::Table) {
     t.insert("pages".into(), toml::Value::Array(vec![toml::Value::Table(page)]));
 }
 
-/// Copies the file to `.bak`, unless that already exists. Returns `false` on failure.
-fn backup(path: &Path) -> bool {
-    let bak = with_suffix(path, ".bak");
-    if bak.exists() {
-        return true;
-    }
+/// Copies the file, still at format `version`, to `config.toml.v<version>.bak` (`.1`, `.2`…
+/// if taken): each migration keeps its own original. Returns `false` on failure.
+fn backup(path: &Path, version: u32) -> bool {
+    let bak = free_name(&with_suffix(path, &format!(".v{version}.bak")));
     match std::fs::copy(path, &bak) {
         Ok(_) => true,
         Err(e) => {
@@ -638,7 +683,7 @@ mod tests {
         let cfg = Config::load_from(&t.file());
         assert_eq!(cfg.version, CURRENT_VERSION);
         assert_eq!(cfg.enabled, vec!["cyber.docker".to_string(), "cyber.cd".to_string()]);
-        assert!(with_suffix(&t.file(), ".bak").exists());
+        assert!(with_suffix(&t.file(), ".v2.bak").exists());
 
         // already migrated: reading again does not duplicate the app
         let cfg = Config::load_from(&t.file());
@@ -747,7 +792,66 @@ mod tests {
         let cfg = Config::load_from(&t.file());
         assert_eq!(cfg.skin, "matrix");
         assert!(cfg.enabled.is_empty());
-        assert!(!with_suffix(&t.file(), ".bak").exists());
+        assert_eq!(std::fs::read_dir(&t.0).unwrap().count(), 1, "no backup");
+    }
+
+    #[test]
+    fn each_migration_keeps_its_own_original() {
+        let t = Tmp::new("two-migrations");
+        let v2 = "version = 2\ncolumns = 2\nenabled = [\"cyber.docker\"]\n";
+        std::fs::write(t.file(), v2).unwrap();
+        Config::load_from(&t.file());
+        // later, a v3 file (e.g. written by an older build) is migrated again
+        let v3 = "version = 3\ncolumns = 3\nenabled = [\"cyber.vitals\"]\n";
+        std::fs::write(t.file(), v3).unwrap();
+        Config::load_from(&t.file());
+        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".v2.bak")).unwrap(), v2);
+        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".v3.bak")).unwrap(), v3);
+        // the same version migrated twice: the first copy is not overwritten
+        std::fs::write(t.file(), v2.replace("docker", "ports")).unwrap();
+        Config::load_from(&t.file());
+        assert_eq!(std::fs::read_to_string(with_suffix(&t.file(), ".v2.bak")).unwrap(), v2);
+        assert!(with_suffix(&t.file(), ".v2.bak.1").exists());
+    }
+
+    #[test]
+    fn hand_edited_values_are_brought_back_in_range() {
+        let t = Tmp::new("normalize");
+        std::fs::write(
+            t.file(),
+            format!("version = {CURRENT_VERSION}\ntext_scale = 400\nlanguage = \"klingon\"\nwindow_place = \"moon\"\n"),
+        )
+        .unwrap();
+        let cfg = Config::load_from(&t.file());
+        assert_eq!(cfg.text_scale, TEXT_SCALE_MAX);
+        assert_eq!(cfg.language, "auto");
+        assert_eq!(cfg.window_place, "tray");
+        assert!(cfg.load_notice().is_none());
+        std::fs::write(t.file(), format!("version = {CURRENT_VERSION}\ntext_scale = 10\nlanguage = \"pt-BR\"\n")).unwrap();
+        let cfg = Config::load_from(&t.file());
+        assert_eq!((cfg.text_scale, cfg.language.as_str()), (TEXT_SCALE_MIN, "pt-BR"));
+    }
+
+    #[test]
+    fn app_setting_of_the_wrong_type_uses_the_default() {
+        let m = Manifest::parse(
+            "id='a.b'\nname='x'\napi=1\n\
+             [[settings]]\nkey='alarm'\nlabel='A'\ntype='int'\ndefault=90\nmin=50\nmax=100\n\
+             [[settings]]\nkey='on'\nlabel='O'\ntype='bool'\ndefault=true\n",
+        )
+        .unwrap();
+        let mut cfg = Config::default();
+        cfg.set("a.b", "alarm", toml::Value::String("70".into()));
+        cfg.set("a.b", "on", toml::Value::Integer(0));
+        assert_eq!(cfg.int(&m, "alarm"), 90);
+        assert!(cfg.bool(&m, "on"));
+        // right type but out of range: clamped to the manifest's min/max
+        cfg.set("a.b", "alarm", toml::Value::Integer(400));
+        assert_eq!(cfg.int(&m, "alarm"), 100);
+        cfg.set("a.b", "alarm", toml::Value::Integer(-3));
+        assert_eq!(cfg.int(&m, "alarm"), 50);
+        cfg.set("a.b", "alarm", toml::Value::Integer(70));
+        assert_eq!(cfg.int(&m, "alarm"), 70);
     }
 
     #[test]
@@ -759,9 +863,10 @@ mod tests {
         let mut cfg = Config::load_from(&t.file());
         assert_eq!(cfg.skin, "matrix");
         cfg.skin = "neon".into();
+        assert!(cfg.load_notice().is_some());
         cfg.save_to(&t.file());
         assert_eq!(std::fs::read_to_string(t.file()).unwrap(), original);
-        assert!(!with_suffix(&t.file(), ".bak").exists());
+        assert_eq!(std::fs::read_dir(&t.0).unwrap().count(), 1, "no backup");
     }
 
     #[test]
@@ -772,6 +877,7 @@ mod tests {
 
         let mut cfg = Config::load_from(&t.file());
         assert_eq!(cfg.skin, Config::default().skin);
+        assert!(cfg.load_notice().is_some());
         // nothing is written until the first save
         assert_eq!(std::fs::read_to_string(t.file()).unwrap(), broken);
 

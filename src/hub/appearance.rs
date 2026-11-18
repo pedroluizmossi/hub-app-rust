@@ -154,6 +154,7 @@ impl Hub {
     /// when opening the settings (autostart may have changed outside, in the system).
     pub(super) fn apply_system(&self) {
         self.ui.set_autostart(crate::autostart::is_enabled());
+        self.ui.set_autostart_error("".into());
         self.apply_window_mode();
         self.ui.set_version(crate::core::about::version_line().into());
         let dir = crate::core::os::log_dir().map(|d| d.display().to_string()).unwrap_or_default();
@@ -240,9 +241,13 @@ impl Hub {
         }
     }
 
-    /// The error, if any, goes to the log; the switch shows the real state.
+    /// The switch shows the real state; an error also shows under the row (and goes to the log).
     pub(super) fn toggle_autostart(&self) {
-        let _ = crate::autostart::set(!crate::autostart::is_enabled());
+        let error = match crate::autostart::set(!crate::autostart::is_enabled()) {
+            Ok(()) => String::new(),
+            Err(e) => tr!("Could not change it: {}", e),
+        };
+        self.ui.set_autostart_error(error.into());
         self.ui.set_autostart(crate::autostart::is_enabled());
     }
 
@@ -322,12 +327,16 @@ impl Hub {
         }
         crate::core::i18n::set(Language::from_setting(key));
         self.ui.set_language_index(i as i32);
+        // `apply_skin` also redoes the tray choices
         self.apply_skin();
         self.apply_system();
-        self.apply_tray_choices();
         // the Settings list has texts built in Rust: forget its fingerprint so it is redone
         self.settings_fingerprint.replace(String::new());
         self.rebuild_lists();
+        // the greeting only changes with the minute, and the store rows with a push
+        self.clock.borrow_mut().clear();
+        self.update_clock();
+        self.store_push();
     }
 
     /// Changes the accent color (0 = the skin's own).

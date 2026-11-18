@@ -363,16 +363,10 @@ impl Director {
     }
 
     /// Language of the whole conversation: mostly the interface language, sometimes the other
-    /// one, German now and then. Only a language that suits both lines is picked; otherwise Portuguese.
+    /// one, German now and then (see `pick_lang`).
     fn lang(&mut self, a: &Say, b: Option<&Say>, ctx: Ctx) -> Lang {
         let roll = self.next() % 100;
-        // the interface language most of the time, the other one sometimes, German rarely
-        let (first, second) = match crate::core::i18n::current() {
-            crate::core::i18n::Language::PtBr => (Lang::Pt, Lang::En),
-            crate::core::i18n::Language::En => (Lang::En, Lang::Pt),
-        };
-        let lang = if roll < 55 { first } else if roll < 90 { second } else { Lang::De };
-        if usable(a, lang, ctx) && b.is_none_or(|b| usable(b, lang, ctx)) { lang } else { Lang::Pt }
+        pick_lang(roll, crate::core::i18n::current(), a, b, ctx)
     }
 
     /// Draws a variant without repeating the last ones spoken: first among those not said
@@ -431,6 +425,22 @@ impl Ctx {
     fn allows(self, t: &str) -> bool {
         (self.value.is_some() || !t.contains("{v}")) && (self.has_b || !t.contains("{b}"))
     }
+}
+
+/// Language for a conversation from a `roll` in `0..100`: the interface language most of the
+/// time, the other one sometimes, German rarely. Only a language that suits both lines is
+/// picked: if the rolled one does not, the interface language, then the other one, then
+/// Portuguese (the lines always have it).
+fn pick_lang(roll: u64, interface: crate::core::i18n::Language, a: &Say, b: Option<&Say>, ctx: Ctx) -> Lang {
+    let (first, second) = match interface {
+        crate::core::i18n::Language::PtBr => (Lang::Pt, Lang::En),
+        crate::core::i18n::Language::En => (Lang::En, Lang::Pt),
+    };
+    let rolled = if roll < 55 { first } else if roll < 90 { second } else { Lang::De };
+    [rolled, first, second]
+        .into_iter()
+        .find(|&l| usable(a, l, ctx) && b.is_none_or(|b| usable(b, l, ctx)))
+        .unwrap_or(Lang::Pt)
 }
 
 /// Has some usable variant in this language.
@@ -607,6 +617,28 @@ mod tests {
         names.extend(run(&mut d, &mut t, &voices, 20).into_iter().filter(|n| n != "CPU"));
         assert_eq!(names, ["CPU", "Docker"]);
         assert!(d.view(t).is_none(), "the conversation ends");
+    }
+
+    #[test]
+    fn english_interface_never_falls_back_to_portuguese_when_english_fits() {
+        use crate::core::i18n::Language;
+        let ctx = Ctx { value: None, has_b: true };
+        let a = Say { pt: vec!["oi".into()], en: vec!["hi".into()], ..Default::default() };
+        let b = Say { pt: vec!["opa".into()], en: vec!["hey".into()], ..Default::default() };
+        for roll in 0..100 {
+            let lang = pick_lang(roll, Language::En, &a, Some(&b), ctx);
+            // the interface language, or Portuguese only when it was rolled as the "other" one
+            let expected = if (55..90).contains(&roll) { Lang::Pt } else { Lang::En };
+            assert_eq!(lang, expected, "roll {roll}");
+        }
+        // a Portuguese interface may roll English, but never German here (no `de` lines)
+        assert!((0..100).all(|r| pick_lang(r, Language::PtBr, &a, Some(&b), ctx) != Lang::De));
+        // English only usable without the `{v}` blank: still not Portuguese for an English interface
+        let v = Say { pt: vec!["{v}%".into()], en: vec!["{v}%".into(), "high".into()], ..Default::default() };
+        assert_eq!(pick_lang(10, Language::En, &v, None, ctx), Lang::En);
+        // nothing but Portuguese fits: Portuguese
+        let pt_only = Say { pt: vec!["só".into()], ..Default::default() };
+        assert_eq!(pick_lang(10, Language::En, &pt_only, None, ctx), Lang::Pt);
     }
 
     #[test]

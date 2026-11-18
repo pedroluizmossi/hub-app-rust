@@ -36,9 +36,43 @@ pub struct List {
     pub items: Vec<Item>,
 }
 
+/// Why `todo.json` could not be used.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoadError {
+    /// It was not a valid list: the file was moved to this path, so a save doesn't overwrite it.
+    SetAside(PathBuf),
+    /// It could not be read (or set aside): saving must not replace it.
+    Unreadable(String),
+}
+
 impl List {
-    pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    /// Reads the list. A missing (or blank) file is an empty list; a file that can't be
+    /// parsed is moved aside to `todo.json.broken` before anything is saved over it.
+    pub fn load(path: &Path) -> Result<Self, LoadError> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(List::default()),
+            Err(e) => {
+                log::warn!("todo: could not read {}: {e}", path.display());
+                return Err(LoadError::Unreadable(e.to_string()));
+            }
+        };
+        if text.trim().is_empty() {
+            return Ok(List::default());
+        }
+        let err = match serde_json::from_str(&text) {
+            Ok(list) => return Ok(list),
+            Err(e) => e,
+        };
+        let dest = free_name(path, ".broken");
+        log::warn!("todo: {} is not a valid list ({err}); moving it to {}", path.display(), dest.display());
+        match std::fs::rename(path, &dest) {
+            Ok(()) => Err(LoadError::SetAside(dest)),
+            Err(e) => {
+                log::warn!("todo: could not move {} aside: {e}", path.display());
+                Err(LoadError::Unreadable(e.to_string()))
+            }
+        }
     }
 
     /// Writes to a temporary file and swaps it in: a shutdown halfway doesn't corrupt the list.
@@ -102,8 +136,10 @@ pub struct TodoMini {
     manifest: Manifest,
     path: PathBuf,
     list: List,
-    /// Last failure when saving (shown on screen).
+    /// Last failure when loading or saving (shown on screen).
     error: String,
+    /// `todo.json` exists but couldn't be read or set aside: don't save over it.
+    locked: bool,
     mood: Mood,
     rows: Rc<VecModel<TodoRow>>,
     face: HeaderMascot,
@@ -120,15 +156,31 @@ impl TodoMini {
         let app = Rc::new(RefCell::new(TodoMini {
             host,
             manifest,
-            list: List::load(&path),
+            list: List::default(),
             path,
             error: String::new(),
+            locked: false,
             mood: Mood::Sleep,
             rows,
             face: HeaderMascot::new(13),
         }));
+        app.borrow_mut().load();
         Self::bind(&app, ui);
         app
+    }
+
+    /// Reads `todo.json` again; a broken file shows a message instead of being lost.
+    fn load(&mut self) {
+        (self.list, self.error, self.locked) = match List::load(&self.path) {
+            Ok(list) => (list, String::new(), false),
+            Err(LoadError::SetAside(dest)) => {
+                let name = dest.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                (List::default(), tr!("The task list was unreadable; saved a copy as {}", name), false)
+            }
+            Err(LoadError::Unreadable(e)) => {
+                (List::default(), tr!("Couldn't read the task list ({}); changes won't be saved.", e), true)
+            }
+        };
     }
 
     fn bind(app: &Rc<RefCell<Self>>, ui: &HubWindow) {
@@ -197,10 +249,12 @@ impl TodoMini {
 
     /// The list changed: save, recompute the mood and redraw.
     fn changed(&mut self, ui: &HubWindow) {
-        self.error = match self.list.save(&self.path) {
+        if !self.locked {
+            self.error = match self.list.save(&self.path) {
             Ok(()) => String::new(),
-            Err(e) => tr!("Couldn't save: {}", e),
-        };
+                Err(e) => tr!("Couldn't save: {}", e),
+            };
+        }
         self.mood = self.compute_mood();
         self.refresh(ui);
         self.push_mascot(ui);
@@ -270,6 +324,23 @@ impl TodoMini {
     }
 }
 
+/// First free name: `path` + `suffix`, then with `.1`, `.2`… appended.
+fn free_name(path: &Path, suffix: &str) -> PathBuf {
+    let with = |extra: &str| {
+        let mut s = path.as_os_str().to_owned();
+        s.push(suffix);
+        s.push(extra);
+        PathBuf::from(s)
+    };
+    let mut p = with("");
+    let mut n = 1;
+    while p.exists() {
+        p = with(&format!(".{n}"));
+        n += 1;
+    }
+    p
+}
+
 /// Age of a task: "just now", "5 min ago", "3 h ago", "2 d ago".
 pub fn age_text(secs: i64) -> String {
     match secs.max(0) {
@@ -286,7 +357,7 @@ impl MiniApp for TodoMini {
     }
 
     fn reload_data(&mut self, ui: &HubWindow) {
-        self.list = List::load(&self.path);
+        self.load();
         self.mood = self.compute_mood();
         self.refresh(ui);
         self.push_mascot(ui);
@@ -294,7 +365,7 @@ impl MiniApp for TodoMini {
 
     fn enable(&mut self, ui: &HubWindow) {
         // read again: the list may have been edited by hand while the app was off
-        self.list = List::load(&self.path);
+        self.load();
         ui.global::<TodoApp>().set_theme(render::colors(self.host.theme_for(&self.manifest)));
         self.mood = self.compute_mood();
         self.refresh(ui);
@@ -386,8 +457,28 @@ mod tests {
         l.add("task", 42);
         l.toggle(1);
         l.save(&path).unwrap();
-        assert_eq!(List::load(&path), l);
-        assert_eq!(List::load(&dir.join("missing.json")), List::default());
+        assert_eq!(List::load(&path), Ok(l));
+        assert_eq!(List::load(&dir.join("missing.json")), Ok(List::default()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn broken_file_is_set_aside_with_its_bytes() {
+        let dir = std::env::temp_dir().join(format!("miniutils-todo-broken-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("todo.json");
+        let bad = "{\"items\": [ {\"id\": 1, \"text\": \"half";
+        std::fs::write(&path, bad).unwrap();
+        let broken = dir.join("todo.json.broken");
+        assert_eq!(List::load(&path), Err(LoadError::SetAside(broken.clone())));
+        assert!(!path.exists(), "the next save can't overwrite the original");
+        assert_eq!(std::fs::read_to_string(&broken).unwrap(), bad);
+        // a second broken file doesn't replace the first copy
+        std::fs::write(&path, "garbage").unwrap();
+        assert_eq!(List::load(&path), Err(LoadError::SetAside(dir.join("todo.json.broken.1"))));
+        // a blank file is just an empty list
+        std::fs::write(&path, "  \n").unwrap();
+        assert_eq!(List::load(&path), Ok(List::default()));
         let _ = std::fs::remove_dir_all(dir);
     }
 

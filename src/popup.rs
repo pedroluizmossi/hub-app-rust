@@ -217,8 +217,9 @@ impl Place {
 
 /// Physical position (top-left corner) of the window for `place`. A pure function, for
 /// testing. `Tray` is `position_with`; the others go on the monitor of the anchor (the
-/// clicked tray) or `fallback`, inside its work area. `Last` uses `last` if its corner is on
-/// a monitor (pulled inside that monitor's work area), or falls back to `Tray`.
+/// clicked tray) or `fallback`, inside its work area. `Last` uses `last` if the window's
+/// center (or corner) is on a monitor (pulled inside that monitor's work area), or falls back
+/// to `Tray`.
 pub fn position_for(
     place: Place,
     anchor: Option<(i32, i32)>,
@@ -230,8 +231,12 @@ pub fn position_for(
 ) -> Option<(i32, i32)> {
     let (pw, ph) = win;
     if place == Place::Last {
-        if let Some(m) = last.and_then(|p| monitors.iter().find(|m| contains(m, p))) {
-            let (x, y) = last?;
+        // the monitor under the window's center (or its corner): a window dragged a little
+        // past the top or left edge has its corner on no monitor
+        let on = |p: (i32, i32)| monitors.iter().find(|m| contains(m, p));
+        if let Some((x, y)) = last
+            && let Some(m) = on((x.saturating_add(pw / 2), y.saturating_add(ph / 2))).or_else(|| on((x, y)))
+        {
             let wk = m.work;
             return Some((fit(x, pw, wk.x, wk.w, 0), fit(y, ph, wk.y, wk.h, 0)));
         }
@@ -501,46 +506,104 @@ mod x11 {
     use x11rb::wrapper::ConnectionExt as _;
     use x11rb::rust_connection::RustConnection;
 
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    /// A connection to the X server, kept for the whole session on the UI thread: the fade
+    /// changes the opacity many times in a row, and every show looks up the work area.
+    struct X {
+        conn: RustConnection,
+        screen: usize,
+        /// Interned atoms (each name asked for once per connection).
+        atoms: RefCell<HashMap<&'static str, u32>>,
+    }
+
+    impl X {
+        fn root(&self) -> u32 {
+            self.conn.setup().roots[self.screen].root
+        }
+
+        fn atom(&self, name: &'static str) -> anyhow::Result<u32> {
+            if let Some(atom) = self.atoms.borrow().get(name) {
+                return Ok(*atom);
+            }
+            let atom = self.conn.intern_atom(false, name.as_bytes())?.reply()?.atom;
+            self.atoms.borrow_mut().insert(name, atom);
+            Ok(atom)
+        }
+    }
+
     thread_local! {
-        /// Connection reused by the fade (many opacity changes in a row).
-        static CONN: Option<(RustConnection, u32)> = x11rb::connect(None).ok().and_then(|(c, _)| {
-            let atom = c.intern_atom(false, b"_NET_WM_WINDOW_OPACITY").ok()?.reply().ok()?.atom;
-            Some((c, atom))
-        });
+        static CONN: RefCell<Option<Rc<X>>> = const { RefCell::new(None) };
+    }
+
+    /// Runs `f` with the session's connection, connecting on the first use. If the connection
+    /// broke (X server restarted), connects again and tries once more.
+    fn with_x<T>(f: impl Fn(&X) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        for retry in [false, true] {
+            let x = match CONN.with(|c| c.borrow().clone()) {
+                Some(x) => x,
+                None => {
+                    let (conn, screen) = x11rb::connect(None)?;
+                    let x = Rc::new(X { conn, screen, atoms: RefCell::default() });
+                    CONN.with(|c| *c.borrow_mut() = Some(x.clone()));
+                    x
+                }
+            };
+            match f(&x) {
+                Err(e) if !retry && broken(&e) => {
+                    log::debug!("X11 connection lost ({e}); connecting again");
+                    CONN.with(|c| *c.borrow_mut() = None);
+                }
+                r => return r,
+            }
+        }
+        unreachable!("the second attempt always returns")
+    }
+
+    /// The error is the connection itself (not an X error about one request).
+    fn broken(e: &anyhow::Error) -> bool {
+        use x11rb::errors::{ConnectionError, ReplyError};
+        e.downcast_ref::<ConnectionError>().is_some() || matches!(e.downcast_ref::<ReplyError>(), Some(ReplyError::ConnectionError(_)))
     }
 
     pub fn set_opacity(window: u32, alpha: f32) -> anyhow::Result<()> {
-        CONN.with(|c| {
-            let Some((conn, atom)) = c else { return Ok(()) };
+        with_x(|x| {
+            let atom = x.atom("_NET_WM_WINDOW_OPACITY")?;
             let value = (alpha.clamp(0.0, 1.0) as f64 * u32::MAX as f64) as u32;
-            conn.change_property32(PropMode::REPLACE, window, *atom, AtomEnum::CARDINAL, &[value])?;
-            conn.flush()?;
+            x.conn.change_property32(PropMode::REPLACE, window, atom, AtomEnum::CARDINAL, &[value])?;
+            x.conn.flush()?;
             Ok(())
         })
     }
 
     /// `_NET_WORKAREA` of the current desktop (the virtual screen minus the panels).
     pub fn work_area() -> anyhow::Result<Option<super::Rect>> {
-        let (conn, screen) = x11rb::connect(None)?;
-        let root = conn.setup().roots[screen].root;
-        let atom = |name: &str| -> anyhow::Result<u32> { Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom) };
-        let current = conn.get_property(false, root, atom("_NET_CURRENT_DESKTOP")?, AtomEnum::CARDINAL, 0, 1)?.reply()?;
-        let desk = current.value32().and_then(|mut v| v.next()).unwrap_or(0);
-        // one area (x, y, w, h) per desktop; the offset counts in 32-bit words
-        let area = conn.get_property(false, root, atom("_NET_WORKAREA")?, AtomEnum::CARDINAL, desk.saturating_mul(4), 4)?.reply()?;
-        let v: Vec<u32> = area.value32().map(Iterator::collect).unwrap_or_default();
-        Ok(match v[..] {
-            [x, y, w, h] if w > 0 && h > 0 => Some(super::Rect { x: x as i32, y: y as i32, w: w as i32, h: h as i32 }),
-            _ => None,
+        with_x(|x| {
+            let (conn, root) = (&x.conn, x.root());
+            let current = conn.get_property(false, root, x.atom("_NET_CURRENT_DESKTOP")?, AtomEnum::CARDINAL, 0, 1)?.reply()?;
+            let desk = current.value32().and_then(|mut v| v.next()).unwrap_or(0);
+            // one area (x, y, w, h) per desktop; the offset counts in 32-bit words
+            let area =
+                conn.get_property(false, root, x.atom("_NET_WORKAREA")?, AtomEnum::CARDINAL, desk.saturating_mul(4), 4)?.reply()?;
+            let v: Vec<u32> = area.value32().map(Iterator::collect).unwrap_or_default();
+            Ok(match v[..] {
+                [x, y, w, h] if w > 0 && h > 0 => Some(super::Rect { x: x as i32, y: y as i32, w: w as i32, h: h as i32 }),
+                _ => None,
+            })
         })
     }
 
     /// `popup`: adds the popup states (out of the taskbar and the pager, above, sticky, on
     /// every desktop); otherwise removes them and puts the window on the current desktop.
     pub fn set_states(window: u32, popup: bool) -> anyhow::Result<()> {
-        let (conn, screen) = x11rb::connect(None)?;
-        let root = conn.setup().roots[screen].root;
-        let atom = |name: &str| -> anyhow::Result<u32> { Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom) };
+        with_x(|x| set_states_on(x, window, popup))
+    }
+
+    fn set_states_on(x: &X, window: u32, popup: bool) -> anyhow::Result<()> {
+        let (conn, root) = (&x.conn, x.root());
+        let atom = |name: &'static str| x.atom(name);
         let net_wm_state = atom("_NET_WM_STATE")?;
         let net_wm_desktop = atom("_NET_WM_DESKTOP")?;
         let states = [
@@ -581,7 +644,7 @@ mod x11 {
                 ev,
             )?;
         }
-        // round trip: makes sure the server processed everything before the connection closes
+        // round trip: makes sure the server processed everything before going on
         conn.get_input_focus()?.reply()?;
         Ok(())
     }
@@ -642,6 +705,12 @@ mod tests {
         let tray = position_with(None, true, (400, 500), &m, 0);
         assert_eq!(last(Some((5000, 300))), tray);
         assert_eq!(last(None), tray);
+        // dragged a little past the top or left edge: its corner is on no monitor, but it
+        // stays where it was left
+        assert_eq!(last(Some((100, -20))), Some((100, 0)));
+        assert_eq!(last(Some((-30, 200))), Some((0, 200)));
+        // mostly on the 2nd monitor: goes there, not to the one with its corner
+        assert_eq!(last(Some((1900, 100))), Some((1920, 100)));
     }
 
     #[test]

@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -72,12 +73,15 @@ pub struct Launch {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub dir: PathBuf,
+    /// The `dir` setting named a folder that doesn't exist (as written), so the shell
+    /// starts in the home folder instead.
+    pub dir_missing: Option<String>,
 }
 
 impl Launch {
     /// From the app settings: `shell` (empty = the system's) and `dir` (empty or missing =
-    /// the home folder). A shell with arguments is split at the spaces, unless the whole
-    /// text is a file (a path with spaces on Windows).
+    /// the home folder; a leading `~` is the home folder). A shell with arguments is split at
+    /// the spaces, unless the whole text is a file (a path with spaces on Windows).
     pub fn from_settings(shell: &str, dir: &str) -> anyhow::Result<Self> {
         let shell = shell.trim();
         let (program, args) = if shell.is_empty() {
@@ -96,8 +100,16 @@ impl Launch {
             (program, words.collect())
         };
         let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
-        let dir = Some(Path::new(dir.trim())).filter(|d| d.is_absolute() && d.is_dir()).map_or(home, Path::to_path_buf);
-        Ok(Launch { program, args, dir })
+        let written = dir.trim();
+        let (dir, dir_missing) = match start_dir(written, &home) {
+            Some(d) => (d, None),
+            None if written.is_empty() => (home, None),
+            None => {
+                log::warn!("terminal: start folder {written:?} not found; using the home folder");
+                (home, Some(written.to_string()))
+            }
+        };
+        Ok(Launch { program, args, dir, dir_missing })
     }
 
     /// Name of the shell for the screen ("zsh", "pwsh").
@@ -106,11 +118,25 @@ impl Launch {
     }
 }
 
+/// The folder `written` names, if it exists: absolute, or starting with `~` (the home folder).
+fn start_dir(written: &str, home: &Path) -> Option<PathBuf> {
+    let path = if written == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = written.strip_prefix("~/").or_else(|| written.strip_prefix("~\\")) {
+        home.join(rest)
+    } else {
+        PathBuf::from(written)
+    };
+    (!written.is_empty() && path.is_absolute() && path.is_dir()).then_some(path)
+}
+
 /// A running shell (or one that has just exited, still showing its last screen).
 pub struct Session {
     shared: Arc<Shared>,
     master: Box<dyn MasterPty + Send>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Bytes for the shell, written by a thread of their own: a program that doesn't read
+    /// its input fills the terminal's buffer, and the write then waits (the UI must not).
+    input: Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     pub launch: Launch,
 }
@@ -140,7 +166,7 @@ impl Session {
         drop(pair.slave);
         let killer = child.clone_killer();
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let mut writer = pair.master.take_writer()?;
         let parser = vt100::Parser::new_with_callbacks(
             rows.try_into()?,
             cols.try_into()?,
@@ -155,8 +181,19 @@ impl Session {
         });
         let wake = Arc::new(wake);
 
+        // writes the keys, pastes and query answers to the shell, in order; ends when the
+        // session and the reading thread are gone
+        let (input, queued) = channel::<Vec<u8>>();
+        std::thread::Builder::new().name("miniutils-term-write".into()).spawn(move || {
+            for bytes in queued {
+                if let Err(e) = writer.write_all(&bytes).and_then(|_| writer.flush()) {
+                    log::debug!("terminal: write failed: {e}");
+                }
+            }
+        })?;
+
         // reads what the shell writes and feeds the emulator
-        let (sh, w, wk) = (shared.clone(), writer.clone(), wake.clone());
+        let (sh, w, wk) = (shared.clone(), input.clone(), wake.clone());
         std::thread::Builder::new().name("miniutils-term-read".into()).spawn(move || {
             let mut buf = [0u8; 16 * 1024];
             loop {
@@ -170,8 +207,7 @@ impl Session {
                             std::mem::take(&mut p.callbacks_mut().replies)
                         };
                         if !replies.is_empty() {
-                            let mut w = lock(&w);
-                            let _ = w.write_all(&replies).and_then(|_| w.flush());
+                            let _ = w.send(replies);
                         }
                         wk();
                     }
@@ -189,7 +225,7 @@ impl Session {
             wk();
         })?;
 
-        Ok(Session { shared, master: pair.master, writer, killer, launch })
+        Ok(Session { shared, master: pair.master, input, killer, launch })
     }
 
     /// The emulator (screen, cursor, modes). Hold it briefly: the reading thread waits.
@@ -197,15 +233,12 @@ impl Session {
         lock(&self.shared.parser)
     }
 
-    /// Sends bytes to the shell (keys, paste).
+    /// Sends bytes to the shell (keys, paste). Never waits: the writing thread delivers them.
     pub fn write(&self, bytes: &[u8]) {
-        if self.exited().is_some() {
+        if self.exited().is_some() || bytes.is_empty() {
             return;
         }
-        let mut w = lock(&self.writer);
-        if let Err(e) = w.write_all(bytes).and_then(|_| w.flush()) {
-            log::debug!("terminal: write failed: {e}");
-        }
+        let _ = self.input.send(bytes.to_vec());
     }
 
     /// New size of the window, in cells.
@@ -268,7 +301,43 @@ mod tests {
         let l = Launch::from_settings("", "").unwrap();
         assert!(l.args.is_empty());
         assert_eq!(Some(l.dir), dirs::home_dir());
+        assert_eq!(l.dir_missing, None);
         assert!(Launch::from_settings("miniutils-shell-that-does-not-exist", "").is_err());
+        // "~" is the home folder
+        let l = Launch::from_settings("", " ~ ").unwrap();
+        assert_eq!((Some(l.dir), l.dir_missing), (dirs::home_dir(), None));
+        // a folder that doesn't exist (or a relative one) starts at home, and says so
+        let l = Launch::from_settings("", "~/miniutils-folder-that-does-not-exist").unwrap();
+        assert_eq!(Some(l.dir), dirs::home_dir());
+        assert_eq!(l.dir_missing.as_deref(), Some("~/miniutils-folder-that-does-not-exist"));
+        assert!(Launch::from_settings("", "relative/dir").unwrap().dir_missing.is_some());
+    }
+
+    #[test]
+    fn tilde_expands_to_home() {
+        let home = std::env::temp_dir();
+        let sub = home.join("miniutils-tilde-test");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(start_dir("~", &home), Some(home.clone()));
+        assert_eq!(start_dir("~/miniutils-tilde-test", &home), Some(sub.clone()));
+        #[cfg(windows)]
+        assert_eq!(start_dir("~\\miniutils-tilde-test", &home), Some(sub.clone()));
+        assert_eq!(start_dir("~/miniutils-tilde-missing", &home), None);
+        assert_eq!(start_dir("", &home), None);
+        let _ = std::fs::remove_dir(sub);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_big_paste_does_not_wait_for_the_shell() {
+        let launch = Launch::from_settings("sh", "/").unwrap();
+        let launch = Launch { args: vec!["-c".into(), "sleep 2".into()], ..launch };
+        let s = Session::start(launch, 4, 20, 0, || {}).unwrap();
+        let paste = vec![b'x'; 1024 * 1024];
+        let started = std::time::Instant::now();
+        s.write(&paste);
+        s.write(b"\r");
+        assert!(started.elapsed() < std::time::Duration::from_millis(50), "write waited {:?}", started.elapsed());
     }
 
     #[test]

@@ -150,7 +150,8 @@ fn change(t: &Target, edit: impl FnOnce(&mut DocumentMut) -> Result<(), String>)
     write_whole(path, &doc.to_string())?;
     let checked = match t {
         Target::Sprite(p) => pack::read_folder(p.parent().unwrap_or(Path::new("."))).map(|_| ()),
-        Target::Code(p) => file::read(p).map(|_| ()),
+        // through the same cache as the reload that follows: parsed (and leaked) once
+        Target::Code(p) => file::check(p),
     };
     if let Err(e) = checked {
         let _ = write_whole(path, &old);

@@ -121,8 +121,10 @@ pub struct Look {
 
 impl Look {
     /// Without an `Animator`: blink and frame come from the global counter (tray, list icons).
+    /// The blink falls on the last frame of each 25-frame cycle, so frame 0 (what a still
+    /// portrait draws) has its eyes open.
     pub fn from_frame(mood: Mood, frame: u32) -> Self {
-        Look { mood, reaction: None, blink: frame.is_multiple_of(25), frame, pose: None, ms: frame as u64 * FRAME.as_millis() as u64 }
+        Look { mood, reaction: None, blink: frame % 25 == 24, frame, pose: None, ms: frame as u64 * FRAME.as_millis() as u64 }
     }
 }
 

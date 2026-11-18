@@ -104,7 +104,7 @@ component Chip inherits Rectangle {
     in property <string> text;
     in property <color> ink;
     property <Colors> t: AgentsApp.theme;
-    height: 20px;
+    height: 20px * Skin.text-scale;
     width: row.preferred-width + 14px;
     horizontal-stretch: 0;
     border-width: 1px;
@@ -165,7 +165,8 @@ component Row inherits Rectangle {
     property <Colors> t: AgentsApp.theme;
     property <color> ink: a.state == "waiting" ? t.warn : a.state == "working" ? t.ok : t.sub;
     property <bool> dim: a.state == "idle";
-    property <length> base: narrow ? 50px : 56px;
+    // part heights follow the text size (never below the size at 100 %: the mascot fits)
+    property <length> base: max(1, Skin.text-scale) * (narrow ? 50px : 56px);
     property <length> inset: a.sub ? 28px : 12px;
     property <length> face-w: narrow ? 32px : 40px;
     // the details start aligned with the title (in a narrow cell, with the mascot)
@@ -176,16 +177,16 @@ component Row inherits Rectangle {
     property <bool> has-stats: !compact && (a.has-tokens || a.turn != "");
     property <bool> has-prompt: !compact && a.prompt != "";
     property <int> sub-lines: compact ? 0 : a.subs.length + (a.more-subs > 0 ? 1 : 0);
-    property <length> chips-h: has-chips ? 26px : 0;
-    property <length> stats-h: has-stats ? 22px : 0;
-    property <length> prompt-h: has-prompt ? 20px : 0;
-    property <length> sub-h: 19px;
+    property <length> chips-h: has-chips ? 26px * Skin.text-scale : 0;
+    property <length> stats-h: has-stats ? 22px * Skin.text-scale : 0;
+    property <length> prompt-h: has-prompt ? 20px * Skin.text-scale : 0;
+    property <length> sub-h: 19px * Skin.text-scale;
     property <length> subs-h: sub-lines * sub-h + (sub-lines > 0 ? 4px : 0);
     property <length> details-h: chips-h + stats-h + prompt-h + subs-h
         + (has-chips || has-stats || has-prompt || sub-lines > 0 ? 8px : 0);
     // strip of working subagents (taller with the imported mascots, up to 32 px)
     property <length> walk-h: a.heroes.length > 0 ? 42px : a.walkers > 0 ? 30px : 0;
-    property <length> options-h: a.open ? 46px : 0;
+    property <length> options-h: a.open ? max(1, Skin.text-scale) * 46px : 0;
 
     height: base + details-h + walk-h + options-h;
     background: a.state == "waiting" ? t.warn.with-alpha(0.1) : a.open ? t.visor.with-alpha(0.08) : hover.has-hover ? t.visor.with-alpha(0.05) : transparent;
@@ -486,12 +487,19 @@ export component AgentsView inherits Rectangle {
                 wrap: word-wrap;
             }
             Text {
-                text: AgentsApp.error-text != "" ? AgentsApp.error-text
-                    : @tr("{} working · {} waiting for you · {} idle", AgentsApp.working, AgentsApp.waiting, AgentsApp.idle);
-                color: AgentsApp.error-text != "" ? t.warn.mix(t.text, 0.6) : t.sub;
+                text: @tr("{} working · {} waiting for you · {} idle", AgentsApp.working, AgentsApp.waiting, AgentsApp.idle);
+                color: t.sub;
                 font-family: Skin.font-mono;
                 font-size: 12px * Skin.text-scale;
                 wrap: word-wrap;
+            }
+            // a source that couldn't be read: below the counts, which stay
+            if AgentsApp.error-text != "": Text {
+                text: AgentsApp.error-text;
+                color: t.warn.mix(t.text, 0.6);
+                font-family: Skin.font-mono;
+                font-size: 12px * Skin.text-scale;
+                overflow: elide;
             }
         }
         if !narrow: HorizontalLayout {

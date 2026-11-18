@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::{
     Agent, Details, LIMIT, RECENT, STALE, Source, State, Step, StepKind, Tool, base_name, describe, home_dir, iso_ms,
-    last_steps, mtime_ms, one_line, open, push_step, read_tail, short_cmd,
+    last_steps, mtime_ms, one_line, open, push_step, read_last, read_tail, short_cmd, TIMELINE_TAIL,
 };
 use crate::tr;
 
@@ -26,8 +26,27 @@ enum Turn {
 struct Tail {
     /// Last turn start or end and its time (ms).
     turn: Option<(Turn, i64)>,
-    /// Last tool called in the current turn.
+    /// Last tool called in the current turn (with no turn mark: the last one in the chunk).
     action: String,
+}
+
+impl Tail {
+    /// The end of a log that only grew since `prev` was read, when the new chunk has no
+    /// turn mark (a long turn whose output filled the whole chunk): the turn is still the
+    /// one `prev` saw, and a newer call replaces its action.
+    fn carry(self, prev: &Tail) -> Tail {
+        match (self.turn, prev.turn) {
+            (None, Some(turn)) => {
+                let action = match turn.0 {
+                    Turn::Started if !self.action.is_empty() => self.action,
+                    Turn::Started => prev.action.clone(),
+                    _ => String::new(),
+                };
+                Tail { turn: Some(turn), action }
+            }
+            _ => self,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -115,7 +134,20 @@ impl Codex {
             && *k == key {
                 return (key.1, tail.clone());
             }
-        let tail = read_tail(path, meta.len()).map(|text| parse_tail(&text)).unwrap_or_default();
+        let mut tail = read_tail(path, meta.len()).map(|text| parse_tail(&text)).unwrap_or_default();
+        if tail.turn.is_none() {
+            match self.tails.get(path) {
+                // the file only grew: what the last reading saw still holds
+                Some(((len, _), prev)) if *len <= key.0 => tail = tail.carry(prev),
+                // first reading in the middle of a long turn: look further back, once
+                _ if meta.len() > super::TAIL => {
+                    if let Some(text) = read_last(path, meta.len(), TIMELINE_TAIL) {
+                        tail = parse_tail(&text);
+                    }
+                }
+                _ => {}
+            }
+        }
         self.tails.insert(path.to_path_buf(), (key, tail.clone()));
         (key.1, tail)
     }
@@ -163,7 +195,7 @@ fn parse_tail(tail: &str) -> Tail {
             action = parse_call(line).unwrap_or_default();
         }
     }
-    Tail::default()
+    Tail { turn: None, action }
 }
 
 /// Timeline of a log chunk: the completed items (`item_completed`) of prompts, replies and
@@ -267,6 +299,19 @@ mod tests {
         // a closed turn has no action, and a call from the previous turn doesn't leak into the new one
         assert_eq!(parse_tail(&[started, new.as_str(), done].join("\n")).action, "");
         assert_eq!(parse_tail(&[started, new.as_str(), done, started].join("\n")).action, "");
+
+        // a chunk without marks (long output after `task_started`) keeps the turn it grew from
+        let prev = parse_tail(&[started, old.as_str()].join("\n"));
+        let chunk = parse_tail(&[other, other].join("\n"));
+        assert_eq!(chunk.turn, None);
+        assert_eq!(chunk.clone().carry(&prev), prev);
+        let newer = parse_tail(&[other, new.as_str(), other].join("\n")).carry(&prev);
+        assert_eq!((newer.turn, newer.action.as_str()), (prev.turn, "exec: cargo test"));
+        // a closed turn stays closed, with no action
+        let closed = parse_tail(&[started, done].join("\n"));
+        assert_eq!(parse_tail(new.as_str()).carry(&closed), Tail { turn: closed.turn, action: String::new() });
+        // a chunk with its own mark wins
+        assert_eq!(parse_tail(done).carry(&prev).turn.map(|t| t.0), Some(Turn::Complete));
     }
 
     #[test]

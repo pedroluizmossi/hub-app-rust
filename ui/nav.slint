@@ -2,7 +2,7 @@
 // at the bottom (PageBar) or tabs in the header (TopTabs). Chosen in Appearance › Pages.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons, Moods } from "theme.slint";
-import { Icon } from "widgets.slint";
+import { Icon, FocusRing } from "widgets.slint";
 import { PageInfo } from "models.slint";
 
 // An item of the page bar: the mascot (or an icon) in a tile and the name below.
@@ -18,12 +18,15 @@ component RailItem inherits Rectangle {
     in property <bool> ghost;         // "new page": only the tile outline
     in property <string> edge: "left";
     in property <color> badge: transparent;
+    // what screen readers hear (the shown text may be a short tag, like "config")
+    in property <string> a11y-label: text;
     callback clicked;
     // doesn't stretch: the bar's leftover space goes between the pages and the settings
     horizontal-stretch: 0;
     vertical-stretch: 0;
+    // a page is a tab; "new page" and the settings set `accessible-role: button`
     accessible-role: tab;
-    accessible-label: text;
+    accessible-label: a11y-label;
     accessible-item-selected: selected;
     accessible-action-default => { root.clicked(); }
 
@@ -113,6 +116,18 @@ component RailItem inherits Rectangle {
         height: mark;
         background: Skin.accent;
     }
+    // keyboard: Tab reaches it, Enter or Space opens it
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing { }
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -161,6 +176,7 @@ export component Rail inherits Rectangle {
                     icon-path: Icons.plus;
                     px-icon: Icons.px-plus;
                     text: @tr("New page");
+                    accessible-role: button;
                     show-text: false;
                     ghost: true;
                     clicked => { root.add(); }
@@ -177,6 +193,8 @@ export component Rail inherits Rectangle {
             icon-path: Icons.gear;
             px-icon: Icons.px-gear;
             text: @tr("config");
+            a11y-label: @tr("Settings");
+            accessible-role: button;
             selected: settings;
             clicked => { root.open-settings(); }
         }
@@ -223,6 +241,7 @@ export component PageBar inherits Rectangle {
                     icon-path: Icons.plus;
                     px-icon: Icons.px-plus;
                     text: @tr("New page");
+                    accessible-role: button;
                     show-text: false;
                     ghost: true;
                     clicked => { root.add(); }
@@ -240,6 +259,8 @@ export component PageBar inherits Rectangle {
             icon-path: Icons.gear;
             px-icon: Icons.px-gear;
             text: @tr("config");
+            a11y-label: @tr("Settings");
+            accessible-role: button;
             selected: settings;
             clicked => { root.open-settings(); }
         }
@@ -255,6 +276,7 @@ component TopTab inherits Rectangle {
     in property <color> badge: transparent;
     callback clicked;
     height: 36px;
+    // a page is a tab; "new page" sets `accessible-role: button`
     accessible-role: tab;
     accessible-label: text;
     accessible-item-selected: selected;
@@ -288,6 +310,17 @@ component TopTab inherits Rectangle {
         border-width: 1px;
         border-color: Skin.panel;
     }
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing { }
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -320,6 +353,7 @@ export component TopTabs inherits Flickable {
             alignment: center;
             TopTab {
                 icon-path: Icons.plus;
+                accessible-role: button;
                 accessible-label: @tr("New page");
                 clicked => { root.add(); }
             }

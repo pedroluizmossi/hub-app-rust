@@ -511,6 +511,9 @@ msgstr "Comemorando"
 msgid "Surprised"
 msgstr "Surpresa"
 
+msgid "Search mascots"
+msgstr "Buscar mascotes"
+
 msgid "Animations"
 msgstr "Animações"
 
@@ -716,6 +719,9 @@ msgstr "Encerrar todos"
 msgid "New tab"
 msgstr "Nova aba"
 
+msgid "Tab limit reached ({})"
+msgstr "Limite de abas atingido ({})"
+
 msgid "Not running. Open it to start your shell."
 msgstr "Parado. Abra para iniciar seu shell."
 
@@ -742,6 +748,9 @@ msgstr "sem sessão"
 
 msgid "{}: exited"
 msgstr "{}: encerrado"
+
+msgid "Start folder not found: {}; using home"
+msgstr "Pasta inicial não encontrada: {}; usando a pasta pessoal"
 
 msgid "Terminal: 1 shell running"
 msgstr "Terminal: 1 shell rodando"

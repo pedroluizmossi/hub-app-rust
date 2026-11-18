@@ -276,11 +276,8 @@ impl VitalsMini {
 
     /// Sustained warnings: CPU and RAM high for a while, a partition almost full, critical temperature.
     fn check_alerts(&mut self, s: &SysSnapshot) {
-        let (on, alarm, critical) = {
-            let cfg = self.host.config.borrow();
-            let m = &self.manifest;
-            (cfg.bool(m, "alerts"), cfg.int(m, "alarm") as f32, cfg.int(m, "temp_critical") as f32)
-        };
+        let on = self.host.config.borrow().bool(&self.manifest, "alerts");
+        let (_, alarm, _, critical) = self.levels();
         if !on {
             self.watches = Watches::default();
             return;
@@ -322,18 +319,19 @@ impl VitalsMini {
         }
     }
 
+    /// The thresholds from the config as (warn, alarm, hot, critical), each pair in order even
+    /// when the settings were saved inverted.
+    fn levels(&self) -> (f32, f32, f32, f32) {
+        let cfg = self.host.config.borrow();
+        let m = &self.manifest;
+        let (warn, alarm) = thresholds(cfg.int(m, "warn") as f32, cfg.int(m, "alarm") as f32);
+        let (hot, critical) = thresholds(cfg.int(m, "temp_hot") as f32, cfg.int(m, "temp_critical") as f32);
+        (warn, alarm, hot, critical)
+    }
+
     /// Recomputes the mood of each card from the thresholds in the config.
     fn update_moods(&mut self) {
-        let (warn, alarm, hot, critical) = {
-            let cfg = self.host.config.borrow();
-            let m = &self.manifest;
-            (
-                cfg.int(m, "warn") as f32,
-                cfg.int(m, "alarm") as f32,
-                cfg.int(m, "temp_hot") as f32,
-                cfg.int(m, "temp_critical") as f32,
-            )
-        };
+        let (warn, alarm, hot, critical) = self.levels();
         let swap = self.swap_frac;
         let before: [Mood; N] = std::array::from_fn(|i| self.vitals[i].mood);
         for (i, v) in self.vitals.iter_mut().enumerate() {
@@ -394,6 +392,12 @@ impl VitalsMini {
             self.cards.set_row_data(i, self.card(i));
         }
     }
+}
+
+/// A (lower, upper) threshold pair in order: the settings allow saving "restless" above
+/// "alarm" (or "hot" above "critical"), which would skip the middle state.
+pub fn thresholds(low: f32, high: f32) -> (f32, f32) {
+    (low.min(high), low.max(high))
 }
 
 /// Title of card `i` in the current language.
@@ -502,6 +506,13 @@ impl MiniApp for VitalsMini {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thresholds_in_order() {
+        assert_eq!(thresholds(60.0, 90.0), (60.0, 90.0));
+        assert_eq!(thresholds(90.0, 40.0), (40.0, 90.0));
+        assert_eq!(thresholds(70.0, 70.0), (70.0, 70.0));
+    }
 
     #[test]
     fn sparkline_path() {

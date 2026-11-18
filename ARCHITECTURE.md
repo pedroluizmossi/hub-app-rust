@@ -94,13 +94,17 @@ hub-app-rust/
                               de detalhe de uma sessão) terminal/ (com window.slint, a
                               janela do terminal)
   src/
-    main.rs                   argumentos (--hidden, --tab, --plugin-dev, --dirs,
-                              --import-mascot, comandos da loja) e event loop
+    main.rs                   argumentos (parse_args: --hidden, --tab, --plugin-dev, --dirs, --quit,
+                              --import-mascot, --check-mascot, -V/--version, comandos da
+                              loja) e event loop
     autostart.rs, autostart/  iniciar com o sistema: `.desktop` XDG no Linux, chave Run no
                               Windows (ver "Registro e iniciar com o sistema")
     store.rs, store/          loja: índice assinado, instalar, atualizar, remover plugins e
                               pacotes de mascotes (`store/mascots.rs`: só desenhos)
-                              (linha de comando e o que a tela da loja chama)
+                              (linha de comando e o que a tela da loja chama);
+                              `store/entry.rs`: `--store-entry`, o mantenedor acrescenta ou
+                              atualiza a entrada de um app no `registry.json` a partir do
+                              repositório e da tag
     hub/                      o host, um `impl Hub` dividido por assunto:
       mod.rs                  estado, montagem, `update` (acordado pelo barramento),
                               quadro de animação, bandeja
@@ -141,6 +145,8 @@ hub-app-rust/
                               pasta de dados XDG, pasta dos registros
       logging.rs              registro em arquivo + saída de erro (crate `log`) e pânico
                               registrado com a pilha; ver "Registro" abaixo
+      i18n.rs                 idioma da interface: `tr!`/`tr_noop!`, catálogo gettext
+                              (`i18n/pt-BR/*.po`) e o dos plugins (`Catalog`)
       about.rs                versão (`--version`, registro e Configurações › Sistema)
       bus.rs                  provedores em threads (`Topic`), assinaturas, "poke" para
                               ler já, janela visível ou escondida
@@ -218,7 +224,8 @@ hub-app-rust/
       todo.rs                 To-do rápido: lista em todo.json, na pasta de dados do app
       terminal/               Terminal: abas com o shell num pseudo-terminal (portable-pty;
                               ConPTY no Windows), emulador VT (vt100) numa thread por aba
-                              (session.rs) e a tela em trechos de texto com cor (grid.rs)
+                              (session.rs), a tela em trechos de texto com cor (grid.rs) e
+                              os efeitos da janela, desenhados uma vez por tamanho (fx.rs)
       mascots.rs              Mascotes: importar, janela de gerenciar (renomear, animações,
                               cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
@@ -242,7 +249,7 @@ Um mini-app é **manifesto + tela + lógica**.
 # miniapps/docker/manifest.toml
 id = "cyber.docker"
 name = "Docker"
-description = "Containers e stacks com ações rápidas; a mascote reage quando algo cai."
+description = "Containers and stacks with quick actions; the mascot reacts when something goes down."
 icon = "neko"            # mascote do app (configurações, bandeja)
 api = 1                  # versão do contrato com o host
 uses = ["docker"]        # provedores que assina enquanto ativo
@@ -252,10 +259,10 @@ exec = ["docker"]        # programas que pode executar
 
 [[settings]]
 key = "theme"            # todo app tem um tema; "auto" acompanha o visual da janela
-label = "Tema"
+label = "Theme"         # name, description e label em inglês; o catálogo traduz
 type = "choice"
 default = "auto"
-options = ["auto", "neon", "matrix", "aconchego"]
+# options: "auto" e todos os temas, preenchidas pelo hub (SettingDef::live_options)
 ```
 
 - `uses` liga os provedores quando o app é ativado e os solta quando é desativado. Os nomes

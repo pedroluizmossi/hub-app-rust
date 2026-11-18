@@ -1,4 +1,5 @@
-//! GPU: NVIDIA through `nvidia-smi`; otherwise the first AMD card (amdgpu) through sysfs.
+//! GPU: the first NVIDIA card through `nvidia-smi`; otherwise the first AMD card (amdgpu)
+//! through sysfs.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -190,7 +191,7 @@ impl Drop for Nvidia {
 fn watch(tx: Sender<GpuSnapshot>, stream: Arc<Stream>) {
     let spawned = exec::command("nvidia-smi")
         .args([
-            "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+            "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu",
             "--format=csv,noheader,nounits",
             "-l",
             &NVIDIA_EVERY.as_secs().to_string(),
@@ -209,7 +210,9 @@ fn watch(tx: Sender<GpuSnapshot>, stream: Arc<Stream>) {
             if stream.idle() {
                 break;
             }
-            if let Some(snap) = parse_nvidia(&line)
+            // one line per card on each loop: only the first card, so a machine with two
+            // doesn't alternate between them
+            if let Some((0, snap)) = parse_nvidia(&line)
                 && tx.send(snap).is_err() {
                     break;
                 }
@@ -222,15 +225,14 @@ fn watch(tx: Sender<GpuSnapshot>, stream: Arc<Stream>) {
     }
 }
 
-pub fn parse_nvidia(text: &str) -> Option<GpuSnapshot> {
-    let f: Vec<f32> = text.lines().next()?.split(',').map(|x| x.trim().parse().unwrap_or(0.0)).collect();
-    (f.len() >= 4).then(|| GpuSnapshot {
-        available: true,
-        vendor: "nvidia",
-        util: f[0],
-        vram_used_mib: f[1],
-        vram_total_mib: f[2],
-        temp: f[3],
+/// One line of `nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,
+/// temperature.gpu`: the card's index and its reading.
+pub fn parse_nvidia(text: &str) -> Option<(u32, GpuSnapshot)> {
+    let mut cols = text.lines().next()?.split(',').map(str::trim);
+    let index = cols.next()?.parse().ok()?;
+    let f: Vec<f32> = cols.map(|x| x.parse().unwrap_or(0.0)).collect();
+    (f.len() >= 4).then(|| {
+        (index, GpuSnapshot { available: true, vendor: "nvidia", util: f[0], vram_used_mib: f[1], vram_total_mib: f[2], temp: f[3] })
     })
 }
 
@@ -273,15 +275,19 @@ mod tests {
 
     #[test]
     fn nvidia() {
-        let g = parse_nvidia("37, 2048, 8192, 61\n").unwrap();
-        assert_eq!((g.util, g.vram_used_mib, g.vram_total_mib, g.temp), (37.0, 2048.0, 8192.0, 61.0));
+        let (i, g) = parse_nvidia("0, 37, 2048, 8192, 61\n").unwrap();
+        assert_eq!((i, g.util, g.vram_used_mib, g.vram_total_mib, g.temp), (0, 37.0, 2048.0, 8192.0, 61.0));
+        // the second card of a machine with two: its own index, so it can be left out
+        assert_eq!(parse_nvidia("1, 90, 100, 200, 80").map(|(i, g)| (i, g.util)), Some((1, 90.0)));
         assert!(parse_nvidia("").is_none());
+        assert!(parse_nvidia("37, 2048, 8192").is_none());
+        assert!(parse_nvidia("[N/A], 1, 2, 3, 4").is_none());
     }
 
     #[test]
     fn stale_reading_becomes_unavailable_and_repeated_failures_give_up() {
         let mut n = Nvidia::default();
-        let snap = parse_nvidia("10, 1, 2, 30").unwrap();
+        let snap = parse_nvidia("0, 10, 1, 2, 30").unwrap().1;
         // reader "running" and a fresh reading
         let (tx, rx) = channel();
         n.rx = Some(rx);

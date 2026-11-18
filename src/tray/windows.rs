@@ -3,6 +3,8 @@
 //! The icon and the menu live on the UI thread: the window's event loop delivers the
 //! clicks. So the `Tray` never leaves it (the hub already keeps it there).
 
+use std::time::{Duration, Instant};
+
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -10,6 +12,10 @@ use crate::core::miniapp::TrayMedia;
 use crate::tr;
 use crate::mascot::{Mood, render, sprites::Sprite, themes::Theme};
 use crate::ui::HubWindow;
+
+/// Two left clicks closer than this are a double-click (the Windows default; the real
+/// setting would need `GetDoubleClickTime`).
+const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// Windows cuts the icon tooltip at 127 characters.
 const TOOLTIP_MAX: usize = 120;
@@ -33,11 +39,25 @@ impl Tray {
             .build()?;
 
         let weak = ui.clone();
+        let last_toggle = std::sync::Mutex::new(None::<Instant>);
         TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+            // a double-click (usual on Windows tray icons) opens, and does not close again
+            if let TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } = event {
+                let _ = weak.upgrade_in_event_loop(|ui| ui.invoke_show_requested("".into()));
+                return;
+            }
             let TrayIconEvent::Click { position, button, button_state: MouseButtonState::Up, .. } = event else { return };
             let (x, y) = (position.x.round() as i32, position.y.round() as i32);
             match button {
                 MouseButton::Left => {
+                    // the second click of a double-click also arrives as a click: skip it
+                    let now = Instant::now();
+                    if let Ok(mut last) = last_toggle.lock() {
+                        if last.is_some_and(|t| now.duration_since(t) < DOUBLE_CLICK) {
+                            return;
+                        }
+                        *last = Some(now);
+                    }
                     let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_toggle_requested(x, y));
                 }
                 // middle click: toggles pin mode
@@ -112,12 +132,8 @@ fn menu(pinned: bool, media: Option<&TrayMedia>) -> anyhow::Result<Menu> {
     if let Some(media) = media {
         menu.append(&PredefinedMenuItem::separator())?;
         // in a Windows menu, `&` marks the shortcut letter: doubled, it is plain text
-        menu.append(&MenuItem::new(media.summary.replace('&', "&&"), false, None))?;
-        for (label, verb, enabled) in [
-            (tr!("Previous track"), "prev", media.can_previous),
-            (if media.playing { tr!("Pause") } else { tr!("Play") }, "play-pause", media.can_play_pause),
-            (tr!("Next track"), "next", media.can_next),
-        ] {
+        menu.append(&MenuItem::new(super::media_label(&media.summary).replace('&', "&&"), false, None))?;
+        for (label, verb, enabled) in super::media_items(media) {
             menu.append(&MenuItem::with_id(verb, label, enabled, None))?;
         }
     }

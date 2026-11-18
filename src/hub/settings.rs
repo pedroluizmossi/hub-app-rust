@@ -124,7 +124,9 @@ impl Hub {
             .iter()
             .map(|s| {
                 let v = cfg.value(m, &s.key);
-                let (label, unit) = split_unit(&s.label);
+                // the unit goes next to the number (only a stepper shows it)
+                let (label, unit) =
+                    if matches!(s.kind, SettingKind::Int) { split_unit(&s.label) } else { (s.label.clone(), String::new()) };
                 let options = s.live_options();
                 SettingRow {
                     app: m.id.clone().into(),
@@ -196,11 +198,14 @@ fn option_label(key: &str) -> String {
     }
 }
 
-/// Splits the unit off the end of the label: "Hot temperature (°C)" -> ("Hot temperature", "°C").
+/// Splits the unit off the end of the label, as the stepper writes it after the number:
+/// "Hot temperature (°C)" -> ("Hot temperature", "°C"); "Refresh every (min)" -> ("Refresh
+/// every", " min"). Symbols stick to the number ("80%"), words get a space ("30 s").
 fn split_unit(label: &str) -> (String, String) {
-    for unit in ["%", "°C"] {
+    const UNITS: [(&str, &str); 5] = [("%", "%"), ("°C", "°C"), ("s", " s"), ("min", " min"), ("px", " px")];
+    for (unit, shown) in UNITS {
         if let Some(base) = label.strip_suffix(&format!(" ({unit})")) {
-            return (base.to_string(), unit.to_string());
+            return (base.to_string(), shown.to_string());
         }
     }
     (label.to_string(), String::new())
@@ -228,6 +233,23 @@ fn origin(id: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn splits_the_unit_off_the_label() {
+        let split = split_unit;
+        assert_eq!(split("Hot temperature (°C)"), ("Hot temperature".into(), "°C".into()));
+        assert_eq!(split("Warn at (%)"), ("Warn at".into(), "%".into()));
+        assert_eq!(split("Skip forward/back step (s)"), ("Skip forward/back step".into(), " s".into()));
+        assert_eq!(split("Refresh every (min)"), ("Refresh every".into(), " min".into()));
+        assert_eq!(split("Terminal text size (px)"), ("Terminal text size".into(), " px".into()));
+        // the pt-BR labels keep the same suffix
+        assert_eq!(split("Atualizar a cada (min)"), ("Atualizar a cada".into(), " min".into()));
+        // no unit, or a parenthesis that is not one
+        assert_eq!(split("Columns"), ("Columns".into(), String::new()));
+        assert_eq!(split("Shell (empty = the system's)"), ("Shell (empty = the system's)".into(), String::new()));
+        assert_eq!(split("Pages (ms)"), ("Pages (ms)".into(), String::new()));
+        assert_eq!(split("(min)"), ("(min)".into(), String::new()));
+    }
 
     #[test]
     fn recognizes_the_mascot_options_of_the_manifests() {

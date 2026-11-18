@@ -38,7 +38,8 @@ export global StoreApp {
     in-out property <string> index;
     in-out property <string> key;
     in property <[StoreRow]> rows;
-    // status: "signature verified · 2 plugins", or the error
+    // status: "signature verified · plugins: 2 · mascots: 1" (after the last action's result,
+    // if any), or the error; while loading, only that result ("" = none)
     in property <string> status;
     in property <bool> failed;
     in property <bool> loading;
@@ -213,7 +214,8 @@ export component StoreView inherits ScrollView {
                 HorizontalLayout {
                     spacing: 10px;
                     Text {
-                        text: StoreApp.loading ? @tr("loading…") : StoreApp.status;
+                        text: !StoreApp.loading ? StoreApp.status
+                            : StoreApp.status != "" ? StoreApp.status + " · " + @tr("loading…") : @tr("loading…");
                         color: StoreApp.failed ? Skin.danger : Skin.sub;
                         font-family: Skin.font-mono;
                         font-size: 12px * Skin.text-scale;
@@ -226,6 +228,8 @@ export component StoreView inherits ScrollView {
                         icon: Icons.refresh;
                         ink: Skin.accent;
                         font-size: 13px * Skin.text-scale;
+                        // one load at a time (an older result is dropped anyway)
+                        enabled: !StoreApp.loading;
                         clicked => { StoreApp.save-source(index.text, key.text); }
                     }
                 }
@@ -235,10 +239,13 @@ export component StoreView inherits ScrollView {
         for r in StoreApp.rows: PluginRow { item: r; }
 
         if StoreApp.rows.length == 0 && !StoreApp.loading: Text {
-            text: @tr("Nothing to show.");
+            text: StoreApp.failed
+                ? @tr("Could not load the store. Check the index and key above, then Save and load.")
+                : @tr("Nothing to show.");
             color: Skin.dim;
             font-size: 13px * Skin.text-scale;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }

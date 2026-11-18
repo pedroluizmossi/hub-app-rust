@@ -44,6 +44,11 @@
 //! fact("strain", "CPU", 93)   fact for the chat: trouble, strain, forecast, recovered, poked
 //! notify("title", "text")
 //! now()                       seconds since 1970
+//! setting("key")              one of the app's options (() if it has none by that name)
+//! tr("text")  tr("{} of {}", [a, b])   text in the interface language, from the plugin's
+//!                             i18n/<lang>.po (like @tr in the view); English without it
+//! lang()                      the interface language: "en" or "pt-BR"
+//! print("text")               the same as summary("text")
 //! ```
 //! State between calls lives in `this` (e.g. `this.count += 1`). The host already tells the
 //! chat about mood changes (alarm, busy, back to normal) and pokes on the mascot.
@@ -88,7 +93,7 @@ use crate::mascot::{Mood, sprites};
 use crate::tr;
 use crate::ui::{HubWindow, PluginApps, PluginCard};
 use db::DbSpec;
-use script::{ScriptEnv, ScriptIn, ScriptOut, engine, event_data, from_app, json_to_dyn, script_loop};
+use script::{PValue, ScriptEnv, ScriptIn, ScriptOut, engine, event_data, from_app, json_to_dyn, load_image, script_loop};
 use view::{FONT_PROP, compile_view, theme_value};
 pub use view::check_view;
 
@@ -351,6 +356,8 @@ struct Full {
     instance: Rc<RefCell<Option<ComponentInstance>>>,
     /// Last values put on the screen, to restore on a new instance.
     values: Rc<RefCell<HashMap<String, Value>>>,
+    /// Image file (and its modification time) last put on each property.
+    images: RefCell<HashMap<String, (PathBuf, Option<std::time::SystemTime>)>>,
     /// The running logic (`None` = off, or the process exited).
     sink: Rc<RefCell<Option<Sink>>>,
     /// Changes on every start: messages from an old process are ignored.
@@ -368,7 +375,10 @@ impl Full {
         }
     }
 
+    /// Stops the logic. The stop is asynchronous (a script may be inside a long call), so
+    /// the generation changes too: whatever the old logic still sends is dropped.
     fn stop(&self) {
+        self.generation.set(self.generation.get() + 1);
         if let Some(sink) = self.sink.borrow_mut().take() {
             sink.stop();
         }
@@ -421,6 +431,7 @@ impl PluginMini {
                     source,
                     instance: Default::default(),
                     values: Default::default(),
+                    images: Default::default(),
                     sink: Default::default(),
                     generation: Default::default(),
                     alive: Default::default(),
@@ -520,11 +531,15 @@ impl PluginMini {
         });
     }
 
-    /// The card's refresh button: an external app that stopped (or failed) starts again;
-    /// the rest runs now.
+    /// The card's refresh button: logic that stopped (or failed) starts again, script or
+    /// external app; the rest runs now.
     fn refresh_button(&mut self) {
-        let stopped = self.full.as_ref().is_some_and(|f| !f.running());
-        if self.plugin.app.is_some() && (stopped || self.error.is_some()) {
+        let stopped = self.full.as_ref().is_some_and(|f| {
+            // the script thread ends by itself on a compile error or a failed migration
+            let script_ended = f.source.is_some() && f.alive.borrow().as_ref().is_some_and(|a| !a.load(Ordering::SeqCst));
+            !f.running() || script_ended
+        });
+        if self.full.is_some() && (stopped || self.error.is_some()) {
             self.start_logic();
             self.mood_changed(self.mood);
         } else {
@@ -549,7 +564,7 @@ impl PluginMini {
         };
         let result = match (prep, source) {
             (Err(e), _) => Err(e),
-            (Ok(_), Some(source)) => self.start_script(source),
+            (Ok(_), Some(source)) => self.start_script(source, generation),
             (Ok(_), None) => self.start_process(generation),
         };
         if let Some(full) = &self.full {
@@ -564,7 +579,7 @@ impl PluginMini {
     }
 
     /// The script thread (plugin with a screen).
-    fn start_script(&self, source: String) -> Result<Sink, String> {
+    fn start_script(&self, source: String, generation: u64) -> Result<Sink, String> {
         let (tx, rx) = channel();
         let m = &self.plugin.manifest;
         let (spec, dir) = (self.plugin.data(), appdata::dir(&m.id));
@@ -590,7 +605,7 @@ impl PluginMini {
             .spawn(move || {
                 script_loop(source, env, settings, rx, move |batch| {
                     let id = id.clone();
-                    let _ = slint::invoke_from_event_loop(move || deliver(&id, None, batch));
+                    let _ = slint::invoke_from_event_loop(move || deliver(&id, generation, batch));
                     // the hub updates the mood and the tray even with the window closed
                     waker.wake();
                 });
@@ -612,10 +627,10 @@ impl PluginMini {
         let data_dir = appdata::dir(&m.id);
         let launch = external::Launch { id: &m.id, program: &program, dir: &self.plugin.dir, data_dir: &data_dir };
         let pending: Arc<Mutex<Vec<ScriptOut>>> = Default::default();
-        let (id, waker) = (m.id.clone(), self.waker.clone());
+        let (id, waker, dir) = (m.id.clone(), self.waker.clone(), self.plugin.dir.clone());
         let process = external::Process::spawn(&launch, move |incoming| {
             let out = match incoming {
-                Incoming::Msg(msg) => from_app(msg),
+                Incoming::Msg(msg) => from_app(msg, &dir),
                 Incoming::Exited(e) => ScriptOut::Exited(e),
             };
             let first = match pending.lock() {
@@ -629,7 +644,7 @@ impl PluginMini {
                 let (id, pending) = (id.clone(), pending.clone());
                 let _ = slint::invoke_from_event_loop(move || {
                     let batch = pending.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-                    deliver(&id, Some(generation), batch);
+                    deliver(&id, generation, batch);
                 });
                 waker.wake();
             }
@@ -670,7 +685,13 @@ impl PluginMini {
         let before = self.mood;
         for msg in batch {
             match msg {
-                ScriptOut::Set(name, v) => self.set_view(&name, v.to_value()),
+                ScriptOut::Set(name, PValue::Image(path)) => self.set_image(&name, path),
+                ScriptOut::Set(name, v) => {
+                    if let Some(full) = &self.full {
+                        full.images.borrow_mut().remove(&name);
+                    }
+                    self.set_view(&name, v.to_value());
+                }
                 ScriptOut::Mood(m) => self.script_mood = mood_from(&m),
                 ScriptOut::Summary(s) => self.script_summary = s,
                 ScriptOut::Fact(kind, subject, value) => {
@@ -775,6 +796,19 @@ impl PluginMini {
         full.values.borrow_mut().insert(name.to_string(), v);
     }
 
+    /// Puts an image from disk on the screen; the same file, unchanged since last time,
+    /// isn't decoded again (an app may send it on every tick).
+    fn set_image(&self, name: &str, path: PathBuf) {
+        let Some(full) = &self.full else { return };
+        let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        let key = (path, mtime);
+        if mtime.is_some() && full.images.borrow().get(name) == Some(&key) {
+            return;
+        }
+        self.set_view(name, Value::Image(load_image(&key.0)));
+        full.images.borrow_mut().insert(name.to_string(), key);
+    }
+
     /// Properties the host fills in, if the screen declares them.
     fn push_host_props(&self) {
         let Some(full) = &self.full else { return };
@@ -873,12 +907,13 @@ impl PluginMini {
     }
 }
 
-/// Delivers what the script (or the process of generation `generation`) sent to its app, on
-/// the UI thread. A message from a process that has since been replaced is dropped.
-fn deliver(id: &str, generation: Option<u64>, batch: Vec<ScriptOut>) {
+/// Delivers what the logic of generation `generation` (script thread or process) sent to
+/// its app, on the UI thread. A message from logic that has since been stopped or replaced
+/// is dropped.
+fn deliver(id: &str, generation: u64, batch: Vec<ScriptOut>) {
     let Some(app) = find_app(id) else { return };
     let current = app.borrow().full.as_ref().map(|f| f.generation.get());
-    if generation.is_some() && generation != current {
+    if current != Some(generation) {
         return;
     }
     let ui = SET.with(|_| crate::hub::ui_handle());

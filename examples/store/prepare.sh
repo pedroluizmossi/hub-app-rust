@@ -18,7 +18,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 bin=${MINIUTILS_BIN:-"cargo run -q --manifest-path $here/../Cargo.toml --"}
 
 new=false
-if [ "${1:-}" = "--new-version" ] || [ "${1:-}" = "--nova-versao" ]; then
+if [ "${1:-}" = "--new-version" ]; then
     new=true
     shift
 fi

@@ -10,7 +10,8 @@
 // `col × cell-w`.
 //
 // Shortcuts: Ctrl+Shift+T new tab, Ctrl+Shift+W close tab, Ctrl+PageUp/PageDown switch
-// tabs, Ctrl+Shift+C/V copy and paste (Shift+Insert and the middle button paste too).
+// tabs, Ctrl+Shift+C/V copy and paste (Shift+Insert and the middle button paste too),
+// Ctrl+= / Ctrl+- / Ctrl+0 text size (bigger, smaller, default; saved as the setting).
 import { Colors, Skin, Icons, Anim } from "../../ui/theme.slint";
 import { HeaderButton, Icon, Mascot } from "../../ui/widgets.slint";
 import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
@@ -66,6 +67,8 @@ export global TerminalScreen {
     in property <string> title;
     in property <[TermTab]> tabs;
     in property <int> active;
+    // below the tab limit: "+" and Ctrl+Shift+T open another
+    in property <bool> can-add-tab: true;
     in property <[TermLine]> lines;
     in property <int> cursor-row;
     in property <int> cursor-col;
@@ -94,6 +97,8 @@ export global TerminalScreen {
     callback select-start(int /* col */, int /* row */);
     callback select-to(int, int);
     callback new-tab();
+    // text size: +1 bigger, -1 smaller, 0 back to the default
+    callback zoom(int);
     callback select-tab(int);
     callback close-tab(int);
     // the window fills the screen (Rust keeps it in step with the system's state)
@@ -108,7 +113,9 @@ export global TerminalScreen {
     callback start-resize(string);
 }
 
-// One tab: the shell's title, a dot for its state and the button that closes it.
+// One tab: the shell's title, a dot for its state and the button that closes it. Many
+// tabs in a narrow window shrink to the icon alone (the middle button and Ctrl+Shift+W
+// still close them), so the tab bar never makes the window wider than the screen.
 component Tab inherits Rectangle {
     in property <TermTab> tab;
     in property <bool> active;
@@ -116,8 +123,10 @@ component Tab inherits Rectangle {
     callback clicked;
     callback close;
     property <Colors> t: TerminalScreen.theme;
-    min-width: 90px;
+    property <bool> narrow: self.width < 80px;
+    min-width: 24px;
     max-width: 220px;
+    clip: true;
     preferred-width: 180px;
     horizontal-stretch: 1;
     background: active ? TerminalScreen.background : area.has-hover ? t.visor.with-alpha(0.06) : transparent;
@@ -137,7 +146,12 @@ component Tab inherits Rectangle {
         height: 2px;
         background: t.visor;
     }
-    HorizontalLayout {
+    if narrow: Icon {
+        icon: Icons.terminal;
+        ink: tab.ended ? t.sleep : active ? t.ok : t.sub;
+        size: 14px;
+    }
+    if !narrow: HorizontalLayout {
         padding-left: 10px;
         padding-right: 4px;
         spacing: 7px;
@@ -258,11 +272,28 @@ export component TerminalWindow inherits Window {
                 return accept;
             }
             if e.text == "t" || e.text == "T" {
-                TerminalScreen.new-tab();
+                if TerminalScreen.can-add-tab {
+                    TerminalScreen.new-tab();
+                }
                 return accept;
             }
             if e.text == "w" || e.text == "W" {
                 TerminalScreen.close-tab(TerminalScreen.active);
+                return accept;
+            }
+        }
+        // text size, as in other terminals ("+" also with Shift, on layouts that need it)
+        if e.modifiers.control && !e.modifiers.alt {
+            if e.text == "=" || e.text == "+" {
+                TerminalScreen.zoom(1);
+                return accept;
+            }
+            if e.text == "-" {
+                TerminalScreen.zoom(-1);
+                return accept;
+            }
+            if e.text == "0" {
+                TerminalScreen.zoom(0);
                 return accept;
             }
         }
@@ -419,9 +450,15 @@ export component TerminalWindow inherits Window {
             }
             Rectangle {
                 width: 32px;
-                background: plus.has-hover ? Skin.accent.with-alpha(0.14) : transparent;
-                Icon { icon: Icons.plus; ink: plus.has-hover ? Skin.accent : Skin.sub; size: 14px; }
+                background: plus.has-hover && plus.enabled ? Skin.accent.with-alpha(0.14) : transparent;
+                opacity: plus.enabled ? 1 : 0.4;
+                accessible-role: button;
+                accessible-label: plus.enabled ? @tr("New tab") : @tr("Tab limit reached ({})", TerminalScreen.tabs.length);
+                accessible-enabled: plus.enabled;
+                accessible-action-default => { if plus.enabled { TerminalScreen.new-tab(); } }
+                Icon { icon: Icons.plus; ink: plus.has-hover && plus.enabled ? Skin.accent : Skin.sub; size: 14px; }
                 plus := TouchArea {
+                    enabled: TerminalScreen.can-add-tab;
                     clicked => {
                         TerminalScreen.new-tab();
                         keys.focus();

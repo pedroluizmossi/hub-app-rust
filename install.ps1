@@ -62,8 +62,8 @@ function Install-MiniUtils {
         $running = @(Get-Process -Name miniutils -ErrorAction SilentlyContinue)
         if ($running.Count -gt 0) {
             Write-Host "Closing the running MiniUtils to update it..."
-            $running | Stop-Process -Force
-            $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+            # the new version asks it to quit, which saves the window and the configuration
+            Stop-MiniUtils -Exe (Join-Path $tmp "$name\miniutils.exe") -Running $running
         }
 
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -87,17 +87,38 @@ function Install-MiniUtils {
     }
 }
 
+# Asks the running MiniUtils to quit (`miniutils --quit`, which saves the window and the
+# configuration) and waits up to 5 s; whatever is still open after that is forced to close.
+function Stop-MiniUtils {
+    param([string]$Exe, [object[]]$Running)
+    if (Test-Path $Exe) {
+        try {
+            Start-Process -FilePath $Exe -ArgumentList "--quit" -Wait -WindowStyle Hidden
+        } catch {
+            # an old version without --quit, or no permission: the force below still closes it
+        }
+        $Running | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+    }
+    $Running | Where-Object { -not $_.HasExited } | Stop-Process -Force -ErrorAction SilentlyContinue
+    $Running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+}
+
 function Uninstall-MiniUtils {
     $ErrorActionPreference = "Stop"
     $dir = Join-Path $env:LOCALAPPDATA "Programs\MiniUtils"
     $shortcut = Join-Path ([Environment]::GetFolderPath("Programs")) "MiniUtils.lnk"
 
-    Get-Process -Name miniutils -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 500
+    $running = @(Get-Process -Name miniutils -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+        Stop-MiniUtils -Exe (Join-Path $dir "miniutils.exe") -Running $running
+        Start-Sleep -Milliseconds 500
+    }
     Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
     Remove-Item -Force $shortcut -ErrorAction SilentlyContinue
     # "Start with the system" (src/autostart/windows.rs)
     Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "MiniUtils" -ErrorAction SilentlyContinue
+    # name and icon of the notifications (src/core/notify.rs)
+    Remove-Item -Path "HKCU:\Software\Classes\AppUserModelId\MiniUtils.MiniUtils" -Recurse -ErrorAction SilentlyContinue
     Write-Host "MiniUtils removed. The configuration in $env:APPDATA\miniutils was not deleted."
 }
 

@@ -31,17 +31,20 @@ pub fn socket_path() -> PathBuf {
     PathBuf::from(format!(r"\\.\pipe\{}-{}", stem(instance.as_deref()), clean(&user)))
 }
 
-/// Tells the running instance (if any) that the plugins changed. `false` = nobody listened.
-pub fn notify_plugins_changed() -> bool {
-    matches!(send(&socket_path(), "plugins"), Ok(true))
+/// Hands a command line to the instance listening at `path`. `false` = nobody listened.
+pub fn send(path: &Path, message: &str) -> bool {
+    matches!(deliver(path, Some(message)), Ok(true))
 }
 
-/// Hands a line to the main instance. `Ok(false)` = no instance is listening.
-fn send(path: &Path, message: &str) -> io::Result<bool> {
+/// Hands a line to the main instance (`None`: opens the pipe and sends nothing, which the
+/// main one ignores). `Ok(false)` = no instance is listening.
+fn deliver(path: &Path, message: Option<&str>) -> io::Result<bool> {
     for _ in 0..20 {
         match OpenOptions::new().write(true).open(path) {
             Ok(mut pipe) => {
-                pipe.write_all(format!("{message}\n").as_bytes())?;
+                if let Some(message) = message {
+                    pipe.write_all(format!("{message}\n").as_bytes())?;
+                }
                 return Ok(true);
             }
             Err(e) if e.raw_os_error() == Some(PIPE_BUSY) => std::thread::sleep(Duration::from_millis(50)),
@@ -139,11 +142,12 @@ impl Server {
     }
 }
 
-/// Tries to be the main instance at `path`. If there already is one, hands it `message`.
-pub fn claim(path: &Path, message: &str) -> io::Result<Role> {
+/// Tries to be the main instance at `path`. If there already is one, hands it `message`
+/// (`None`: sends nothing).
+pub fn claim(path: &Path, message: Option<&str>) -> io::Result<Role> {
     // two attempts: the 2nd covers another instance starting at that very moment
     for _ in 0..2 {
-        if send(path, message)? {
+        if deliver(path, message)? {
             return Ok(Role::Second);
         }
         match create(path, true) {
@@ -164,7 +168,7 @@ mod tests {
     #[test]
     fn second_instance_delivers_the_command_and_exits() {
         let path = PathBuf::from(format!(r"\\.\pipe\miniutils-test-{}", std::process::id()));
-        let Role::First(server) = claim(&path, "show apps").unwrap() else {
+        let Role::First(server) = claim(&path, Some("show apps")).unwrap() else {
             panic!("the first instance should become the main one");
         };
         let (tx, rx) = mpsc::channel();
@@ -174,7 +178,7 @@ mod tests {
             })
             .unwrap();
         for _ in 0..2 {
-            assert!(matches!(claim(&path, "show apps").unwrap(), Role::Second));
+            assert!(matches!(claim(&path, Some("show apps")).unwrap(), Role::Second));
             let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("command did not arrive");
             assert_eq!(cmd, Command::Show(Some("apps".into())));
         }

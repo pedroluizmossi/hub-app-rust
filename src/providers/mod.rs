@@ -29,9 +29,8 @@ pub fn spawn_all(bus: &mut Bus) {
     let mut media = media::MediaProvider::default();
     bus.spawn_polled(Topic::Media, Duration::from_secs(1), move |_, poked| media.collect(poked).map(Event::Media));
     let mut ai_usage = ai_usage::UsageProvider::default();
-    bus.spawn_polled(Topic::AiUsage, Duration::from_secs(60), move |_, poked| {
-        Some(Event::AiUsage(ai_usage.collect(poked)))
-    });
+    // only publishes when some source was read (or a reading was requested)
+    bus.spawn_polled(Topic::AiUsage, Duration::from_secs(60), move |_, poked| ai_usage.collect(poked).map(Event::AiUsage));
     // `ss` is cheap: every 3 s with the window open, every 15 s hidden (only the tray sees it)
     let mut last_ports: Option<std::time::Instant> = None;
     bus.spawn_polled(Topic::Ports, Duration::from_secs(3), move |poker, poked| {

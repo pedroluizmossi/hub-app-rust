@@ -44,6 +44,8 @@ pub struct Container {
     pub finished_at: i64,
     /// How many times Docker restarted the container (restart policy).
     pub restarts: u32,
+    /// The kernel killed it for running out of memory (exit 137 then is not a deliberate stop).
+    pub oom_killed: bool,
 }
 
 /// What `docker inspect` adds to `docker ps`.
@@ -52,6 +54,7 @@ pub struct Inspect {
     pub started_at: i64,
     pub finished_at: i64,
     pub restarts: u32,
+    pub oom_killed: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
@@ -89,6 +92,9 @@ const RETRY_FIRST: Duration = Duration::from_secs(2);
 const RETRY_MAX: Duration = Duration::from_secs(30);
 /// Bursts of events (e.g. `compose up`) become a single reading.
 const DEBOUNCE: Duration = Duration::from_millis(300);
+/// How often the idle events thread checks whether it still has subscribers (the delay
+/// before it stops once the Docker app is turned off).
+const IDLE_CHECK: Duration = Duration::from_secs(1);
 /// Container actions that change what the mini-app shows.
 const RELEVANT: &[&str] = &[
     "create", "start", "restart", "die", "stop", "kill", "oom", "pause", "unpause", "destroy", "rename", "update",
@@ -143,20 +149,32 @@ impl DockerProvider {
         // without the command there is nothing to watch; the thread starts once it shows up
         if !self.missing && !self.watching.swap(true, Ordering::Relaxed) {
             let (p, flag) = (poker.clone(), self.watching.clone());
-            std::thread::Builder::new()
-                .name("docker-events".into())
-                .spawn(move || watch(p, flag))
-                .expect("could not spawn the docker events thread");
+            let spawned = std::thread::Builder::new().name("docker-events".into()).spawn(move || watch(p, flag));
+            if let Err(e) = spawned {
+                // polling with `ps` keeps working; the next collect tries again
+                log::warn!("docker: could not start the events watcher: {e}");
+                self.watching.store(false, Ordering::Relaxed);
+            }
         }
 
         if self.containers.iter().any(|c| c.state == "running") {
             if poked || self.last_stats.is_none_or(|t| now - t >= stats_every) {
                 self.last_stats = Some(now);
-                self.stats =
-                    exec::run_timeout("docker", &["stats", "--no-stream", "--format", "{{json .}}"], STATS_TIMEOUT)
-                        .map(|o| parse_stats(&o))
-                        .unwrap_or_default();
-                changed = true;
+                match exec::run_timeout("docker", &["stats", "--no-stream", "--format", "{{json .}}"], STATS_TIMEOUT) {
+                    Ok(out) => {
+                        self.stats = parse_stats(&out);
+                        changed = true;
+                    }
+                    // a slow or failed reading keeps the last good one (minus containers that are gone)
+                    Err(e) => {
+                        log::debug!("docker stats failed: {}", e.brief());
+                        let before = self.stats.len();
+                        let names: std::collections::HashSet<&str> =
+                            self.containers.iter().map(|c| c.name.as_str()).collect();
+                        self.stats.retain(|name, _| names.contains(name.as_str()));
+                        changed |= self.stats.len() != before;
+                    }
+                }
             }
         } else {
             self.last_stats = None;
@@ -206,13 +224,15 @@ impl DockerProvider {
                 c.started_at = i.started_at;
                 c.finished_at = i.finished_at;
                 c.restarts = i.restarts;
+                c.oom_killed = i.oom_killed;
             }
         }
     }
 }
 
-/// One line per container: "<id> <restarts> <start> <end>".
-const INSPECT_FORMAT: &str = "{{.Id}} {{.RestartCount}} {{.State.StartedAt}} {{.State.FinishedAt}}";
+/// One line per container: "<id> <restarts> <start> <end> <oom-killed>".
+const INSPECT_FORMAT: &str =
+    "{{.Id}} {{.RestartCount}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.OOMKilled}}";
 
 /// Docker ids are hexadecimal (with --no-trunc, 64 digits).
 fn valid_id(id: &str) -> bool {
@@ -228,7 +248,8 @@ pub fn parse_inspect(out: &str) -> HashMap<String, Inspect> {
             let restarts = f.next()?.parse().ok()?;
             let started_at = f.next().and_then(parse_time).unwrap_or(0);
             let finished_at = f.next().and_then(parse_time).unwrap_or(0);
-            Some((id.to_string(), Inspect { started_at, finished_at, restarts }))
+            let oom_killed = f.next() == Some("true");
+            Some((id.to_string(), Inspect { started_at, finished_at, restarts, oom_killed }))
         })
         .collect()
 }
@@ -294,7 +315,9 @@ fn watch(poker: Poker, watching: Arc<AtomicBool>) {
                 if !poker.subscribed() {
                     break;
                 }
-                match rx.recv_timeout(Duration::from_millis(100)) {
+                // waits for the pending debounce, or else up to IDLE_CHECK to see the subscription
+                let wait = due.map_or(IDLE_CHECK, |t| t.saturating_duration_since(Instant::now()));
+                match rx.recv_timeout(wait) {
                     Ok(line) => {
                         if relevant(&line) && due.is_none() {
                             due = Some(Instant::now() + DEBOUNCE);
@@ -340,13 +363,16 @@ fn events_args() -> Vec<String> {
 /// Sleeps `d`, unless the provider loses its subscribers. `false` if it lost them.
 fn sleep_subscribed(poker: &Poker, d: Duration) -> bool {
     let end = Instant::now() + d;
-    while Instant::now() < end {
+    loop {
         if !poker.subscribed() {
             return false;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        std::thread::sleep(left.min(IDLE_CHECK));
     }
-    poker.subscribed()
 }
 
 /// Tells whether a `docker events` line changes what the mini-app shows.
@@ -576,12 +602,16 @@ mod tests {
 
     #[test]
     fn inspect() {
-        let out = "abc123 2 2026-11-09T15:02:34.006791228Z 0001-01-01T00:00:00Z\n\
-                   def 0 2026-11-09T15:00:00Z 2026-11-09T16:00:00Z\ngarbage\n";
+        let out = "abc123 2 2026-11-09T15:02:34.006791228Z 0001-01-01T00:00:00Z false\n\
+                   def 0 2026-11-09T15:00:00Z 2026-11-09T16:00:00Z true\n\
+                   f00 1 2026-11-09T15:00:00Z\ngarbage\n";
         let i = parse_inspect(out);
-        assert_eq!(i.len(), 2);
-        assert_eq!(i["abc123"], Inspect { started_at: 1794236554, finished_at: 0, restarts: 2 });
+        assert_eq!(i.len(), 3);
+        assert_eq!(i["abc123"], Inspect { started_at: 1794236554, finished_at: 0, restarts: 2, oom_killed: false });
         assert_eq!(i["def"].finished_at - i["def"].started_at, 3600);
+        assert!(i["def"].oom_killed);
+        // missing fields at the end: unknown, not an error
+        assert_eq!((i["f00"].finished_at, i["f00"].oom_killed), (0, false));
         assert!(valid_id("abc123"));
         assert!(!valid_id("-f"));
         assert!(!valid_id(""));

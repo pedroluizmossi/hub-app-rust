@@ -2,8 +2,8 @@
 // The processes come from the hub's "procs" provider (uses in the manifest), every 3 s and
 // the same on Linux and Windows: the plugin runs no program.
 //
-// Texts: the view (view.slint) phrases them with @tr("…") and translates them from
-// i18n/pt-BR.po; this script sends values (the process count, the sort order).
+// Texts: the view (view.slint) phrases them with @tr("…"), and this script with tr("…"),
+// both translated from i18n/pt-BR.po.
 
 fn start() {
     this.sort = "cpu";
@@ -41,10 +41,13 @@ fn show() {
     let top = if this.data.by_cpu.len() > 0 { this.data.by_cpu[0].cpu } else { 0.0 };
     mood(if top > 50.0 { "busy" } else if top > 5.0 { "happy" } else { "idle" });
     if rows.len() > 0 {
-        // the card's summary line (not translated: scripts have no catalog)
-        let what = if this.sort == "mem" { " memory" } else { " CPU" };
-        let value = if this.sort == "mem" { rows[0].mem } else { rows[0].cpu };
-        summary(rows[0].name + " " + value + what);
+        // the card's summary line, translated from i18n/pt-BR.po like the view's texts
+        let line = if this.sort == "mem" {
+            tr("{} {} memory", [rows[0].name, rows[0].mem])
+        } else {
+            tr("{} {} CPU", [rows[0].name, rows[0].cpu])
+        };
+        summary(line);
     }
 }
 

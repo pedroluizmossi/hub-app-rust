@@ -528,6 +528,7 @@ impl TerminalMini {
             self.tab_rows.set_vec(tabs);
         }
         g.set_active(self.active as i32);
+        g.set_can_add_tab(self.tabs.len() < MAX_TABS);
         let Some(tab) = self.tabs.get(self.active) else { return };
         g.set_title(tab.title().into());
         let Some(s) = &tab.session else {
@@ -600,6 +601,10 @@ impl TerminalMini {
             _ if !error.is_empty() => error.to_string(),
             None => tr!("no session").into(),
             Some(s) if s.exited().is_some() => tr!("{}: exited", s.launch.name()),
+            // the setting names a folder that isn't there: say so instead of the home folder
+            Some(Session { launch: Launch { dir_missing: Some(dir), .. }, .. }) => {
+                tr!("Start folder not found: {}; using home", dir)
+            }
             Some(s) => format!("{} · {}", s.launch.name(), short_path(&s.launch.dir)),
         };
         g.set_status(status.into());
@@ -673,6 +678,22 @@ impl TerminalMini {
         self.drop_selection();
         self.redraw();
         true
+    }
+
+    /// Ctrl+= / Ctrl+- (`by` = ±1) and Ctrl+0 (`by` = 0, back to the default): the text
+    /// size, saved as the `font_size` setting (so Settings shows it too).
+    fn zoom(&mut self, by: i32) {
+        let Some(def) = self.manifest.setting("font_size") else { return };
+        let (min, max) = (def.min.unwrap_or(9), def.max.unwrap_or(24));
+        let default = def.default.as_integer().unwrap_or(13);
+        let now = self.host.config.borrow().int(&self.manifest, "font_size");
+        let size = if by == 0 { default } else { (now + by as i64).clamp(min, max) };
+        if size == now {
+            return;
+        }
+        self.host.set_setting(&self.manifest, "font_size", toml::Value::Integer(size));
+        self.style();
+        self.redraw();
     }
 
     fn paste(&mut self, text: &str) {
@@ -803,6 +824,12 @@ fn bind(win: &TerminalWindow, app: &Rc<RefCell<TerminalMini>>) {
     g.on_select_start(with_cell(TerminalMini::select_start));
     g.on_select_to(with_cell(TerminalMini::select_to));
     g.on_new_tab(with(TerminalMini::new_tab));
+    let a = Rc::downgrade(app);
+    g.on_zoom(move |by| {
+        if let Some(a) = a.upgrade() {
+            a.borrow_mut().zoom(by);
+        }
+    });
     g.on_select_tab(with_int(TerminalMini::select_tab));
     g.on_close_tab(with_int(TerminalMini::close_tab));
     g.on_restart(with(|a| a.start(a.active)));

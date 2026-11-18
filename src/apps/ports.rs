@@ -151,11 +151,15 @@ impl PortsMini {
         let now = Instant::now();
         let cur: HashSet<(String, u16)> = snap.listeners.iter().map(|l| (l.proto.clone(), l.port)).collect();
         if self.baseline && snap.ok {
-            let notify = self.host.config.borrow().bool(&self.manifest, "notify_new");
-            let show_udp = self.host.config.borrow().bool(&self.manifest, "show_udp");
+            let (notify, show_udp, hide_others) = {
+                let cfg = self.host.config.borrow();
+                let m = &self.manifest;
+                (cfg.bool(m, "notify_new"), cfg.bool(m, "show_udp"), cfg.bool(m, "hide_others"))
+            };
             for l in &snap.listeners {
                 let key = (l.proto.clone(), l.port);
-                if self.seen.contains(&key) || (l.proto == "udp" && !show_udp) {
+                // only what the list shows is announced
+                if self.seen.contains(&key) || !shown(l, show_udp, hide_others) {
                     continue;
                 }
                 self.fresh.push((key, now));
@@ -203,8 +207,7 @@ impl PortsMini {
             .snap
             .listeners
             .iter()
-            .filter(|l| show_udp || l.proto == "tcp")
-            .filter(|l| !hide_others || l.mine)
+            .filter(|l| shown(l, show_udp, hide_others))
             .filter(|l| {
                 q.is_empty()
                     || l.port.to_string().contains(&q)
@@ -245,6 +248,13 @@ impl PortsMini {
         g.set_exposed(exposed as i32);
         g.set_ok(self.snap.ok);
         g.set_missing(self.snap.missing);
+        let (title, hint) = if cfg!(windows) {
+            (tr!("netstat not found"), tr!("netstat is needed to see the ports."))
+        } else {
+            (tr!("ss not installed"), tr!("Install iproute2 to see the ports."))
+        };
+        g.set_missing_title(title.into());
+        g.set_missing_hint(hint.into());
         g.set_error_text(if self.snap.missing {
             if cfg!(windows) { tr!("The netstat command was not found.") } else { tr!("The ss command (iproute2) was not found.") }.into()
         } else {
@@ -370,9 +380,26 @@ impl MiniApp for PortsMini {
     }
 }
 
+/// The list filters ("Show UDP", "Hide other users' ports"), also used for the speech and
+/// notifications about new ports.
+fn shown(l: &Listener, show_udp: bool, hide_others: bool) -> bool {
+    (show_udp || l.proto == "tcp") && (!hide_others || l.mine)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filters() {
+        let tcp = |mine| Listener { proto: "tcp".into(), mine, ..Default::default() };
+        let udp = Listener { proto: "udp".into(), mine: true, ..Default::default() };
+        assert!(shown(&tcp(false), false, false));
+        assert!(!shown(&tcp(false), false, true), "another user's port is hidden");
+        assert!(shown(&tcp(true), false, true));
+        assert!(!shown(&udp, false, false));
+        assert!(shown(&udp, true, true));
+    }
 
     fn l(addrs: &[&str]) -> Listener {
         Listener { proto: "tcp".into(), port: 80, addrs: addrs.iter().map(|a| a.to_string()).collect(), ..Default::default() }

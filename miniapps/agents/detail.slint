@@ -12,7 +12,7 @@ import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
 
 // One step of the conversation.
 export struct AgentStep {
-    // "14:32" ("" = unknown)
+    // "14:32", or "11/17 23:50" for another day ("" = unknown)
     time: string,
     // "user" | "reply" | "tool" | "error"
     kind: string,
@@ -37,6 +37,8 @@ export global AgentDetail {
     in property <string> tokens;
     // newest to oldest
     in property <[AgentStep]> steps;
+    // some step is from another day: its time has the date, and the column is wider
+    in property <bool> dated-steps;
     // the conversation has not been read yet
     in property <bool> loading;
     // the session left the list (closed or got too old)
@@ -99,7 +101,7 @@ component StepLine inherits Rectangle {
         padding-bottom: 7px;
         spacing: 10px;
         Text {
-            width: 44px;
+            width: (AgentDetail.dated-steps ? 84px : 44px) * Skin.text-scale;
             text: step.time;
             color: t.sub;
             font-family: Skin.font-mono;
@@ -317,8 +319,8 @@ export component AgentDetailWindow inherits Window {
                     }
                 }
 
-                // actions (the same as on the card)
-                HorizontalLayout {
+                // actions (the same as on the card); a session that is gone has none
+                if !AgentDetail.gone: HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
                     TextButton {

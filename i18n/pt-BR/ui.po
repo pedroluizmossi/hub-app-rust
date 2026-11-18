@@ -8,6 +8,12 @@ msgstr "Atualizar"
 msgid "No apps enabled. Open Settings from the gear."
 msgstr "Nenhum app ligado. Na engrenagem, abra as Configurações."
 
+msgid "This page is empty. Move an app here in Settings, under the app's options."
+msgstr "Esta página está vazia. Traga um app para cá nas Configurações, nas opções do app."
+
+msgid "Open settings"
+msgstr "Abrir configurações"
+
 msgid "Move {}. Arrows move, Shift plus arrows resize"
 msgstr "Mover {}. Setas movem, Shift mais setas redimensiona"
 
@@ -158,6 +164,9 @@ msgstr "Diminuir"
 
 msgid "search…"
 msgstr "buscar…"
+
+msgid "Clear the search"
+msgstr "Limpar a busca"
 
 # ui/settings.slint
 msgid "Dashboard"
@@ -340,8 +349,14 @@ msgstr "Confirmar: apagar os dados de {}"
 msgid "Delete the data of {}"
 msgstr "Apagar os dados de {}"
 
-msgid "Each page has its own grid and shows in the page bar. To move an app to another page, open its options below."
-msgstr "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo."
+msgid "Each page has its own grid and shows in the page bar. To move an app to another page, open its options below. On the dashboard, Ctrl+PgDn and Ctrl+PgUp (or Ctrl+Tab) switch pages, Ctrl+1 to Ctrl+9 open a page and Ctrl+, opens Settings."
+msgstr "Cada página tem a sua grade e aparece na barra de páginas. Para mudar um app de página, abra as opções dele abaixo. No painel, Ctrl+PgDn e Ctrl+PgUp (ou Ctrl+Tab) trocam de página, Ctrl+1 a Ctrl+9 abrem uma página e Ctrl+, abre as Configurações."
+
+msgid "Confirm: delete {}"
+msgstr "Confirmar: apagar {}"
+
+msgid "Click again to delete {}: its apps go to the previous page."
+msgstr "Clique de novo para apagar {}: os apps dela vão para a página anterior."
 
 msgid "Name of page {}"
 msgstr "Nome da página {}"
@@ -369,6 +384,12 @@ msgstr "1 opção · clique para abrir"
 
 msgid "{} options · click to open"
 msgstr "{} opções · clique para abrir"
+
+msgid "no options · click to open"
+msgstr "nenhuma opção · clique para abrir"
+
+msgid "no options"
+msgstr "nenhuma opção"
 
 msgid "Enable {}"
 msgstr "Ativar {}"
@@ -431,3 +452,9 @@ msgstr "As mascotes não pulam quando o mouse passa sobre o app delas. Funciona 
 
 msgid "unreviewed"
 msgstr "sem revisão"
+
+msgid "local"
+msgstr "local"
+
+msgid "dev"
+msgstr "dev"

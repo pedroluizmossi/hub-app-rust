@@ -28,7 +28,9 @@
 //! ```text
 //! {"type":"set","prop":"total","value":42}    changes a property of the screen (text,
 //!                                  number, bool, list or object, as in the script)
-//! {"type":"image","prop":"chart","path":"/absolute/path.png"}   image from disk
+//! {"type":"image","prop":"chart","path":"assets/chart.png"}   image from disk (a relative
+//!                                  path is relative to the app's folder; sending the same
+//!                                  unchanged file again doesn't reload it)
 //! {"type":"mood","mood":"happy"}   sleep, idle, happy, busy, alarm
 //! {"type":"summary","text":"…"}    line in the tray tooltip
 //! {"type":"notify","title":"…","body":"…"}
@@ -207,10 +209,7 @@ impl Process {
         if let Some(stderr) = stderr {
             let id = l.id.to_string();
             let _ = std::thread::Builder::new().name(name("err")).spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    let line: String = line.chars().take(1000).collect();
-                    log::info!("app {id}: {line}");
-                }
+                drain_stderr(stderr, |line| log::info!("app {id}: {line}"));
             });
         }
         // standard output: the messages
@@ -271,6 +270,25 @@ impl Drop for Process {
     }
 }
 
+/// Reads the app's standard error to the end, line by line (each cut to 1000 characters).
+/// Bytes that aren't UTF-8 (a Windows console program writes in the ANSI code page) become
+/// `�` instead of ending the reading: the pipe stays drained and the app never blocks or
+/// dies writing to it.
+fn drain_stderr(stderr: impl Read, mut on: impl FnMut(&str)) {
+    let mut reader = BufReader::new(stderr);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let text = String::from_utf8_lossy(&buf);
+        let line: String = text.trim_end_matches(['\n', '\r']).chars().take(1000).collect();
+        on(&line);
+    }
+}
+
 /// Reads the lines to the end. `Some(error)` if it stopped because of a problem with the app (a line too long).
 fn read_messages(stdout: impl Read, id: &str, on: &impl Fn(Incoming)) -> Option<String> {
     let mut reader = BufReader::new(stdout);
@@ -317,6 +335,13 @@ fn finish(child: &Mutex<Option<Child>>, grace: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stderr_survives_bytes_that_are_not_utf8() {
+        let mut lines = Vec::new();
+        drain_stderr(&b"ok\n\xff\xfe bad\r\nafter\n"[..], |l| lines.push(l.to_string()));
+        assert_eq!(lines, ["ok", "\u{fffd}\u{fffd} bad", "after"]);
+    }
 
     #[test]
     fn protocol_messages() {

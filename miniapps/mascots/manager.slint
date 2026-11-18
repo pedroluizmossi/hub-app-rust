@@ -8,7 +8,7 @@
 // stops, and where to use it. Every change is written to the mascot's own file.
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "../../ui/theme.slint";
-import { TextButton, HeaderButton, Select, SqSwitch } from "../../ui/widgets.slint";
+import { TextButton, HeaderButton, Select, SqSwitch, SearchBox } from "../../ui/widgets.slint";
 import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
 
 export struct MascotItem {
@@ -40,9 +40,9 @@ export struct StopRow {
 
 export global MascotsManager {
     in property <Colors> theme;
+    // the mascots that pass the search, in order
     in property <[MascotItem]> items;
-    in property <int> selected: -1;
-    // the chosen one
+    // the chosen one (key "" = none chosen)
     in property <string> name;
     in property <string> key;
     // has a file of its own (not built-in): can be renamed and changed
@@ -75,7 +75,10 @@ export global MascotsManager {
     in property <bool> armed-remove;
     in property <bool> busy;
 
-    callback select(int);
+    callback select(string /* key */);
+    // Up/Down: the previous (-1) or next (1) mascot of the list
+    callback step(int);
+    callback filter-edited(string);
     callback rename(string);
     callback preview-mode(int);
     callback map(int /* mood or reaction */, int /* option */);
@@ -118,13 +121,17 @@ component Line inherits HorizontalLayout {
 component ItemRow inherits Rectangle {
     in property <MascotItem> item;
     in property <bool> chosen;
-    in property <int> index;
+    // clicked: the window takes the keyboard back (Up/Down), even from the search field
+    callback picked();
     property <Colors> t: MascotsManager.theme;
     height: max(44px, row.preferred-height);
     background: chosen ? t.visor.with-alpha(0.16) : touch.has-hover ? t.visor.with-alpha(0.06) : transparent;
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { MascotsManager.select(index); }
+        clicked => {
+            MascotsManager.select(item.key);
+            root.picked();
+        }
     }
     row := HorizontalLayout {
         padding-left: 8px;
@@ -172,11 +179,19 @@ export component MascotsWindow inherits Window {
     default-font-family: Skin.font-ui;
     default-font-size: 13px * Skin.text-scale;
 
-  FocusScope {
+  keys := FocusScope {
     init => { self.focus(); }
     key-pressed(e) => {
         if e.text == Key.Escape {
             MascotsManager.close();
+            return accept;
+        }
+        if e.text == Key.UpArrow {
+            MascotsManager.step(-1);
+            return accept;
+        }
+        if e.text == Key.DownArrow {
+            MascotsManager.step(1);
             return accept;
         }
         reject
@@ -258,19 +273,29 @@ export component MascotsWindow inherits Window {
                 padding: 10px;
                 spacing: 12px;
 
-                // every mascot
-                Rectangle {
-                    width: 230px;
-                    border-width: 1px;
-                    border-color: t.muted.with-alpha(0.45);
-                    background: t.bg1.mix(t.bg0, 0.6);
-                    ScrollView {
-                        VerticalLayout {
-                            alignment: start;
-                            for it[i] in MascotsManager.items: ItemRow {
-                                item: it;
-                                index: i;
-                                chosen: i == MascotsManager.selected;
+                // every mascot, with a search; Up/Down move the choice
+                VerticalLayout {
+                    // grows with the text size, up to a limit (the card needs the rest)
+                    width: min(230px * Skin.text-scale, 320px);
+                    spacing: 6px;
+                    SearchBox {
+                        theme: t;
+                        placeholder: @tr("Search mascots");
+                        edited(text) => { MascotsManager.filter-edited(text); }
+                    }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-width: 1px;
+                        border-color: t.muted.with-alpha(0.45);
+                        background: t.bg1.mix(t.bg0, 0.6);
+                        ScrollView {
+                            VerticalLayout {
+                                alignment: start;
+                                for it in MascotsManager.items: ItemRow {
+                                    item: it;
+                                    chosen: it.key == MascotsManager.key;
+                                    picked => { keys.focus(); }
+                                }
                             }
                         }
                     }
@@ -284,12 +309,12 @@ export component MascotsWindow inherits Window {
                         spacing: 10px;
                         padding-right: 8px;
 
-                        if MascotsManager.selected < 0: Text {
+                        if MascotsManager.key == "": Text {
                             text: @tr("Choose a mascot on the left.");
                             color: t.sub;
                         }
 
-                        if MascotsManager.selected >= 0: HorizontalLayout {
+                        if MascotsManager.key != "": HorizontalLayout {
                             spacing: 14px;
                             Rectangle {
                                 width: 112px;
@@ -307,8 +332,12 @@ export component MascotsWindow inherits Window {
                                 alignment: center;
                                 spacing: 6px;
                                 horizontal-stretch: 1;
-                                // rename: Enter saves (the key, what the config stores, stays)
+                                // rename: Enter saves (the key, what the config stores, stays);
+                                // Esc drops the draft. Typing replaces the `text` binding, so
+                                // another mascot (or a saved name) is put back by hand.
                                 Rectangle {
+                                    property <string> source: MascotsManager.key + "\n" + MascotsManager.name;
+                                    changed source => { name.text = MascotsManager.name; }
                                     height: 34px;
                                     border-width: 1px;
                                     border-color: name.has-focus ? t.visor : t.muted.with-alpha(0.6);
@@ -325,6 +354,15 @@ export component MascotsWindow inherits Window {
                                         single-line: true;
                                         accessible-label: @tr("Name of the mascot");
                                         accepted => { MascotsManager.rename(self.text); }
+                                        key-pressed(e) => {
+                                            // a draft: Esc puts the saved name back (a second
+                                            // Esc closes the window)
+                                            if e.text == Key.Escape && self.text != MascotsManager.name {
+                                                self.text = MascotsManager.name;
+                                                return accept;
+                                            }
+                                            reject
+                                        }
                                     }
                                 }
                                 Text {
@@ -350,7 +388,7 @@ export component MascotsWindow inherits Window {
                             }
                         }
 
-                        if MascotsManager.selected >= 0: Text {
+                        if MascotsManager.key != "": Text {
                             text: MascotsManager.report;
                             color: t.sub;
                             font-family: Skin.font-mono;
@@ -436,7 +474,7 @@ export component MascotsWindow inherits Window {
                         }
 
                         // use in…
-                        if MascotsManager.selected >= 0: VerticalLayout {
+                        if MascotsManager.key != "": VerticalLayout {
                             spacing: 4px;
                             Heading { text: @tr("Use in"); }
                             Line {
@@ -460,7 +498,7 @@ export component MascotsWindow inherits Window {
                             wrap: word-wrap;
                         }
 
-                        if MascotsManager.selected >= 0: HorizontalLayout {
+                        if MascotsManager.key != "": HorizontalLayout {
                             spacing: 8px;
                             alignment: end;
                             if MascotsManager.editable: TextButton {

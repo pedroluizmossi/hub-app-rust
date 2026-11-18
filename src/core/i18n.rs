@@ -82,23 +82,33 @@ pub struct Catalog(HashMap<String, String>);
 
 impl Catalog {
     /// Reads a gettext `.po` (msgid/msgstr, with continuation lines). Entries with an
-    /// empty msgstr, plurals and the header are ignored; `msgctxt` is not supported.
+    /// empty msgstr, plurals and the header are ignored; `msgctxt` is not supported. Entries
+    /// flagged `#, fuzzy` (what `msgmerge` leaves when the English text changed) are skipped,
+    /// like `msgfmt` does: the English text shows instead of a stale translation.
     pub fn parse(po: &str) -> Catalog {
         let mut map = HashMap::new();
         let mut id: Option<String> = None;
         let mut text: Option<String> = None;
         let mut target = 0; // 1 = continuing the msgid, 2 = the msgstr
-        let mut flush = |id: &mut Option<String>, text: &mut Option<String>| {
+        // the flags of the next entry (they come before its msgid) and of the current one
+        let (mut next_fuzzy, mut fuzzy) = (false, false);
+        let mut flush = |id: &mut Option<String>, text: &mut Option<String>, fuzzy: bool| {
             if let (Some(i), Some(t)) = (id.take(), text.take())
                 && !i.is_empty()
                 && !t.is_empty()
+                && !fuzzy
             {
                 map.insert(i, t);
             }
         };
         for line in po.lines().map(str::trim) {
-            if let Some(rest) = line.strip_prefix("msgid ") {
-                flush(&mut id, &mut text);
+            if let Some(flags) = line.strip_prefix("#,") {
+                if flags.split(',').any(|f| f.trim() == "fuzzy") {
+                    next_fuzzy = true;
+                }
+            } else if let Some(rest) = line.strip_prefix("msgid ") {
+                flush(&mut id, &mut text, fuzzy);
+                fuzzy = std::mem::take(&mut next_fuzzy);
                 id = Some(unquote(rest));
                 target = 1;
             } else if let Some(rest) = line.strip_prefix("msgstr ") {
@@ -118,7 +128,7 @@ impl Catalog {
                 target = 0;
             }
         }
-        flush(&mut id, &mut text);
+        flush(&mut id, &mut text, fuzzy);
         Catalog(map)
     }
 
@@ -368,6 +378,14 @@ msgstr ""
 
 msgid "Say \"hi\"\n"
 msgstr "Diga \"oi\"\n"
+
+#: src/x.rs
+#, fuzzy, c-format
+msgid "Changed in English"
+msgstr "Tradução antiga"
+
+msgid "After the fuzzy one"
+msgstr "Depois da incerta"
 "#;
 
     #[test]
@@ -377,7 +395,10 @@ msgstr "Diga \"oi\"\n"
         assert_eq!(c.get("Two lines"), Some("Duas linhas"));
         assert_eq!(c.get("Not translated"), None);
         assert_eq!(c.get("Say \"hi\"\n"), Some("Diga \"oi\"\n"));
-        assert_eq!(c.len(), 3, "the header is not an entry");
+        // fuzzy: stale translation, not used; the flag does not leak to the next entry
+        assert_eq!(c.get("Changed in English"), None);
+        assert_eq!(c.get("After the fuzzy one"), Some("Depois da incerta"));
+        assert_eq!(c.len(), 4, "the header is not an entry");
     }
 
     #[test]

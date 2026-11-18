@@ -38,10 +38,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
-      # `--locked`: fails if Cargo.lock is out of date, instead of resolving again
-      - name: cargo check
-        run: cargo check --workspace --all-targets --locked
-      # a clippy warning fails the build: code goes in clean on both systems
+      # clippy type-checks every target (no separate `cargo check`); a warning fails the
+      # build, so code goes in clean on both systems. `--locked`: fails if Cargo.lock is out
+      # of date, instead of resolving again
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test

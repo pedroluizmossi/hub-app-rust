@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use super::{Command, Role, parse, stem};
 
-/// Tells the running instance (if any) that the plugins changed. `false` = nobody listened.
-pub fn notify_plugins_changed() -> bool {
-    let Ok(mut stream) = UnixStream::connect(socket_path()) else { return false };
+/// Hands a command line to the instance listening at `path`. `false` = nobody listened.
+pub fn send(path: &Path, message: &str) -> bool {
+    let Ok(mut stream) = UnixStream::connect(path) else { return false };
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-    stream.write_all(b"plugins\n").is_ok()
+    stream.write_all(format!("{message}\n").as_bytes()).is_ok()
 }
 
 /// `$XDG_RUNTIME_DIR/miniutils.sock` (or `miniutils-<name>.sock` with `MINIUTILS_INSTANCE`).
@@ -71,13 +71,16 @@ fn handle<F: Fn(Command)>(stream: UnixStream, on_command: &F) {
         }
 }
 
-/// Tries to be the main instance at `path`. If there already is one, hands it `message`.
-pub fn claim(path: &Path, message: &str) -> io::Result<Role> {
+/// Tries to be the main instance at `path`. If there already is one, hands it `message`
+/// (`None`: connects and sends nothing, which the main one ignores).
+pub fn claim(path: &Path, message: Option<&str>) -> io::Result<Role> {
     // two attempts: the 2nd covers another instance starting at that very moment
     for _ in 0..2 {
         if let Ok(mut stream) = UnixStream::connect(path) {
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-            let _ = stream.write_all(format!("{message}\n").as_bytes());
+            if let Some(message) = message {
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                let _ = stream.write_all(format!("{message}\n").as_bytes());
+            }
             return Ok(Role::Second);
         }
         // nobody answers: stale socket of a dead process (or a leftover file)
@@ -117,35 +120,41 @@ mod tests {
         let path = test_path("stale");
         drop(UnixListener::bind(&path).unwrap());
         assert!(path.exists());
-        assert!(matches!(claim(&path, "show").unwrap(), Role::First(_)));
+        assert!(matches!(claim(&path, Some("show")).unwrap(), Role::First(_)));
     }
 
     #[test]
     fn regular_file_in_place_of_the_socket_is_replaced() {
         let path = test_path("file");
         fs::write(&path, b"junk").unwrap();
-        assert!(matches!(claim(&path, "show").unwrap(), Role::First(_)));
+        assert!(matches!(claim(&path, Some("show")).unwrap(), Role::First(_)));
     }
 
     #[test]
     fn second_instance_delivers_the_command_and_exits() {
         let path = test_path("second");
-        let Role::First(server) = claim(&path, "show apps").unwrap() else {
+        let Role::First(server) = claim(&path, Some("show apps")).unwrap() else {
             panic!("the first instance should become the main one");
         };
         let (tx, rx) = mpsc::channel();
         server.serve(move |cmd| {
             let _ = tx.send(cmd);
         }).unwrap();
-        assert!(matches!(claim(&path, "show apps").unwrap(), Role::Second));
+        assert!(matches!(claim(&path, Some("show apps")).unwrap(), Role::Second));
         let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("command did not arrive");
         assert_eq!(cmd, Command::Show(Some("apps".into())));
+        // a hidden start sends nothing: the main one gets no command
+        assert!(matches!(claim(&path, None).unwrap(), Role::Second));
+        assert!(send(&path, "quit"));
+        let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("command did not arrive");
+        assert_eq!(cmd, Command::Quit, "the empty connection must not produce a command");
+        assert!(!send(&test_path("nobody"), "quit"));
     }
 
     #[test]
     fn socket_goes_away_when_the_main_one_exits() {
         let path = test_path("exit");
-        let Role::First(server) = claim(&path, "show").unwrap() else {
+        let Role::First(server) = claim(&path, Some("show")).unwrap() else {
             panic!("the first instance should become the main one");
         };
         assert!(path.exists());

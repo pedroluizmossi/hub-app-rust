@@ -7,6 +7,7 @@
 //! and the hub wakes up to drain the channel — the UI is never touched off its thread.
 
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -129,6 +130,19 @@ impl Slot {
     }
 }
 
+/// Longest wait between tries of a provider that keeps panicking.
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+/// Wait before the next reading: `tick`, doubled for each panic in a row, up to
+/// `MAX_BACKOFF` (never shorter than `tick` itself).
+fn backoff(tick: Duration, panics: u32) -> Duration {
+    if panics == 0 {
+        return tick;
+    }
+    let slower = tick.saturating_mul(1u32 << panics.min(16));
+    slower.min(MAX_BACKOFF).max(tick)
+}
+
 pub struct Bus {
     slots: HashMap<Topic, Arc<Slot>>,
     visible: Arc<AtomicBool>,
@@ -172,16 +186,29 @@ impl Bus {
             .name(format!("provider-{}", topic.name()))
             .spawn(move || {
                 let me = Poker(Some(slot.clone()));
+                let mut panics = 0u32;
                 loop {
                     slot.wait_subscriber();
                     let poked = slot.take_poke();
-                    if let Some(ev) = collect(&me, poked) {
-                        if tx.send(ev).is_err() {
-                            return; // the hub closed
+                    // a panic in one reading (a parser meeting odd output) must not end the
+                    // provider for good: the panic hook logs it, this round publishes nothing
+                    // and the next tick tries again, more slowly while it keeps failing
+                    match std::panic::catch_unwind(AssertUnwindSafe(|| collect(&me, poked))) {
+                        Ok(reading) => {
+                            panics = 0;
+                            if let Some(ev) = reading {
+                                if tx.send(ev).is_err() {
+                                    return; // the hub closed
+                                }
+                                waker.wake();
+                            }
                         }
-                        waker.wake();
+                        Err(_) => {
+                            panics = panics.saturating_add(1);
+                            log::error!("provider {} panicked ({panics} in a row); trying again later", topic.name());
+                        }
                     }
-                    slot.wait_next(tick);
+                    slot.wait_next(backoff(tick, panics));
                 }
             })
             .expect("could not create the provider thread");
@@ -292,5 +319,97 @@ mod tests {
         assert!(!bus.poker(Topic::Sys).visible());
         bus.set_visible(true);
         assert!(bus.poker(Topic::Sys).visible());
+    }
+
+    /// Counts the readings of a test provider on `topic` (1-hour tick: only subscribing or a
+    /// poke makes it collect). `wait(n)` waits up to 5 s for `n` readings and returns the count.
+    fn counting(bus: &mut Bus, topic: Topic) -> (Arc<AtomicUsize>, impl Fn(usize) -> usize + use<>) {
+        let n = Arc::new(AtomicUsize::new(0));
+        let count = n.clone();
+        bus.spawn(topic, Duration::from_secs(3600), move || {
+            count.fetch_add(1, Ordering::Relaxed);
+            Event::Gpu(GpuSnapshot::default())
+        });
+        let seen = n.clone();
+        let wait = move |want: usize| {
+            let end = Instant::now() + Duration::from_secs(5);
+            while seen.load(Ordering::Relaxed) < want && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            seen.load(Ordering::Relaxed)
+        };
+        (n, wait)
+    }
+
+    #[test]
+    fn unsubscribing_stops_the_collection() {
+        let mut bus = Bus::default();
+        let (n, wait) = counting(&mut bus, Topic::Sys);
+        bus.subscribe(Topic::Sys);
+        assert_eq!(wait(1), 1);
+        bus.unsubscribe(Topic::Sys);
+        bus.poke(Topic::Sys);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(n.load(Ordering::Relaxed), 1, "no reading without a subscriber, even when poked");
+    }
+
+    #[test]
+    fn unsubscribing_without_a_subscriber_does_not_underflow() {
+        let mut bus = Bus::default();
+        let (_, wait) = counting(&mut bus, Topic::Sys);
+        bus.unsubscribe(Topic::Sys);
+        assert!(!bus.poker(Topic::Sys).subscribed(), "the count did not wrap to usize::MAX");
+        bus.subscribe(Topic::Sys);
+        assert_eq!(wait(1), 1);
+    }
+
+    #[test]
+    fn one_of_two_subscribers_leaving_keeps_it_collecting() {
+        let mut bus = Bus::default();
+        let (_, wait) = counting(&mut bus, Topic::Sys);
+        bus.subscribe(Topic::Sys);
+        bus.subscribe(Topic::Sys);
+        assert_eq!(wait(1), 1);
+        bus.unsubscribe(Topic::Sys);
+        bus.poke(Topic::Sys);
+        assert_eq!(wait(2), 2);
+    }
+
+    #[test]
+    fn a_panicking_reading_does_not_end_the_provider() {
+        let mut bus = Bus::default();
+        let n = Arc::new(AtomicUsize::new(0));
+        let count = n.clone();
+        bus.spawn(Topic::Sys, Duration::from_secs(3600), move || {
+            if count.fetch_add(1, Ordering::Relaxed) == 0 {
+                panic!("test: first reading fails");
+            }
+            Event::Gpu(GpuSnapshot::default())
+        });
+        bus.subscribe(Topic::Sys);
+        let end = Instant::now() + Duration::from_secs(5);
+        while n.load(Ordering::Relaxed) < 1 && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(bus.drain().is_empty(), "the panicking round publishes nothing");
+        bus.poke(Topic::Sys);
+        let end = Instant::now() + Duration::from_secs(5);
+        let mut got = Vec::new();
+        while got.is_empty() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+            got = bus.drain();
+        }
+        assert_eq!(got.len(), 1, "the thread survived and answered the poke");
+    }
+
+    #[test]
+    fn backoff_doubles_up_to_a_minute() {
+        let s = Duration::from_secs;
+        assert_eq!(backoff(s(2), 0), s(2));
+        assert_eq!(backoff(s(2), 1), s(4));
+        assert_eq!(backoff(s(2), 3), s(16));
+        assert_eq!(backoff(s(2), 40), MAX_BACKOFF);
+        // a slow provider is never sped up
+        assert_eq!(backoff(s(3600), 2), s(3600));
     }
 }

@@ -1,7 +1,7 @@
 // Dashboard: the mini-app grid, with edit mode (drag and resize).
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Icons } from "theme.slint";
-import { Icon } from "widgets.slint";
+import { Icon, TextButton } from "widgets.slint";
 import { DockerView } from "../miniapps/docker/view.slint";
 import { VitalsView } from "../miniapps/vitals/view.slint";
 import { CdPlayerView } from "../miniapps/cdplayer/view.slint";
@@ -52,6 +52,10 @@ export component Dashboard inherits ScrollView {
     in property <int> rows;
     in property <bool> editing;
     in property <Ghost> ghost;
+    // some app is enabled (maybe on another page): an empty page says so
+    in property <bool> any-enabled;
+    // the button of the empty page
+    callback open-settings();
     // start, middle and end of a drag (cell under the pointer)
     callback edit-begin(string /* id */, string /* "move" | "r" | "b" | "rb" */, int, int);
     callback edit-drag(int, int);
@@ -74,13 +78,30 @@ export component Dashboard inherits ScrollView {
         return clamp(floor((py - pad + gap / 2) / (rh + gap)), 0, rows - 1);
     }
 
-    if cells.length == 0 && !editing: Text {
+    if cells.length == 0 && !editing: VerticalLayout {
         width: root.visible-width;
         height: root.visible-height;
-        text: @tr("No apps enabled. Open Settings from the gear.");
-        color: Skin.dim;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+        padding: 24px;
+        spacing: 12px;
+        alignment: center;
+        Text {
+            text: root.any-enabled
+                ? @tr("This page is empty. Move an app here in Settings, under the app's options.")
+                : @tr("No apps enabled. Open Settings from the gear.");
+            color: Skin.dim;
+            font-size: 14px * Skin.text-scale;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: center;
+            TextButton {
+                text: @tr("Open settings");
+                icon: Icons.gear;
+                font-size: 13px * Skin.text-scale;
+                clicked => { root.open-settings(); }
+            }
+        }
     }
 
     // empty grid cells, to aim at

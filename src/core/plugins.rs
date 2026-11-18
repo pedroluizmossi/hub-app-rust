@@ -200,6 +200,12 @@ struct Extra {
     mood: Vec<MoodRule>,
 }
 
+/// A program name for the PATH lookup (`ls`, `docker`), not a path on either system: no
+/// `/`, `\`, drive letter (`C:`) or leading dot (`..`, hidden files).
+fn plain_program(p: &str) -> bool {
+    !p.trim().is_empty() && !p.contains(['/', '\\', ':']) && !p.starts_with('.')
+}
+
 impl Plugin {
     /// Reads and validates a plugin manifest. The errors are shown to the user (Settings ›
     /// System, `--plugins`, `--plugin-dev`), so they are translated.
@@ -207,7 +213,7 @@ impl Plugin {
         let mut manifest = Manifest::parse(text).map_err(|e| e.to_string())?;
         let extra: Extra = toml::from_str(text).map_err(|e| e.to_string())?;
         validate_id(&manifest.id)?;
-        if let Some(p) = manifest.permissions.exec.iter().find(|p| p.contains('/') || p.is_empty()) {
+        if let Some(p) = manifest.permissions.exec.iter().find(|p| !plain_program(p)) {
             return Err(tr!("[permissions] exec: use the program name, not a path: {}", p));
         }
         if let Some(h) = manifest.permissions.net.iter().find(|h| !valid_host(h)) {
@@ -247,7 +253,7 @@ impl Plugin {
         }
         if let Some(run) = &extra.run {
             let program = run.command.first().ok_or(tr!("[run] command is empty"))?;
-            if program.contains('/') {
+            if !plain_program(program) {
                 return Err(tr!("[run] use the program name, not a path: {}", program));
             }
             if !manifest.permissions.exec.contains(program) {
@@ -676,6 +682,10 @@ pub(crate) mod tests {
         assert!(case("id='cyber.x'\n[permissions]\nexec=['ls']\n[run]\ncommand=['ls']\nevery=10").contains("cyber."));
         assert!(case("id='a.b'\n[run]\ncommand=['ls']\nevery=10").contains("not in [permissions]"));
         assert!(case("id='a.b'\n[permissions]\nexec=['/bin/ls']\n[run]\ncommand=['/bin/ls']\nevery=10").contains("path"));
+        // Windows paths are paths too (checked on every system)
+        assert!(case("id='a.b'\n[permissions]\nexec=['C:\\x\\y.exe']\n[run]\ncommand=['ls']\nevery=10").contains("path"));
+        assert!(case("id='a.b'\n[permissions]\nexec=['..\\x']\n[run]\ncommand=['ls']\nevery=10").contains("path"));
+        assert!(case("id='a.b'\n[permissions]\nexec=['ls', '']\n[run]\ncommand=['ls']\nevery=10").contains("path"));
         assert!(case("id='a.b'\n[permissions]\nexec=['ls']\n[run]\ncommand=['ls']\nevery=1").contains("every"));
         assert!(case("id='a.b'\n[permissions]\nexec=['ls']").contains("[run]"));
         assert!(case("id='a.b'\n[ui]\nview='../x.slint'\nscript='main.rhai'").contains("view.slint"));

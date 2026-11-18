@@ -8,7 +8,8 @@
 #   ~/.local/share/applications/miniutils.desktop     entry in the applications menu
 #   ~/.local/share/doc/miniutils/                     README and licenses
 #
-# Uninstall (the configuration in ~/.config/miniutils stays):
+# Uninstall (the configuration in ~/.config/miniutils and the data in ~/.local/share/miniutils
+# stay):
 #   curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/install.sh | sh -s -- --uninstall
 #
 # A specific version: MINIUTILS_VERSION=0.2.0 (instead of the latest).
@@ -25,13 +26,42 @@ DOC_DIR="$DATA_DIR/doc/miniutils"
 AUTOSTART="$CONFIG_DIR/autostart/miniutils.desktop"
 
 say() { printf '%s\n' "$*"; }
-fail() { printf 'erro: %s\n' "$*" >&2; exit 1; }
+fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "the '$1' command is needed"; }
 
+# Is MiniUtils running for this user?
+running() {
+    command -v pgrep >/dev/null 2>&1 && pgrep -x -u "$(id -u)" miniutils >/dev/null 2>&1
+}
+
+# Asks the running MiniUtils to quit (saving the window and the configuration) and waits up
+# to 5 s. With `force`, kills it if it is still open after that. Fails if it is still running.
+stop_running() {
+    # only a version that knows --quit (an older one would open its window instead)
+    if [ -x "$BIN" ] && "$BIN" --help 2>/dev/null | grep -q -- '--quit'; then
+        "$BIN" --quit >/dev/null 2>&1 || true
+        i=0
+        while running && [ "$i" -lt 25 ]; do
+            sleep 0.2
+            i=$((i + 1))
+        done
+    fi
+    if [ "${1:-}" = force ] && running; then
+        pkill -x -u "$(id -u)" miniutils >/dev/null 2>&1 || true
+        sleep 0.5
+    fi
+    ! running
+}
+
 uninstall() {
+    if running; then
+        say "Closing the running MiniUtils..."
+        stop_running force || say "MiniUtils is still open: quit it from the tray menu."
+    fi
     rm -f "$BIN" "$DESKTOP" "$AUTOSTART"
     rm -rf "$DOC_DIR"
-    say "MiniUtils removed. The configuration in $CONFIG_DIR/miniutils was not deleted."
+    say "MiniUtils removed. The configuration ($CONFIG_DIR/miniutils) and the data ($DATA_DIR/miniutils:"
+    say "themes, mascots, apps and their data) were kept; delete those folders to remove everything."
 }
 
 # Quoted path for the Exec line of the .desktop file (same rule as src/autostart/linux.rs).
@@ -107,8 +137,14 @@ EOF
         *":$BIN_DIR:"*) ;;
         *) say "Note: $BIN_DIR is not in PATH. To run 'miniutils' in the terminal, add it to your shell's PATH." ;;
     esac
-    if command -v pgrep >/dev/null 2>&1 && pgrep -x miniutils >/dev/null 2>&1; then
-        say "MiniUtils is open: quit it (Quit, in the tray menu) and open it again to use the new version."
+    # the open MiniUtils is still the old version: close it and open the new one in the tray
+    if running; then
+        if stop_running; then
+            nohup "$BIN" --hidden >/dev/null 2>&1 &
+            say "MiniUtils was opened again in the tray."
+        else
+            say "MiniUtils is open: quit it (Quit, in the tray menu) and open it again to use the new version."
+        fi
     fi
 }
 

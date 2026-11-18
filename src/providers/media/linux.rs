@@ -1,12 +1,13 @@
 //! MPRIS over D-Bus: who is playing, what, and the player commands.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
-use super::{ART_MAX_BYTES, ArtCache, MediaSnapshot, Score, file_url_path, usable};
+use super::{ART_MAX_BYTES, Art, ArtCache, MediaSnapshot, Score, file_url_path, usable};
 use crate::tr;
 
 /// Where the players come from, for the label in the CD Player display.
@@ -37,7 +38,12 @@ pub struct MediaProvider {
     retry_at: Option<Instant>,
     /// Cover of the current track (read once per `mpris:artUrl`).
     art: ArtCache,
+    /// Download of an HTTP(S) cover running on its own thread: the URL and the slot where
+    /// the thread leaves the bytes (`Some(None)`: the download failed).
+    art_job: Option<(String, ArtSlot)>,
 }
+
+type ArtSlot = Arc<Mutex<Option<Option<Vec<u8>>>>>;
 
 
 impl MediaProvider {
@@ -112,12 +118,49 @@ impl MediaProvider {
                 self.player = snap.player.clone();
                 // a late cover comes with a new URL (a new key): one read per URL, so a
                 // download that fails (offline) does not hold the readings again
-                snap.art = self.art.get(&art_url, 1, || art_bytes(&art_url));
+                snap.art = if is_http(&art_url) {
+                    self.http_art(&art_url, download_art)
+                } else {
+                    self.art.get(&art_url, 1, || file_art(&art_url))
+                };
                 Ok(snap)
             }
             None => {
                 self.player.clear();
                 Ok(MediaSnapshot { ok: true, ..Default::default() })
+            }
+        }
+    }
+}
+
+impl MediaProvider {
+    /// The cover at an HTTP(S) URL, downloaded on its own thread so a slow or offline
+    /// network doesn't hold the readings: `None` until the bytes arrive, and then the
+    /// snapshot changes on a later tick. One download per URL.
+    fn http_art(&mut self, url: &str, fetch: fn(&str) -> Option<Vec<u8>>) -> Option<Art> {
+        match &self.art_job {
+            Some((job, slot)) if job == url => {
+                let done = slot.lock().ok().and_then(|mut s| s.take());
+                match done {
+                    Some(bytes) => self.art.get(url, 1, || bytes),
+                    // still downloading, or already read: whatever the cache has
+                    None => self.art.get(url, 0, || None),
+                }
+            }
+            _ => {
+                let slot = ArtSlot::default();
+                let (thread_slot, thread_url) = (slot.clone(), url.to_string());
+                let spawned = std::thread::Builder::new().name("media-art".into()).spawn(move || {
+                    let bytes = fetch(&thread_url);
+                    if let Ok(mut s) = thread_slot.lock() {
+                        *s = Some(bytes);
+                    }
+                });
+                if let Err(e) = spawned {
+                    log::warn!("media: could not start the cover download: {e}");
+                }
+                self.art_job = Some((url.to_string(), slot));
+                self.art.get(url, 0, || None)
             }
         }
     }
@@ -139,9 +182,12 @@ fn props(conn: &Connection, service: &str, iface: &str) -> anyhow::Result<HashMa
 }
 
 /// Current position in microseconds (only on the player interface, and not in `GetAll`).
+/// A plain `Properties.Get`: a proxy's `get_property` would set up a property cache (a
+/// match rule and a `GetAll`) on every call, since the proxy lives only for this reading.
 fn position(conn: &Connection, service: &str) -> anyhow::Result<i64> {
-    let p = Proxy::new(conn, service, PATH, PLAYER)?;
-    Ok(p.get_property::<i64>("Position")?)
+    let p = Proxy::new(conn, service, PATH, PROPS)?;
+    let value: OwnedValue = p.call("Get", &(PLAYER, "Position"))?;
+    Ok(i64::try_from(value)?)
 }
 
 /// Properties -> snapshot. Kept apart from D-Bus so it can be tested.
@@ -185,21 +231,30 @@ fn metadata(player: &HashMap<String, OwnedValue>) -> HashMap<String, OwnedValue>
 /// Deadline to download a cover (Spotify gives an `https://` URL).
 const ART_TIMEOUT: Duration = Duration::from_secs(4);
 
-/// Bytes of the cover at `url` (`mpris:artUrl`): a local file (browsers, local players) or
-/// HTTP(S) (Spotify). Capped at `ART_MAX_BYTES`; anything else is ignored.
-fn art_bytes(url: &str) -> Option<Vec<u8>> {
-    if let Some(path) = file_url_path(url) {
-        let meta = std::fs::metadata(&path).ok()?;
-        if !meta.is_file() || meta.len() > ART_MAX_BYTES {
-            return None;
-        }
-        return std::fs::read(&path).ok();
-    }
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
+fn is_http(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+/// Bytes of the cover at a `file://` URL (`mpris:artUrl` of browsers and local players),
+/// capped at `ART_MAX_BYTES`; anything else is ignored.
+fn file_art(url: &str) -> Option<Vec<u8>> {
+    let path = file_url_path(url)?;
+    let meta = std::fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > ART_MAX_BYTES {
         return None;
     }
-    let client = reqwest::blocking::Client::builder().timeout(ART_TIMEOUT).build().ok()?;
-    let resp = client.get(url).send().and_then(|r| r.error_for_status()).ok()?;
+    std::fs::read(&path).ok()
+}
+
+/// One HTTP client for every cover (building one loads the system certificates).
+fn art_client() -> Option<&'static reqwest::blocking::Client> {
+    static CLIENT: OnceLock<Option<reqwest::blocking::Client>> = OnceLock::new();
+    CLIENT.get_or_init(|| reqwest::blocking::Client::builder().timeout(ART_TIMEOUT).build().ok()).as_ref()
+}
+
+/// Bytes of the cover at an HTTP(S) URL (Spotify), capped at `ART_MAX_BYTES`.
+fn download_art(url: &str) -> Option<Vec<u8>> {
+    let resp = art_client()?.get(url).send().and_then(|r| r.error_for_status()).ok()?;
     if resp.content_length().is_some_and(|n| n > ART_MAX_BYTES) {
         return None;
     }
@@ -350,6 +405,40 @@ mod tests {
             ("CanPlay", Value::from(true)),
             ("CanPause", Value::from(true)),
         ])
+    }
+
+    fn cover(_url: &str) -> Option<Vec<u8>> {
+        let img = image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 0]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).ok()?;
+        Some(out.into_inner())
+    }
+
+    #[test]
+    fn http_cover_arrives_on_a_later_tick() {
+        let mut p = MediaProvider::default();
+        let url = "https://example.invalid/a.png";
+        // the first tick only starts the download
+        assert!(p.http_art(url, cover).is_none());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let art = loop {
+            if let Some(art) = p.http_art(url, cover) {
+                break Some(art);
+            }
+            if Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(art.is_some());
+        // already read: stays cached, no new download
+        assert!(p.http_art(url, |_| panic!("downloaded twice")).is_some());
+        // a failed download gives no cover and isn't retried
+        let other = "https://example.invalid/b.png";
+        assert!(p.http_art(other, |_| None).is_none());
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(p.http_art(other, |_| None).is_none());
+        assert!(p.http_art(other, |_| panic!("downloaded twice")).is_none());
     }
 
     #[test]

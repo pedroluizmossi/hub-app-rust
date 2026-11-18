@@ -29,6 +29,9 @@ msgstr "{} não está instalado"
 msgid "{} did not respond within {} s"
 msgstr "{} não respondeu em {} s"
 
+msgid "{} wrote more than {} MiB"
+msgstr "{} escreveu mais de {} MiB"
+
 msgid "the mini-app {} is not allowed to run \"{}\""
 msgstr "o mini-app {} não tem permissão para executar \"{}\""
 
@@ -258,11 +261,77 @@ msgstr "registros:"
 msgid "--import-mascot <folder>: missing the folder with the PNG sheets"
 msgstr "--import-mascot <pasta>: falta a pasta com as folhas PNG"
 
-msgid "in {}; with MiniUtils open: miniutils --reload"
-msgstr "em {}; com o MiniUtils aberto: miniutils --reload"
+msgid "in {}"
+msgstr "em {}"
+
+msgid "MiniUtils reloaded the mascots"
+msgstr "O MiniUtils aberto recarregou as mascotes"
+
+msgid "--tab <name>: missing the page name"
+msgstr "--tab <nome>: falta o nome da página"
+
+msgid "unknown option: {} (see miniutils --help)"
+msgstr "opção desconhecida: {} (veja miniutils --help)"
+
+msgid "only one of --dirs, --quit, --import-mascot and --check-mascot at a time"
+msgstr "use só um de --dirs, --quit, --import-mascot e --check-mascot por vez"
+
+msgid "MiniUtils is not open"
+msgstr "O MiniUtils não está aberto"
+
+msgid "closes the running MiniUtils as Quit in the tray menu does (the window\nand the configuration are saved); used by the installers"
+msgstr "fecha o MiniUtils aberto como o Sair do menu da bandeja (a janela e a\nconfiguração são salvas); usado pelos instaladores"
 
 msgid "--plugin-dev <folder>: missing the plugin folder"
 msgstr "--plugin-dev <pasta>: falta a pasta do plugin"
 
 msgid "--plugin-dev: close the MiniUtils that is already open (the plugin under development runs in an instance of its own)"
 msgstr "--plugin-dev: feche o MiniUtils que já está aberto (o plugin em desenvolvimento roda numa instância só dele)"
+
+# Config file notices (src/core/config.rs)
+msgid "config.toml is from a newer MiniUtils: changes made here won't be saved."
+msgstr "O config.toml é de um MiniUtils mais novo: as mudanças feitas aqui não serão salvas."
+
+msgid "config.toml could not be read, so the defaults are in use. It is set aside as config.toml.broken on the next save."
+msgstr "Não deu para ler o config.toml, então o padrão está em uso. Ele é guardado como config.toml.broken no próximo salvamento."
+
+# Manifest checks (src/core/manifest.rs)
+msgid "mini-app {} uses API {} (this hub understands up to {})"
+msgstr "o mini-app {} usa a API {} (este hub entende até a {})"
+
+msgid "mini-app {}: a setting has an empty key"
+msgstr "mini-app {}: uma opção está com a chave (key) vazia"
+
+msgid "mini-app {}: setting {} is declared twice"
+msgstr "mini-app {}: a opção {} foi declarada duas vezes"
+
+msgid "mini-app {}: setting {} is a {}, which needs api = {}"
+msgstr "mini-app {}: a opção {} é do tipo {}, que pede api = {}"
+
+msgid "mini-app {}: the default of setting {} is not a {} value"
+msgstr "mini-app {}: o padrão (default) da opção {} não é um valor do tipo {}"
+
+msgid "mini-app {}: setting {} has min greater than max"
+msgstr "mini-app {}: a opção {} tem min maior que max"
+
+msgid "mini-app {}: the default of setting {} is outside min and max"
+msgstr "mini-app {}: o padrão (default) da opção {} está fora de min e max"
+
+msgid "mini-app {}: setting {} needs a step greater than 0"
+msgstr "mini-app {}: a opção {} precisa de step maior que 0"
+
+msgid "mini-app {}: the default of setting {} is not one of its options"
+msgstr "mini-app {}: o padrão (default) da opção {} não está entre as opções (options)"
+
+msgid "mini-app {}: setting {} has max_len = 0"
+msgstr "mini-app {}: a opção {} tem max_len = 0"
+
+# App data checks (src/core/appdata.rs)
+msgid "[data] version = {}: use 1 to 1000000"
+msgstr "[data] version = {}: use de 1 a 1000000"
+
+msgid "[data] max_mb = {}: use 1 to 1024"
+msgstr "[data] max_mb = {}: use de 1 a 1024"
+
+msgid "[data] kinds: \"{}\" repeated"
+msgstr "[data] kinds: \"{}\" repetido"

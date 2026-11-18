@@ -262,7 +262,9 @@ fn pixel_cell(px: &Pixel, row: &[u8], x: usize, theme: &Theme, look: &Look) -> O
     };
     // closed eye: takes the neighbor's color (darker), like an eyelid
     open.or_else(|| {
-        let side = row.get(x.wrapping_sub(1)).or(row.get(x + 1)).and_then(|c| px.color(*c))?;
+        // each side on its own: a transparent left cell ('.' or another 'e') must not hide
+        // an opaque right one
+        let side = [x.wrapping_sub(1), x + 1].into_iter().find_map(|i| row.get(i).and_then(|c| px.color(*c)))?;
         Some(darker(side, 1.4))
     })
 }
@@ -476,6 +478,39 @@ mod tests {
         let awake = render(s, t, Mood::Idle, 1);
         let asleep = render(s, t, Mood::Sleep, 1);
         assert_ne!(awake, asleep);
+    }
+
+    #[test]
+    fn frame_zero_has_open_eyes() {
+        let t = themes::get("neon");
+        for key in ["neko", "capivara"] {
+            let s = sprites::get(key);
+            let shut = render_look(s, t, &Look { blink: true, ..Look::from_frame(Mood::Idle, 0) });
+            assert_ne!(render(s, t, Mood::Idle, 0), shut, "{key} blinks on frame 0");
+        }
+        // a pixel mascot also blinks when happy (the cached "Working" face of the AI mascots)
+        let s = sprites::get("capivara");
+        let shut = render_look(s, t, &Look { blink: true, ..Look::from_frame(Mood::Happy, 0) });
+        assert_ne!(render(s, t, Mood::Happy, 0), shut);
+        assert!(Look::from_frame(Mood::Idle, 24).blink);
+        assert!(!Look::from_frame(Mood::Idle, 25).blink);
+    }
+
+    #[test]
+    fn closed_pixel_eye_takes_the_first_opaque_neighbor() {
+        let t = themes::get("neon");
+        let px = crate::mascot::sprites::Pixel { eye: 0xffffff, pal: &[(b'k', 0x406080)] };
+        let look = Look::from_frame(Mood::Sleep, 1);
+        // ".ek": the left is transparent, the right gives the color
+        let cell = pixel_cell(&px, b".ek", 1, t, &look);
+        assert_eq!(cell, Some(darker(0x406080, 1.4)));
+        // "kee k": the second 'e' has another 'e' on the left
+        let cell = pixel_cell(&px, b"kee k", 2, t, &look);
+        assert_eq!(cell, None, "both sides are transparent");
+        let cell = pixel_cell(&px, b"kek", 1, t, &look);
+        assert_eq!(cell, Some(darker(0x406080, 1.4)));
+        let cell = pixel_cell(&px, b".eek", 2, t, &look);
+        assert_eq!(cell, Some(darker(0x406080, 1.4)));
     }
 
     #[test]

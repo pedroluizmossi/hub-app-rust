@@ -148,7 +148,8 @@ fn cpu_mhz() -> f32 {
 }
 
 /// Mount points of /proc/mounts worth showing: real block devices, one per device (btrfs
-/// subvolumes of the same disk count once, by the shortest path).
+/// subvolumes of the same disk count once, by the shortest path), plus ZFS (one per pool:
+/// `rpool/ROOT/ubuntu`) and multi-device bcachefs (`/dev/sda:/dev/sdb`).
 pub fn parse_mounts(text: &str) -> Vec<String> {
     const SKIP_FS: &[&str] = &["squashfs", "iso9660", "udf", "overlay"];
     const SKIP_AT: &[&str] = &["/snap", "/var/lib/docker", "/run", "/boot/efi", "/efi"];
@@ -158,7 +159,9 @@ pub fn parse_mounts(text: &str) -> Vec<String> {
             let mut f = l.split_whitespace();
             let (dev, at, fs) = (f.next()?, f.next()?, f.next()?);
             let at = unescape_mount(at);
-            let ok = dev.starts_with("/dev/")
+            // a ZFS dataset counts by its pool, like a btrfs subvolume by its disk
+            let dev = if fs == "zfs" { dev.split('/').next().unwrap_or(dev) } else { dev };
+            let ok = (fs == "zfs" || dev.starts_with("/dev/"))
                 && !dev.starts_with("/dev/loop")
                 && !SKIP_FS.contains(&fs)
                 && !SKIP_AT.iter().any(|p| at == *p || at.starts_with(&format!("{p}/")));
@@ -257,9 +260,14 @@ fn ipv4_of(iface: &str) -> Option<String> {
     }
 }
 
-/// /proc/net/dev -> accumulated bytes (rx, tx) of the "real" interfaces.
+/// /proc/net/dev -> accumulated bytes (rx, tx) of the "real" interfaces. Left out: loopback,
+/// containers and VMs (their traffic also goes through the real card, or never leaves the
+/// machine), and VPN tunnels, whose bytes the real card carries too (counted twice).
 pub fn parse_net(text: &str) -> (u64, u64) {
-    const SKIP: &[&str] = &["lo", "docker", "veth", "br-", "virbr"];
+    const SKIP: &[&str] = &[
+        "lo", "docker", "veth", "br-", "virbr", "vboxnet", "vmnet", "lxc", "lxd", "podman", "cni", "flannel", "cali",
+        "vxlan", "tun", "tap", "wg", "tailscale", "zt", "nebula",
+    ];
     let mut rx = 0;
     let mut tx = 0;
     for line in text.lines().skip(2) {
@@ -293,7 +301,8 @@ fn cpu_temp() -> f32 {
 
 /// (total, used) in bytes of the filesystem of `path`.
 fn disk_usage(path: &str) -> (u64, u64) {
-    let c = std::ffi::CString::new(path).unwrap();
+    // a path with a NUL can't be passed to C (and isn't a real mount point)
+    let Ok(c) = std::ffi::CString::new(path) else { return (0, 0) };
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: `c` is a valid C string and `st` points to our own memory of the right size.
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
@@ -336,6 +345,13 @@ mod tests {
                  /dev/loop3 /snap/core/1 squashfs ro 0 0\n\
                  /dev/sdb1 /mnt/HD\\040Externo ext4 rw 0 0\n";
         assert_eq!(parse_mounts(t), vec!["/".to_string(), "/mnt/HD Externo".to_string()]);
+
+        // ZFS: one per pool, by the shortest path; multi-device bcachefs
+        let zfs = "rpool/ROOT/ubuntu / zfs rw 0 0\n\
+                   rpool/home /home zfs rw 0 0\n\
+                   bpool/BOOT/ubuntu /boot zfs rw 0 0\n\
+                   /dev/sda:/dev/sdb /mnt/pool bcachefs rw 0 0\n";
+        assert_eq!(parse_mounts(zfs), ["/", "/boot", "/mnt/pool"]);
     }
 
     #[test]
@@ -360,5 +376,8 @@ mod tests {
     fn network_skips_loopback_and_docker() {
         let t = "h1\nh2\n    lo: 999 0 0 0 0 0 0 0 999 0\n  eth0: 100 0 0 0 0 0 0 0 50 0\ndocker0: 7 0 0 0 0 0 0 0 7 0\n";
         assert_eq!(parse_net(t), (100, 50));
+        // VPN tunnels and VM host-only networks: the real card already counts their bytes
+        let vpn = format!("{t}  tun0: 30 0 0 0 0 0 0 0 30 0\n   wg0: 5 0 0 0 0 0 0 0 5 0\ntailscale0: 9 0 0 0 0 0 0 0 9 0\nvboxnet0: 3 0 0 0 0 0 0 0 3 0\n wlan0: 1 0 0 0 0 0 0 0 2 0\n");
+        assert_eq!(parse_net(&vpn), (101, 52));
     }
 }

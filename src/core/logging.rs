@@ -17,6 +17,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
@@ -24,11 +25,51 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 const MAX_SIZE: u64 = 1 << 20;
 const FILE_NAME: &str = "miniutils.log";
 const OLD_NAME: &str = "miniutils.1.log";
+/// After the file could not be opened (disk full, locked by an antivirus), how long until
+/// the next try: the log does not stop for good, and a broken disk is not hit on every line.
+const RETRY: Duration = Duration::from_secs(30);
 
 struct Logger {
     /// Our level (`info` or `debug`).
     level: LevelFilter,
-    file: Mutex<Option<Sink>>,
+    file: Mutex<FileLog>,
+}
+
+/// The log file, reopened by itself when it was lost.
+struct FileLog {
+    /// Where the file goes (`None`: no log folder on this system).
+    dir: Option<PathBuf>,
+    sink: Option<Sink>,
+    /// Last time opening the file failed.
+    failed_at: Option<Instant>,
+}
+
+impl FileLog {
+    fn new(dir: Option<PathBuf>) -> Self {
+        let mut f = FileLog { dir, sink: None, failed_at: None };
+        f.reopen(Instant::now());
+        f
+    }
+
+    /// Opens the file if there is none and the last failure is old enough.
+    fn reopen(&mut self, now: Instant) {
+        if self.sink.is_some() || self.failed_at.is_some_and(|t| now.saturating_duration_since(t) < RETRY) {
+            return;
+        }
+        let Some(dir) = &self.dir else { return };
+        self.sink = Sink::open(dir);
+        self.failed_at = if self.sink.is_some() { None } else { Some(now) };
+    }
+
+    fn write(&mut self, line: &str, now: Instant) {
+        self.reopen(now);
+        if let Some(sink) = self.sink.take() {
+            self.sink = sink.write(line);
+            if self.sink.is_none() {
+                self.failed_at = Some(now);
+            }
+        }
+    }
 }
 
 struct Sink {
@@ -41,11 +82,12 @@ impl Sink {
     fn open(dir: &Path) -> Option<Sink> {
         std::fs::create_dir_all(dir).ok()?;
         let path = dir.join(FILE_NAME);
-        if std::fs::metadata(&path).is_ok_and(|m| m.len() >= MAX_SIZE) {
-            let _ = std::fs::rename(&path, dir.join(OLD_NAME));
-        }
+        // the full file becomes the old one; if it can't be renamed (another program holds
+        // it on Windows), keep appending and try again after another MAX_SIZE
+        let stuck = std::fs::metadata(&path).is_ok_and(|m| m.len() >= MAX_SIZE)
+            && std::fs::rename(&path, dir.join(OLD_NAME)).is_err();
         let file = OpenOptions::new().create(true).append(true).open(&path).ok()?;
-        let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+        let size = if stuck { 0 } else { file.metadata().map(|m| m.len()).unwrap_or(0) };
         Some(Sink { dir: dir.to_path_buf(), file, size })
     }
 
@@ -79,14 +121,11 @@ impl Log for Logger {
             &record.args().to_string(),
         );
         eprint!("{line}");
-        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(sink) = file.take() {
-            *file = sink.write(&line);
-        }
+        self.file.lock().unwrap_or_else(|e| e.into_inner()).write(&line, Instant::now());
     }
 
     fn flush(&self) {
-        if let Some(sink) = self.file.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        if let Some(sink) = self.file.lock().unwrap_or_else(|e| e.into_inner()).sink.as_mut() {
             let _ = sink.file.flush();
         }
     }
@@ -106,10 +145,9 @@ fn format_line(time: &str, level: Level, target: &str, msg: &str) -> String {
 pub fn init(debug: bool) -> Option<PathBuf> {
     let debug = debug || std::env::var_os("MINIUTILS_DEBUG").is_some();
     let level = if debug { LevelFilter::Debug } else { LevelFilter::Info };
-    let dir = super::os::log_dir();
-    let sink = dir.as_deref().and_then(Sink::open);
-    let path = sink.as_ref().map(|s| s.dir.join(FILE_NAME));
-    let logger = Box::leak(Box::new(Logger { level, file: Mutex::new(sink) }));
+    let file = FileLog::new(super::os::log_dir());
+    let path = file.sink.as_ref().map(|s| s.dir.join(FILE_NAME));
+    let logger = Box::leak(Box::new(Logger { level, file: Mutex::new(file) }));
     if log::set_logger(logger).is_ok() {
         log::set_max_level(level.max(LevelFilter::Warn));
     }
@@ -149,5 +187,28 @@ mod tests {
         assert!(now < MAX_SIZE, "the current one started over");
         drop(sink);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn opens_the_file_again_after_a_failure() {
+        let base = std::env::temp_dir().join(format!("miniutils-log-retry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        // the log folder is taken by a file: opening fails
+        let dir = base.join("logs");
+        std::fs::write(&dir, "not a folder").unwrap();
+        let mut log = FileLog::new(Some(dir.clone()));
+        let t0 = Instant::now();
+        assert!(log.sink.is_none());
+        std::fs::remove_file(&dir).unwrap();
+        // too soon: not tried again yet
+        log.write("lost\n", t0);
+        assert!(log.sink.is_none());
+        // after RETRY it opens and writes
+        log.write("back\n", t0 + RETRY);
+        assert!(log.sink.is_some());
+        assert_eq!(std::fs::read_to_string(dir.join(FILE_NAME)).unwrap(), "back\n");
+        drop(log);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

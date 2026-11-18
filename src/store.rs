@@ -508,18 +508,29 @@ fn ask(summary: &str, question: &str) -> bool {
 
 // ---- index and signature ------------------------------------------------------------
 
+/// Largest index (or Release file) `fetch` accepts.
+const FETCH_MAX: u64 = 4 << 20;
+
+/// Downloads (https) or reads (local path) a small file: the index, its signature, a
+/// Release's `registry-entry.json`. A response over `FETCH_MAX` is refused while it
+/// arrives, not after it is all in memory.
 fn fetch(src: &str) -> Result<Vec<u8>, String> {
     if src.starts_with("https://") {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(20))
+            .user_agent(concat!("miniutils/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|e| e.to_string())?;
         let resp = client.get(src).send().and_then(|r| r.error_for_status()).map_err(|e| format!("{src}: {e}"))?;
-        let bytes = resp.bytes().map_err(|e| e.to_string())?;
-        if bytes.len() > 4 << 20 {
+        if resp.content_length().is_some_and(|n| n > FETCH_MAX) {
             return Err(tr!("{}: index too large", src));
         }
-        Ok(bytes.to_vec())
+        let mut bytes = Vec::new();
+        resp.take(FETCH_MAX + 1).read_to_end(&mut bytes).map_err(|e| format!("{src}: {e}"))?;
+        if bytes.len() as u64 > FETCH_MAX {
+            return Err(tr!("{}: index too large", src));
+        }
+        Ok(bytes)
     } else {
         std::fs::read(src).map_err(|e| format!("{src}: {e}"))
     }
@@ -695,7 +706,7 @@ fn check_source(id: &str, repo: &str, path: &str, commit: &str, license: &str) -
     if !(repo.starts_with("https://") || local) {
         return Err(tr!("{}: the repository must be https:// (or a local folder, for tests)", id));
     }
-    if path.contains("..") || path.starts_with('/') {
+    if repo_subpath(path).is_none() {
         return Err(tr!("{}: invalid path in the index: {}", id, path));
     }
     if license.trim().is_empty() {
@@ -704,11 +715,27 @@ fn check_source(id: &str, repo: &str, path: &str, commit: &str, license: &str) -
     Ok(())
 }
 
-/// Clones `repo` into `into` and checks out exactly `commit` (no hooks, no submodules: the
-/// clone runs nothing from the repository).
+/// A folder inside the repository, as `a/b` (`\\` becomes `/`; "" is the root), or `None`
+/// if it could leave the clone: absolute, with a Windows drive (`C:`) or `..`/`.` parts.
+/// A name that only contains dots (`my..app`) is fine.
+pub(crate) fn repo_subpath(path: &str) -> Option<String> {
+    let path = path.replace('\\', "/");
+    if path.starts_with('/') || path.contains(':') {
+        return None;
+    }
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.iter().any(|p| matches!(*p, "." | "..")) {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
+/// Clones `repo` into `into` (without file contents yet: checking out the commit fetches
+/// only its own) and checks out exactly `commit` (no hooks, no submodules: the clone runs
+/// nothing from the repository).
 fn checkout(id: &str, repo: &str, commit: &str, into: &Path) -> Result<(), String> {
     let into_s = into.to_string_lossy().to_string();
-    git(&["clone", "--quiet", "--no-checkout", "-c", "core.hooksPath=/dev/null", "--", repo, &into_s])?;
+    git(&["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.hooksPath=/dev/null", "--", repo, &into_s])?;
     git(&["-C", &into_s, "-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", commit])?;
     let head = git(&["-C", &into_s, "rev-parse", "HEAD"])?;
     if !head.trim().eq_ignore_ascii_case(commit) {
@@ -1054,6 +1081,16 @@ fn installed_list(root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::core::plugins::tests::EXAMPLE;
+
+    #[test]
+    fn repository_subpath_stays_inside_the_clone() {
+        for bad in ["C:/x", "C:\\x", "/x", "\\\\server\\share", "a/../b", "..", "./a", "a/./b"] {
+            assert_eq!(repo_subpath(bad), None, "{bad}");
+        }
+        assert_eq!(repo_subpath("my..app").as_deref(), Some("my..app"));
+        assert_eq!(repo_subpath("apps\\notes/").as_deref(), Some("apps/notes"));
+        assert_eq!(repo_subpath("").as_deref(), Some(""));
+    }
 
     /// A real git repository with the example plugin and an index pointing to it.
     struct Store {

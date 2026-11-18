@@ -34,6 +34,10 @@ pub struct Prev {
 #[derive(Debug, PartialEq)]
 pub enum DockerEvent {
     Crash { name: String, code: i32 },
+    /// Exit 137 with Docker's `OOMKilled` flag: the kernel killed it for lack of memory.
+    OutOfMemory(String),
+    /// Docker marked it `dead` (it could not be stopped or removed cleanly).
+    Dead(String),
     Restarting(String),
     Unhealthy(String),
     Recovered(String),
@@ -254,10 +258,8 @@ impl DockerMini {
 
     fn ingest(&mut self, snap: DockerSnapshot) -> Vec<DockerEvent> {
         let now = Instant::now();
-        // crash = was running and exited with an error code (137/143 = stopped on purpose)
         for c in &snap.containers {
-            let was_running = self.prev.get(&c.name).is_some_and(|p| p.state == "running");
-            if was_running && c.state == "exited" && ![0, 137, 143].contains(&c.exit_code) {
+            if self.prev.get(&c.name).is_some_and(|p| crashed_now(&p.state, c)) {
                 self.crashes.insert(c.name.clone(), now);
             }
             if c.state == "running" {
@@ -296,6 +298,18 @@ impl DockerMini {
                     tr!("The container exited with code {}.", code),
                     true,
                 ),
+                DockerEvent::OutOfMemory(n) => (
+                    format!("crash:{n}"),
+                    tr!("💥 {} ran out of memory", n),
+                    tr!("The system killed the container for using too much memory.").into(),
+                    true,
+                ),
+                DockerEvent::Dead(n) => (
+                    format!("crash:{n}"),
+                    tr!("💥 {} died", n),
+                    tr!("Docker marked the container as dead.").into(),
+                    true,
+                ),
                 DockerEvent::Restarting(n) => (
                     format!("restarting:{n}"),
                     tr!("🔁 {} is in a restart loop", n),
@@ -317,9 +331,11 @@ impl DockerMini {
             };
             // chat between mascots: Docker tells what happened to the container
             let (kind, subject) = match ev {
-                DockerEvent::Crash { name, .. } | DockerEvent::Restarting(name) | DockerEvent::Unhealthy(name) => {
-                    (FactKind::Trouble, name)
-                }
+                DockerEvent::Crash { name, .. }
+                | DockerEvent::OutOfMemory(name)
+                | DockerEvent::Dead(name)
+                | DockerEvent::Restarting(name)
+                | DockerEvent::Unhealthy(name) => (FactKind::Trouble, name),
                 DockerEvent::Recovered(name) => (FactKind::Recovered, name),
             };
             let voice = self.voice();
@@ -479,9 +495,11 @@ impl DockerMini {
     fn row(&self, c: &Container, busy_cpu: f32) -> ContainerRow {
         let problem = self.is_problem(c);
         let state_text = if c.health == "unhealthy" {
-            "unhealthy".to_string()
+            tr!("unhealthy").into()
         } else if c.state == "restarting" {
             tr!("in a restart loop").into()
+        } else if problem && out_of_memory(c) {
+            tr!("killed: out of memory").into()
         } else if problem {
             tr!("crashed (code {})", c.exit_code)
         } else {
@@ -636,13 +654,35 @@ pub fn restarts_text(n: u32) -> String {
     }
 }
 
+/// Exit 137 (SIGKILL) because the kernel ran out of memory, not because someone stopped it.
+fn out_of_memory(c: &Container) -> bool {
+    c.exit_code == 137 && c.oom_killed
+}
+
+/// The container went down on its own between two readings: it was running and exited with
+/// an error code (0, 137 and 143 are a deliberate stop, unless the 137 came from the OOM
+/// killer), or Docker marked it `dead`.
+pub fn crashed_now(prev_state: &str, c: &Container) -> bool {
+    match c.state.as_str() {
+        "exited" => prev_state == "running" && (![0, 137, 143].contains(&c.exit_code) || out_of_memory(c)),
+        "dead" => matches!(prev_state, "running" | "restarting"),
+        _ => false,
+    }
+}
+
 /// Compares the previous reading with the current one and returns what is worth warning about.
 pub fn detect_events(prev: &HashMap<String, Prev>, now: &[Container], cur: &HashMap<String, Prev>) -> Vec<DockerEvent> {
     let mut out = Vec::new();
     for c in now {
         let (Some(p), Some(n)) = (prev.get(&c.name), cur.get(&c.name)) else { continue };
-        if p.state == "running" && c.state == "exited" && ![0, 137, 143].contains(&c.exit_code) {
-            out.push(DockerEvent::Crash { name: c.name.clone(), code: c.exit_code });
+        if crashed_now(&p.state, c) {
+            out.push(if c.state == "dead" {
+                DockerEvent::Dead(c.name.clone())
+            } else if out_of_memory(c) {
+                DockerEvent::OutOfMemory(c.name.clone())
+            } else {
+                DockerEvent::Crash { name: c.name.clone(), code: c.exit_code }
+            });
         } else if p.state != "restarting" && c.state == "restarting" {
             out.push(DockerEvent::Restarting(c.name.clone()));
         } else if p.health != "unhealthy" && c.health == "unhealthy" {
@@ -862,13 +902,18 @@ mod tests {
             ("c".to_string(), p("running", "healthy", false)),
             ("d".to_string(), p("exited", "", true)),
             ("e".to_string(), p("running", "", false)),
+            ("f".to_string(), p("running", "", false)),
+            ("g".to_string(), p("restarting", "", true)),
         ]);
+        let oom = Container { oom_killed: true, ..c("f", "exited", 137, "") };
         let now = vec![
             c("a", "exited", 1, ""),       // crashed
             c("b", "exited", 137, ""),     // stopped on purpose
             c("c", "running", 0, "unhealthy"),
             c("d", "running", 0, ""),      // back up
             c("e", "restarting", 0, ""),
+            oom,                           // killed for lack of memory
+            c("g", "dead", 0, ""),         // died
         ];
         let cur = HashMap::from([
             ("a".to_string(), p("exited", "", true)),
@@ -876,14 +921,32 @@ mod tests {
             ("c".to_string(), p("running", "unhealthy", true)),
             ("d".to_string(), p("running", "", false)),
             ("e".to_string(), p("restarting", "", true)),
+            ("f".to_string(), p("exited", "", true)),
+            ("g".to_string(), p("dead", "", true)),
         ]);
         let ev = detect_events(&prev, &now, &cur);
         assert_eq!(ev, vec![
             DockerEvent::Crash { name: "a".into(), code: 1 },
             DockerEvent::Unhealthy("c".into()),
             DockerEvent::Restarting("e".into()),
+            DockerEvent::OutOfMemory("f".into()),
+            DockerEvent::Dead("g".into()),
             DockerEvent::Recovered("d".into()),
         ]);
+    }
+
+    #[test]
+    fn what_counts_as_a_crash() {
+        assert!(crashed_now("running", &c("a", "exited", 1, "")));
+        assert!(!crashed_now("running", &c("a", "exited", 0, "")));
+        assert!(!crashed_now("running", &c("a", "exited", 137, "")));
+        assert!(!crashed_now("running", &c("a", "exited", 143, "")));
+        assert!(crashed_now("running", &Container { oom_killed: true, ..c("a", "exited", 137, "") }));
+        assert!(crashed_now("running", &c("a", "dead", 0, "")));
+        assert!(crashed_now("restarting", &c("a", "dead", 0, "")));
+        // already down before: nothing new
+        assert!(!crashed_now("exited", &c("a", "exited", 1, "")));
+        assert!(!crashed_now("created", &c("a", "dead", 0, "")));
     }
 
     #[test]

@@ -39,6 +39,9 @@ export global PortsApp {
     in property <int> exposed;
     in property <bool> ok: true;
     in property <bool> missing;
+    // what to say when the system command is missing (ss on Linux, netstat on Windows)
+    in property <string> missing-title;
+    in property <string> missing-hint;
     in property <string> error-text;
     in property <image> mascot;
     in property <string> mood: "sleep";
@@ -202,7 +205,7 @@ export component PortsView inherits Rectangle {
             horizontal-stretch: 1;
             spacing: 4px;
             Text {
-                text: PortsApp.missing ? @tr("ss not installed") : !PortsApp.ok ? @tr("Could not read the ports") : PortsApp.speech;
+                text: PortsApp.missing ? PortsApp.missing-title : !PortsApp.ok ? @tr("Could not read the ports") : PortsApp.speech;
                 color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
                 font-size: (short ? 15px : 19px) * Skin.text-scale;
                 font-weight: 700;
@@ -275,7 +278,9 @@ export component PortsView inherits Rectangle {
         background: t.bg1.mix(t.bg0, 0.6);
 
         if PortsApp.rows.length == 0: Text {
-            text: PortsApp.missing ? @tr("Install iproute2 to see the ports.") : PortsApp.search != "" ? @tr("No port matches this filter.") : @tr("No port listening.");
+            text: PortsApp.missing ? PortsApp.missing-hint
+                : !PortsApp.ok ? @tr("Could not read the ports")
+                : PortsApp.search != "" ? @tr("No port matches this filter.") : @tr("No port listening.");
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 13px * Skin.text-scale;

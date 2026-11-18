@@ -147,6 +147,34 @@ mod tests {
     }
 
     #[test]
+    fn moved_renewal_time_alone_clears_the_history() {
+        let mut h = history(60, 3, 180 * MIN, |m| 40.0 + m as f64 * 0.5);
+        h.record(63 * MIN, 70.0, 191 * MIN);
+        assert_eq!(h.samples.len(), 1);
+        assert_eq!(h.resets_at, 191 * MIN);
+    }
+
+    #[test]
+    fn small_jitter_keeps_the_history() {
+        let mut h = history(60, 3, 180 * MIN, |m| 40.0 + m as f64 * 0.5);
+        let before = h.forecast(60 * MIN);
+        let n = h.samples.len();
+        // the renewal time moved 5 min and the % dipped half a point: same window
+        h.record(60 * MIN + 30, 69.5, 185 * MIN);
+        // not cleared (only the reading that fell out of the hour went away)
+        assert_eq!(h.samples.len(), n);
+        assert_eq!(h.samples.back(), Some(&(60 * MIN + 30, 69.5)));
+        assert!(before.is_some());
+        assert_eq!(h.forecast(60 * MIN + 30).map(|f| f.strained), before.map(|f| f.strained));
+    }
+
+    #[test]
+    fn full_window_has_no_forecast() {
+        let h = history(60, 3, 180 * MIN, |m| (40.0 + m as f64).min(100.0));
+        assert_eq!(h.forecast(60 * MIN), None);
+    }
+
+    #[test]
     fn repeated_reading_does_not_count_twice() {
         let mut h = history(60, 3, 180 * MIN, |m| 40.0 + m as f64 * 0.5);
         let n = h.samples.len();

@@ -22,6 +22,9 @@ msgstr "boa tarde"
 msgid "good evening"
 msgstr "boa noite"
 
+msgid "Could not change it: {}"
+msgstr "Não foi possível mudar: {}"
+
 # App settings (src/hub/settings.rs)
 msgid "Follows the window"
 msgstr "Acompanha a janela"
@@ -235,3 +238,10 @@ msgstr "camada {}: {}"
 # Usage of the hub and its external apps (src/hub/usage.rs): the sum line
 msgid "Total"
 msgstr "Total"
+
+# Dashboard grid tag on the "grid" header skins (src/hub/grid.rs): apps · columns × rows
+msgid "// 1 APP · {} × {}"
+msgstr "// 1 APP · {} × {}"
+
+msgid "// {} APPS · {} × {}"
+msgstr "// {} APPS · {} × {}"

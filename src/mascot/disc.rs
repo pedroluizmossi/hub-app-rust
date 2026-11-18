@@ -6,7 +6,7 @@
 //! does not turn: rotating 16 pixels with no smoothing flickers, so the spin shows in the
 //! moving highlight.
 
-use super::render::darker;
+use super::render::{darker, lighter};
 use super::themes::Theme;
 use crate::providers::media::{ART_SIZE, Art};
 
@@ -43,8 +43,8 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> [[u8; 4]
                 continue; // hole: transparent, shows the well's background
             }
             let mut color = if r <= HOLE + 0.9 {
-                // rim of the hole
-                darker(theme.muted, 0.8)
+                // rim of the hole: a little lighter than the muted tone, so it shows
+                lighter(theme.muted, 1.25)
             } else if let Some(art) = art.filter(|_| r <= LABEL_R) {
                 // label: the cover pixel under this disc pixel
                 let side = ART_SIZE as usize;
@@ -56,7 +56,7 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> [[u8; 4]
                 c = mix(c, 0xffffff, spec * 0.25);
                 // edge of the label: a thin dark line where the data area starts
                 if r > LABEL_R - 0.8 {
-                    c = darker(c, 0.7);
+                    c = darker(c, 1.43);
                 }
                 c
             } else {
@@ -65,7 +65,7 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> [[u8; 4]
                 let mut c = mix(body, iri, 0.5);
                 // tracks: thin data rings
                 if ((r - HOLE) * 1.7) as i32 % 2 == 0 {
-                    c = darker(c, 0.9);
+                    c = darker(c, 1.11);
                 }
                 // spinning highlight
                 let spec = (a - rot).cos().max(0.0).powf(6.0);
@@ -77,7 +77,7 @@ pub fn pixels(theme: &Theme, spin: u8, lit: bool, art: Option<&Art>) -> [[u8; 4]
                 c
             };
             if !lit {
-                color = darker(color, 0.7);
+                color = darker(color, 1.43);
             }
             let pixel = rgb(color);
             out[y * SIZE + x] = [pixel.0, pixel.1, pixel.2, 255];
@@ -183,6 +183,19 @@ mod tests {
         assert_ne!(pixels(t, 0, true, None), pixels(themes::get("aconchego"), 0, true, None));
         // same frame, same image
         assert_eq!(pixels(t, 3, true, None), pixels(t, 3, true, None));
+    }
+
+    #[test]
+    fn unlit_disc_is_darker() {
+        let max = |p: [u8; 4]| p[0].max(p[1]).max(p[2]);
+        for key in ["neon", "aconchego"] {
+            let t = themes::get(key);
+            let (lit, unlit) = (pixels(t, 0, true, None), pixels(t, 0, false, None));
+            // a data-area pixel, away from the highlight
+            let (x, y) = (SIZE / 2 - 7, SIZE / 2);
+            assert_eq!(px(&lit, x, y)[3], 255);
+            assert!(max(px(&unlit, x, y)) < max(px(&lit, x, y)), "{key}: the unlit disc got lighter");
+        }
     }
 
     #[test]

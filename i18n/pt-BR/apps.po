@@ -22,6 +22,9 @@ msgstr "há {} h"
 msgid "Resets in {}"
 msgstr "Renova em {}"
 
+msgid "Resets at {}"
+msgstr "Renova às {}"
+
 msgid "Resets %m/%d at %H:%M"
 msgstr "Renova %d/%m às %H:%M"
 
@@ -73,6 +76,9 @@ msgstr "1 agente esperando por você!"
 
 msgid "{} agents waiting for you!"
 msgstr "{} agentes esperando por você!"
+
+msgid "{} agents finished their turn"
+msgstr "{} agentes terminaram o turno"
 
 msgid "1 agent working."
 msgstr "1 agente trabalhando."
@@ -509,6 +515,12 @@ msgstr "view.slint precisa exportar `component Main`"
 msgid "store_set: the data is over {} KiB; it wasn't saved"
 msgstr "store_set: os dados passam de {} KiB; não foram gravados"
 
+msgid "couldn't read the stored data ({}); changes won't be saved"
+msgstr "não deu para ler os dados guardados ({}); as mudanças não serão gravadas"
+
+msgid "the stored data was damaged and was set aside as {}"
+msgstr "os dados guardados estavam danificados e foram separados como {}"
+
 msgid "{}: https:// only"
 msgstr "{}: só https://"
 
@@ -572,3 +584,51 @@ msgstr "falhou há {} s · {}"
 
 msgid "updated {} s ago · {}"
 msgstr "atualizado há {} s · {}"
+
+msgid "unhealthy"
+msgstr "não saudável"
+
+msgid "killed: out of memory"
+msgstr "encerrado: sem memória"
+
+msgid "💥 {} ran out of memory"
+msgstr "💥 {} ficou sem memória"
+
+msgid "The system killed the container for using too much memory."
+msgstr "O sistema encerrou o container por usar memória demais."
+
+msgid "💥 {} died"
+msgstr "💥 {} morreu"
+
+msgid "Docker marked the container as dead."
+msgstr "O Docker marcou o container como morto."
+
+msgid "The task list was unreadable; saved a copy as {}"
+msgstr "A lista de tarefas estava ilegível; uma cópia foi guardada como {}"
+
+msgid "Couldn't read the task list ({}); changes won't be saved."
+msgstr "Não consegui ler a lista de tarefas ({}); as mudanças não serão salvas."
+
+msgid "Couldn't play/pause"
+msgstr "Não consegui tocar/pausar"
+
+msgid "Couldn't skip to the next track"
+msgstr "Não consegui pular para a próxima faixa"
+
+msgid "Couldn't go to the previous track"
+msgstr "Não consegui voltar para a faixa anterior"
+
+msgid "Couldn't seek"
+msgstr "Não consegui mudar a posição"
+
+msgid "Couldn't open the player"
+msgstr "Não consegui abrir o player"
+
+msgid "The player command failed"
+msgstr "O comando do player falhou"
+
+msgid "netstat not found"
+msgstr "netstat não encontrado"
+
+msgid "netstat is needed to see the ports."
+msgstr "O netstat é necessário para ver as portas."

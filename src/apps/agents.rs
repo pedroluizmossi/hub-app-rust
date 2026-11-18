@@ -40,8 +40,6 @@ pub struct AgentsMini {
     speech: Speech,
     mood: Mood,
     rows: Rc<VecModel<AgentRow>>,
-    /// The session of each row on screen, in the same order (clicks come by index).
-    shown: Vec<Agent>,
     /// Session with its options open (the clicked row). By session, not by index: the
     /// list reorders itself.
     selected: Option<(Tool, String)>,
@@ -88,7 +86,6 @@ impl AgentsMini {
             speech: Speech::new(SPEECH_TTL),
             mood: Mood::Sleep,
             rows,
-            shown: Vec::new(),
             selected: None,
             cards: Vec::new(),
             faces: HashMap::new(),
@@ -148,9 +145,11 @@ impl AgentsMini {
         app
     }
 
-    /// Session shown with key `key` (see `session_key`).
+    /// Session with key `key` (see `session_key`), among everything the last reading saw:
+    /// the detail window may show one that is no longer on a card (a subagent, or one past
+    /// the `recent` option).
     fn find(&self, key: &str) -> Option<&Agent> {
-        self.shown.iter().find(|a| session_key(a) == key)
+        self.snap.agents.iter().find(|a| session_key(a) == key)
     }
 
     /// Opens the session's folder in the file manager.
@@ -188,13 +187,16 @@ impl AgentsMini {
     }
 
     /// Compares with the previous reading: who finished and who started waiting for the user.
-    fn ingest(&mut self, snap: AgentsSnapshot) {
+    fn ingest(&mut self, mut snap: AgentsSnapshot) {
+        carry_over(&self.snap, &mut snap);
         let cur: HashMap<(Tool, String), State> = snap.agents.iter().map(|a| ((a.tool, a.id.clone()), a.state)).collect();
         if self.baseline {
             let (notify_waiting, notify_done) = {
                 let cfg = self.host.config.borrow();
                 (cfg.bool(&self.manifest, "notify_waiting"), cfg.bool(&self.manifest, "notify_done"))
             };
+            // what each change says, to sum up in one speech line afterwards
+            let mut said: Vec<(Change, String)> = Vec::new();
             // subagents coming and going is noise: only the sessions the user opened
             for a in snap.agents.iter().filter(|a| a.parent.is_none()) {
                 let before = self.prev.get(&(a.tool, a.id.clone())).copied();
@@ -213,9 +215,12 @@ impl AgentsMini {
                     }
                 };
                 if notify {
-                    self.host.notifier.borrow_mut().send(&format!("agents:{}:{}", a.tool.name(), a.id), title, &body, urgent);
+                    self.host.notifier.borrow_mut().send(&notify_key(&change, a), title, &body, urgent);
                 }
-                self.speech.say(body);
+                said.push((change, body));
+            }
+            if let Some(line) = speech_of(said) {
+                self.speech.say(line);
             }
         }
         self.prev = cur;
@@ -230,30 +235,17 @@ impl AgentsMini {
         self.snap.agents.iter().filter(|a| a.state != State::Idle || now - a.since_ms <= recent).collect()
     }
 
-    fn compute_mood(&self, list: &[&Agent]) -> Mood {
-        if list.iter().any(|a| a.state == State::Waiting) {
-            Mood::Busy
-        } else if list.iter().any(|a| a.state == State::Working) {
-            Mood::Happy
-        } else if !list.is_empty() {
-            Mood::Idle
-        } else {
-            Mood::Sleep
-        }
-    }
-
     fn face(&mut self, tool: Tool, state: State) -> slint::Image {
         if let Some(img) = self.faces.get(&(tool, state)) {
             return img.clone();
         }
-        let name = if tool == Tool::OpenCode { "OpenCode Go" } else { tool.name() };
         let mood = match state {
             State::Working => Mood::Happy,
             State::Waiting => Mood::Busy,
             State::Idle => Mood::Sleep,
         };
         let theme = self.host.theme_for(&self.manifest);
-        let img = ai_mascots::get(name).map(|s| render::image(s, theme, mood, 0)).unwrap_or_default();
+        let img = ai_mascots::for_tool(tool).map(|s| render::image(s, theme, mood, 0)).unwrap_or_default();
         self.faces.insert((tool, state), img.clone());
         img
     }
@@ -262,9 +254,10 @@ impl AgentsMini {
         let now = now_ms();
         let home = dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
         let all: Vec<Agent> = self.visible(now).into_iter().cloned().collect();
-        self.mood = self.compute_mood(&all.iter().collect::<Vec<_>>());
         // one row per session; subagents stay on the card of whoever started them
         let list = group(&all);
+        let counts = Counts::of(&list);
+        self.mood = counts.mood();
         // the session with open options left the list: close them
         if self.selected.as_ref().is_some_and(|(t, id)| !list.iter().any(|(a, _)| a.tool == *t && a.id == *id)) {
             self.selected = None;
@@ -300,11 +293,8 @@ impl AgentsMini {
         let theme = self.host.theme_for(&self.manifest);
         self.heroes.sync(on, &walking, theme);
         self.cards = cards;
-        let list: Vec<Agent> = list.into_iter().map(|(a, _)| a.clone()).collect();
-        self.shown = list.clone();
 
-        let count = |s: State| list.iter().filter(|a| a.state == s).count();
-        let (working, waiting, idle) = (count(State::Working), count(State::Waiting), count(State::Idle));
+        let Counts { working, waiting, idle } = counts;
         let g = ui.global::<AgentsApp>();
         g.set_working(working as i32);
         g.set_waiting(waiting as i32);
@@ -401,6 +391,89 @@ fn change(before: Option<State>, a: &Agent) -> Option<Change> {
     }
 }
 
+/// Notification key of a change: one per kind, so a "finished" right after a "waiting"
+/// isn't dropped by the notifier's once-a-minute limit for the same key.
+fn notify_key(change: &Change, a: &Agent) -> String {
+    let kind = match change {
+        Change::Waiting => "waiting",
+        Change::Done => "done",
+        Change::Stopped => "stopped",
+    };
+    format!("agents:{kind}:{}:{}", a.tool.name(), a.id)
+}
+
+/// One speech line for the changes of a reading: a single change keeps its own text;
+/// several are summed up, with whoever waits for the user first.
+fn speech_of(said: Vec<(Change, String)>) -> Option<String> {
+    if said.len() <= 1 {
+        return said.into_iter().next().map(|(_, body)| body);
+    }
+    let (waiting, ended): (Vec<_>, Vec<_>) = said.into_iter().partition(|(c, _)| *c == Change::Waiting);
+    let mut parts = Vec::new();
+    match waiting.len() {
+        0 => {}
+        1 => parts.push(waiting[0].1.clone()),
+        n => parts.push(tr!("{} agents waiting for you!", n)),
+    }
+    match ended.len() {
+        0 => {}
+        1 => parts.push(ended[0].1.clone()),
+        n => parts.push(tr!("{} agents finished their turn", n)),
+    }
+    Some(parts.join(" · "))
+}
+
+/// A tool that couldn't be read this time keeps the sessions of the previous reading: they
+/// don't vanish from the list for a moment, nor come back as new (and warn again).
+fn carry_over(prev: &AgentsSnapshot, snap: &mut AgentsSnapshot) {
+    for (tool, _) in &snap.errors {
+        if snap.agents.iter().any(|a| a.tool == *tool) {
+            continue;
+        }
+        snap.agents.extend(prev.agents.iter().filter(|a| a.tool == *tool).cloned());
+    }
+}
+
+/// How many rows (sessions with their subagents) are in each state. A row counts as
+/// working when its subagents work, as in the list order (`group`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Counts {
+    working: usize,
+    waiting: usize,
+    idle: usize,
+}
+
+impl Counts {
+    fn of(list: &[(&Agent, Vec<&Agent>)]) -> Counts {
+        let mut c = Counts::default();
+        for (a, subs) in list {
+            match row_state(a, subs) {
+                State::Waiting => c.waiting += 1,
+                State::Working => c.working += 1,
+                State::Idle => c.idle += 1,
+            }
+        }
+        c
+    }
+
+    fn mood(self) -> Mood {
+        if self.waiting > 0 {
+            Mood::Busy
+        } else if self.working > 0 {
+            Mood::Happy
+        } else if self.idle > 0 {
+            Mood::Idle
+        } else {
+            Mood::Sleep
+        }
+    }
+}
+
+/// State of a row: the session's, or working when it waits on a working subagent.
+fn row_state(a: &Agent, subs: &[&Agent]) -> State {
+    if a.state == State::Idle && subs.iter().any(|s| s.state == State::Working) { State::Working } else { a.state }
+}
+
 /// Attaches each subagent to the session that started it: (session, its subagents). A
 /// subagent whose session is not on the list (stopped long ago) gets its own row.
 /// In screen order: who needs you, then who is working (or has a subagent working); within
@@ -415,10 +488,7 @@ fn group(all: &[Agent]) -> Vec<(&Agent, Vec<&Agent>)> {
         .filter(|a| is_top(a))
         .map(|a| (a, all.iter().filter(|s| s.tool == a.tool && s.parent.as_deref() == Some(a.id.as_str())).collect()))
         .collect();
-    list.sort_by_key(|(a, subs)| {
-        let busy = subs.iter().any(|s| s.state == State::Working);
-        (rank(a.state).min(if busy { rank(State::Working) } else { u8::MAX }), -a.since_ms)
-    });
+    list.sort_by_key(|(a, subs)| (rank(row_state(a, subs)), -a.since_ms));
     list
 }
 
@@ -707,16 +777,22 @@ fn compact(n: u64) -> String {
     let decimal = |s: String| if i18n::current() == Language::PtBr { s.replace('.', ",") } else { s };
     match n {
         0..1_000 => n.to_string(),
-        1_000..10_000 => decimal(format!("{:.1} k", n as f64 / 1e3)),
+        // from 9 950 on, one decimal would round up to "10.0 k"
+        1_000..9_950 => decimal(format!("{:.1} k", n as f64 / 1e3)),
+        9_950..10_000 => "10 k".to_string(),
         10_000..1_000_000 => format!("{} k", n / 1_000),
         _ => decimal(format!("{:.1} M", n as f64 / 1e6)),
     }
 }
 
-/// "8 s", "2 min 05 s".
+/// "8 s", "2 min 05 s", "2 h 05 min".
 fn duration(ms: i64) -> String {
     let s = (ms / 1000).max(0);
-    if s < 60 { format!("{s} s") } else { format!("{} min {:02} s", s / 60, s % 60) }
+    match s {
+        0..60 => format!("{s} s"),
+        60..3600 => format!("{} min {:02} s", s / 60, s % 60),
+        _ => format!("{} h {:02} min", s / 3600, s % 3600 / 60),
+    }
 }
 
 /// Why it stopped, in words (the raw name if it's one I don't know).
@@ -797,12 +873,16 @@ fn state_text(a: &Agent, now: i64) -> String {
     }
 }
 
-/// `/home/me/Projects/x` → `~/Projects/x` (`C:\Users\me\x` → `~\x` on Windows).
+/// `/home/me/Projects/x` → `~/Projects/x` (`C:\Users\me\x` → `~\x` on Windows, where the
+/// case may differ: a tool can record `c:\users\me\x`).
 fn short_dir(cwd: &str, home: &str) -> String {
-    match cwd.strip_prefix(home) {
-        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with(['/', '\\'])) => format!("~{rest}"),
-        _ => cwd.to_string(),
-    }
+    // a drive letter: a Windows path, compared without case
+    let windows = home.as_bytes().get(1) == Some(&b':');
+    let rest = match cwd.get(..home.len()) {
+        Some(head) if head == home || (windows && head.eq_ignore_ascii_case(home)) => &cwd[home.len()..],
+        _ => return cwd.to_string(),
+    };
+    if !home.is_empty() && (rest.is_empty() || rest.starts_with(['/', '\\'])) { format!("~{rest}") } else { cwd.to_string() }
 }
 
 impl AgentsMini {
@@ -902,7 +982,11 @@ impl AgentsMini {
         }
         if let Some(steps) = timeline {
             if steps != d.shown {
-                d.steps.set_vec(steps.iter().rev().map(step_row).collect::<Vec<_>>());
+                let today = chrono::Local::now().date_naive();
+                let rows: Vec<AgentStep> = steps.iter().rev().map(|s| step_row(s, today)).collect();
+                // the date only takes room when some step is from another day
+                g.set_dated_steps(rows.iter().any(|r| r.time.len() > 5));
+                d.steps.set_vec(rows);
                 d.shown = steps;
             }
             d.loaded = true;
@@ -964,13 +1048,13 @@ impl Detail {
     }
 }
 
-/// A step in the screen's format.
-fn step_row(s: &Step) -> AgentStep {
+/// A step in the screen's format; one from a day other than `today` also has the date.
+fn step_row(s: &Step, today: chrono::NaiveDate) -> AgentStep {
     use chrono::TimeZone;
     let time = (s.at_ms > 0)
         .then(|| chrono::Local.timestamp_millis_opt(s.at_ms).single())
         .flatten()
-        .map(|t| t.format("%H:%M").to_string())
+        .map(|t| t.format(if t.date_naive() == today { "%H:%M" } else { tr!("%m/%d %H:%M") }).to_string())
         .unwrap_or_default();
     let kind = match s.kind {
         StepKind::User => "user",
@@ -1002,7 +1086,6 @@ impl MiniApp for AgentsMini {
         self.prev.clear();
         self.speech.clear();
         self.mood = Mood::Sleep;
-        self.shown.clear();
         self.selected = None;
         self.cards.clear();
         self.rows.set_vec(Vec::new());
@@ -1048,9 +1131,8 @@ impl MiniApp for AgentsMini {
     }
 
     fn summary(&self) -> String {
-        let list = self.visible(now_ms());
-        let count = |s: State| list.iter().filter(|a| a.state == s).count();
-        let (working, waiting) = (count(State::Working), count(State::Waiting));
+        let all: Vec<Agent> = self.visible(now_ms()).into_iter().cloned().collect();
+        let Counts { working, waiting, .. } = Counts::of(&group(&all));
         if waiting > 0 {
             tr!("Agents: {} waiting for you · {} working", waiting, working)
         } else {
@@ -1126,6 +1208,8 @@ mod tests {
         assert_eq!(c.walking.len(), c.walkers);
 
         assert_eq!((compact(1_500).as_str(), duration(8_400).as_str()), ("1.5 k", "8 s"));
+        assert_eq!((compact(9_949).as_str(), compact(9_960).as_str(), compact(10_000).as_str()), ("9.9 k", "10 k", "10 k"));
+        assert_eq!((duration(3_599_000).as_str(), duration(7_505_000).as_str()), ("59 min 59 s", "2 h 05 min"));
         assert_eq!(stop_text("new_reason"), "stopped by new_reason");
     }
 
@@ -1212,6 +1296,81 @@ mod tests {
         assert_eq!(short_dir("/srv/x", ""), "/srv/x");
         assert_eq!(short_dir(r"C:\Users\me\x", r"C:\Users\me"), r"~\x");
         assert_eq!(short_dir(r"C:\Users\meg", r"C:\Users\me"), r"C:\Users\meg");
+        // Windows paths: the case may differ (lowercase drive from some terminals)
+        assert_eq!(short_dir(r"c:\users\me\x", r"C:\Users\me"), r"~\x");
+        assert_eq!(short_dir(r"c:\users\meg", r"C:\Users\me"), r"c:\users\meg");
+        // Unix paths keep their case
+        assert_eq!(short_dir("/home/Me/x", "/home/me"), "/home/Me/x");
+        assert_eq!(short_dir("/hé", "/h"), "/hé");
+    }
+
+    #[test]
+    fn each_kind_of_change_has_its_own_notification() {
+        let a = agent(State::Idle, 1, "");
+        assert_eq!(notify_key(&Change::Waiting, &a), "agents:waiting:Claude:s");
+        assert_ne!(notify_key(&Change::Waiting, &a), notify_key(&Change::Done, &a));
+        assert_ne!(notify_key(&Change::Done, &a), notify_key(&Change::Stopped, &a));
+    }
+
+    #[test]
+    fn several_changes_make_one_speech_line() {
+        assert_eq!(speech_of(Vec::new()), None);
+        assert_eq!(speech_of(vec![(Change::Done, "x finished".into())]).as_deref(), Some("x finished"));
+        // whoever waits comes first, even if it changed last
+        let line = speech_of(vec![(Change::Done, "a finished".into()), (Change::Waiting, "b waits".into())]);
+        assert_eq!(line.as_deref(), Some("b waits · a finished"));
+        let line = speech_of(vec![
+            (Change::Done, "a".into()),
+            (Change::Stopped, "b".into()),
+            (Change::Waiting, "c".into()),
+            (Change::Waiting, "d".into()),
+        ]);
+        assert_eq!(line.as_deref(), Some("2 agents waiting for you! · 2 agents finished their turn"));
+    }
+
+    #[test]
+    fn a_tool_that_failed_to_read_keeps_its_sessions() {
+        let waiting = Agent { id: "w".into(), ..agent(State::Waiting, 1, "") };
+        let codex = Agent { tool: Tool::Codex, id: "c".into(), ..agent(State::Working, 1, "") };
+        let prev = AgentsSnapshot { agents: vec![waiting.clone(), codex.clone()], ..Default::default() };
+        // Claude failed this time; Codex was read (and its session finished)
+        let done = Agent { state: State::Idle, ..codex.clone() };
+        let mut snap = AgentsSnapshot {
+            agents: vec![done.clone()],
+            errors: vec![(Tool::Claude, "locked".into())],
+            ..Default::default()
+        };
+        carry_over(&prev, &mut snap);
+        assert_eq!(snap.agents, [done, waiting.clone()]);
+        // the session that was waiting isn't new: no second warning
+        assert_eq!(change(Some(State::Waiting), &snap.agents[1]), None);
+        // a good reading changes nothing
+        let mut good = AgentsSnapshot { agents: vec![waiting.clone()], ..Default::default() };
+        carry_over(&prev, &mut good);
+        assert_eq!(good.agents, [waiting]);
+    }
+
+    #[test]
+    fn a_row_with_a_working_subagent_counts_as_working() {
+        let parent = Agent { id: "p".into(), ..agent(State::Idle, 1, "") };
+        let sub = |id: &str, state: State| Agent { id: id.into(), parent: Some("p".into()), ..agent(state, 1, "") };
+        let all = [parent, sub("s1", State::Working), sub("s2", State::Working)];
+        let counts = Counts::of(&group(&all));
+        assert_eq!(counts, Counts { working: 1, waiting: 0, idle: 0 });
+        assert_eq!(counts.mood(), Mood::Happy);
+        let waiting = [Agent { state: State::Waiting, ..all[0].clone() }, all[1].clone()];
+        assert_eq!(Counts::of(&group(&waiting)), Counts { working: 0, waiting: 1, idle: 0 });
+        assert_eq!(Counts::of(&group(&[])).mood(), Mood::Sleep);
+    }
+
+    #[test]
+    fn steps_from_another_day_have_the_date() {
+        use chrono::TimeZone;
+        let at = chrono::Local.with_ymd_and_hms(2026, 11, 17, 23, 50, 0).single().unwrap();
+        let step = Step { at_ms: at.timestamp_millis(), kind: StepKind::Tool, text: "Edit".into() };
+        assert_eq!(step_row(&step, at.date_naive()).time, "23:50");
+        assert_eq!(step_row(&step, at.date_naive().succ_opt().unwrap()).time, "11/17 23:50");
+        assert_eq!(step_row(&Step { at_ms: 0, ..step }, at.date_naive()).time, "");
     }
 
     #[test]

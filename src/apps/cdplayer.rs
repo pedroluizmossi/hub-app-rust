@@ -81,7 +81,7 @@ impl CdPlayerMini {
     fn command(&self, verb: &str) {
         let step = self.host.config.borrow().int(&self.manifest, "seek").clamp(1, 300) * 1_000_000;
         let verb = verb.to_string();
-        self.run(verb.clone(), move |player| media::send(player, &verb, step));
+        self.run(verb_label(&verb), move |player| media::send(player, &verb, step));
     }
 
     /// Click on the progress bar: jump to `fraction` (0..1) of the track.
@@ -90,7 +90,7 @@ impl CdPlayerMini {
             return;
         }
         let fraction = f64::from(fraction.clamp(0.0, 1.0));
-        self.run("seek-to".into(), move |player| media::seek_to(player, fraction));
+        self.run(verb_label("seek-to"), move |player| media::seek_to(player, fraction));
     }
 
     /// Runs `action` on the current player in a thread: the system may take a while and the
@@ -127,7 +127,8 @@ impl CdPlayerMini {
                     (true, false) => snap.album.clone(),
                     (true, true) => snap.app.clone(),
                 };
-                self.host.notifier.borrow_mut().send("cd:track", &format!("▶ {}", snap.title), &body, false);
+                // keyed by track: only the same track repeating within a minute is held back
+                self.host.notifier.borrow_mut().send(&notify_key(&key), &format!("▶ {}", snap.title), &body, false);
                 self.announced = Some(key);
             }
         }
@@ -309,6 +310,24 @@ impl MiniApp for CdPlayerMini {
     }
 }
 
+/// Rate-limit key of a track notification (`track` is "player|title").
+fn notify_key(track: &str) -> String {
+    format!("cd:track:{track}")
+}
+
+/// What failed, for the error line: "Couldn't skip to the next track: <reason>".
+fn verb_label(verb: &str) -> String {
+    match verb {
+        "play-pause" => tr!("Couldn't play/pause"),
+        "next" => tr!("Couldn't skip to the next track"),
+        "prev" => tr!("Couldn't go to the previous track"),
+        "back" | "fwd" | "seek-to" => tr!("Couldn't seek"),
+        "raise" => tr!("Couldn't open the player"),
+        _ => tr!("The player command failed"),
+    }
+    .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +419,22 @@ mod tests {
         assert_eq!(a.announced.as_deref(), Some("org.mpris.MediaPlayer2.x|Current track"));
         assert_eq!(a.error, "command failed");
         assert_eq!(a.error_at, Some(at));
+    }
+
+    #[test]
+    fn each_track_has_its_own_notification_key() {
+        // a constant key would hold back the next track for a minute
+        let a = notify_key("org.mpris.MediaPlayer2.x|One");
+        let b = notify_key("org.mpris.MediaPlayer2.x|Two");
+        assert_ne!(a, b);
+        assert_eq!(a, notify_key("org.mpris.MediaPlayer2.x|One"));
+    }
+
+    #[test]
+    fn failed_commands_are_labeled_in_words() {
+        assert_eq!(verb_label("play-pause"), "Couldn't play/pause");
+        assert_eq!(verb_label("fwd"), verb_label("seek-to"));
+        assert!(!verb_label("anything").contains("anything"));
     }
 
     #[test]

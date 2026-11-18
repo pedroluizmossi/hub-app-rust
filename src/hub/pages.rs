@@ -21,17 +21,35 @@ impl Hub {
     /// app on it, see `Config::find_page`).
     pub(super) fn open_tab(&self, tab: &str) {
         if tab == "apps" || tab == "store" {
-            self.ui.set_current(tab.into());
-            if tab == "store" {
-                self.store_reload();
-            }
+            self.enter_tab(tab);
             return;
         }
         let found = self.host.config.borrow().find_page(tab);
-        if let Some(i) = found {
-            self.page.set(i);
+        if let Some(i) = found
+            && self.page.replace(i) != i
+        {
+            // an edit in progress stays on the page where it started
+            self.drag.borrow_mut().take();
+            self.set_ghost(None);
         }
-        self.ui.set_current("panel".into());
+        self.enter_tab("panel");
+    }
+
+    /// Switches to tab `id` ("panel", "apps" or "store") and refreshes what it shows. Every
+    /// way in (tab click, `--tab`, `show` from another instance) goes through here.
+    pub(super) fn enter_tab(&self, id: &str) {
+        if id == "apps" {
+            self.apply_system();
+            self.refresh_data();
+            self.refresh_usage(true);
+        }
+        self.ui.set_current(id.into());
+        if id == "store" {
+            self.store_reload();
+        }
+        self.rebuild_pages(true);
+        self.anim_tick(); // draw the mascots right on the first frame
+        self.schedule_backdrop();
     }
 
     /// Mood of the page: the worst of its enabled apps.
@@ -128,22 +146,21 @@ impl Hub {
         if self.host.config.borrow().pages.len() <= 1 {
             return;
         }
-        let cur = self.page.get();
-        if cur >= i && cur > 0 {
-            self.page.set(cur - 1);
-        }
+        self.page.set(page_after_remove(self.page.get(), i));
         self.edit_pages(|cfg| cfg.remove_page(i));
     }
 
+    /// Renames page `i`. An empty name is refused, and the field shows the saved name again
+    /// (the user's typing broke its binding to the model).
     pub(super) fn rename_page(&self, i: usize, name: &str) {
-        let name = name.trim().to_string();
-        self.edit_pages(|cfg| match cfg.pages.get_mut(i) {
-            Some(p) if !name.is_empty() && p.name != name => {
-                p.name = name;
-                true
-            }
-            _ => false,
+        let mut changed = false;
+        self.edit_pages(|cfg| {
+            changed = rename(cfg, i, name);
+            changed
         });
+        if !changed {
+            self.rebuild_pages(true);
+        }
     }
 
     pub(super) fn page_icon(&self, i: usize, k: usize) {
@@ -165,8 +182,7 @@ impl Hub {
             return;
         }
         let j = j as usize;
-        let cur = self.page.get();
-        self.page.set(if cur == i { j } else if cur == j { i } else { cur });
+        self.page.set(page_after_swap(self.page.get(), i, j));
         self.edit_pages(|cfg| {
             cfg.pages.swap(i, j);
             true
@@ -181,5 +197,74 @@ impl Hub {
             cfg.move_to_page(id, to);
             true
         });
+    }
+}
+
+/// Sets page `i`'s name (trimmed); false (nothing changed) for a blank name, the same name
+/// or no such page.
+fn rename(cfg: &mut Config, i: usize, name: &str) -> bool {
+    let name = name.trim();
+    match cfg.pages.get_mut(i) {
+        Some(p) if !name.is_empty() && p.name != name => {
+            p.name = name.to_string();
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The open page after page `removed` is deleted: the same page (one index lower if it came
+/// after the removed one), or the previous one if it was the one removed.
+fn page_after_remove(cur: usize, removed: usize) -> usize {
+    if cur >= removed && cur > 0 { cur - 1 } else { cur }
+}
+
+/// The open page after pages `i` and `j` swap places: it follows its page.
+fn page_after_swap(cur: usize, i: usize, j: usize) -> usize {
+    if cur == i {
+        j
+    } else if cur == j {
+        i
+    } else {
+        cur
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_page_follows_a_removal() {
+        // removed after the open one: unchanged
+        assert_eq!(page_after_remove(1, 3), 1);
+        // removed before: one index lower, same page
+        assert_eq!(page_after_remove(3, 1), 2);
+        // the open one removed: the previous one
+        assert_eq!(page_after_remove(2, 2), 1);
+        // page 0 open and removed: stays on 0 (the next page moved there)
+        assert_eq!(page_after_remove(0, 0), 0);
+        assert_eq!(page_after_remove(0, 2), 0);
+    }
+
+    #[test]
+    fn open_page_follows_a_swap() {
+        assert_eq!(page_after_swap(1, 1, 2), 2);
+        assert_eq!(page_after_swap(2, 1, 2), 1);
+        assert_eq!(page_after_swap(0, 1, 2), 0);
+        assert_eq!(page_after_swap(3, 2, 1), 3);
+    }
+
+    #[test]
+    fn blank_rename_is_ignored() {
+        let mut cfg = Config::default();
+        let before = cfg.pages[0].name.clone();
+        assert!(!rename(&mut cfg, 0, ""));
+        assert!(!rename(&mut cfg, 0, "  \t "));
+        assert!(!rename(&mut cfg, 0, before.as_str()));
+        assert!(!rename(&mut cfg, 99, "Other"));
+        assert_eq!(cfg.pages[0].name, before);
+        assert!(rename(&mut cfg, 0, "  Work "));
+        assert_eq!(cfg.pages[0].name, "Work");
     }
 }

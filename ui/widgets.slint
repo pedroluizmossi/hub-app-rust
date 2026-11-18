@@ -151,6 +151,14 @@ export component Icon inherits Path {
     fill: filled ? ink : transparent;
 }
 
+// Outline of the control that has the keyboard focus (reached with Tab). Fills its parent
+// unless placed (controls with a border put it 3px outside, to stand apart from it).
+export component FocusRing inherits Rectangle {
+    in property <color> ink: Skin.accent;
+    border-width: 2px;
+    border-color: ink;
+}
+
 // Square icon-only button (container actions, pin, gear).
 export component IconButton inherits Rectangle {
     in property <string> icon;
@@ -169,6 +177,7 @@ export component IconButton inherits Rectangle {
     animate background { duration: 120ms; }
     accessible-role: button;
     accessible-label: label;
+    accessible-enabled: enabled;
     accessible-action-default => { if enabled { root.clicked(); } }
 
     Icon {
@@ -176,6 +185,20 @@ export component IconButton inherits Rectangle {
         ink: root.ink;
         size: root.icon-size;
     }
+    // keyboard: Tab reaches it, Enter or Space clicks (a mouse click does not take the focus)
+    keys := FocusScope {
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    // outside the button, so it does not blend with its border
+    if keys.has-focus: FocusRing { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
@@ -227,6 +250,18 @@ export component TextButton inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    keys := FocusScope {
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; ink: root.ink; }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
@@ -265,6 +300,24 @@ export component SqSwitch inherits Rectangle {
         background: checked ? on-knob : off-knob;
         animate x { duration: 150ms; easing: ease-in-out; }
     }
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.toggled();
+                return accept;
+            }
+            reject
+        }
+    }
+    // outside the track, so it shows in either state
+    if keys.has-focus: FocusRing {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        ink: accent;
+    }
     TouchArea {
         mouse-cursor: pointer;
         clicked => { root.toggled(); }
@@ -282,6 +335,7 @@ component StepKey inherits Rectangle {
     opacity: enabled ? 1 : 0.35;
     accessible-role: button;
     accessible-label: text == "+" ? @tr("Increase") : @tr("Decrease");
+    accessible-enabled: enabled;
     accessible-action-default => { if enabled { root.clicked(); } }
     Text {
         text: root.text;
@@ -291,6 +345,18 @@ component StepKey inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
+    keys := FocusScope {
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing { ink: root.ink; }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
@@ -307,6 +373,8 @@ export component Stepper inherits Rectangle {
     in property <string> unit;
     in property <color> accent: Skin.accent;
     in property <color> edge: Skin.field-edge;
+    // at least this wide; wider when the largest value (or, with no real maximum, the
+    // current one) needs it at the text size in use, so it does not jump while stepping
     in property <length> value-width: 52px;
     in property <length> font-size: 15px * Skin.text-scale;
     // − and + disabled from outside (e.g. the grid can't fit it)
@@ -317,6 +385,13 @@ export component Stepper inherits Rectangle {
     border-width: 1px;
     border-color: edge;
     background: Skin.field;
+    // measures the widest value; not drawn
+    widest := Text {
+        visible: false;
+        text: (maximum < 1000000 ? max(maximum, value) : value) + unit;
+        font-family: Skin.font-mono;
+        font-size: root.font-size;
+    }
     HorizontalLayout {
         padding: 1px;
         StepKey {
@@ -326,7 +401,7 @@ export component Stepper inherits Rectangle {
             clicked => { root.edited(max(minimum, value - step)); }
         }
         Text {
-            width: value-width;
+            width: max(value-width, widest.preferred-width + 10px);
             text: value + unit;
             color: Skin.ink;
             font-family: Skin.font-mono;
@@ -348,6 +423,8 @@ export component Stepper inherits Rectangle {
 export component TextField inherits Rectangle {
     in property <string> value;
     in property <bool> secret;
+    // monospaced (URLs, tokens); off for names
+    in property <bool> mono: true;
     in property <string> label;
     in property <color> accent: Skin.accent;
     in property <color> edge: Skin.field-edge;
@@ -375,8 +452,8 @@ export component TextField inherits Rectangle {
             input-type: root.secret ? InputType.password : InputType.text;
             single-line: true;
             color: Skin.ink;
-            font-family: Skin.font-mono;
-            font-size: 13px * Skin.text-scale;
+            font-family: root.mono ? Skin.font-mono : Skin.font-ui;
+            font-size: (root.mono ? 13px : 14px) * Skin.text-scale;
             vertical-alignment: center;
             accessible-label: root.label;
             accepted => { root.commit(); }
@@ -410,6 +487,27 @@ export component Select inherits Rectangle {
     accessible-label: label;
     accessible-value: options[index];
     accessible-action-default => { popup.show(); }
+
+    // keyboard: Enter or Space opens the list; the arrows change the option in place
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                popup.show();
+                return accept;
+            }
+            if e.text == Key.UpArrow && index > 0 {
+                root.picked = index - 1;
+                return accept;
+            }
+            if e.text == Key.DownArrow && index < options.length - 1 {
+                root.picked = index + 1;
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; ink: accent; }
 
     HorizontalLayout {
         padding-left: 10px;
@@ -556,6 +654,27 @@ export component MascotSelect inherits Rectangle {
     accessible-label: label;
     accessible-value: options[index];
     accessible-action-default => { popup.show(); }
+
+    // keyboard: as in `Select` (the arrows go to the previous or next mascot)
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                popup.show();
+                return accept;
+            }
+            if (e.text == Key.UpArrow || e.text == Key.LeftArrow) && index > 0 {
+                root.picked = index - 1;
+                return accept;
+            }
+            if (e.text == Key.DownArrow || e.text == Key.RightArrow) && index < options.length - 1 {
+                root.picked = index + 1;
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; ink: accent; }
 
     HorizontalLayout {
         padding-left: 6px;
@@ -789,6 +908,37 @@ export component SearchBox inherits Rectangle {
                 single-line: true;
                 accessible-label: placeholder;
                 edited => { root.edited(self.text); }
+                // the first Esc clears the filter; with the box empty, Esc goes on to the
+                // window (which closes the popup)
+                key-pressed(e) => {
+                    if e.text == Key.Escape && self.text != "" {
+                        self.text = "";
+                        root.edited("");
+                        return accept;
+                    }
+                    reject
+                }
+            }
+        }
+        if text != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                Icon { icon: Icons.close; ink: clear.has-hover ? theme.text : theme.sub; size: 12px; weight: 2.4; }
+                clear := TouchArea {
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: @tr("Clear the search");
+                    accessible-action-default => {
+                        root.text = "";
+                        root.edited("");
+                    }
+                    clicked => {
+                        root.text = "";
+                        root.edited("");
+                    }
+                }
             }
         }
     }
@@ -873,6 +1023,21 @@ export component HeaderButton inherits Rectangle {
             font-size: 14px * Skin.text-scale;
             vertical-alignment: center;
         }
+    }
+
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    if keys.has-focus: FocusRing {
+        width: parent.width - shadow;
+        height: parent.height - shadow;
     }
 
     touch := TouchArea {

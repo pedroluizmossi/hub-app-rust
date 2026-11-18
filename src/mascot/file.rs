@@ -107,13 +107,7 @@ pub fn check_key(key: &str) -> Result<(), String> {
 
 /// Reads one sprite file (`path`, key = file name), checking size, format and drawing.
 pub fn read(path: &Path) -> Result<FileSprite, String> {
-    let key = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    check_key(&key)?;
-    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
-    if size > MAX_BYTES {
-        return Err(tr!("file too large (64 KiB at most)").into());
-    }
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let (key, text) = read_text(path)?;
     parse(&key, &text)
 }
 
@@ -145,7 +139,7 @@ pub fn parse(key: &str, text: &str) -> Result<FileSprite, String> {
         Some(px) => c == b'.' || c == b'e' || px.color(c).is_some(),
         None => ROLES.contains(&c),
     };
-    let rows: Vec<&str> = raw.grid.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
+    let rows: Vec<&str> = raw.grid.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     if rows.len() != H {
         return Err(tr!("grid: {} rows, expected 14", rows.len()));
     }
@@ -232,14 +226,7 @@ fn leak(s: &str) -> &'static str {
 /// already in use (the imported PNG mascots): a file with one of them stays out.
 pub fn load(root: &Path, taken: &[String]) -> (Vec<FileSprite>, Vec<Skipped>) {
     let (mut out, mut skipped) = (Vec::new(), Vec::new());
-    let Ok(entries) = std::fs::read_dir(root) else { return (out, skipped) };
-    let mut files: Vec<_> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "toml"))
-        .collect();
-    files.sort();
-    for path in files {
+    for path in toml_files(root) {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let key = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let result = if taken.contains(&key) {
@@ -255,30 +242,105 @@ pub fn load(root: &Path, taken: &[String]) -> (Vec<FileSprite>, Vec<Skipped>) {
     (out, skipped)
 }
 
-/// Replaces the program's sprites from files (and their animations). Each reload leaks the
-/// previous ones (the screens hold `&'static Sprite`); reloading is rare and manual.
-pub fn set(list: Vec<FileSprite>) {
+/// A sprite file already in the program. The screens hold `&'static Sprite` and parsing
+/// leaks the drawing, so a file is parsed (and leaked) once per text: reading the same
+/// text again (a reload after editing another mascot) gives back what it gave before.
+#[derive(Clone)]
+struct Kept {
+    sprite: &'static Sprite,
+    clips: Option<Arc<Clips>>,
+    extras: Vec<String>,
+}
+
+/// What each `(key, text)` became (see `Kept`).
+static KEPT: std::sync::Mutex<Option<HashMap<(String, String), Kept>>> = std::sync::Mutex::new(None);
+
+/// Parses `text`, or gives back what the same key and text gave before.
+fn parse_kept(key: &str, text: &str) -> Result<Kept, String> {
+    let id = (key.to_string(), text.to_string());
+    if let Some(k) = KEPT.lock().ok().and_then(|m| m.as_ref()?.get(&id).cloned()) {
+        return Ok(k);
+    }
+    let f = parse(key, text)?;
+    let kept = Kept { sprite: Box::leak(Box::new(f.sprite)), clips: f.clips.map(Arc::new), extras: f.extras };
+    if let Ok(mut m) = KEPT.lock() {
+        m.get_or_insert_with(HashMap::new).insert(id, kept.clone());
+    }
+    Ok(kept)
+}
+
+/// The text of a sprite file, checking key and size first.
+fn read_text(path: &Path) -> Result<(String, String), String> {
+    let key = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    check_key(&key)?;
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > MAX_BYTES {
+        return Err(tr!("file too large (64 KiB at most)").into());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok((key, text))
+}
+
+/// Checks a sprite file the way `reload` will read it (and keeps the result for it).
+pub fn check(path: &Path) -> Result<(), String> {
+    let (key, text) = read_text(path)?;
+    parse_kept(&key, &text).map(drop)
+}
+
+/// Reads `root` (the `sprites/` folder) and replaces the program's sprites from files (and
+/// their animations). `taken` are the keys of the imported PNG mascots: a file with one of
+/// them stays out. A file whose text didn't change keeps the same `Sprite`. Returns how
+/// many got in and the files that didn't.
+pub fn reload(root: &Path, taken: &[String]) -> (usize, Vec<Skipped>) {
+    let mut skipped = Vec::new();
+    let mut kept = Vec::new();
+    for path in toml_files(root) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let key = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let result = if taken.contains(&key) {
+            Err(tr!("the imported mascot {}/{} already uses this key", super::pack::DIR, key))
+        } else {
+            read_text(&path).and_then(|(key, text)| parse_kept(&key, &text))
+        };
+        match result {
+            Ok(k) => kept.push(k),
+            Err(reason) => skipped.push(Skipped { file: format!("{DIR}/{name}"), reason }),
+        }
+    }
+    let count = kept.len();
     let mut sprites = Vec::new();
     let mut lib = HashMap::new();
     let mut extras = HashMap::new();
-    for f in list {
-        let sprite: &'static Sprite = Box::leak(Box::new(f.sprite));
-        if let Some(clips) = f.clips {
-            lib.insert(sprite.key.to_string(), Arc::new(clips));
+    for k in kept {
+        if let Some(clips) = k.clips {
+            lib.insert(k.sprite.key.to_string(), clips);
         }
-        if !f.extras.is_empty() {
-            extras.insert(sprite.key.to_string(), f.extras);
+        if !k.extras.is_empty() {
+            extras.insert(k.sprite.key.to_string(), k.extras);
         }
-        sprites.push(sprite);
+        sprites.push(k.sprite);
     }
     if let Ok(mut e) = EXTRAS.write() {
         *e = Some(extras);
     }
     clips::set_extra(lib);
     sprites::set_files(sprites);
+    (count, skipped)
 }
 
-/// `extras` of each sprite file, by key (see `set`).
+/// The `.toml` files of `root`, in order.
+fn toml_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
+    let mut files: Vec<_> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "toml"))
+        .collect();
+    files.sort();
+    files
+}
+
+/// `extras` of each sprite file, by key (see `reload`).
 static EXTRAS: std::sync::RwLock<Option<HashMap<String, Vec<String>>>> = std::sync::RwLock::new(None);
 
 /// The stops the walking subagents do besides `idle` (`extras` of the file; empty for a
@@ -322,6 +384,41 @@ grid = """
         // the drawing goes through the same renderer as the built-in ones
         let img = crate::mascot::render::image(&f.sprite, crate::mascot::themes::get("neon"), crate::mascot::Mood::Idle, 1);
         assert!(img.size().width > 0);
+    }
+
+    #[test]
+    fn indented_grid_reads_the_same() {
+        let indented: String = ROLES_GRID
+            .lines()
+            .map(|l| if l.len() == 16 { format!("    {l}\n") } else { format!("{l}\n") })
+            .collect();
+        let plain = parse("blob", ROLES_GRID).unwrap();
+        let f = parse("blob", &indented).unwrap();
+        assert_eq!(f.sprite.grid, plain.sprite.grid);
+    }
+
+    #[test]
+    fn reload_keeps_an_unchanged_file() {
+        let dir = std::env::temp_dir().join(format!("miniutils-sprites-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kept-a.toml"), ROLES_GRID).unwrap();
+        std::fs::write(dir.join("kept-b.toml"), ROLES_GRID).unwrap();
+        assert_eq!(reload(&dir, &[]).0, 2);
+        let find = |k: &str| sprites::find(k).unwrap();
+        let (a, b) = (find("kept-a"), find("kept-b"));
+        // the same texts: the same sprites, nothing parsed (or leaked) again
+        assert!(check(&dir.join("kept-a.toml")).is_ok());
+        reload(&dir, &[]);
+        assert!(std::ptr::eq(find("kept-a"), a) && std::ptr::eq(find("kept-b"), b));
+        // one file changed: only that one is new
+        std::fs::write(dir.join("kept-b.toml"), format!("label = \"B\"\n{ROLES_GRID}")).unwrap();
+        reload(&dir, &[]);
+        assert!(std::ptr::eq(find("kept-a"), a));
+        assert_eq!(find("kept-b").label, "B");
+        std::fs::remove_dir_all(&dir).unwrap();
+        reload(&dir, &[]);
+        assert!(sprites::find("kept-a").is_none());
     }
 
     #[test]

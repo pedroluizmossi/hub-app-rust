@@ -100,8 +100,15 @@ impl MascotStatus {
 
 /// What entry `id` installed in `appearance`, if anything.
 pub fn installed(appearance: &Path, id: &str) -> Option<MascotInstalled> {
-    let text = std::fs::read_to_string(receipt(appearance, id)).ok()?;
-    serde_json::from_str(&text).ok()
+    let path = receipt(appearance, id);
+    let text = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            log::warn!("mascot store receipt {} is unreadable ({e}); treating {id} as not installed", path.display());
+            None
+        }
+    }
 }
 
 fn receipt(appearance: &Path, id: &str) -> PathBuf {
@@ -309,7 +316,8 @@ fn write_receipt(appearance: &Path, r: &MascotInstalled) -> Result<(), String> {
     let path = receipt(appearance, &r.id);
     std::fs::create_dir_all(appearance.join(RECEIPTS)).map_err(|err| err.to_string())?;
     let json = serde_json::to_string_pretty(r).map_err(|err| err.to_string())?;
-    std::fs::write(&path, json).map_err(|err| format!("{}: {err}", path.display()))
+    // atomic: a crash halfway must not leave a truncated receipt (the keys would be orphaned)
+    crate::core::os::write_atomic(&path, json.as_bytes()).map_err(|err| format!("{}: {err}", path.display()))
 }
 
 /// Deletes the files a receipt lists. The keys are checked again: a receipt edited by hand

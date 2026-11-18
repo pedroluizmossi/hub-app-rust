@@ -16,13 +16,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use super::kit::HeaderMascot;
 use crate::core::bus::Event;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp, Report, mascot_targets};
-use crate::mascot::anim::Reaction;
+use crate::mascot::anim::{Animator, Look, Reaction};
 use crate::mascot::check;
 use crate::mascot::sprites::{self, Sprite};
 use crate::mascot::walkers::{self, Walker};
@@ -39,6 +39,8 @@ const MAPPED: [&str; 7] = ["sleep", "idle", "happy", "busy", "alarm", "celebrate
 const ARM: Duration = Duration::from_secs(6);
 /// Most person's mascots on the card.
 const GALLERY: usize = 10;
+/// Pace of the manager window's preview (its own timer: the hub may be hidden).
+const MANAGER_TICK: Duration = Duration::from_millis(125);
 
 pub struct MascotsMini {
     host: Rc<Host>,
@@ -46,9 +48,14 @@ pub struct MascotsMini {
     face: HeaderMascot,
     /// `sprites::generation` last shown (a new one: the list changed).
     generation: Option<u64>,
+    /// The card's line: the summary of the last import, or its error.
     status: String,
     status_bad: bool,
     busy: bool,
+    /// The person's own mascots on the card, each with its last frame: a row's image is
+    /// only replaced when its pixels change.
+    gallery: Vec<(&'static Sprite, render::Cache)>,
+    gallery_model: Rc<VecModel<slint::Image>>,
     manager: Option<Manager>,
 }
 
@@ -58,12 +65,36 @@ struct Manager {
     open: bool,
     /// The chosen mascot's key.
     selected: Option<String>,
-    /// Preview: 0..5 the moods (calm, happy, busy, alarm, sleeping), 5 walking.
+    /// What the preview list offers for the chosen one, in its order, and the choice.
+    modes: Vec<Preview>,
     mode: usize,
     walker: Option<Walker>,
     armed: Option<Instant>,
     /// What "Use in" lists, in order (the first entry is "Choose…").
     targets: Vec<Place>,
+    /// Drives the preview and the end of "Confirm removal" while the window is open: the
+    /// hub's frame stops when its popup hides, and the manager stays on screen.
+    timer: slint::Timer,
+    ticks: u32,
+    /// The preview draws like a header mascot: blinking, drawn animations, reactions.
+    animator: Animator,
+    cache: render::Cache,
+    /// Walking frame shown last (the walking preview doesn't go through `cache`).
+    walk_shown: Option<usize>,
+    /// `sprites::generation` the list was made from.
+    generation: Option<u64>,
+    /// Text of the search field, and the keys it lets through, in the list's order.
+    filter: String,
+    listed: Vec<String>,
+}
+
+/// What the preview shows.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Preview {
+    Mood(Mood),
+    /// Plays the reaction again each time it ends.
+    React(Reaction),
+    Walking,
 }
 
 /// Where "Use in" puts a mascot.
@@ -75,8 +106,28 @@ enum Place {
     App { app: String, setting: String },
 }
 
-/// Moods of the preview, in the list's order.
-const PREVIEW: [Mood; 5] = [Mood::Idle, Mood::Happy, Mood::Busy, Mood::Alarm, Mood::Sleep];
+/// The preview list: moods, reactions, then walking (only for a mascot that walks).
+fn preview_modes(walks: bool) -> Vec<(Preview, &'static str)> {
+    let mut modes = vec![
+        (Preview::Mood(Mood::Idle), tr!("Calm")),
+        (Preview::Mood(Mood::Happy), tr!("Happy")),
+        (Preview::Mood(Mood::Busy), tr!("Busy")),
+        (Preview::Mood(Mood::Alarm), tr!("Alarm")),
+        (Preview::Mood(Mood::Sleep), tr!("Sleeping")),
+        (Preview::React(Reaction::Celebrate), tr!("Celebrating")),
+        (Preview::React(Reaction::Surprised), tr!("Surprised")),
+    ];
+    if walks {
+        modes.push((Preview::Walking, tr!("Walking")));
+    }
+    modes
+}
+
+/// Whether `s` passes the manager's search: by name, key or origin, ignoring case.
+fn matches(filter: &str, name: &str, key: &str, origin: &str) -> bool {
+    let f = filter.trim().to_lowercase();
+    f.is_empty() || [name, key, origin].iter().any(|t| t.to_lowercase().contains(&f))
+}
 
 impl MascotsMini {
     pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
@@ -89,6 +140,8 @@ impl MascotsMini {
             status: String::new(),
             status_bad: false,
             busy: false,
+            gallery: Vec::new(),
+            gallery_model: Rc::new(VecModel::default()),
             manager: None,
         }));
         Self::bind(&app, ui);
@@ -152,8 +205,12 @@ impl MascotsMini {
             };
             // cancelled: nothing to say
             let Some(path) = chosen else { return reporter.done() };
+            // first line: the summary for the card; then one line per mascot
             match crate::mascot::import::import(&path, &appearance) {
-                Ok(lines) => reporter.output(lines.join("\n")),
+                Ok(out) => {
+                    let text = format!("{}\n{}", out.summary(), out.lines.join("\n"));
+                    if out.count > 0 { reporter.output(text) } else { reporter.error(text) }
+                }
                 Err(e) => reporter.error(e),
             }
         });
@@ -181,21 +238,39 @@ impl MascotsMini {
         g.set_reaction(self.face.reaction());
     }
 
-    /// Counts, kinds and the person's own mascots.
-    fn push_card(&self, ui: &HubWindow, frame: u32) {
+    /// Counts, kinds and the status line: only when the list, the settings or the status
+    /// change.
+    fn push_counts(&self, ui: &HubWindow) {
         let all = sprites::all();
-        let own: Vec<&'static Sprite> = all.iter().copied().filter(|s| !builtin(s)).collect();
+        let own = all.iter().filter(|s| !builtin(s)).count();
         let walking = all.iter().filter(|s| walkers::walks(s)).count();
-        let png = own.iter().filter(|s| pack::art(s).is_some()).count();
+        let png = all.iter().filter(|s| !builtin(s) && pack::art(s).is_some()).count();
         let g = ui.global::<MascotsApp>();
         g.set_counts(tr!("{} mascots · {} walk", all.len(), walking).into());
-        g.set_kinds(tr!("{} of your own: {} in code · {} PNG sprites", own.len(), own.len() - png, png).into());
-        let theme = self.theme();
-        let gallery: Vec<slint::Image> = own.iter().rev().take(GALLERY).map(|s| render::image(s, theme, Mood::Idle, frame)).collect();
-        g.set_gallery(ModelRc::new(VecModel::from(gallery)));
+        g.set_kinds(tr!("{} of your own: {} in code · {} PNG sprites", own, own - png, png).into());
         g.set_status(self.status.as_str().into());
         g.set_status_bad(self.status_bad);
         g.set_busy(self.busy);
+    }
+
+    /// The gallery's mascots, again (the list changed).
+    fn rebuild_gallery(&mut self) {
+        let own: Vec<&'static Sprite> = sprites::all().into_iter().filter(|s| !builtin(s)).collect();
+        self.gallery = own.into_iter().rev().take(GALLERY).map(|s| (s, render::Cache::default())).collect();
+        self.gallery_model.set_vec(vec![slint::Image::default(); self.gallery.len()]);
+    }
+
+    /// The gallery at `frame`: only the rows whose pixels changed are replaced.
+    fn push_gallery(&mut self, frame: u32) {
+        let theme = self.theme();
+        // reduce motion: a still gallery
+        let frame = if self.host.config.borrow().reduce_motion { 0 } else { frame };
+        let look = Look::from_frame(Mood::Idle, frame);
+        for (i, (s, cache)) in self.gallery.iter_mut().enumerate() {
+            if cache.update_look(s, theme, &look) {
+                self.gallery_model.set_row_data(i, cache.image());
+            }
+        }
     }
 
     // ---- manager window ---------------------------------------------------------------
@@ -206,7 +281,24 @@ impl MascotsMini {
             match MascotsWindow::new() {
                 Ok(win) => {
                     Self::bind_manager(&win, app, ui);
-                    me.manager = Some(Manager { win, open: false, selected: None, mode: 0, walker: None, armed: None, targets: Vec::new() });
+                    me.manager = Some(Manager {
+                        win,
+                        open: false,
+                        selected: None,
+                        modes: Vec::new(),
+                        mode: 0,
+                        walker: None,
+                        armed: None,
+                        targets: Vec::new(),
+                        timer: slint::Timer::default(),
+                        ticks: 0,
+                        animator: Animator::new(43),
+                        cache: render::Cache::default(),
+                        walk_shown: None,
+                        generation: None,
+                        filter: String::new(),
+                        listed: Vec::new(),
+                    });
                     me.style_manager();
                 }
                 Err(e) => {
@@ -217,6 +309,15 @@ impl MascotsMini {
         }
         if let Some(m) = me.manager.as_mut() {
             m.open = true;
+            let a = Rc::downgrade(app);
+            m.timer.start(slint::TimerMode::Repeated, MANAGER_TICK, move || {
+                // already borrowed (a callback running): this tick is skipped
+                if let Some(a) = a.upgrade()
+                    && let Ok(mut a) = a.try_borrow_mut()
+                {
+                    a.manager_tick();
+                }
+            });
         }
         me.fill_manager();
         let win = me.manager.as_ref().map(|m| m.win.clone_strong());
@@ -247,12 +348,29 @@ impl MascotsMini {
                 }
             }
         };
-        g.on_select(on(|m, i| m.select(i)));
+        let a = Rc::downgrade(app);
+        g.on_select(move |key| {
+            if let Some(a) = a.upgrade() {
+                a.borrow_mut().select(&key);
+            }
+        });
+        g.on_step(on(|m, d| m.step(d)));
+        let a = Rc::downgrade(app);
+        g.on_filter_edited(move |text| {
+            if let Some(a) = a.upgrade() {
+                let mut a = a.borrow_mut();
+                if let Some(m) = a.manager.as_mut() {
+                    m.filter = text.to_string();
+                }
+                a.fill_list();
+            }
+        });
         g.on_preview_mode(on(|m, i| {
             if let Some(mg) = m.manager.as_mut() {
-                mg.mode = i.max(0) as usize;
+                mg.mode = usize::try_from(i).unwrap_or(0).min(mg.modes.len().saturating_sub(1));
+                mg.restart_preview();
             }
-            m.push_preview(0);
+            m.push_preview();
         }));
         g.on_stop_toggled(on(|m, i| m.toggle_stop(i)));
         g.on_use_in(on(|m, i| m.use_in(i)));
@@ -298,13 +416,13 @@ impl MascotsMini {
                 a.borrow_mut().pick(true);
             }
         });
-        let (a, w) = (Rc::downgrade(app), win.as_weak());
+        let a = Rc::downgrade(app);
         g.on_close(move || {
-            if let (Some(a), Some(win)) = (a.upgrade(), w.upgrade()) {
-                let _ = win.hide();
-                if let Some(m) = a.borrow_mut().manager.as_mut() {
-                    m.open = false;
-                }
+            if let Some(a) = a.upgrade()
+                && let Some(m) = a.borrow_mut().manager.as_mut()
+            {
+                let _ = m.win.hide();
+                m.closed();
             }
         });
         let w = win.as_weak();
@@ -324,7 +442,7 @@ impl MascotsMini {
             if let Some(a) = a.upgrade()
                 && let Some(m) = a.borrow_mut().manager.as_mut()
             {
-                m.open = false;
+                m.closed();
             }
             slint::CloseRequestResponse::HideWindow
         });
@@ -341,50 +459,82 @@ impl MascotsMini {
 
     /// The list and the chosen one's card, from scratch.
     fn fill_manager(&mut self) {
+        if let Some(m) = self.manager.as_mut() {
+            m.generation = Some(sprites::generation());
+            // the chosen one may have left (removed, folder changed)
+            if m.selected.as_deref().is_some_and(|k| sprites::find(k).is_none()) {
+                m.selected = None;
+            }
+        }
+        self.fill_list();
+        self.fill_card();
+    }
+
+    /// The list on the left: every mascot that passes the search.
+    fn fill_list(&mut self) {
         let theme = self.theme();
         let Some(m) = self.manager.as_mut() else { return };
         let store = store_keys();
-        let all = sprites::all();
-        let items: Vec<MascotItem> = all
-            .iter()
-            .map(|s| MascotItem {
-                key: s.key.into(),
-                name: s.name().into(),
-                kind: if pack::art(s).is_some() { "sprite" } else { "code" }.into(),
-                origin: if builtin(s) {
+        let mut listed = Vec::new();
+        let items: Vec<MascotItem> = sprites::all()
+            .into_iter()
+            .filter_map(|s| {
+                let origin = if builtin(s) {
                     tr!("built-in")
                 } else if store.iter().any(|k| k == s.key) {
                     tr!("store")
                 } else {
                     tr!("yours")
+                };
+                if !matches(&m.filter, s.name(), s.key, origin) {
+                    return None;
                 }
-                .into(),
-                icon: render::image(s, theme, Mood::Idle, 1),
-                walks: walkers::walks(s),
-                themed: check::of_sprite(s).themed,
+                listed.push(s.key.to_string());
+                Some(MascotItem {
+                    key: s.key.into(),
+                    name: s.name().into(),
+                    kind: if pack::art(s).is_some() { "sprite" } else { "code" }.into(),
+                    origin: origin.into(),
+                    icon: render::image(s, theme, Mood::Idle, 1),
+                    walks: walkers::walks(s),
+                    themed: check::of_sprite(s).themed,
+                })
             })
             .collect();
-        let g = m.win.global::<MascotsManager>();
-        g.set_items(ModelRc::new(VecModel::from(items)));
-        // the chosen one may have left (removed, folder changed)
-        let index = m.selected.as_deref().and_then(|k| all.iter().position(|s| s.key == k));
-        if index.is_none() {
-            m.selected = None;
-        }
-        g.set_selected(index.map_or(-1, |i| i as i32));
-        self.fill_card();
+        m.listed = listed;
+        m.win.global::<MascotsManager>().set_items(ModelRc::new(VecModel::from(items)));
     }
 
-    fn select(&mut self, i: i32) {
-        let Some(s) = usize::try_from(i).ok().and_then(|i| sprites::all().get(i).copied()) else { return };
+    fn select(&mut self, key: &str) {
+        if sprites::find(key).is_none() {
+            return;
+        }
         if let Some(m) = self.manager.as_mut() {
-            m.selected = Some(s.key.to_string());
+            m.selected = Some(key.to_string());
             m.mode = 0;
             m.armed = None;
-            m.win.global::<MascotsManager>().set_selected(i);
+            m.restart_preview();
             m.win.global::<MascotsManager>().set_status("".into());
         }
         self.fill_card();
+    }
+
+    /// Up/Down in the window: the previous or next mascot of the (searched) list.
+    fn step(&mut self, delta: i32) {
+        let Some(m) = &self.manager else { return };
+        if m.listed.is_empty() {
+            return;
+        }
+        let last = m.listed.len() as i32 - 1;
+        let next = match m.selected.as_deref().and_then(|k| m.listed.iter().position(|x| x == k)) {
+            Some(i) => (i as i32 + delta).clamp(0, last),
+            None if delta < 0 => last,
+            None => 0,
+        };
+        let key = m.listed[next as usize].clone();
+        if m.selected.as_deref() != Some(key.as_str()) {
+            self.select(&key);
+        }
     }
 
     fn chosen(&self) -> Option<&'static Sprite> {
@@ -399,7 +549,7 @@ impl MascotsMini {
             if let Some(m) = self.manager.as_mut() {
                 m.walker = None;
                 let g = m.win.global::<MascotsManager>();
-                g.set_selected(-1);
+                g.set_key("".into());
                 g.set_editable(false);
                 g.set_can_map(false);
                 g.set_can_palette(false);
@@ -420,15 +570,15 @@ impl MascotsMini {
         g.set_report(report.text().into());
         g.set_armed_remove(false);
         m.walker = walkers::walker(s, theme);
-        let mut modes: Vec<slint::SharedString> =
-            [tr!("Calm"), tr!("Happy"), tr!("Busy"), tr!("Alarm"), tr!("Sleeping")].into_iter().map(Into::into).collect();
-        if m.walker.is_some() {
-            modes.push(tr!("Walking").into());
-        }
-        if m.mode >= modes.len() {
-            m.mode = 0;
-        }
-        g.set_preview_modes(ModelRc::new(VecModel::from(modes)));
+        // the same preview stays chosen when it is still offered (after an edit, a reload)
+        let before = m.modes.get(m.mode).copied();
+        let offered = preview_modes(m.walker.is_some());
+        m.modes = offered.iter().map(|(p, _)| *p).collect();
+        m.mode = before.and_then(|b| m.modes.iter().position(|p| *p == b)).unwrap_or(0);
+        m.restart_preview();
+        let g = m.win.global::<MascotsManager>();
+        let labels: Vec<slint::SharedString> = offered.iter().map(|(_, l)| (*l).into()).collect();
+        g.set_preview_modes(ModelRc::new(VecModel::from(labels)));
         g.set_preview_index(m.mode as i32);
 
         // animations of each mood and reaction (PNG sprite)
@@ -504,20 +654,65 @@ impl MascotsMini {
         drop(cfg);
         m.targets = places;
         g.set_targets(ModelRc::new(VecModel::from(labels)));
-        self.push_preview(0);
+        self.push_preview();
     }
 
-    /// The preview image: the chosen mood, or walking.
-    fn push_preview(&self, frame: u32) {
-        let (Some(m), Some(s)) = (&self.manager, self.chosen()) else { return };
-        let img = match (m.mode, &m.walker) {
-            (5, Some(w)) => {
+    /// The preview image: the chosen mood or reaction (drawn like a header mascot, with
+    /// its drawn animations), or walking. Only handed to the window when it changed.
+    fn push_preview(&mut self) {
+        let theme = self.theme();
+        let Some(s) = self.chosen() else { return };
+        let Some(m) = self.manager.as_mut() else { return };
+        let now = Instant::now();
+        let img = match (m.modes.get(m.mode).copied().unwrap_or(Preview::Mood(Mood::Idle)), &m.walker) {
+            (Preview::Walking, Some(w)) => {
                 let (right, _) = &w.frames[w.script.walk];
-                right[(frame / 2) as usize % right.len().max(1)].clone()
+                let i = (m.ticks / 2) as usize % right.len().max(1);
+                if m.walk_shown == Some(i) {
+                    return;
+                }
+                m.walk_shown = Some(i);
+                right.get(i).cloned().unwrap_or_default()
             }
-            (i, _) => render::image(s, self.theme(), PREVIEW[i.min(4)], frame),
+            (preview, _) => {
+                let mood = match preview {
+                    Preview::Mood(mood) => mood,
+                    _ => Mood::Idle,
+                };
+                if let Preview::React(r) = preview
+                    && m.animator.current(now).is_none()
+                {
+                    // played to the end: again (a new animator has no cooldown)
+                    m.animator = Animator::new(43);
+                    m.animator.trigger(r, now);
+                }
+                let look = m.animator.look_with(s, mood, now);
+                if !m.cache.update_look(s, theme, &look) {
+                    return;
+                }
+                m.cache.image()
+            }
         };
         m.win.global::<MascotsManager>().set_preview(img);
+    }
+
+    /// One tick of the manager's own timer: the preview, the end of "Confirm removal" and
+    /// the list, when the mascots changed (the hub's tick may not be running).
+    fn manager_tick(&mut self) {
+        let Some(m) = self.manager.as_mut() else { return };
+        if !m.open {
+            m.timer.stop();
+            return;
+        }
+        m.ticks = m.ticks.wrapping_add(1);
+        if m.armed.is_some_and(|at| at.elapsed() >= ARM) {
+            m.armed = None;
+            m.win.global::<MascotsManager>().set_armed_remove(false);
+        }
+        if m.generation != Some(sprites::generation()) {
+            self.fill_manager();
+        }
+        self.push_preview();
     }
 
     fn say(&self, text: String, bad: bool) {
@@ -670,16 +865,20 @@ impl MiniApp for MascotsMini {
     }
 
     fn enable(&mut self, ui: &HubWindow) {
-        ui.global::<MascotsApp>().set_theme(render::colors(self.theme()));
-        self.generation = None;
+        let g = ui.global::<MascotsApp>();
+        g.set_theme(render::colors(self.theme()));
+        g.set_gallery(ModelRc::from(self.gallery_model.clone()));
+        self.generation = Some(sprites::generation());
+        self.rebuild_gallery();
         self.push_face(ui);
-        self.push_card(ui, 0);
+        self.push_counts(ui);
+        self.push_gallery(0);
     }
 
     fn disable(&mut self, _ui: &HubWindow) {
         if let Some(m) = self.manager.as_mut() {
             let _ = m.win.hide();
-            m.open = false;
+            m.closed();
         }
     }
 
@@ -689,23 +888,24 @@ impl MiniApp for MascotsMini {
         self.busy = false;
         match report {
             Report::Done => {}
-            Report::Output(text) => {
-                self.status = text.clone();
-                self.status_bad = false;
-                self.face.react(Reaction::Celebrate);
-                crate::hub::request_plugin_reload();
+            // an import: the card shows the summary (its first line), the manager and the
+            // log every line
+            Report::Output(text) | Report::Error(text) => {
+                let ok = matches!(report, Report::Output(_));
+                log::info!("mascot import:\n{text}");
+                self.status = text.lines().next().unwrap_or_default().to_string();
+                self.status_bad = !ok;
+                self.say(text.clone(), !ok);
+                // something came in
+                if ok {
+                    self.face.react(Reaction::Celebrate);
+                    crate::hub::request_plugin_reload();
+                }
             }
-            Report::Error(e) => {
-                self.status = e.clone();
-                self.status_bad = true;
-            }
-        }
-        if !self.status.is_empty() {
-            self.say(self.status.clone(), self.status_bad);
         }
         self.push_busy();
         self.push_face(ui);
-        self.push_card(ui, 0);
+        self.push_counts(ui);
     }
 
     fn tick(&mut self, frame: u32, ui: &HubWindow) {
@@ -714,33 +914,23 @@ impl MiniApp for MascotsMini {
             g.set_mascot(self.face.image());
             g.set_reaction(self.face.reaction());
         }
-        // the mascot list changed (import, edit, removal, Reload): everything again
+        // the mascot list changed (import, edit, removal, Reload): the card again (the
+        // manager window follows the list with its own timer)
         let generation = sprites::generation();
         if self.generation != Some(generation) {
             self.generation = Some(generation);
-            if self.manager.as_ref().is_some_and(|m| m.open) {
-                self.fill_manager();
-            }
-            self.push_card(ui, frame);
-        } else if frame.is_multiple_of(2) {
-            // the gallery and the preview move
-            self.push_card(ui, frame);
+            self.rebuild_gallery();
+            self.push_counts(ui);
         }
-        if self.manager.as_ref().is_some_and(|m| m.open) {
-            self.push_preview(frame);
-            if let Some(m) = self.manager.as_mut()
-                && m.armed.is_some_and(|at| at.elapsed() >= ARM)
-            {
-                m.armed = None;
-                m.win.global::<MascotsManager>().set_armed_remove(false);
-            }
-        }
+        // only the rows whose pixels changed are replaced
+        self.push_gallery(frame);
     }
 
     fn settings_changed(&mut self, ui: &HubWindow) {
         ui.global::<MascotsApp>().set_theme(render::colors(self.theme()));
         self.push_face(ui);
-        self.push_card(ui, 0);
+        self.push_counts(ui);
+        self.push_gallery(0);
         self.style_manager();
         if self.manager.as_ref().is_some_and(|m| m.open) {
             self.fill_manager();
@@ -757,6 +947,26 @@ impl MiniApp for MascotsMini {
 
     fn summary(&self) -> String {
         tr!("Mascots: {}", sprites::all().len())
+    }
+}
+
+impl Manager {
+    /// The window was closed (button, Esc, the system): the timer stops with it.
+    fn closed(&mut self) {
+        self.open = false;
+        self.armed = None;
+        self.timer.stop();
+    }
+
+    /// Another mascot or preview: drawn from the start (the next `push_preview` always
+    /// hands over an image).
+    fn restart_preview(&mut self) {
+        self.animator = Animator::new(43);
+        self.cache = render::Cache::default();
+        self.walk_shown = None;
+        if let Some(Preview::React(r)) = self.modes.get(self.mode) {
+            self.animator.trigger(*r, Instant::now());
+        }
     }
 }
 
@@ -833,6 +1043,22 @@ mod tests {
         assert_eq!(keys, ["knight", "owl"]);
         assert!(store_keys_in(&d.join("nothing")).is_empty());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn search_matches_name_key_or_origin() {
+        assert!(matches("", "Neko", "neko", "built-in"));
+        assert!(matches("  NEK ", "Neko", "neko", "built-in"));
+        assert!(matches("pink", "Pink Monster", "pink-monster", "yours"));
+        assert!(matches("yours", "Owl", "owl", "yours"));
+        assert!(!matches("cat", "Owl", "owl", "yours"));
+    }
+
+    #[test]
+    fn preview_offers_walking_only_when_it_walks() {
+        assert!(!preview_modes(false).iter().any(|(p, _)| *p == Preview::Walking));
+        assert_eq!(preview_modes(true).last().map(|(p, _)| *p), Some(Preview::Walking));
+        assert!(preview_modes(false).iter().any(|(p, _)| *p == Preview::React(Reaction::Surprised)));
     }
 
     #[test]

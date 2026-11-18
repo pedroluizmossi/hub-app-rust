@@ -6,6 +6,7 @@ use super::Hub;
 use crate::core::layout::{self, Rect};
 use crate::core::miniapp::AppRef;
 use crate::mascot::render;
+use crate::tr;
 use crate::ui::{Ghost, GridCell};
 
 /// An app being moved or resized in edit mode.
@@ -59,7 +60,9 @@ impl Hub {
         self.ui.set_cols_up_ok(fits(cols + 1, rows));
         self.ui.set_rows_down_ok(fits(cols, rows.wrapping_sub(1)));
         self.ui.set_rows_up_ok(fits(cols, rows + 1));
-        self.ui.set_grid_tag(format!("// {n} {} · {cols} × {rows}", if n == 1 { "APP" } else { "APPS" }).into());
+        let tag = if n == 1 { tr!("// 1 APP · {} × {}", cols, rows) } else { tr!("// {} APPS · {} × {}", n, cols, rows) };
+        self.ui.set_grid_tag(tag.into());
+        self.ui.set_any_enabled(!self.registry.enabled().is_empty());
         self.ui.set_columns(cols as i32);
         self.ui.set_rows(rows as i32);
         self.ui.set_cells(ModelRc::new(VecModel::from(cells)));
@@ -117,16 +120,7 @@ impl Hub {
         let mut slot = self.drag.borrow_mut();
         let Some(d) = slot.as_mut() else { return };
         let Some((cols, rows, rects, i)) = self.grid_of(&d.id) else { return };
-        let r = rects[i];
-        let t = if d.mode == "move" {
-            let x = (col - d.off.0).clamp(0, (cols - r.w) as i32) as u32;
-            let y = (row - d.off.1).clamp(0, (rows - r.h) as i32) as u32;
-            Rect::new(x, y, r.w, r.h)
-        } else {
-            let w = if d.mode.contains('r') { (col - r.x as i32 + 1).max(1) as u32 } else { r.w };
-            let h = if d.mode.contains('b') { (row - r.y as i32 + 1).max(1) as u32 } else { r.h };
-            Rect::new(r.x, r.y, w, h)
-        };
+        let t = drag_target(&d.mode, d.off, col, row, rects[i], cols, rows);
         if t == d.target {
             return;
         }
@@ -179,5 +173,46 @@ impl Hub {
         if let Some(out) = layout::settle(&rects, None, cols, rows) {
             self.apply_layout(cols, rows, out);
         }
+    }
+}
+
+/// Where an app being dragged would land, with the pointer on cell (`col`, `row`). Moving
+/// keeps the cell grabbed (`off`) under the pointer and the app inside the grid; resizing
+/// ("r", "b", "rb") pulls the right/bottom edge to the pointer, never below 1×1 (the grid
+/// edge is checked later by `layout::settle`).
+fn drag_target(mode: &str, off: (i32, i32), col: i32, row: i32, r: Rect, cols: u32, rows: u32) -> Rect {
+    if mode == "move" {
+        let x = (col - off.0).clamp(0, cols.saturating_sub(r.w) as i32) as u32;
+        let y = (row - off.1).clamp(0, rows.saturating_sub(r.h) as i32) as u32;
+        Rect::new(x, y, r.w, r.h)
+    } else {
+        let w = if mode.contains('r') { (col - r.x as i32 + 1).max(1) as u32 } else { r.w };
+        let h = if mode.contains('b') { (row - r.y as i32 + 1).max(1) as u32 } else { r.h };
+        Rect::new(r.x, r.y, w, h)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn move_keeps_the_grab_offset_inside_the_grid() {
+        let r = Rect::new(1, 1, 2, 2);
+        // grabbed by its second column: the pointer on column 4 puts it at 3
+        assert_eq!(drag_target("move", (1, 0), 4, 1, r, 6, 4), Rect::new(3, 1, 2, 2));
+        // past the right/bottom edge: clamped so it still fits
+        assert_eq!(drag_target("move", (0, 0), 9, 9, r, 6, 4), Rect::new(4, 2, 2, 2));
+        // past the left/top edge
+        assert_eq!(drag_target("move", (1, 1), 0, 0, r, 6, 4), Rect::new(0, 0, 2, 2));
+    }
+
+    #[test]
+    fn resize_never_goes_below_one_cell() {
+        let r = Rect::new(2, 1, 2, 2);
+        assert_eq!(drag_target("r", (0, 0), 4, 0, r, 6, 4), Rect::new(2, 1, 3, 2));
+        assert_eq!(drag_target("b", (0, 0), 0, 3, r, 6, 4), Rect::new(2, 1, 2, 3));
+        assert_eq!(drag_target("rb", (0, 0), 0, 0, r, 6, 4), Rect::new(2, 1, 1, 1));
+        assert_eq!(drag_target("rb", (0, 0), 3, 2, r, 6, 4), Rect::new(2, 1, 2, 2));
     }
 }

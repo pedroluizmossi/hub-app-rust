@@ -232,6 +232,8 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
                       copia folhas PNG (Nome_Animação_N.png) para a pasta de mascotes
 --check-mascot <pasta ou .toml>
                       confere uma mascote sem instalar: humores, andar, tema e ações livres
+--quit                fecha o MiniUtils aberto como o Sair da bandeja (salva a janela e a
+                      configuração); os instaladores usam antes de trocar o programa
 --dirs                onde ficam os apps locais, os dados dos apps, a configuração e os registros
 --version             mostra a versão (também em Configurações › Sistema)
 ```

@@ -41,8 +41,14 @@ const RESIZE_QUIET: Duration = Duration::from_millis(800);
 /// the window, 8 frames/s; outside it, 4/s: each frame is drawn on the CPU.
 const FRAME_HOT: Duration = Duration::from_millis(125);
 const FRAME_COLD: Duration = Duration::from_millis(250);
+/// Starting with `--hidden` and no panel yet: checks for the tray this many times, every
+/// `TRAY_WAIT_STEP`, before showing the window (~8 s).
+const TRAY_WAIT_TRIES: u32 = 16;
+const TRAY_WAIT_STEP: Duration = Duration::from_millis(500);
 /// Fastest frame a drawn animation can ask for (30/s): only while it plays.
 const FRAME_FASTEST: Duration = Duration::from_millis(33);
+/// Animation frames refresh sidebar moods and tray at most this often (see `anim_tick`).
+const DERIVED_EVERY: Duration = Duration::from_millis(500);
 
 thread_local! {
     /// The hub of the UI thread, for whoever arrives from another thread through the event
@@ -73,6 +79,21 @@ pub fn request_plugin_reload() {
     });
 }
 
+/// The panel that showed the tray icon went away (crashed, or the session has none now):
+/// with the window hidden there would be no way back, so it shows. Called from the tray's
+/// thread. Only the Linux tray (StatusNotifier) can tell; Windows keeps its icon itself.
+#[cfg(target_os = "linux")]
+pub fn tray_lost() {
+    let _ = slint::invoke_from_event_loop(|| {
+        with_hub(|h| {
+            if !h.shown.get() {
+                log::info!("the tray icon is gone: showing the window");
+                h.show(None);
+            }
+        })
+    });
+}
+
 /// Media command picked in the tray menu (called on the ksni thread): goes to the app that
 /// gave the media information, on the UI thread.
 pub fn tray_media_command(verb: &'static str) {
@@ -85,6 +106,10 @@ pub struct Hub {
     ui: HubWindow,
     tray: RefCell<Option<Tray>>,
     shown: Cell<bool>,
+    /// The shown window was minimized or covered (see `set_covered`).
+    covered: Cell<bool>,
+    /// The window can be seen: shown, not minimized, not covered (see `sync_on_screen`).
+    on_screen: Cell<bool>,
     /// The window can be positioned (X11/XWayland).
     positionable: bool,
     /// When the popup hid because it lost focus (see `toggle`).
@@ -110,6 +135,8 @@ pub struct Hub {
     /// Clock of the animation frame; the interval follows `hovered` (see `FRAME_HOT`) and
     /// speeds up while a drawn animation asks for short frames (see `pace_frames`).
     anim: Timer,
+    /// When `refresh_derived` last ran (the animation frame runs it at most every `DERIVED_EVERY`).
+    derived_at: Cell<Option<Instant>>,
     /// Shortest frame asked for by the animations in the last frame (ms).
     frame_wanted: Cell<Option<u32>>,
     /// Drag in progress in edit mode.
@@ -167,7 +194,12 @@ impl Hub {
         let config = Config::load();
         // before the apps parse their manifests, which are translated on load
         crate::core::i18n::set(crate::core::i18n::Language::from_setting(&config.language));
+        // after the language is set: the notice is translated
+        let notice = config.load_notice();
         let host = Rc::new(Host::new(config, bus));
+        if let Some(body) = notice {
+            host.notifier.borrow_mut().send("config:load", &crate::core::config::display_name(), body, true);
+        }
         let ui = HubWindow::new()?;
         crate::core::i18n::apply_to_ui();
 
@@ -190,6 +222,8 @@ impl Hub {
             ui,
             tray: RefCell::new(None),
             shown: Cell::new(false),
+            covered: Cell::new(false),
+            on_screen: Cell::new(false),
             positionable,
             focus_hidden_at: Cell::new(None),
             had_focus: Cell::new(false),
@@ -202,6 +236,7 @@ impl Hub {
             last_tray: RefCell::new(None),
             hovered: Cell::new(false),
             anim: Timer::default(),
+            derived_at: Cell::new(None),
             frame_wanted: Cell::new(None),
             drag: RefCell::new(None),
             backdrop_size: Cell::new((0.0, 0.0)),
@@ -245,8 +280,15 @@ impl Hub {
         }
 
         Self::start_loops(&hub);
-        if !(start_hidden && hub.has_tray()) {
+        if !start_hidden || hub.tray.borrow().is_none() {
             hub.show(None);
+        } else if hub.has_tray() {
+            log::info!("starting hidden in the tray");
+        } else {
+            // at login the panel often comes up after the autostart: wait for it a little
+            // before deciding the window has to show
+            log::info!("starting hidden: waiting for the panel to show the tray icon");
+            window::wait_for_tray(TRAY_WAIT_TRIES);
         }
         Ok(hub)
     }
@@ -259,9 +301,9 @@ impl Hub {
         });
         // what arrived before installing it (the setup takes a while)
         hub.update();
-        // animation: only with the window visible (`set_shown` turns it on and off; `set_hovered` changes the pace)
+        // animation: only with the window on screen (`sync_on_screen` turns it on and off; `set_hovered` changes the pace)
         hub.anim.start(TimerMode::Repeated, FRAME_COLD, || with_hub(Hub::anim_tick));
-        if !hub.shown.get() {
+        if !hub.on_screen.get() {
             hub.anim.stop();
         }
     }
@@ -286,6 +328,7 @@ impl Hub {
     /// Updates what depends on the apps' state: Settings form, page moods, tray and
     /// conversation. Cheap when nothing changed (each part compares first).
     fn refresh_derived(&self) {
+        self.derived_at.set(Some(Instant::now()));
         if self.host.settings_dirty.replace(false) {
             self.rebuild_settings();
         }
@@ -394,6 +437,12 @@ impl Hub {
         if !self.shown.get() {
             return;
         }
+        // minimized by the window manager's button or the taskbar: no event says so on every
+        // system, so the frame checks; restoring brings focus, which turns it back on
+        if crate::popup::is_minimized(self.ui.window()) {
+            self.sync_on_screen();
+            return;
+        }
         self.update_clock();
         let f = self.frame.get().wrapping_add(1) % 600;
         self.frame.set(f);
@@ -414,7 +463,17 @@ impl Hub {
         }
         self.frame_wanted.set(crate::mascot::anim::take_requested_frame_ms());
         self.pace_frames();
-        self.refresh_derived();
+        // the sidebar moods and the tray only change with a reading (which runs `update`) or
+        // a click inside an app: a few times a second is enough to catch the clicks, instead
+        // of rebuilding their fingerprints on every frame
+        if self.derived_at.get().is_some_and(|t| t.elapsed() < DERIVED_EVERY) {
+            if self.host.settings_dirty.replace(false) {
+                self.rebuild_settings();
+            }
+            self.chat_tick();
+        } else {
+            self.refresh_derived();
+        }
     }
 
     /// Frame pace: 8/s with the mouse on the window, 4/s outside, and faster (up to 30/s)

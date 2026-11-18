@@ -175,15 +175,6 @@ msgstr "Renovação Claude inválida"
 msgid "Invalid Claude expiry"
 msgstr "Validade Claude inválida"
 
-msgid "Could not save the refreshed Claude login"
-msgstr "Não foi possível salvar o login Claude renovado"
-
-msgid "Claude login changed during refresh"
-msgstr "Login Claude alterado durante renovação"
-
-msgid "Claude login changed during refresh; check the login"
-msgstr "Login Claude alterado durante renovação; confira o login"
-
 msgid "Codex folder unavailable"
 msgstr "Diretório Codex indisponível"
 

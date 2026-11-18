@@ -184,8 +184,8 @@ msgstr "{}: já existe em {} (apague a pasta para importar de novo)"
 msgid "{}: {} ({} animations, {}×{} frame after trimming)"
 msgstr "{}: {} ({} animações, quadro {}×{} depois de aparar)"
 
-msgid "{}: copied, but it doesn't load: {}"
-msgstr "{}: copiada, mas não carrega: {}"
+msgid "{} imported · {} skipped"
+msgstr "{} importados · {} ignorados"
 
 msgid "{}: no sheet named like Name_Animation_N.png (at least two animations)"
 msgstr "{}: nenhuma folha no formato Nome_Animação_N.png (pelo menos duas animações)"

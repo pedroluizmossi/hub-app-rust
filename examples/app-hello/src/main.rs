@@ -90,9 +90,9 @@ impl App {
     }
 
     fn load(&mut self) {
-        // earlier versions of this example wrote "estado.json": read it if that is all there is
-        let old = self.data.as_ref().map(|d| d.join("estado.json"));
-        let saved = [self.state_file(), old].into_iter().flatten().find_map(|f| std::fs::read_to_string(f).ok());
+        // a change in this format goes through [data] version in the manifest and the
+        // `migrated` message, not through reading old file names
+        let saved = self.state_file().and_then(|f| std::fs::read_to_string(f).ok());
         let parsed = saved.and_then(|t| serde_json::from_str::<Value>(&t).ok());
         self.count = parsed.and_then(|v| v["count"].as_i64()).unwrap_or(0);
     }

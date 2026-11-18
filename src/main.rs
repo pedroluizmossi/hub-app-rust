@@ -30,6 +30,7 @@ fn help() -> String {
         tr!("miniutils [--hidden] [--tab <name>] [--plugin-dev <folder>]"),
         tr!("miniutils --import-mascot <folder>"),
         tr!("miniutils --check-mascot <folder or .toml>"),
+        "miniutils --quit",
         "miniutils --dirs",
         "miniutils --version",
     ] {
@@ -55,6 +56,10 @@ fn help() -> String {
         (
             "--check-mascot",
             tr!("checks a mascot without installing it (a folder of PNG sheets or a\n.toml): moods, walking, theme and free actions"),
+        ),
+        (
+            "--quit",
+            tr!("closes the running MiniUtils as Quit in the tray menu does (the window\nand the configuration are saved); used by the installers"),
         ),
         ("--dirs", tr!("where the local apps, the themes/skins/backdrops/mascots,\nthe configuration and the logs are")),
         ("--version", tr!("shows the version (also in Settings › System)")),
@@ -115,6 +120,120 @@ fn dirs_text() -> String {
     out
 }
 
+/// What the command line asks for (see [`parse_args`]). Without `command`, the app opens.
+#[derive(Debug, Default, PartialEq)]
+struct Cli {
+    /// `--hidden`: in the tray only (autostart).
+    hidden: bool,
+    /// `--tab <name>`: the page to open on.
+    tab: Option<String>,
+    /// `--plugin-dev <folder>`, as given (it may repeat).
+    dev_dirs: Vec<String>,
+    /// A command that answers on the terminal and opens no window.
+    command: Option<OneShot>,
+}
+
+/// The commands of [`Cli::command`].
+#[derive(Debug, PartialEq)]
+enum OneShot {
+    Help,
+    Version,
+    Dirs,
+    Quit,
+    ImportMascot(String),
+    CheckMascot(String),
+}
+
+/// Reads the options (the store ones are read before, by `store::run_cli`). A missing value or
+/// an unknown option is an error, with the text to show.
+fn parse_args(args: &[String]) -> Result<Cli, String> {
+    // --help and --version win over anything else on the line
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        return Ok(Cli { command: Some(OneShot::Help), ..Cli::default() });
+    }
+    if args.iter().any(|a| a == "-V" || a == "--version") {
+        return Ok(Cli { command: Some(OneShot::Version), ..Cli::default() });
+    }
+    let mut cli = Cli::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        // the value of an option: the next argument, unless it is another option
+        let mut value = |missing: &str| it.next().filter(|v| !v.starts_with("--")).cloned().ok_or_else(|| missing.to_string());
+        let command = match arg.as_str() {
+            "--hidden" => {
+                cli.hidden = true;
+                None
+            }
+            "--tab" => {
+                cli.tab = Some(value(tr!("--tab <name>: missing the page name"))?);
+                None
+            }
+            "--plugin-dev" => {
+                cli.dev_dirs.push(value(tr!("--plugin-dev <folder>: missing the plugin folder"))?);
+                None
+            }
+            "--dirs" => Some(OneShot::Dirs),
+            "--quit" => Some(OneShot::Quit),
+            "--import-mascot" => Some(OneShot::ImportMascot(value(tr!("--import-mascot <folder>: missing the folder with the PNG sheets"))?)),
+            "--check-mascot" => Some(OneShot::CheckMascot(value(tr!("--check-mascot <folder or .toml>: missing the mascot to check"))?)),
+            _ => return Err(tr!("unknown option: {} (see miniutils --help)", arg)),
+        };
+        if let Some(command) = command {
+            if cli.command.is_some() {
+                return Err(tr!("only one of --dirs, --quit, --import-mascot and --check-mascot at a time").to_string());
+            }
+            cli.command = Some(command);
+        }
+    }
+    Ok(cli)
+}
+
+/// Runs a command that opens no window; the result is the exit code.
+fn run_command(command: &OneShot) -> i32 {
+    match command {
+        OneShot::Help => println!("{}\n\n{}", help(), store::USAGE),
+        OneShot::Version => println!("miniutils {}", core::about::version_line()),
+        // where things are (for someone adding an app by hand, or an agent about to create one)
+        OneShot::Dirs => println!("{}", dirs_text()),
+        // the installers close the running app this way before replacing it
+        OneShot::Quit => {
+            if !instance::notify_quit() {
+                eprintln!("{}", tr!("MiniUtils is not open"));
+                return 1;
+            }
+        }
+        // imported mascot (PNG sheets): copies it to the mascots folder
+        OneShot::ImportMascot(src) => {
+            let root = skin::user::dir().join(mascot::pack::DIR);
+            match mascot::pack::import(std::path::Path::new(src), &root) {
+                Ok(out) => {
+                    for l in &out.lines {
+                        println!("{l}");
+                    }
+                    println!("{}", tr!("in {}", root.display()));
+                    // the running hub rereads the appearance, where the mascots are
+                    if instance::notify_plugins_changed() {
+                        println!("{}", tr!("MiniUtils reloaded the mascots"));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    return 2;
+                }
+            }
+        }
+        // what a mascot has (the same report as the Mascots app)
+        OneShot::CheckMascot(p) => match mascot::check::path(std::path::Path::new(p)) {
+            Ok(r) => print!("{}", r.text()),
+            Err(e) => {
+                eprintln!("{e}");
+                return 1;
+            }
+        },
+    }
+    0
+}
+
 fn main() -> anyhow::Result<()> {
     // live-preview (development only): the interface is interpreted at run time, and the
     // ComponentContainer of hub.slint is still an experimental feature (see ui/build.rs)
@@ -132,63 +251,16 @@ fn main() -> anyhow::Result<()> {
     if let Some(code) = store::run_cli(&args) {
         std::process::exit(code);
     }
-    // where things are (for someone adding an app by hand, or an agent about to create one)
-    if args.first().is_some_and(|a| a == "--dirs") {
-        println!("{}", dirs_text());
-        return Ok(());
+    let cli = parse_args(&args).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    if let Some(command) = &cli.command {
+        std::process::exit(run_command(command));
     }
-    // imported mascot (PNG sheets): copies it to the mascots folder; opens no window
-    if args.first().is_some_and(|a| a == "--import-mascot") {
-        let Some(src) = args.get(1) else {
-            eprintln!("{}", tr!("--import-mascot <folder>: missing the folder with the PNG sheets"));
-            std::process::exit(2);
-        };
-        let root = skin::user::dir().join(mascot::pack::DIR);
-        match mascot::pack::import(std::path::Path::new(src), &root) {
-            Ok(lines) => {
-                for l in lines {
-                    println!("{l}");
-                }
-                println!("{}", tr!("in {}; with MiniUtils open: miniutils --reload", root.display()));
-            }
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(2);
-            }
-        }
-        return Ok(());
-    }
-    // what a mascot has (the same report as the Mascots app); opens no window
-    if args.first().is_some_and(|a| a == "--check-mascot") {
-        let Some(p) = args.get(1) else {
-            eprintln!("{}", tr!("--check-mascot <folder or .toml>: missing the mascot to check"));
-            std::process::exit(2);
-        };
-        match mascot::check::path(std::path::Path::new(p)) {
-            Ok(r) => print!("{}", r.text()),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        return Ok(());
-    }
-    if args.iter().any(|a| a == "-V" || a == "--version") {
-        println!("miniutils {}", core::about::version_line());
-        return Ok(());
-    }
-    if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("{}\n\n{}", help(), store::USAGE);
-        return Ok(());
-    }
-    let tab = args.iter().position(|a| a == "--tab").and_then(|i| args.get(i + 1)).cloned();
     // --plugin-dev may come more than once: one folder each
     let mut dev_dirs = Vec::new();
-    for (i, _) in args.iter().enumerate().filter(|(_, a)| *a == "--plugin-dev") {
-        let Some(dir) = args.get(i + 1).filter(|d| !d.starts_with("--")) else {
-            eprintln!("{}", tr!("--plugin-dev <folder>: missing the plugin folder"));
-            std::process::exit(2);
-        };
+    for dir in &cli.dev_dirs {
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|e| {
             eprintln!("--plugin-dev {dir}: {e}");
             std::process::exit(2);
@@ -203,11 +275,12 @@ fn main() -> anyhow::Result<()> {
     if dev {
         core::plugins::set_dev(dev_dirs);
     }
+    let Cli { hidden, tab, .. } = cli;
 
     // is there an instance already? it gets the request and this one exits, with no window or tray
     let socket = instance::socket_path();
     let mut claim_error = None;
-    let server = match instance::claim(&socket, &instance::show_message(tab.as_deref())) {
+    let server = match instance::claim(&socket, instance::message(tab.as_deref(), hidden).as_deref()) {
         Ok(instance::Role::Second) if dev => {
             eprintln!(
                 "{}",
@@ -236,7 +309,7 @@ fn main() -> anyhow::Result<()> {
 
     let result = (|| -> anyhow::Result<()> {
         let positionable = popup::select_backend()?;
-        let hub = hub::Hub::new(args.iter().any(|a| a == "--hidden"), tab, positionable)?;
+        let hub = hub::Hub::new(hidden, tab, positionable)?;
         if let Some(server) = &server {
             hub.serve_commands(server);
         }
@@ -313,5 +386,42 @@ mod tests {
         assert!(flags.len() >= 5, "no options found in the help: {flags:?}");
         let missing: Vec<&&str> = flags.iter().filter(|f| !readme.contains(**f)).collect();
         assert!(missing.is_empty(), "--help options missing from the README: {missing:?}");
+    }
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn parse_args_reads_the_options() {
+        assert_eq!(parse_args(&[]), Ok(Cli::default()));
+        let cli = parse_args(&args("--hidden --tab apps --plugin-dev a --plugin-dev b")).unwrap();
+        assert_eq!(
+            cli,
+            Cli { hidden: true, tab: Some("apps".into()), dev_dirs: vec!["a".into(), "b".into()], command: None }
+        );
+        // a page name with spaces comes as one argument
+        let cli = parse_args(&["--tab".to_string(), "My page".to_string()]).unwrap();
+        assert_eq!(cli.tab.as_deref(), Some("My page"));
+        assert_eq!(parse_args(&args("--quit")).unwrap().command, Some(OneShot::Quit));
+        assert_eq!(parse_args(&args("--hidden --dirs")).unwrap().command, Some(OneShot::Dirs));
+        assert_eq!(parse_args(&args("--check-mascot m.toml")).unwrap().command, Some(OneShot::CheckMascot("m.toml".into())));
+        // --help and --version win, wherever they are
+        assert_eq!(parse_args(&args("--hiden --help")).unwrap().command, Some(OneShot::Help));
+        assert_eq!(parse_args(&args("--tab x -V")).unwrap().command, Some(OneShot::Version));
+    }
+
+    #[test]
+    fn parse_args_rejects_missing_values_and_unknown_options() {
+        // --tab does not take the next option as its value
+        assert!(parse_args(&args("--tab --hidden")).is_err());
+        assert!(parse_args(&args("--tab")).is_err());
+        assert!(parse_args(&args("--plugin-dev a --plugin-dev")).is_err());
+        assert!(parse_args(&args("--import-mascot")).is_err());
+        let err = parse_args(&args("--hiden")).unwrap_err();
+        assert!(err.contains("--hiden"), "{err}");
+        assert!(parse_args(&args("--tabs apps")).is_err());
+        assert!(parse_args(&args("stray")).is_err());
+        assert!(parse_args(&args("--dirs --quit")).is_err());
     }
 }

@@ -85,6 +85,8 @@ export component HubWindow inherits Window {
     in property <int> tray-theme-index;
     // dashboard pages (sidebar) and the open one
     in property <[PageInfo]> pages;
+    // some app is enabled, on any page (the empty-page message depends on it)
+    in property <bool> any-enabled;
     in property <int> page;
     in property <[string]> page-names;
     in property <[string]> mascots;          // mascot labels (page icons)
@@ -103,6 +105,8 @@ export component HubWindow inherits Window {
     in property <int> chatter-index: 1;
     in property <int> language-index;
     in property <bool> autostart: false;
+    // why the last change of "start with the system" failed ("" = it did not)
+    in property <string> autostart-error;
     // where the window opens (index into `popup::Place::KEYS`) and the desktop app mode;
     // `can-place`: false on native Wayland, where the system decides both
     in property <int> place-index;
@@ -205,6 +209,27 @@ export component HubWindow inherits Window {
                 } else {
                     root.hide-window();
                 }
+                return accept;
+            }
+            // dashboard shortcuts (Ctrl only, so text fields keep their keys)
+            if e.modifiers.control && !e.modifiers.alt && current == "panel" && !editing && pages.length > 0 {
+                if e.text == Key.PageDown || (e.text == Key.Tab && !e.modifiers.shift) {
+                    root.page-selected(Math.mod(page + 1, pages.length));
+                    return accept;
+                }
+                if e.text == Key.PageUp || e.text == Key.Backtab || (e.text == Key.Tab && e.modifiers.shift) {
+                    root.page-selected(Math.mod(page - 1 + pages.length, pages.length));
+                    return accept;
+                }
+                if e.text.is-float() && e.text.to-float() >= 1 && e.text.to-float() <= 9 {
+                    if e.text.to-float() <= pages.length {
+                        root.page-selected(e.text.to-float() - 1);
+                    }
+                    return accept;
+                }
+            }
+            if e.modifiers.control && e.text == "," && current != "apps" {
+                root.select-tab("apps");
                 return accept;
             }
             reject
@@ -497,6 +522,8 @@ export component HubWindow inherits Window {
                     rows: rows;
                     editing: editing;
                     ghost: ghost;
+                    any-enabled: any-enabled;
+                    open-settings => { root.select-tab("apps"); }
                     edit-begin(id, mode, col, row) => { root.edit-begin(id, mode, col, row); }
                     edit-drag(col, row) => { root.edit-drag(col, row); }
                     edit-end => { root.edit-end(); }
@@ -531,6 +558,7 @@ export component HubWindow inherits Window {
                 language-index: language-index;
                 language-chosen(i) => { root.language-chosen(i); }
                 autostart: autostart;
+                autostart-error: autostart-error;
                 autostart-toggled => { root.autostart-toggled(); }
                 place-index: place-index;
                 place-chosen(i) => { root.place-chosen(i); }

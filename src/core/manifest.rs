@@ -5,6 +5,7 @@ use serde::Deserialize;
 use super::appdata::DataSpec;
 use super::bus::Topic;
 use crate::mascot::sprites;
+use crate::tr;
 
 /// Newest version of the host/mini-app contract this binary understands. Older ones still
 /// load: 2 only adds the `text` and `secret` settings, and a manifest that uses them must
@@ -153,30 +154,70 @@ impl Manifest {
                 sprites::SPRITES.iter().map(|sp| sp.key.to_string()).filter(|k| !s.options.contains(k)).collect();
             s.options.extend(rest);
         }
-        anyhow::ensure!(
-            (1..=API_VERSION).contains(&m.api),
-            "mini-app {} uses API {} (this hub understands up to {})",
-            m.id,
-            m.api,
-            API_VERSION
-        );
-        for s in &m.settings {
-            if s.kind.is_text() {
-                anyhow::ensure!(
-                    m.api >= API_TEXT_SETTINGS,
-                    "mini-app {}: setting {} is a {}, which needs api = {API_TEXT_SETTINGS}",
-                    m.id,
-                    s.key,
-                    s.kind.as_str()
-                );
-                anyhow::ensure!(s.default.is_str(), "mini-app {}: setting {} needs a text default", m.id, s.key);
-                anyhow::ensure!(s.max_len != Some(0), "mini-app {}: setting {} has max_len = 0", m.id, s.key);
+        m.check().map_err(anyhow::Error::msg)?;
+        Ok(m)
+    }
+
+    /// Checks what serde can't: the API version, the settings (a default of the right type,
+    /// within range, among the options; unique keys) and `[data]`. The errors are shown to
+    /// the user (Settings › System, `--plugins`), so they are translated.
+    fn check(&self) -> Result<(), String> {
+        let id = &self.id;
+        if !(1..=API_VERSION).contains(&self.api) {
+            return Err(tr!("mini-app {} uses API {} (this hub understands up to {})", id, self.api, API_VERSION));
+        }
+        for (i, s) in self.settings.iter().enumerate() {
+            let key = &s.key;
+            if key.trim().is_empty() {
+                return Err(tr!("mini-app {}: a setting has an empty key", id));
+            }
+            if self.settings[..i].iter().any(|o| o.key == *key) {
+                return Err(tr!("mini-app {}: setting {} is declared twice", id, key));
+            }
+            if s.kind.is_text() && self.api < API_TEXT_SETTINGS {
+                return Err(tr!("mini-app {}: setting {} is a {}, which needs api = {}", id, key, s.kind.as_str(), API_TEXT_SETTINGS));
+            }
+            let typed = match s.kind {
+                SettingKind::Bool => s.default.is_bool(),
+                SettingKind::Int => s.default.is_integer(),
+                SettingKind::Choice | SettingKind::Text | SettingKind::Secret => s.default.is_str(),
+            };
+            if !typed {
+                return Err(tr!("mini-app {}: the default of setting {} is not a {} value", id, key, s.kind.as_str()));
+            }
+            match s.kind {
+                SettingKind::Int => {
+                    if let (Some(min), Some(max)) = (s.min, s.max)
+                        && min > max
+                    {
+                        return Err(tr!("mini-app {}: setting {} has min greater than max", id, key));
+                    }
+                    let d = s.default.as_integer().unwrap_or_default();
+                    if s.min.is_some_and(|min| d < min) || s.max.is_some_and(|max| d > max) {
+                        return Err(tr!("mini-app {}: the default of setting {} is outside min and max", id, key));
+                    }
+                    if s.step.is_some_and(|step| step <= 0) {
+                        return Err(tr!("mini-app {}: setting {} needs a step greater than 0", id, key));
+                    }
+                }
+                // the theme and mascot choices are completed at runtime (file themes, imported
+                // mascots): their default can't be checked against the manifest alone
+                SettingKind::Choice if key != "theme" && !sprites::is_choice(&s.options) => {
+                    let d = s.default.as_str().unwrap_or_default();
+                    if !s.options.iter().any(|o| o == d) {
+                        return Err(tr!("mini-app {}: the default of setting {} is not one of its options", id, key));
+                    }
+                }
+                SettingKind::Text | SettingKind::Secret if s.max_len == Some(0) => {
+                    return Err(tr!("mini-app {}: setting {} has max_len = 0", id, key));
+                }
+                _ => {}
             }
         }
-        if let Some(d) = &m.data {
-            d.check().map_err(anyhow::Error::msg)?;
+        if let Some(d) = &self.data {
+            d.check()?;
         }
-        Ok(m)
+        Ok(())
     }
 
     pub fn setting(&self, key: &str) -> Option<&SettingDef> {
@@ -201,16 +242,11 @@ mod tests {
             include_str!("../../miniapps/agents/manifest.toml"),
             include_str!("../../miniapps/mascots/manifest.toml"),
         ] {
+            // parse checks the types, ranges and options; the theme and mascot choices are
+            // completed at runtime, so their defaults are checked here
             let m = Manifest::parse(text).unwrap();
-            for s in &m.settings {
-                match s.kind {
-                    SettingKind::Bool => assert!(s.default.is_bool(), "{}", s.key),
-                    SettingKind::Int => assert!(s.default.is_integer(), "{}", s.key),
-                    SettingKind::Choice => {
-                        assert!(s.live_options().contains(&s.default.as_str().unwrap().to_string()), "{}", s.key)
-                    }
-                    SettingKind::Text | SettingKind::Secret => assert!(s.default.is_str(), "{}", s.key),
-                }
+            for s in m.settings.iter().filter(|s| s.kind == SettingKind::Choice) {
+                assert!(s.live_options().contains(&s.default.as_str().unwrap().to_string()), "{}", s.key);
             }
         }
     }
@@ -273,5 +309,26 @@ mod tests {
         assert!(Manifest::parse(&TEXT_SETTINGS.replace("api=2", "api=1")).is_err());
         assert!(Manifest::parse(&TEXT_SETTINGS.replace("default=''", "default=0")).is_err());
         assert!(Manifest::parse(&TEXT_SETTINGS.replace("max_len=8", "max_len=0")).is_err());
+    }
+
+    #[test]
+    fn settings_are_checked_on_parse() {
+        let one = |setting: &str| Manifest::parse(&format!("id='x'\nname='x'\napi=1\n[[settings]]\nkey='k'\nlabel='K'\n{setting}"));
+        assert!(one("type='int'\ndefault=5\nmin=1\nmax=10\nstep=1").is_ok());
+        assert!(one("type='int'\ndefault=true").is_err(), "wrong type");
+        assert!(one("type='bool'\ndefault=1").is_err(), "wrong type");
+        assert!(one("type='int'\ndefault=5\nmin=10\nmax=1").is_err(), "min > max");
+        assert!(one("type='int'\ndefault=50\nmin=1\nmax=10").is_err(), "default out of range");
+        assert!(one("type='int'\ndefault=5\nstep=0").is_err(), "step 0");
+        assert!(one("type='choice'\ndefault='a'\noptions=['a','b']").is_ok());
+        assert!(one("type='choice'\ndefault='c'\noptions=['a','b']").is_err(), "default not an option");
+        assert!(one("type='choice'\ndefault=1\noptions=['a']").is_err(), "wrong type");
+        // two settings with the same key
+        let twice = "id='x'\nname='x'\napi=1\n[[settings]]\nkey='k'\nlabel='K'\ntype='bool'\ndefault=true\n\
+            [[settings]]\nkey='k'\nlabel='K'\ntype='bool'\ndefault=false";
+        assert!(Manifest::parse(twice).unwrap_err().to_string().contains("twice"));
+        assert!(one("type='bool'\ndefault=true").unwrap().setting("k").is_some());
+        let empty = "id='x'\nname='x'\napi=1\n[[settings]]\nkey=' '\nlabel='K'\ntype='bool'\ndefault=true";
+        assert!(Manifest::parse(empty).is_err(), "empty key");
     }
 }

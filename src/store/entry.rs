@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::{check_entry, check_matches, download_verified, fetch, git, grant_list, Binary, Entry, Index};
+use super::{check_entry, check_matches, download_verified, fetch, git, grant_list, repo_subpath, Binary, Entry, Index};
 use crate::core::appdata::Kind;
 use crate::core::plugins::{self, Plugin};
 use crate::tr;
@@ -36,6 +36,9 @@ pub struct Opts {
     /// With no license given or detected, use "unknown" instead of failing (only
     /// `--install-from`, where there is no store entry to review).
     pub allow_unknown_license: bool,
+    /// Take the Release's SHA-256 of each executable without downloading them to check
+    /// (only `--install-from`: installing downloads and checks this OS's one anyway).
+    pub skip_binary_download: bool,
 }
 
 /// Adds or updates in `index_path` the app from `repo` at tag (or branch, or commit)
@@ -73,7 +76,13 @@ pub fn from_repo(repo: &str, git_ref: &str, opts: &Opts) -> Result<Entry, String
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let index = Index { schema: 1, plugins: vec![], mascots: vec![] };
-    let opts = Opts { path: opts.path.clone(), version: opts.version.clone(), license: opts.license.clone(), allow_unknown_license: true };
+    let opts = Opts {
+        path: opts.path.clone(),
+        version: opts.version.clone(),
+        license: opts.license.clone(),
+        allow_unknown_license: true,
+        skip_binary_download: true,
+    };
     let result = build(&index, &repo, git_ref, &opts, &tmp);
     let _ = std::fs::remove_dir_all(&tmp);
     result.map(|(entry, _)| entry)
@@ -91,12 +100,12 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
     // the same clone as installation: no hooks, only the requested commit
     let checkout = tmp.join("repo");
     let checkout_s = checkout.to_string_lossy().to_string();
-    git(&["clone", "--quiet", "--no-checkout", "-c", "core.hooksPath=/dev/null", "--", repo, &checkout_s])?;
+    git(&["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.hooksPath=/dev/null", "--", repo, &checkout_s])?;
     let commit = resolve(&checkout_s, git_ref)?;
     git(&["-C", &checkout_s, "-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", &commit])?;
 
     let path = match &opts.path {
-        Some(p) => p.trim_matches('/').to_string(),
+        Some(p) => repo_subpath(p.trim_start_matches(['/', '\\'])).ok_or_else(|| tr!("--path {}: a folder inside the repository", p))?,
         None => tag_prefix(git_ref)
             .filter(|p| checkout.join(p).join("manifest.toml").is_file())
             .map(str::to_string)
@@ -149,7 +158,7 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
     }
     if plugin.app.is_some() {
         crate::apps::plugin::check_view(&src).map_err(|e| format!("{id}: {e}"))?;
-        entry.binaries = release_binaries(&entry, git_ref, tmp)?;
+        entry.binaries = release_binaries(&entry, git_ref, tmp, !opts.skip_binary_download)?;
     }
     check_entry(&entry)?;
     check_matches(&entry, &plugin)?;
@@ -159,8 +168,8 @@ fn build(index: &Index, repo: &str, git_ref: &str, opts: &Opts, tmp: &Path) -> R
 }
 
 /// The tag's Release executables: the `registry-entry.json` the workflow publishes, checked
-/// against the commit, downloading each executable to check its SHA-256.
-fn release_binaries(entry: &Entry, tag: &str, tmp: &Path) -> Result<BTreeMap<String, Binary>, String> {
+/// against the commit, downloading each executable to check its SHA-256 (when `verify`).
+fn release_binaries(entry: &Entry, tag: &str, tmp: &Path, verify: bool) -> Result<BTreeMap<String, Binary>, String> {
     let base = format!("{}/releases/download/{tag}/", entry.repo);
     let url = format!("{base}registry-entry.json");
     let bytes = fetch(&url).map_err(|e| {
@@ -181,7 +190,9 @@ fn release_binaries(entry: &Entry, tag: &str, tmp: &Path) -> Result<BTreeMap<Str
         if !b.url.starts_with(&base) {
             return Err(tr!("{}: the {} executable is not from this Release ({})", url, os, b.url));
         }
-        download_verified(b, &tmp.join(format!("bin-{os}"))).map_err(|e| format!("{}: {os}: {e}", entry.id))?;
+        if verify {
+            download_verified(b, &tmp.join(format!("bin-{os}"))).map_err(|e| format!("{}: {os}: {e}", entry.id))?;
+        }
     }
     Ok(release.binaries)
 }

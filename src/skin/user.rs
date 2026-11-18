@@ -71,15 +71,14 @@ impl Loaded {
 pub fn reload() -> Loaded {
     let root = dir();
     let mut loaded = load(&root);
-    let (arts, skipped) = pack::load(&root.join(pack::DIR));
+    // a mascot whose files didn't change keeps what it had: no reading and leaking every
+    // pack again after each edit in the Mascots app
+    let (packs, skipped) = pack::reload(&root.join(pack::DIR));
     loaded.skipped.extend(skipped.into_iter().map(|s| Skipped { file: s.dir, reason: s.reason }));
     // a sprite file can't take the key of an imported mascot (both are in the pickers)
-    let taken: Vec<String> = arts.iter().map(|a| a.key.clone()).collect();
-    let (files, skipped) = mascot_file::load(&root.join(mascot_file::DIR), &taken);
+    let (files, skipped) = mascot_file::reload(&root.join(mascot_file::DIR), &packs);
     loaded.skipped.extend(skipped.into_iter().map(|s| Skipped { file: s.file, reason: s.reason }));
-    loaded.mascots = arts.len() + files.len();
-    mascot_file::set(files);
-    pack::set(arts);
+    loaded.mascots = packs.len() + files;
     for s in &loaded.skipped {
         log::warn!("{} skipped: {}", root.join(&s.file).display(), s.reason);
     }
@@ -102,22 +101,62 @@ pub fn load(root: &Path) -> Loaded {
         }
     }
     let (dir, shown) = (root.join(THEMES), THEMES);
-    for (key, path) in files(&dir) {
+    let read_all = files(&dir).into_iter().map(|(key, path)| {
         let builtin = themes::BUILTIN.iter().any(|t| t.key == key);
-        match read(&path, builtin).and_then(|t| parse_theme(&key, &t, &out.themes)) {
+        let t = read(&path, builtin);
+        (key, t)
+    });
+    for (key, table) in base_first(read_all.collect()) {
+        match table.and_then(|t| parse_theme(&key, &t, &out.themes)) {
             Ok(t) => out.themes.push(t),
             Err(reason) => out.skipped.push(Skipped { file: format!("{shown}/{key}.toml"), reason }),
         }
     }
     let (dir, shown) = (root.join(SKINS), SKINS);
-    for (key, path) in files(&dir) {
+    let read_all = files(&dir).into_iter().map(|(key, path)| {
         let builtin = super::BUILTIN.iter().any(|s| s.key == key);
-        match read(&path, builtin).and_then(|t| parse_skin(&key, &t, &out)) {
+        let t = read(&path, builtin);
+        (key, t)
+    });
+    for (key, table) in base_first(read_all.collect()) {
+        match table.and_then(|t| parse_skin(&key, &t, &out)) {
             Ok(s) => out.skins.push(s),
             Err(reason) => out.skipped.push(Skipped { file: format!("{shown}/{key}.toml"), reason }),
         }
     }
     out
+}
+
+/// Puts each file after the file it names as `base`, so that `a.toml` can start from
+/// `b.toml` even though it sorts first. Files in a cycle keep their order and then fail
+/// with "there is no …" (their base is never parsed before them).
+fn base_first(mut pending: Vec<(String, Result<toml::Table, String>)>) -> Vec<(String, Result<toml::Table, String>)> {
+    let base = |t: &Result<toml::Table, String>| -> Option<String> {
+        t.as_ref().ok()?.get("base")?.as_str().map(str::to_string)
+    };
+    let mut out = Vec::with_capacity(pending.len());
+    loop {
+        let before = pending.len();
+        let mut i = 0;
+        while i < pending.len() {
+            let (key, table) = &pending[i];
+            // still waits while its base is another file not placed yet
+            let waits = base(table).is_some_and(|b| b != *key && pending.iter().any(|(k, _)| *k == b));
+            if waits {
+                i += 1;
+            } else {
+                out.push(pending.remove(i));
+            }
+        }
+        if pending.is_empty() {
+            return out;
+        }
+        if pending.len() == before {
+            // no progress: a cycle
+            out.append(&mut pending);
+            return out;
+        }
+    }
 }
 
 /// The `.toml` files of `dir`, in order, with the key (file name). An invalid key is not
@@ -346,6 +385,27 @@ mod tests {
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(sprites.iter().map(|f| f.sprite.key).collect::<Vec<_>>(), ["jellyfish"]);
         assert!(sprites[0].clips.as_ref().is_some_and(|c| c.contains_key("idle")));
+    }
+
+    #[test]
+    fn base_may_be_a_file_that_sorts_later() {
+        let root = temp_dir("base-order");
+        for (dir, base) in [(THEMES, "neon"), (SKINS, "neon")] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("a.toml"), "base = 'b'\n").unwrap();
+            std::fs::write(root.join(dir).join("b.toml"), format!("base = '{base}'\n")).unwrap();
+            // a cycle: both fail, nothing hangs
+            std::fs::write(root.join(dir).join("x.toml"), "base = 'y'\n").unwrap();
+            std::fs::write(root.join(dir).join("y.toml"), "base = 'x'\n").unwrap();
+        }
+        let l = load(&root);
+        let mut themes: Vec<&str> = l.themes.iter().map(|t| t.key).collect();
+        let mut skins: Vec<&str> = l.skins.iter().map(|s| s.key).collect();
+        themes.sort();
+        skins.sort();
+        assert_eq!((themes, skins), (vec!["a", "b"], vec!["a", "b"]));
+        assert_eq!(l.skipped.len(), 4, "{:?}", l.skipped);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -9,6 +9,27 @@ use crate::instance;
 use crate::popup;
 use crate::tray::Tray;
 
+/// Started hidden with no panel up yet: checks again every `TRAY_WAIT_STEP`, `tries` more
+/// times, and shows the window if the tray icon never became visible (otherwise there would
+/// be no way to open it).
+pub(super) fn wait_for_tray(tries: u32) {
+    Timer::single_shot(super::TRAY_WAIT_STEP, move || {
+        with_hub(|h| {
+            if h.shown.get() {
+                return; // opened in the meantime (another instance, the tray)
+            }
+            if h.has_tray() {
+                log::info!("the panel showed the tray icon: staying hidden");
+            } else if tries == 0 {
+                log::info!("no panel showed the tray icon: showing the window");
+                h.show(None);
+            } else {
+                wait_for_tray(tries - 1);
+            }
+        })
+    });
+}
+
 impl Hub {
     /// Shows the popup next to `anchor` (point clicked on the tray).
     pub(super) fn show(&self, anchor: Option<(i32, i32)>) {
@@ -21,6 +42,7 @@ impl Hub {
         if restoring {
             self.ui.window().set_minimized(false);
         }
+        self.covered.set(false);
         // reopening the popup: starts transparent and fades in (the first time the window
         // does not exist yet). A desktop app just shows up, like any window.
         let fade_in = !desktop && self.positionable && popup::has_window(self.ui.window());
@@ -49,6 +71,8 @@ impl Hub {
         Timer::single_shot(Duration::from_millis(60), move || {
             with_hub(|h| {
                 if h.shown.get() {
+                    // restored from minimized: the system reports it a little later
+                    h.sync_on_screen();
                     h.apply_icon();
                     if positionable {
                         h.place_window(anchor, !restoring);
@@ -108,6 +132,11 @@ impl Hub {
                 }
                 // the command-line store installed or removed a plugin
                 instance::Command::ReloadPlugins => super::request_plugin_reload(),
+                // `miniutils --quit` (installers): the same path as Quit in the tray menu
+                instance::Command::Quit => {
+                    log::info!("quit requested by another instance");
+                    let _ = weak.upgrade_in_event_loop(|ui| ui.invoke_quit());
+                }
             }
         });
         if let Err(e) = served {
@@ -115,19 +144,41 @@ impl Hub {
         }
     }
 
-    /// The window opened or hid. While hidden, the expensive providers collect more slowly
-    /// and the animation stops; on opening, each app may refresh (see `MiniApp::window_shown`).
+    /// The window opened or hid. On opening, each app may refresh (see
+    /// `MiniApp::window_shown`); see `sync_on_screen` for the animation and the providers.
     pub(super) fn set_shown(&self, on: bool) {
         if self.shown.replace(on) == on {
             return;
         }
+        if on {
+            self.covered.set(false);
+            for app in self.registry.enabled() {
+                app.borrow_mut().window_shown(&self.ui);
+            }
+        }
+        self.sync_on_screen();
+    }
+
+    /// The window was minimized or covered (`true`), or came back (`false`), without being
+    /// hidden: minimize button, taskbar, `Occluded` from the system.
+    pub(super) fn set_covered(&self, on: bool) {
+        self.covered.set(on);
+        self.sync_on_screen();
+    }
+
+    /// Whether the window can be seen now: shown, not minimized and not covered. Only then the
+    /// animation runs (each frame is drawn on the CPU) and the expensive providers collect at
+    /// the fast rate; otherwise they slow down and the animation stops.
+    pub(super) fn sync_on_screen(&self) {
+        let on = self.shown.get() && !self.covered.get() && !popup::is_minimized(self.ui.window());
+        if self.on_screen.replace(on) == on {
+            return;
+        }
+        log::debug!("window on screen: {on}");
         self.host.bus.set_visible(on);
         if on {
             self.update_clock();
             self.anim.restart();
-            for app in self.registry.enabled() {
-                app.borrow_mut().window_shown(&self.ui);
-            }
         } else {
             self.anim.stop();
         }
@@ -177,15 +228,23 @@ impl Hub {
         }
     }
 
-    pub(super) fn hide(&self) {
+    /// What the window leaves behind when it goes away (hide, quit, closed by the window
+    /// manager): size and position saved, and the mouse no longer over it.
+    pub(super) fn remember_window(&self) {
         self.remember_size();
         self.remember_position();
         // no `CursorLeft` arrives when hiding: the next time it shows, `CursorEntered` decides
         self.set_hovered(false);
+    }
+
+    pub(super) fn hide(&self) {
+        self.remember_window();
         // without a tray there would be no way back; a desktop app stays in the taskbar:
         // just minimize
         if !self.has_tray() || self.desktop_app() {
             self.ui.window().set_minimized(true);
+            // the system may take a moment to report it minimized: stop drawing now
+            self.set_covered(true);
             return;
         }
         self.set_shown(false);

@@ -168,7 +168,7 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
 
     // One reader per pipe (otherwise a full pipe blocks the child); each one signals when
     // its pipe closes, and we wait for that signal with a deadline, without busy waking.
-    let (tx, rx) = mpsc::channel::<(bool, Vec<u8>)>();
+    let (tx, rx) = mpsc::channel::<(bool, Option<Vec<u8>>)>();
     let mut readers = 0;
     let pipes: [(bool, Option<Box<dyn Read + Send>>); 2] = [
         (true, child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>)),
@@ -179,9 +179,7 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
         let tx = tx.clone();
         readers += 1;
         std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf);
-            let _ = tx.send((is_stdout, buf));
+            let _ = tx.send((is_stdout, read_capped(&mut pipe, MAX_OUTPUT)));
         });
     }
     drop(tx);
@@ -191,8 +189,13 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
     let mut timed_out = false;
     for _ in 0..readers {
         match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok((true, buf)) => stdout = buf,
-            Ok((false, buf)) => stderr = buf,
+            Ok((true, Some(buf))) => stdout = buf,
+            Ok((false, Some(buf))) => stderr = buf,
+            // past the cap: stop now instead of buffering a runaway output
+            Ok((_, None)) => {
+                kill_group(&mut child);
+                return Err(ExecError::Failed(tr!("{} wrote more than {} MiB", program, MAX_OUTPUT >> 20)));
+            }
             Err(_) => {
                 timed_out = true;
                 break;
@@ -220,6 +223,17 @@ pub fn output_timeout<S: AsRef<OsStr>>(program: &str, args: &[S], limit: Duratio
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
         status: status.to_string(),
     })
+}
+
+/// Most a command may write on each channel: past this, it is killed (a plugin's `run`
+/// or a misbehaving tool would otherwise fill the memory within the deadline).
+const MAX_OUTPUT: usize = 8 << 20;
+
+/// Reads `pipe` to the end, or `None` when it has more than `max` bytes.
+fn read_capped(pipe: &mut dyn Read, max: usize) -> Option<Vec<u8>> {
+    let mut buf = Vec::new();
+    let _ = pipe.take(max as u64 + 1).read_to_end(&mut buf);
+    (buf.len() <= max).then_some(buf)
 }
 
 /// `Command` for a program that runs in the background (providers, app actions).
@@ -343,13 +357,7 @@ pub fn open_terminal_at(dir: &Path) -> anyhow::Result<()> {
 fn terminal_command(title: &str, dir: Option<&Path>, run: Option<(&Path, &[&str])>) -> anyhow::Result<Command> {
     let (term, prefix) = terminal().ok_or_else(|| anyhow::anyhow!("{}", tr!("no terminal found (set $TERMINAL)")))?;
     let mut cmd = Command::new(&term);
-    if !title.is_empty() {
-        if term.ends_with("konsole") {
-            cmd.args(["-p", &format!("tabtitle={title}")]);
-        } else if term.ends_with("xfce4-terminal") || term.ends_with("gnome-terminal") {
-            cmd.args(["--title", title]);
-        }
-    }
+    cmd.args(terminal_title_args(&term, title));
     // konsole may reuse a running process, in another folder: pass it the folder
     if let (Some(dir), true) = (dir, term.ends_with("konsole")) {
         cmd.arg("--workdir").arg(dir);
@@ -488,30 +496,63 @@ const USER_BIN_DIRS: &[&str] = &[".local/bin", ".opencode/bin", ".cargo/bin", ".
 const USER_BIN_DIRS: &[&str] =
     &["AppData/Roaming/npm", ".local/bin", ".opencode/bin", ".cargo/bin", ".bun/bin", "AppData/Local/Volta/bin", "scoop/shims"];
 
-/// Known terminals and the argument that introduces the command to run.
+/// A terminal the hub knows how to drive.
 #[cfg(any(not(windows), test))]
-const KNOWN_TERMINALS: &[(&str, &[&str])] = &[
-    ("konsole", &["-e"]),
-    ("gnome-terminal", &["--"]),
-    ("kgx", &["--"]),
-    ("ptyxis", &["--"]),
-    ("xfce4-terminal", &["-x"]),
-    ("mate-terminal", &["-x"]),
-    ("tilix", &["-e"]),
-    ("alacritty", &["-e"]),
-    ("kitty", &[]),
-    ("foot", &[]),
-    ("wezterm", &["start", "--"]),
-    ("xterm", &["-e"]),
-    ("x-terminal-emulator", &["-e"]),
+struct KnownTerminal {
+    name: &'static str,
+    /// Argument that introduces the command to run.
+    prefix: &'static [&'static str],
+    /// Flag that sets the window title (empty: the terminal has none, or konsole's own).
+    title: &'static str,
+}
+
+#[cfg(any(not(windows), test))]
+const fn known(name: &'static str, prefix: &'static [&'static str], title: &'static str) -> KnownTerminal {
+    KnownTerminal { name, prefix, title }
+}
+
+/// Known terminals, in the order they are looked for.
+#[cfg(any(not(windows), test))]
+const KNOWN_TERMINALS: &[KnownTerminal] = &[
+    known("konsole", &["-e"], ""),
+    known("gnome-terminal", &["--"], "--title"),
+    known("kgx", &["--"], "--title"),
+    known("ptyxis", &["--"], ""),
+    known("xfce4-terminal", &["-x"], "--title"),
+    known("mate-terminal", &["-x"], "--title"),
+    known("tilix", &["-e"], "--title"),
+    known("alacritty", &["-e"], "--title"),
+    known("kitty", &[], "--title"),
+    known("foot", &[], "--title"),
+    known("wezterm", &["start", "--"], ""),
+    known("xterm", &["-e"], "-T"),
+    known("x-terminal-emulator", &["-e"], ""),
 ];
+
+/// The entry for terminal `term` (name or path), if it is on the list.
+#[cfg(any(not(windows), test))]
+fn known_terminal(term: &str) -> Option<&'static KnownTerminal> {
+    let name = Path::new(term).file_name().and_then(|n| n.to_str()).unwrap_or(term);
+    KNOWN_TERMINALS.iter().find(|t| t.name == name)
+}
 
 /// Argument that introduces the command for terminal `term` (name or path). A terminal not
 /// on the list gets `-e`, the most common one.
 #[cfg(any(not(windows), test))]
 fn terminal_prefix(term: &str) -> &'static [&'static str] {
-    let name = Path::new(term).file_name().and_then(|n| n.to_str()).unwrap_or(term);
-    KNOWN_TERMINALS.iter().find(|(t, _)| *t == name).map_or(&["-e"], |(_, p)| *p)
+    known_terminal(term).map_or(&["-e"], |t| t.prefix)
+}
+
+/// Arguments that give the window of terminal `term` the title `title` (none for a
+/// terminal without such a flag, or one not on the list).
+#[cfg(any(not(windows), test))]
+fn terminal_title_args(term: &str, title: &str) -> Vec<String> {
+    let Some(t) = known_terminal(term).filter(|_| !title.is_empty()) else { return Vec::new() };
+    match t.name {
+        "konsole" => vec!["-p".into(), format!("tabtitle={title}")],
+        _ if t.title.is_empty() => Vec::new(),
+        _ => vec![t.title.into(), title.into()],
+    }
 }
 
 /// Available terminal and the argument that introduces the command to run.
@@ -522,7 +563,7 @@ fn terminal() -> Option<(String, &'static [&'static str])> {
             let prefix = terminal_prefix(&t);
             return Some((t, prefix));
         }
-    KNOWN_TERMINALS.iter().find(|(t, _)| which(t)).map(|(t, p)| (t.to_string(), *p))
+    KNOWN_TERMINALS.iter().find(|t| which(t.name)).map(|t| (t.name.to_string(), t.prefix))
 }
 
 #[cfg(test)]
@@ -603,6 +644,29 @@ mod tests {
         assert_eq!(terminal_prefix("/usr/bin/gnome-terminal"), &["--"]);
         assert_eq!(terminal_prefix("wezterm"), &["start", "--"]);
         assert_eq!(terminal_prefix("st"), &["-e"]);
+    }
+
+    #[test]
+    fn outside_terminal_gets_the_title_flag() {
+        assert_eq!(terminal_title_args("/usr/bin/kitty", "Logs"), ["--title", "Logs"]);
+        assert_eq!(terminal_title_args("xterm", "Logs"), ["-T", "Logs"]);
+        assert_eq!(terminal_title_args("konsole", "Logs"), ["-p", "tabtitle=Logs"]);
+        assert!(terminal_title_args("wezterm", "Logs").is_empty());
+        assert!(terminal_title_args("st", "Logs").is_empty());
+        assert!(terminal_title_args("kitty", "").is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn runaway_output_is_cut() {
+        let r = run_timeout("sh", &["-c", "yes | head -c 20000000"], Duration::from_secs(20));
+        assert!(matches!(&r, Err(ExecError::Failed(m)) if m.contains("more than 8 MiB")), "{r:?}");
+    }
+
+    #[test]
+    fn capped_reader_keeps_what_fits() {
+        assert_eq!(read_capped(&mut &b"abc"[..], 3), Some(b"abc".to_vec()));
+        assert_eq!(read_capped(&mut &b"abcd"[..], 3), None);
     }
 
     #[test]

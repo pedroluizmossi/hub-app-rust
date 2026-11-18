@@ -4,8 +4,9 @@
 #   git tag v0.2.0 && git push origin v0.2.0
 #
 # The tag must match the `version` in Cargo.toml. A tag with a hyphen (`v0.2.0-rc1`) goes out as
-# a pre-release. Tests do not run here but in CI (ci.yml) on every push to master: create
-# the tag on a commit that passed it. Running it by hand (Actions tab › Release › Run workflow)
+# a pre-release. The tests run again here before building (a tag on a commit that never went
+# through CI doesn't publish a broken release); still, create the tag on a commit that passed
+# CI (ci.yml), which also runs clippy. Running it by hand (Actions tab › Release › Run workflow)
 # only builds the packages, as run artifacts, without publishing anything: useful to test an
 # `.exe`.
 name: Release
@@ -62,6 +63,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+
+      - name: Tests
+        run: cargo test --workspace --locked
 
       - name: Build (release)
         run: cargo build --release --locked

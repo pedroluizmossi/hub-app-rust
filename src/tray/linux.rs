@@ -20,6 +20,8 @@ pub struct AppTray {
     media: Option<TrayMedia>,
     /// A panel (`StatusNotifierWatcher`) is showing the icon right now.
     online: Arc<AtomicBool>,
+    /// `spawn` returned: a `watcher_offline` from now on means the panel went away.
+    spawned: Arc<AtomicBool>,
 }
 
 impl ksni::Tray for AppTray {
@@ -30,7 +32,12 @@ impl ksni::Tray for AppTray {
     }
 
     fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
-        self.online.store(false, Ordering::Relaxed);
+        let was_online = self.online.swap(false, Ordering::Relaxed);
+        // the panel went away after the icon was up: a hidden window would be unreachable.
+        // Not the first call, inside `spawn` (no panel at start): the hub decides that one.
+        if was_online && self.spawned.load(Ordering::Relaxed) {
+            crate::hub::tray_lost();
+        }
         true
     }
 
@@ -84,15 +91,11 @@ impl ksni::Tray for AppTray {
             items.push(MenuItem::Separator);
             // D-BusMenu treats underscores as keyboard shortcuts.
             items.push(StandardItem {
-                label: media.summary.replace('_', "__"),
+                label: super::media_label(&media.summary).replace('_', "__"),
                 enabled: false,
                 ..Default::default()
             }.into());
-            for (label, verb, enabled) in [
-                (tr!("Previous track"), "prev", media.can_previous),
-                (if media.playing { tr!("Pause") } else { tr!("Play") }, "play-pause", media.can_play_pause),
-                (tr!("Next track"), "next", media.can_next),
-            ] {
+            for (label, verb, enabled) in super::media_items(media) {
                 items.push(StandardItem {
                     label: label.into(),
                     enabled,
@@ -140,6 +143,7 @@ impl Tray {
     /// says whether it is visible now. Only fails without D-Bus.
     pub fn spawn(ui: slint::Weak<HubWindow>, sprite: &Sprite, theme: &Theme, mood: Mood) -> anyhow::Result<Self> {
         let online = Arc::new(AtomicBool::new(true));
+        let spawned = Arc::new(AtomicBool::new(false));
         let tray = AppTray {
             icons: icons(sprite, theme, mood),
             tooltip: String::new(),
@@ -147,9 +151,11 @@ impl Tray {
             pinned: false,
             media: None,
             online: online.clone(),
+            spawned: spawned.clone(),
         };
         // without a panel, ksni calls `watcher_offline` before returning from here
         let handle = tray.assume_sni_available(true).spawn()?;
+        spawned.store(true, Ordering::Relaxed);
         Ok(Tray { handle, online })
     }
 

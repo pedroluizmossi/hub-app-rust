@@ -53,19 +53,31 @@ fn block_on<F: Future>(f: F) -> F::Output {
 /// The host tries from the most complete version down to the original: if the plugin
 /// already sets its own background or font, the repeated property doesn't compile and the
 /// next version is used; if it uses something only a rectangle has (border), the original
-/// stays.
+/// stays. When the complete version fails for any other reason, the screen has a real
+/// error: the original is compiled once more for its diagnostics (lines as in the file)
+/// and the other versions are skipped (a broken screen costs two compiles, not five).
 pub(super) fn compile_view(dir: &Path, source: String) -> Result<ComponentDefinition, String> {
     // @tr("…") in the interface language (the interpreter has no bundled translations)
     let source = crate::core::i18n::Catalog::of_app(dir, crate::core::i18n::current()).localize_slint(&source);
     check_images(dir, &dir.join("view.slint"), &source)?;
-    let candidates = [(true, true), (true, false), (false, true), (false, false)];
-    for (transparent, font) in candidates {
-        if let Some(candidate) = as_window(&source, transparent, font)
-            && let Ok(def) = build_view(dir, candidate) {
-                return Ok(def);
-            }
+    let window = |transparent: bool, font: bool| as_window(&source, transparent, font).map(|c| build_view(dir, c));
+    let rest = || [(true, false), (false, true), (false, false)].into_iter().find_map(|(t, f)| window(t, f)?.ok());
+    match window(true, true) {
+        Some(Ok(def)) => Ok(def),
+        Some(Err(e)) if only_window_errors(&e) => rest().map_or_else(|| build_view(dir, source.clone()), Ok),
+        Some(Err(_)) => {
+            let original = build_view(dir, source.clone())?;
+            Ok(rest().unwrap_or(original))
+        }
+        // no `export component Main`: the original says so
+        None => build_view(dir, source.clone()),
     }
-    build_view(dir, source)
+}
+
+/// The errors only come from turning `Main` into a window: a property the plugin also
+/// sets (background, font) or one a window doesn't have (border).
+fn only_window_errors(errors: &str) -> bool {
+    errors.lines().all(|l| l.ends_with("Duplicated property binding") || l.contains(" in Window"))
 }
 
 /// Property that carries the look's font to the window of the plugin's screen.
@@ -74,7 +86,7 @@ pub(super) const FONT_PROP: &str = "miniutils-font";
 /// `source` with `Main` inheriting from `Window`, with a transparent background and/or the
 /// look's font.
 fn as_window(source: &str, transparent: bool, font: bool) -> Option<String> {
-    let start = source.find("export component Main")?;
+    let start = find_main(source)?;
     let brace = start + source[start..].find('{')?;
     let header = &source[start..brace];
     let header = match header.find(" inherits ") {
@@ -89,6 +101,17 @@ fn as_window(source: &str, transparent: bool, font: bool) -> Option<String> {
         extra.push_str(&format!("\n    in property <string> {FONT_PROP};\n    default-font-family: {FONT_PROP};"));
     }
     Some(format!("{}{header}{{{extra}{}", &source[..start], &source[brace + 1..]))
+}
+
+/// Where the `export component Main` header starts: the whole name (not `MainRow`), and
+/// not inside a `//` comment.
+fn find_main(source: &str) -> Option<usize> {
+    const HEADER: &str = "export component Main";
+    source.match_indices(HEADER).map(|(i, _)| i).find(|&i| {
+        let whole = source[i + HEADER.len()..].chars().next().is_some_and(|c| c.is_whitespace() || c == '{');
+        let line = &source[source[..i].rfind('\n').map_or(0, |n| n + 1)..i];
+        whole && !line.contains("//")
+    })
 }
 
 /// Path without `.` or `..` (without touching the disk: doesn't follow links).
@@ -270,6 +293,20 @@ mod tests {
         let border = "export component Main inherits Rectangle { border-width: 1px; }";
         assert!(build_view(dir, as_window(border, false, false).unwrap()).is_err());
         assert!(compile_view(dir, border.into()).is_ok());
+        // another export whose name starts with Main (and a comment that mentions it): only
+        // the real Main becomes the window
+        let row = "// export component Main is below\nexport component MainRow inherits Rectangle { }\nexport component Main inherits Rectangle { MainRow { } }";
+        let window = as_window(row, true, false).unwrap();
+        assert!(window.contains("export component MainRow inherits Rectangle { }"), "{window}");
+        assert!(window.contains("export component Main inherits Window {\n    background: transparent;"), "{window}");
+        assert!(compile_view(dir, row.into()).unwrap().properties().any(|(n, _)| n == FONT_PROP));
+    }
+
+    #[test]
+    fn broken_screen_reports_the_lines_of_the_file() {
+        let broken = "export component Main inherits Rectangle {\n    in property <int> n;\n    n: = 3;\n}";
+        let e = compile_view(Path::new("/tmp"), broken.into()).err().unwrap_or_default();
+        assert!(e.starts_with("view.slint:3:"), "{e}");
     }
 
     /// Draws the example screen with the software renderer (the same as the app's): the

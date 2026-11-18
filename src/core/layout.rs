@@ -37,7 +37,9 @@ impl Occupancy {
     }
 
     fn fits(&self, r: Rect) -> bool {
-        if r.w == 0 || r.h == 0 || r.x + r.w > self.cols || r.y + r.h > self.rows {
+        // checked: a hand-edited `[layout]` (x = 4294967295) must not wrap around and "fit"
+        let inside = |a: u32, len: u32, max: u32| a.checked_add(len).is_some_and(|end| end <= max);
+        if r.w == 0 || r.h == 0 || !inside(r.x, r.w, self.cols) || !inside(r.y, r.h, self.rows) {
             return false;
         }
         (r.y..r.y + r.h).all(|y| (r.x..r.x + r.w).all(|x| !self.used[(y * self.cols + x) as usize]))
@@ -102,7 +104,7 @@ pub fn settle(items: &[Rect], fixed: Option<(usize, Rect)>, cols: u32, rows: u32
 /// otherwise it goes to the first free spot with the same size, then as 1×1; with none,
 /// the grid gets more rows. Returns the spot and the number of rows.
 pub fn add(items: &[Rect], want: Rect, cols: u32, rows: u32) -> (Rect, u32) {
-    let (w, h) = (want.w.clamp(1, cols), want.h.max(1));
+    let (w, h) = (want.w.clamp(1, cols), want.h.clamp(1, MAX_ROWS));
     let mut rows = rows.max(1);
     loop {
         let mut occ = Occupancy::new(cols, rows);
@@ -176,5 +178,16 @@ mod tests {
         assert_eq!(add(&[r(0, 0, 1, 1)], r(0, 0, 2, 1), 2, 1), (r(1, 0, 1, 1), 1));
         // full grid: gets a new row
         assert_eq!(add(&[r(0, 0, 2, 1)], r(0, 0, 2, 1), 2, 1), (r(0, 1, 2, 1), 2));
+    }
+
+    #[test]
+    fn add_ignores_an_off_grid_spot_from_the_config() {
+        // would overflow x + w / y + h: not a fit, so the first free spot
+        assert_eq!(add(&[], r(u32::MAX, 0, 1, 1), 2, 1), (r(0, 0, 1, 1), 1));
+        assert_eq!(add(&[r(0, 0, 1, 1)], r(0, u32::MAX, 1, 1), 2, 1), (r(1, 0, 1, 1), 1));
+        // a huge height is cut to the grid limit
+        assert_eq!(add(&[], r(0, 0, 1, u32::MAX), 2, 1).0.h, 1);
+        // a saved spot that is already taken by an off-grid one does not panic in settle
+        assert_eq!(settle(&[r(u32::MAX, u32::MAX, 1, 1)], None, 2, 1), Some(vec![r(1, 0, 1, 1)]));
     }
 }

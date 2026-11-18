@@ -70,9 +70,17 @@ impl PValue {
             PValue::Bool(b) => Value::Bool(*b),
             PValue::List(l) => Value::Model(ModelRc::new(VecModel::from(l.iter().map(PValue::to_value).collect::<Vec<_>>()))),
             PValue::Map(m) => Value::Struct(m.iter().map(|(k, v)| (k.clone(), v.to_value())).collect()),
-            PValue::Image(p) => Value::Image(slint::Image::load_from_path(p).unwrap_or_default()),
+            PValue::Image(p) => Value::Image(load_image(p)),
         }
     }
+}
+
+/// Reads an image the external app pointed to (empty, and a line in the log, if it can't).
+pub(super) fn load_image(path: &Path) -> slint::Image {
+    slint::Image::load_from_path(path).unwrap_or_else(|_| {
+        log::warn!("image {}: couldn't load it", path.display());
+        slint::Image::default()
+    })
 }
 
 /// From the script to the UI.
@@ -138,22 +146,49 @@ pub(super) struct ScriptEnv {
 pub(super) struct Store {
     data: rhai::Map,
     dirty: bool,
+    /// The file exists but couldn't be read: never written over in this run.
+    read_only: bool,
 }
 
 impl Store {
-    fn load(path: Option<&Path>) -> Store {
-        let data = path
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .map(json_to_dyn)
-            .and_then(|d| d.try_cast::<rhai::Map>())
-            .unwrap_or_default();
-        Store { data, dirty: false }
+    /// Loads the data, and the problem to show on the card, if there was one. A file that
+    /// isn't a JSON object goes aside as `<name>.broken` and the store starts empty; a file
+    /// that can't be read (locked, no permission) is kept, and nothing is saved over it.
+    fn load(path: Option<&Path>) -> (Store, Option<String>) {
+        let mut store = Store::default();
+        let Some(path) = path else { return (store, None) };
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (store, None),
+            Err(e) => {
+                log::warn!("{}: {e}; the stored data won't be saved in this run", path.display());
+                store.read_only = true;
+                return (store, Some(tr!("couldn't read the stored data ({}); changes won't be saved", e)));
+            }
+        };
+        let parsed = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|e| e.to_string())
+            .and_then(|v| json_to_dyn(v).try_cast::<rhai::Map>().ok_or_else(|| "not a JSON object".to_string()));
+        match parsed {
+            Ok(data) => store.data = data,
+            Err(e) => {
+                let mut broken = path.as_os_str().to_owned();
+                broken.push(".broken");
+                let broken = PathBuf::from(broken);
+                log::warn!("{}: {e}; moved to {}", path.display(), broken.display());
+                if let Err(err) = std::fs::rename(path, &broken) {
+                    log::warn!("{}: {err}; the stored data won't be saved in this run", broken.display());
+                    store.read_only = true;
+                }
+                return (store, Some(tr!("the stored data was damaged and was set aside as {}", broken.display())));
+            }
+        }
+        (store, None)
     }
 
     /// Writes if it changed (temporary file and `rename`: never left half-written).
     fn save(&mut self, path: Option<&Path>) -> Result<(), String> {
-        if !self.dirty {
+        if !self.dirty || self.read_only {
             return Ok(());
         }
         self.dirty = false;
@@ -235,27 +270,47 @@ fn check_url(url: &reqwest::Url, allowed: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// A script's `http_get`: the domains of `[permissions] net` and one HTTP client for all
+/// its requests (building one loads the system certificates), made on the first request.
+struct Http {
+    allowed: Vec<String>,
+    client: std::sync::OnceLock<Result<reqwest::blocking::Client, String>>,
+}
+
+impl Http {
+    fn new(allowed: Vec<String>) -> Self {
+        Http { allowed, client: std::sync::OnceLock::new() }
+    }
+
+    /// The client: time limit, and redirects only to an allowed domain.
+    fn client(&self) -> Result<&reqwest::blocking::Client, String> {
+        let built = self.client.get_or_init(|| {
+            let hosts = self.allowed.clone();
+            reqwest::blocking::Client::builder()
+                .timeout(HTTP_TIMEOUT)
+                .user_agent(concat!("miniutils/", env!("CARGO_PKG_VERSION")))
+                .redirect(reqwest::redirect::Policy::custom(move |a| {
+                    if a.previous().len() >= 5 {
+                        a.error(tr!("too many redirects"))
+                    } else if let Err(e) = check_url(a.url(), &hosts) {
+                        a.error(tr!("redirected outside what is allowed: {}", e))
+                    } else {
+                        a.follow()
+                    }
+                }))
+                .build()
+                .map_err(|e| e.to_string())
+        });
+        built.as_ref().map_err(Clone::clone)
+    }
+}
+
 /// GET with a time and size limit; redirects only to an allowed domain.
-fn http_get(url: &str, allowed: &[String]) -> Result<(u16, String), String> {
+fn http_get(http: &Http, url: &str) -> Result<(u16, String), String> {
     use std::io::Read;
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("{url}: {e}"))?;
-    check_url(&parsed, allowed)?;
-    let hosts = allowed.to_vec();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .user_agent(concat!("miniutils/", env!("CARGO_PKG_VERSION")))
-        .redirect(reqwest::redirect::Policy::custom(move |a| {
-            if a.previous().len() >= 5 {
-                a.error(tr!("too many redirects"))
-            } else if let Err(e) = check_url(a.url(), &hosts) {
-                a.error(tr!("redirected outside what is allowed: {}", e))
-            } else {
-                a.follow()
-            }
-        }))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client.get(parsed).send().map_err(|e| format!("{url}: {e}"))?;
+    check_url(&parsed, &http.allowed)?;
+    let resp = http.client()?.get(parsed).send().map_err(|e| format!("{url}: {e}"))?;
     let status = resp.status().as_u16();
     let mut body = Vec::new();
     resp.take(HTTP_MAX as u64 + 1).read_to_end(&mut body).map_err(|e| format!("{url}: {e}"))?;
@@ -283,8 +338,8 @@ fn run_result(exec: &Exec, cmd: &rhai::Array) -> rhai::Map {
 }
 
 /// Result of `http_get`: #{ ok, status, body, err } (`ok` = answered with 2xx).
-fn http_result(url: &str, allowed: &[String]) -> rhai::Map {
-    let r = http_get(url, allowed);
+fn http_result(http: &Http, url: &str) -> rhai::Map {
+    let r = http_get(http, url);
     let mut m = rhai::Map::new();
     let (status, body) = r.as_ref().map(|(s, b)| (*s, b.clone())).unwrap_or_default();
     m.insert("ok".into(), (r.is_ok() && (200..300).contains(&status)).into());
@@ -323,11 +378,12 @@ fn fact_out(kind: &str, subject: &str, value: Option<f32>) -> Result<ScriptOut, 
     Ok(ScriptOut::Fact(k, subject.to_string(), value))
 }
 
-/// Message from the external app → what the UI applies (the same as the script sends).
-pub(super) fn from_app(msg: FromApp) -> ScriptOut {
+/// Message from the external app → what the UI applies (the same as the script sends). A
+/// relative image path is relative to `dir`, the app's folder (where the process runs).
+pub(super) fn from_app(msg: FromApp, dir: &Path) -> ScriptOut {
     match msg {
         FromApp::Set { prop, value } => ScriptOut::Set(prop, PValue::from_json(&value)),
-        FromApp::Image { prop, path } => ScriptOut::Set(prop, PValue::Image(PathBuf::from(path))),
+        FromApp::Image { prop, path } => ScriptOut::Set(prop, PValue::Image(dir.join(path))),
         FromApp::Mood { mood } => ScriptOut::Mood(mood),
         FromApp::Summary { text } => ScriptOut::Summary(text),
         FromApp::Notify { title, body } => ScriptOut::Notify(title, body),
@@ -445,16 +501,17 @@ pub(super) fn engine(
     let pending = Arc::new(AtomicUsize::new(0));
     let ex = env.exec.clone();
     e.register_fn("run", move |cmd: rhai::Array| run_result(&ex, &cmd));
-    let net = env.net.clone();
-    e.register_fn("http_get", move |url: &str| http_result(url, &net));
+    let http = Arc::new(Http::new(env.net.clone()));
+    let h = http.clone();
+    e.register_fn("http_get", move |url: &str| http_result(&h, url));
     let (en, pe) = (env.clone(), pending.clone());
     e.register_fn("run_async", move |cmd: rhai::Array, cb: &str| {
         let exec = en.exec.clone();
         spawn_async(&en, &pe, cb.to_string(), move || run_result(&exec, &cmd))
     });
     e.register_fn("http_get_async", move |url: &str, cb: &str| {
-        let (url, net) = (url.to_string(), env.net.clone());
-        spawn_async(&env, &pending, cb.to_string(), move || http_result(&url, &net))
+        let (url, http) = (url.to_string(), http.clone());
+        spawn_async(&env, &pending, cb.to_string(), move || http_result(&http, &url))
     });
     e
 }
@@ -468,19 +525,30 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
     let shared_settings = Arc::new(Mutex::new(settings.clone()));
     let data = env.data.clone();
     let migrate = env.migrate;
-    let store = Arc::new(Mutex::new(Store::load(data.as_deref())));
+    let (store, damaged) = Store::load(data.as_deref());
+    let store = Arc::new(Mutex::new(store));
     let db = Arc::new(Mutex::new(Db::new(env.db.clone())));
     let engine = engine(out.clone(), env, shared_settings.clone(), store.clone(), db.clone());
+    // an error is on the card: the next call that runs fine clears it (once)
+    let failed = std::cell::Cell::new(false);
+    let error = |e: String| {
+        failed.set(true);
+        if let Ok(mut v) = out.lock() {
+            v.push(ScriptOut::Error(e));
+        }
+    };
+    // not through `error`: a fine `start()` must not hide it at once
+    if let (Some(e), Ok(mut v)) = (damaged, out.lock()) {
+        v.push(ScriptOut::Error(e));
+    }
     let flush = || {
         let saved = store.lock().map_err(|e| e.to_string()).and_then(|mut s| s.save(data.as_deref()));
-        if let Err(e) = saved
-            && let Ok(mut v) = out.lock() {
-                v.push(ScriptOut::Error(e));
-            }
-        if let Some(warn) = db.lock().ok().and_then(|mut d| d.end_call())
-            && let Ok(mut v) = out.lock() {
-                v.push(ScriptOut::Error(warn));
-            }
+        if let Err(e) = saved {
+            error(e);
+        }
+        if let Some(warn) = db.lock().ok().and_then(|mut d| d.end_call()) {
+            error(warn);
+        }
         let batch = out.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
         if !batch.is_empty() {
             deliver(batch);
@@ -501,31 +569,35 @@ pub(super) fn script_loop(source: String, env: ScriptEnv, settings: rhai::Map, r
         m.insert("settings".into(), settings.into());
         m.into()
     };
-    let report = |r: Result<(), Box<rhai::EvalAltResult>>| {
-        if let Err(e) = r
-            && let Ok(mut v) = out.lock() {
-                v.push(ScriptOut::Error(format!("main.rhai: {e}")));
+    // `Ok(true)`: a hook ran and finished fine; `Ok(false)`: there was no hook to run
+    let report = |r: Result<bool, Box<rhai::EvalAltResult>>| match r {
+        Err(e) => error(format!("main.rhai: {e}")),
+        Ok(true) if failed.replace(false) => {
+            if let Ok(mut v) = out.lock() {
+                v.push(ScriptOut::Error(String::new()));
             }
+        }
+        Ok(_) => {}
     };
-    report(engine.run_ast_with_scope(&mut scope, &ast));
+    report(engine.run_ast_with_scope(&mut scope, &ast).map(|_| false));
     let mut call = |name: &str, args: Vec<rhai::Dynamic>, this: &mut rhai::Dynamic| {
         if !has(name, args.len()) {
-            return Ok(());
+            return Ok(false);
         }
         let opts = rhai::CallFnOptions::new().eval_ast(false).rewind_scope(true).bind_this_ptr(this);
-        engine.call_fn_with_options::<rhai::Dynamic>(opts, &mut scope, &ast, name, args).map(|_| ())
+        engine.call_fn_with_options::<rhai::Dynamic>(opts, &mut scope, &ast, name, args).map(|_| true)
     };
     // data from an old version: fn migrate(from, to) before anything. If it fails: close the
     // database and save nothing (the host restores the copy from before) and the app doesn't start.
     if let Some((from, to)) = migrate {
         let r = call("migrate", vec![(from as rhai::INT).into(), (to as rhai::INT).into()], &mut this);
         let open_tx = db.lock().ok().and_then(|mut d| d.end_call());
-        let failed = match (r, open_tx) {
+        let broke = match (r, open_tx) {
             (Err(e), _) => Some(format!("main.rhai: {e}")),
-            (Ok(()), Some(w)) => Some(w),
-            (Ok(()), None) => None,
+            (Ok(_), Some(w)) => Some(w),
+            (Ok(_), None) => None,
         };
-        if let Some(e) = failed {
+        if let Some(e) = broke {
             if let Ok(mut d) = db.lock() {
                 d.close();
             }
@@ -590,16 +662,58 @@ mod tests {
     }
 
     #[test]
+    fn error_clears_once_the_next_call_works() {
+        let s = r#"
+            fn start() { this.n = 0; }
+            fn tick() { this.n += 1; if this.n == 1 { throw "boom"; } }
+        "#;
+        let errors: Vec<String> = run(s, vec![ScriptIn::Tick, ScriptIn::Tick, ScriptIn::Tick])
+            .into_iter()
+            .filter_map(|m| match m {
+                ScriptOut::Error(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        // the failure, then one clear (not one per later call)
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].contains("boom"), "{errors:?}");
+        assert_eq!(errors[1], "");
+    }
+
+    #[test]
+    fn damaged_store_is_set_aside_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("miniutils-script-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("store.json");
+        std::fs::write(&file, "{not json").unwrap();
+        let out = run_with(r#"fn start() { store_set("a", 1); }"#, env(&[], Some(file.clone())), vec![]);
+        assert!(matches!(&out[0], ScriptOut::Error(e) if e.contains("store.json.broken")), "{out:?}");
+        assert_eq!(std::fs::read_to_string(dir.join("store.json.broken")).unwrap(), "{not json");
+        // the store started empty and saved the new value in a fresh file
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"a":1}"#);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn external_app_messages_become_script_ones() {
-        let set = from_app(FromApp::Set { prop: "n".into(), value: serde_json::json!({"a": [1, true]}) });
+        let dir = Path::new("/apps/x");
+        let set = from_app(FromApp::Set { prop: "n".into(), value: serde_json::json!({"a": [1, true]}) }, dir);
         assert!(matches!(&set, ScriptOut::Set(p, PValue::Map(m)) if p == "n" && matches!(&m[0].1, PValue::List(l) if l.len() == 2)));
-        assert!(matches!(from_app(FromApp::Image { prop: "g".into(), path: "/x.png".into() }), ScriptOut::Set(_, PValue::Image(_))));
+        // a relative image path is the app folder's; an absolute one stays
+        let image = |path: &str| match from_app(FromApp::Image { prop: "g".into(), path: path.into() }, dir) {
+            ScriptOut::Set(_, PValue::Image(p)) => p.to_string_lossy().replace('\\', "/"),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(image("assets/chart.png"), "/apps/x/assets/chart.png");
+        #[cfg(unix)]
+        assert_eq!(image("/tmp/x.png"), "/tmp/x.png");
         assert!(matches!(
-            from_app(FromApp::Fact { kind: "strain".into(), subject: "CPU".into(), value: Some(93.0) }),
+            from_app(FromApp::Fact { kind: "strain".into(), subject: "CPU".into(), value: Some(93.0) }, dir),
             ScriptOut::Fact(FactKind::Strain, s, Some(_)) if s == "CPU"
         ));
         // an unknown fact kind becomes an error in the cell, not a panic
-        assert!(matches!(from_app(FromApp::Fact { kind: "x".into(), subject: String::new(), value: None }), ScriptOut::Error(e) if e.contains("unknown")));
+        assert!(matches!(from_app(FromApp::Fact { kind: "x".into(), subject: String::new(), value: None }, dir), ScriptOut::Error(e) if e.contains("unknown")));
     }
 
     #[test]

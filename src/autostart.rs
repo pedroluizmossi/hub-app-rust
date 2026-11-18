@@ -30,16 +30,60 @@ pub fn set(on: bool) -> Result<(), String> {
 }
 
 /// On, but pointing to another executable (the app moved or was replaced by a new version
-/// elsewhere)? Rewrites it with the current one. Runs when the app opens.
+/// elsewhere)? Rewrites it with the current one. Runs when the app opens. An entry the user
+/// edited (an `env VAR=1` in front, other options) is left alone while it still runs this
+/// executable.
 pub fn refresh() {
     let Some(old) = imp::current() else { return };
     let Ok(exe) = program() else { return };
-    if old != imp::entry_for(&exe) {
+    if !runs(&imp::command_words(&old), &exe) {
         log::info!("start with the system: updated to {}", exe.display());
         if let Err(e) = imp::enable(&exe) {
             log::warn!("start with the system: {e}");
         }
     }
+}
+
+/// Does the command (split into words) run `exe`? Any word may be it, so a wrapper in front
+/// (`env`, `nice`) still counts.
+fn runs(words: &[String], exe: &std::path::Path) -> bool {
+    words.iter().any(|w| same_path(w, &exe.to_string_lossy()))
+}
+
+/// Windows paths ignore case; Linux ones do not.
+fn same_path(a: &str, b: &str) -> bool {
+    if cfg!(windows) { a.to_lowercase() == b.to_lowercase() } else { a == b }
+}
+
+/// Words of a Windows command line (`"C:\…\miniutils.exe" --hidden`): a part in double quotes
+/// is one word, with its spaces. Pure, so it is tested on Linux too.
+#[cfg(any(windows, test))]
+fn split_command_line(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let (mut quoted, mut any) = (false, false);
+    for c in line.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                any = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if any {
+                    words.push(std::mem::take(&mut word));
+                }
+                any = false;
+            }
+            c => {
+                word.push(c);
+                any = true;
+            }
+        }
+    }
+    if any {
+        words.push(word);
+    }
+    words
 }
 
 /// The executable to open. In an AppImage, `current_exe` is a temporary mount point: the
@@ -49,4 +93,31 @@ fn program() -> Result<PathBuf, String> {
         return Ok(PathBuf::from(image));
     }
     std::env::current_exe().map_err(|e| crate::tr!("could not find the executable ({})", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn words(list: &[&str]) -> Vec<String> {
+        list.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn an_entry_that_still_runs_this_executable_is_kept() {
+        let exe = Path::new("/home/x/bin/miniutils");
+        assert!(runs(&words(&["/home/x/bin/miniutils", "--hidden"]), exe));
+        assert!(runs(&words(&["env", "MINIUTILS_NATIVE_WAYLAND=1", "/home/x/bin/miniutils", "--hidden", "--tab", "X"]), exe));
+        assert!(!runs(&words(&["/opt/old/miniutils", "--hidden"]), exe));
+        assert!(!runs(&[], exe));
+    }
+
+    #[test]
+    fn windows_command_line_words() {
+        assert_eq!(split_command_line(r#""C:\Program Files\Mini Utils\miniutils.exe" --hidden"#), words(&[r"C:\Program Files\Mini Utils\miniutils.exe", "--hidden"]));
+        assert_eq!(split_command_line(r"C:\bin\miniutils.exe  --hidden "), words(&[r"C:\bin\miniutils.exe", "--hidden"]));
+        assert_eq!(split_command_line(r#""" x"#), words(&["", "x"]));
+        assert!(split_command_line("  ").is_empty());
+    }
 }

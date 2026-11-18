@@ -101,14 +101,15 @@ impl DataSpec {
     }
 
     pub fn check(&self) -> Result<(), String> {
+        // shown to the user (Settings › System, `--plugins`): translated
         if !(1..=1_000_000).contains(&self.version) {
-            return Err(format!("[data] version = {}: use 1 to 1000000", self.version));
+            return Err(tr!("[data] version = {}: use 1 to 1000000", self.version));
         }
         if !(1..=1024).contains(&self.max_mb) {
-            return Err(format!("[data] max_mb = {}: use 1 to 1024", self.max_mb));
+            return Err(tr!("[data] max_mb = {}: use 1 to 1024", self.max_mb));
         }
         if let Some(k) = self.kinds.iter().enumerate().find(|(i, k)| self.kinds[..*i].contains(k)).map(|(_, k)| k) {
-            return Err(format!("[data] kinds: \"{}\" repeated", k.key()));
+            return Err(tr!("[data] kinds: \"{}\" repeated", k.key()));
         }
         Ok(())
     }
@@ -255,7 +256,8 @@ pub fn human(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
     let mut v = bytes as f64;
     let mut u = 0;
-    while v >= 1024.0 && u < UNITS.len() - 1 {
+    // compare the value as shown (one decimal): 1048575 bytes is "1.0 MB", not "1024.0 KB"
+    while (v * 10.0).round() >= 10240.0 && u < UNITS.len() - 1 {
         v /= 1024.0;
         u += 1;
     }
@@ -280,7 +282,15 @@ pub fn export(root: &Path, id: &str, to: &Path) -> Result<PathBuf, String> {
         return Err(tr!("this app has no data").into());
     }
     let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
-    let dest = to.join(format!("{id}-{stamp}"));
+    // a second export in the same second gets its own folder (VACUUM INTO refuses an
+    // existing file)
+    let base = format!("{id}-{stamp}");
+    let mut dest = to.join(&base);
+    let mut n = 2;
+    while dest.exists() {
+        dest = to.join(format!("{base}-{n}"));
+        n += 1;
+    }
     std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     let db = dir.join(DB_FILE);
     let skip: Vec<PathBuf> = if db.is_file() {
@@ -428,6 +438,10 @@ mod tests {
             assert_eq!(read, 42);
             assert_eq!(std::fs::read_to_string(out.join("sub").join("note.txt")).unwrap(), "hi");
             assert!(!out.join(format!("{DB_FILE}-wal")).exists());
+            // again right away (same second): a folder of its own, not an error
+            let again = export(&root, "io.x.db", &root.join("out")).unwrap();
+            assert_ne!(again, out);
+            assert!(again.join(DB_FILE).is_file());
         }
         let (bytes, cut) = size(&dir);
         assert!(bytes > 2 && !cut);
@@ -440,5 +454,9 @@ mod tests {
         assert_eq!(human(0), "0 B");
         assert_eq!(human(1536), "1.5 KB");
         assert_eq!(human(3 << 20), "3.0 MB");
+        // just under a unit: rounds up into the next one
+        assert_eq!(human(1_048_575), "1.0 MB");
+        assert_eq!(human(1023), "1023 B");
+        assert_eq!(human(1024), "1.0 KB");
     }
 }

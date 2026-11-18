@@ -3,6 +3,7 @@
 //! index, `git clone`, copying) runs in a thread; the result comes back through the UI
 //! thread. A mascot pack's row id is `mascot:<id>` (plugin and mascot ids may repeat).
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -19,17 +20,105 @@ const ARM_TTL: Duration = Duration::from_secs(8);
 /// Prefix of a mascot pack's row id.
 const MASCOT: &str = "mascot:";
 
+/// What an index load brings back: the catalog and the bytes of stored data of each
+/// installed plugin that has some (measured in the store thread, not on the UI thread).
+type Loaded = Result<(Catalog, HashMap<String, u64>), String>;
+
 #[derive(Default)]
 pub(super) struct StoreState {
     statuses: Vec<Status>,
     mascots: Vec<MascotStatus>,
-    status: String,
-    failed: bool,
+    /// How the last index that loaded was checked (`None`: nothing loaded, or it failed).
+    trust: Option<Trust>,
+    /// Error of the last load or action ("" = none).
+    error: String,
+    /// Result of the last action ("x installed"): kept across the reload that the action
+    /// starts and shown before the catalog summary.
+    notice: String,
     loading: bool,
+    /// Generation of the latest index load: the result of an older one is dropped.
+    load_gen: u64,
+    /// Stored data of the installed plugins, by id (bytes; only the ones with data).
+    data: HashMap<String, u64>,
     /// Action waiting for the second click: (id, verb, when it was armed).
     armed: Option<(String, String, Instant)>,
     /// Plugin with an action in progress.
     busy: Option<String>,
+}
+
+impl StoreState {
+    /// A new index load starts: returns its generation.
+    fn begin_load(&mut self) -> u64 {
+        self.armed = None;
+        self.loading = true;
+        self.notice.clear();
+        self.error.clear();
+        self.load_gen += 1;
+        self.load_gen
+    }
+
+    /// Takes the result of load `generation`; `false` (and nothing changes) if a newer load
+    /// was started meanwhile.
+    fn apply_load(&mut self, generation: u64, result: Loaded) -> bool {
+        if generation != self.load_gen {
+            return false;
+        }
+        self.loading = false;
+        match result {
+            Ok((c, data)) => {
+                self.trust = Some(c.trust);
+                self.statuses = c.plugins;
+                self.mascots = c.mascots;
+                self.data = data;
+                self.error.clear();
+            }
+            Err(e) => {
+                self.trust = None;
+                self.statuses.clear();
+                self.mascots.clear();
+                self.data.clear();
+                self.notice.clear();
+                self.error = e;
+            }
+        }
+        true
+    }
+
+    /// The status line: the error; or the last action's result and the catalog summary
+    /// ("x installed · signature verified · plugins: 3 · mascots: 1"). Built on every push,
+    /// so it follows the interface language. While loading, only the notice (the screen
+    /// adds "loading…").
+    fn status_line(&self) -> String {
+        if !self.error.is_empty() {
+            return self.error.clone();
+        }
+        let summary = match (&self.trust, self.loading) {
+            (Some(t), false) => tr!(
+                "{} · plugins: {} · mascots: {}",
+                if *t == Trust::Signed { tr!("signature verified") } else { tr!("local index, not signed") },
+                self.statuses.len(),
+                self.mascots.len()
+            ),
+            _ => String::new(),
+        };
+        match (self.notice.is_empty(), summary.is_empty()) {
+            (true, _) => summary,
+            (false, true) => self.notice.clone(),
+            (false, false) => format!("{} · {summary}", self.notice),
+        }
+    }
+}
+
+/// Bytes of stored data of each installed plugin of the catalog that has some.
+fn data_sizes(c: &Catalog) -> HashMap<String, u64> {
+    c.plugins
+        .iter()
+        .filter(|s| s.installed.is_some())
+        .filter_map(|s| {
+            let dir = appdata::dir(&s.entry.id);
+            appdata::has_data(&dir).then(|| (s.entry.id.clone(), appdata::size(&dir).0))
+        })
+        .collect()
 }
 
 impl Hub {
@@ -51,49 +140,31 @@ impl Hub {
     }
 
     /// The store was opened or a reload was asked for: downloads the index in a thread.
+    /// Loads overlap (the store reopened, "Save and load" clicked twice): only the result of
+    /// the latest one counts.
     pub(super) fn store_reload(&self) {
         let src = Source::from_config(&self.host.config.borrow());
         let g = self.ui.global::<StoreApp>();
         g.set_index(src.index.as_str().into());
         g.set_key(src.key.as_str().into());
-        {
-            let mut st = self.store.borrow_mut();
-            st.armed = None;
-            st.loading = true;
-        }
+        let generation = self.store.borrow_mut().begin_load();
         self.store_push();
         let spawned = std::thread::Builder::new().name("store".into()).spawn(move || {
-            let result = store::statuses(&src, &plugins::dir(), &crate::skin::user::dir());
-            let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_loaded(result)));
+            let result = store::statuses(&src, &plugins::dir(), &crate::skin::user::dir()).map(|c| {
+                let data = data_sizes(&c);
+                (c, data)
+            });
+            let _ = slint::invoke_from_event_loop(move || with_hub(|h| h.store_loaded(generation, result)));
         });
         if let Err(e) = spawned {
             self.store_failed(tr!("no thread for the store: {}", e));
         }
     }
 
-    fn store_loaded(&self, result: Result<Catalog, String>) {
-        {
-            let mut st = self.store.borrow_mut();
-            st.loading = false;
-            match result {
-                Ok(c) => {
-                    st.status = tr!(
-                        "{} · plugins: {} · mascots: {}",
-                        if c.trust == Trust::Signed { tr!("signature verified") } else { tr!("local index, not signed") },
-                        c.plugins.len(),
-                        c.mascots.len()
-                    );
-                    st.statuses = c.plugins;
-                    st.mascots = c.mascots;
-                    st.failed = false;
-                }
-                Err(e) => {
-                    st.statuses.clear();
-                    st.mascots.clear();
-                    st.status = e;
-                    st.failed = true;
-                }
-            }
+    fn store_loaded(&self, generation: u64, result: Loaded) {
+        if !self.store.borrow_mut().apply_load(generation, result) {
+            log::debug!("store: dropped the result of an older index load");
+            return;
         }
         self.store_push();
     }
@@ -103,8 +174,8 @@ impl Hub {
             let mut st = self.store.borrow_mut();
             st.loading = false;
             st.busy = None;
-            st.status = msg;
-            st.failed = true;
+            st.notice.clear();
+            st.error = msg;
         }
         self.store_push();
     }
@@ -131,6 +202,9 @@ impl Hub {
         };
         self.store_push();
         if !confirmed {
+            // the "Confirm …" button goes back to its first label when the time runs out
+            // (`store_push` drops an expired arm; a newer arm is still within its time)
+            slint::Timer::single_shot(ARM_TTL + Duration::from_millis(50), || with_hub(|h| h.store_push()));
             return;
         }
         // a mascot pack is only drawings: nothing running to stop, no data
@@ -169,28 +243,16 @@ impl Hub {
         }
     }
 
+    /// The action finished. On success the index loads again (the states changed) and the
+    /// result stays on the status line, before the catalog summary, after that load.
     fn store_done(&self, id: &str, verb: &str, result: Result<String, String>) {
         self.store.borrow_mut().busy = None;
-        if id.starts_with(MASCOT) {
-            match result {
-                Ok(msg) => {
-                    // the new mascots show up in every picker at once
-                    self.reload_looks();
-                    self.store_reload();
-                    let mut st = self.store.borrow_mut();
-                    st.status = msg;
-                    st.failed = false;
-                }
-                Err(e) => {
-                    let mut st = self.store.borrow_mut();
-                    st.status = e;
-                    st.failed = true;
-                }
+        let notice = match result {
+            Ok(msg) if id.starts_with(MASCOT) => {
+                // the new mascots show up in every picker at once
+                self.reload_looks();
+                Ok(msg)
             }
-            self.store_push();
-            return;
-        }
-        match result {
             Ok(msg) => {
                 // the plugin comes into (or leaves) the hub without restarting
                 self.reload_plugins();
@@ -198,24 +260,31 @@ impl Hub {
                 if verb == "install" && !self.host.config.borrow().is_enabled(id) {
                     self.ui.invoke_toggle_app(id.into());
                 }
+                Ok(if verb == "install" { tr!("{} and enabled on the panel", msg) } else { msg })
+            }
+            Err(e) => Err(e),
+        };
+        match notice {
+            Ok(msg) => {
                 self.store_reload();
-                let mut st = self.store.borrow_mut();
-                st.status = if verb == "install" { tr!("{} and enabled on the panel", msg) } else { msg };
-                st.failed = false;
+                self.store.borrow_mut().notice = msg;
             }
             Err(e) => {
                 let mut st = self.store.borrow_mut();
-                st.status = e;
-                st.failed = true;
+                st.notice.clear();
+                st.error = e;
             }
         }
-        // an external app stopped by `suspend` and not swapped: runs again
-        crate::apps::plugin::resume(id);
+        // an external app stopped by `suspend` and not swapped: runs again (a mascot pack
+        // has no app)
+        if !id.starts_with(MASCOT) {
+            crate::apps::plugin::resume(id);
+        }
         self.store_push();
     }
 
     /// Takes the state to the screen.
-    fn store_push(&self) {
+    pub(super) fn store_push(&self) {
         let st = self.store.borrow();
         let armed = st.armed.as_ref().filter(|(_, _, at)| at.elapsed() < ARM_TTL);
         let mut rows: Vec<StoreRow> = st
@@ -226,11 +295,9 @@ impl Hub {
                 let verb = armed.filter(|(i, _, _)| *i == e.id).map(|(_, v, _)| v.as_str()).unwrap_or("");
                 let perms = e.grants_text();
                 // stored data (only matters for installed ones: removing asks about it)
-                let dir = appdata::dir(&e.id);
-                let data = if s.installed.is_some() && appdata::has_data(&dir) {
-                    appdata::human(appdata::size(&dir).0)
-                } else {
-                    String::new()
+                let data = match st.data.get(&e.id) {
+                    Some(bytes) if s.installed.is_some() => appdata::human(*bytes),
+                    _ => String::new(),
                 };
                 let new_perms = s.new_permissions();
                 let state = match &s.installed {
@@ -320,8 +387,8 @@ impl Hub {
         }));
         let g = self.ui.global::<StoreApp>();
         g.set_rows(ModelRc::new(VecModel::from(rows)));
-        g.set_status(st.status.as_str().into());
-        g.set_failed(st.failed);
+        g.set_status(st.status_line().into());
+        g.set_failed(!st.error.is_empty());
         g.set_loading(st.loading);
     }
 }
@@ -338,4 +405,44 @@ fn wait_release(id: String, tries: u32) {
             }
         })
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog() -> Catalog {
+        Catalog { plugins: Vec::new(), mascots: Vec::new(), trust: Trust::Unsigned }
+    }
+
+    #[test]
+    fn the_result_of_an_action_survives_the_reload_it_starts() {
+        let mut st = StoreState::default();
+        let g = st.begin_load();
+        // `store_done`: reload, then the notice
+        st.notice = "x installed".into();
+        assert_eq!(st.status_line(), "x installed", "while loading, only the notice");
+        assert!(st.apply_load(g, Ok((catalog(), HashMap::new()))));
+        let line = st.status_line();
+        assert!(line.starts_with("x installed · ") && line.ends_with("plugins: 0 · mascots: 0"), "{line}");
+        // the next load (the user asked for it) forgets it
+        let g = st.begin_load();
+        assert!(st.apply_load(g, Ok((catalog(), HashMap::new()))));
+        assert!(!st.status_line().contains("x installed"));
+    }
+
+    #[test]
+    fn an_older_load_does_not_overwrite_a_newer_one() {
+        let mut st = StoreState::default();
+        let old = st.begin_load();
+        let new = st.begin_load();
+        assert!(st.apply_load(new, Ok((catalog(), HashMap::new()))));
+        assert!(!st.apply_load(old, Err("timeout".into())), "stale result taken");
+        assert!(st.error.is_empty() && !st.loading);
+        // a failure shows the error and clears the lists
+        let g = st.begin_load();
+        assert!(st.apply_load(g, Err("bad signature".into())));
+        assert_eq!(st.status_line(), "bad signature");
+        assert!(st.trust.is_none());
+    }
 }

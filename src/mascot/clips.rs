@@ -289,7 +289,7 @@ pub fn parse(sprite: &Sprite, src: &str) -> Result<Clips, String> {
 
 /// Turns a frame's text into a `Grid`, checking size and colors.
 fn grid(sprite: &Sprite, text: &str) -> Result<Grid, String> {
-    let rows: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
+    let rows: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     if rows.len() != sprite.grid.len() {
         return Err(format!("{} rows, expected {}", rows.len(), sprite.grid.len()));
     }
@@ -341,6 +341,16 @@ pub(crate) mod tests {
         let row = "Z".repeat(16);
         let color = format!("[x]\nframes = [{}]", frame(&[row.as_str(); 14]));
         assert!(parse(neko, &color).unwrap_err().contains("color 'Z'"));
+    }
+
+    #[test]
+    fn accepts_an_indented_frame() {
+        let neko = sprites::get("neko");
+        let rows: Vec<String> = neko.grid.iter().map(|r| format!("      {r}")).collect();
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let src = format!("[x]\nframes = [{}]", frame(&rows));
+        let clips = parse(neko, &src).unwrap();
+        assert_eq!(clips["x"].frames[0], neko.grid);
     }
 
     #[test]

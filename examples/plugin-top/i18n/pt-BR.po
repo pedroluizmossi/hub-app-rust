@@ -18,3 +18,9 @@ msgstr "por CPU · {} processos"
 
 msgid "Memory"
 msgstr "Memória"
+
+msgid "{} {} memory"
+msgstr "{} {} de memória"
+
+msgid "{} {} CPU"
+msgstr "{} {} de CPU"
