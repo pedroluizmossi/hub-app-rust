@@ -467,7 +467,14 @@ execução, **da pasta da pessoa**: `mascots/<chave>/` dentro da pasta de aparê
     compasso; com "reduzir movimento", ficam parados, espalhados.
 
   A opção "Subagentes andando com as mascotes que andam" desliga (andam com a mascote da
-  ferramenta).
+  ferramenta). Os agentes de um **workflow** do Claude Code andam no cartão da sessão
+  como os subagentes; a execução em si não anda.
+- **Workflows** (Claude Code): cada execução é um bloco no cartão da sessão que a iniciou,
+  com uma barra de um segmento por fase (cheio conforme os agentes voltam; a fase que roda
+  em `visor`, com um brilho correndo; parada no meio em `warn`). Clicar abre as fases e os
+  agentes da fase que roda (ou da escolhida com um clique): o quadrado de estado pulsa
+  enquanto trabalha, e a linha diz a ferramenta chamada ou, terminada, modelo e tokens de
+  saída. Com "reduzir movimento", nem brilho nem pulso.
 - **Ações livres**: animação que não é humor, reação, jeito de andar (`walk`, `run`, `jump`
   e variações) nem está em `extras` (ex.: `explosion`, `attack`) nunca toca sozinha; fica
   para quando um app pedir. Vale para os dois tipos.

@@ -107,6 +107,18 @@ msgstr "subagentes ativos"
 msgid "{} of {} subagents active"
 msgstr "{} de {} subagentes ativos"
 
+msgid "workflow"
+msgstr "workflow"
+
+msgid "workflows"
+msgstr "workflows"
+
+msgid "phase {} of {}: {} · {}/{}"
+msgstr "fase {} de {}: {} · {}/{}"
+
+msgid "{} output"
+msgstr "{} saída"
+
 msgid "{} messages"
 msgstr "{} mensagens"
 

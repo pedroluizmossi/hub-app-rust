@@ -1,7 +1,7 @@
 //! AI Agents mini-app: the Claude Code, Codex and OpenCode sessions and the state of each.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -18,15 +18,20 @@ use crate::mascot::stroll::{Pose, Script, Stage};
 use crate::mascot::themes::Theme;
 use crate::mascot::{Mood, anim, render, sprites, walkers};
 use crate::core::bus::Topic;
-use crate::providers::agents::{self, Agent, AgentsSnapshot, State, Step, StepKind, Tool, clip};
+use crate::providers::agents::{self, Agent, AgentsSnapshot, State, Step, StepKind, Tool, WORKFLOW, clip};
 use crate::tr;
-use crate::ui::{AgentDetail, AgentDetailWindow, AgentRow, AgentStep, AgentSub, AgentWalker, AgentsApp, Anim, HubWindow};
+use crate::ui::{
+    AgentDetail, AgentDetailWindow, AgentPhase, AgentRow, AgentRun, AgentRunAgent, AgentStep, AgentSub, AgentWalker, AgentsApp,
+    Anim, HubWindow,
+};
 
 const SPEECH_TTL: Duration = Duration::from_secs(30);
 /// Subagents drawn walking in a session's strip (the counter shows all of them).
 const MAX_WALKERS: usize = 6;
 /// Subagents listed on a session's card.
 const MAX_SUB_LINES: usize = 5;
+/// Agents of a phase listed in an expanded workflow run.
+const MAX_RUN_AGENTS: usize = 12;
 
 pub struct AgentsMini {
     host: Rc<Host>,
@@ -54,6 +59,16 @@ pub struct AgentsMini {
     /// Detail window (only one: opening another session swaps what it shows). Created on
     /// first use and only hidden when closed.
     detail: Option<Detail>,
+    /// How the workflow runs are shown, by run id.
+    runs: RunView,
+}
+
+/// Which workflow runs are expanded, and the phase picked in each (none picked: the one
+/// running, or the last one that started).
+#[derive(Debug, Default)]
+struct RunView {
+    open: HashSet<String>,
+    phase: HashMap<String, usize>,
 }
 
 /// The detail window and the session it shows.
@@ -92,6 +107,7 @@ impl AgentsMini {
             heroes: Heroes::default(),
             face: HeaderMascot::new(13),
             detail: None,
+            runs: RunView::default(),
         }));
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
@@ -111,6 +127,27 @@ impl AgentsMini {
                 let mut a = a.borrow_mut();
                 let key = a.find(&key).map(|s| (s.tool, s.id.clone()));
                 a.selected = if a.selected == key { None } else { key };
+                a.refresh(&ui);
+            }
+        });
+        let a = Rc::downgrade(&app);
+        let w = ui.as_weak();
+        ui.global::<AgentsApp>().on_toggle_run(move |key| {
+            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
+                let mut a = a.borrow_mut();
+                let key = key.to_string();
+                if !a.runs.open.remove(&key) {
+                    a.runs.open.insert(key);
+                }
+                a.refresh(&ui);
+            }
+        });
+        let a = Rc::downgrade(&app);
+        let w = ui.as_weak();
+        ui.global::<AgentsApp>().on_run_phase(move |key, index| {
+            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
+                let mut a = a.borrow_mut();
+                a.runs.phase.insert(key.to_string(), index.max(0) as usize);
                 a.refresh(&ui);
             }
         });
@@ -232,7 +269,7 @@ impl AgentsMini {
     /// option's time limit.
     fn visible(&self, now: i64) -> Vec<&Agent> {
         let recent = self.host.config.borrow().int(&self.manifest, "recent").max(1) * 60_000;
-        self.snap.agents.iter().filter(|a| a.state != State::Idle || now - a.since_ms <= recent).collect()
+        visible(&self.snap.agents, now, recent)
     }
 
     fn face(&mut self, tool: Tool, state: State) -> slint::Image {
@@ -263,11 +300,15 @@ impl AgentsMini {
             self.selected = None;
         }
         let selected = self.selected.clone();
+        // runs that left the list forget how they were shown
+        let present = |id: &String| all.iter().any(|a| a.id == *id && a.details.kind == WORKFLOW);
+        self.runs.open.retain(present);
+        self.runs.phase.retain(|id, _| present(id));
         let cards: Vec<Card> = list
             .iter()
             .map(|(a, subs)| {
                 let open = selected.as_ref().is_some_and(|(t, id)| a.tool == *t && a.id == *id);
-                card(a, subs, &short_dir(&a.cwd, &home), now, open)
+                card(a, subs, &short_dir(&a.cwd, &home), now, open, &self.runs)
             })
             .collect();
         if cards.len() != self.cards.len() {
@@ -286,7 +327,7 @@ impl AgentsMini {
         let walking: Vec<(String, Vec<(String, bool)>)> = list
             .iter()
             .map(|(a, subs)| {
-                let working = subs.iter().filter(|s| s.state == State::Working).take(MAX_WALKERS);
+                let working = walkers(subs).take(MAX_WALKERS);
                 (session_key(a), working.map(|s| (s.id.clone(), self.heroes.calling_tools(s, now))).collect())
             })
             .collect();
@@ -352,6 +393,8 @@ impl AgentsMini {
             prompt: c.prompt.as_str().into(),
             subs: ModelRc::from(Rc::new(VecModel::from(subs))),
             more_subs: c.more_subs as i32,
+            run_lines: c.runs.iter().map(|r| r.lines).sum::<usize>() as i32,
+            runs: ModelRc::from(Rc::new(VecModel::from(c.runs.iter().map(run_row).collect::<Vec<_>>()))),
         }
     }
 
@@ -469,13 +512,36 @@ impl Counts {
     }
 }
 
+/// What goes on screen: who is not stopped, or stopped less than `recent` ms ago, and
+/// whoever started one of those (a session quiet for a while whose workflow still runs, or
+/// just ended, keeps its card; otherwise the run would show up loose).
+fn visible(all: &[Agent], now: i64, recent: i64) -> Vec<&Agent> {
+    let mut keep: HashSet<(Tool, &str)> =
+        all.iter().filter(|a| a.state != State::Idle || now - a.since_ms <= recent).map(|a| (a.tool, a.id.as_str())).collect();
+    loop {
+        let parents: Vec<(Tool, &str)> = all
+            .iter()
+            .filter(|a| keep.contains(&(a.tool, a.id.as_str())))
+            .filter_map(|a| a.parent.as_deref().map(|p| (a.tool, p)))
+            .filter(|k| !keep.contains(k))
+            .collect();
+        if parents.is_empty() {
+            break;
+        }
+        keep.extend(parents);
+    }
+    all.iter().filter(|a| keep.contains(&(a.tool, a.id.as_str()))).collect()
+}
+
 /// State of a row: the session's, or working when it waits on a working subagent.
 fn row_state(a: &Agent, subs: &[&Agent]) -> State {
     if a.state == State::Idle && subs.iter().any(|s| s.state == State::Working) { State::Working } else { a.state }
 }
 
 /// Attaches each subagent to the session that started it: (session, its subagents). A
-/// subagent whose session is not on the list (stopped long ago) gets its own row.
+/// subagent whose session is not on the list (stopped long ago) gets its own row. The agents
+/// of a workflow run hang from the run, itself a subagent: they come after the session's own
+/// subagents (the card lists only those; see `direct`).
 /// In screen order: who needs you, then who is working (or has a subagent working); within
 /// each group, the most recent first.
 fn group(all: &[Agent]) -> Vec<(&Agent, Vec<&Agent>)> {
@@ -486,14 +552,67 @@ fn group(all: &[Agent]) -> Vec<(&Agent, Vec<&Agent>)> {
     let mut list: Vec<(&Agent, Vec<&Agent>)> = all
         .iter()
         .filter(|a| is_top(a))
-        .map(|a| (a, all.iter().filter(|s| s.tool == a.tool && s.parent.as_deref() == Some(a.id.as_str())).collect()))
+        .map(|a| {
+            let children = |p: &Agent| -> Vec<&Agent> {
+                all.iter().filter(|s| s.tool == p.tool && s.parent.as_deref() == Some(p.id.as_str())).collect()
+            };
+            let mut subs = children(a);
+            let grand: Vec<&Agent> = subs.iter().flat_map(|s| children(s)).collect();
+            subs.extend(grand);
+            (a, subs)
+        })
         .collect();
     list.sort_by_key(|(a, subs)| (rank(row_state(a, subs)), -a.since_ms));
     list
 }
 
+/// A workflow run in the screen's format.
+fn run_row(r: &RunCard) -> AgentRun {
+    let phases: Vec<AgentPhase> = r
+        .phases
+        .iter()
+        .map(|p| AgentPhase {
+            title: p.title.as_str().into(),
+            state: p.state.into(),
+            count: p.count.as_str().into(),
+            fill: p.fill_permille as f32 / 1000.0,
+            selected: p.selected,
+        })
+        .collect();
+    let agents: Vec<AgentRunAgent> = r
+        .agents
+        .iter()
+        .map(|g| AgentRunAgent { title: g.title.as_str().into(), state: g.state.into(), text: g.text.as_str().into() })
+        .collect();
+    AgentRun {
+        key: r.key.as_str().into(),
+        title: r.title.as_str().into(),
+        state: state_key(r.state).into(),
+        state_text: r.state_text.as_str().into(),
+        caption: r.caption.as_str().into(),
+        open: r.open,
+        phases: ModelRc::from(Rc::new(VecModel::from(phases))),
+        agents: ModelRc::from(Rc::new(VecModel::from(agents))),
+        more_agents: r.more_agents as i32,
+        top: r.top as i32,
+        lines: r.lines as i32,
+    }
+}
+
+/// The session's own subagents: without the agents of its workflow runs (whose parent is
+/// another item of the list).
+fn direct<'a>(subs: &[&'a Agent]) -> Vec<&'a Agent> {
+    subs.iter().copied().filter(|s| !subs.iter().any(|o| s.parent.as_deref() == Some(o.id.as_str()))).collect()
+}
+
+/// Who walks on the card: the working subagents and workflow agents, not the runs (those
+/// are already represented by their agents).
+fn walkers<'a>(subs: &[&'a Agent]) -> impl Iterator<Item = &'a Agent> {
+    subs.iter().copied().filter(|s| s.state == State::Working && !subs.iter().any(|o| o.parent.as_deref() == Some(s.id.as_str())))
+}
+
 /// Second line: tool, subagents and what it's doing now (when stopped, the folder).
-fn info(a: &Agent, subs: &[&Agent], dir: &str) -> String {
+fn info(a: &Agent, subs: &[&Agent], runs: usize, dir: &str) -> String {
     let mut parts = vec![a.tool.name().to_string()];
     if a.parent.is_some() {
         parts.push(tr!("subagent").into());
@@ -504,6 +623,9 @@ fn info(a: &Agent, subs: &[&Agent], dir: &str) -> String {
         (n, 0) => parts.push(plural(n, tr!("subagent"), tr!("subagents"))),
         (n, w) if n == w => parts.push(plural(n, tr!("active subagent"), tr!("active subagents"))),
         (n, w) => parts.push(tr!("{} of {} subagents active", w, n)),
+    }
+    if runs > 0 {
+        parts.push(plural(runs, tr!("workflow"), tr!("workflows")));
     }
     if a.state != State::Idle && !a.action.is_empty() {
         parts.push(a.action.clone());
@@ -555,6 +677,124 @@ struct Card {
     subs: Vec<SubLine>,
     /// Subagents beyond the ones listed.
     more_subs: usize,
+    runs: Vec<RunCard>,
+}
+
+/// A workflow run on the card of the session that started it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunCard {
+    /// The run id: clicks arrive with it.
+    key: String,
+    title: String,
+    state: State,
+    state_text: String,
+    /// Where it is: "phase 3 of 4: Review · 4/5".
+    caption: String,
+    open: bool,
+    phases: Vec<PhaseLine>,
+    /// Agents of the selected phase (expanded only).
+    agents: Vec<RunAgentLine>,
+    more_agents: usize,
+    /// Lines of the runs above it on the card, and its own.
+    top: usize,
+    lines: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PhaseLine {
+    title: String,
+    /// "done", "current", "stopped" or "todo" (see `AgentPhase` in the view).
+    state: &'static str,
+    /// "4/5" ("" before it starts).
+    count: String,
+    /// Part done, in thousandths.
+    fill_permille: u16,
+    selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunAgentLine {
+    title: String,
+    /// "working", "done" or "stopped".
+    state: &'static str,
+    text: String,
+}
+
+/// Run `run` for the card. `subs`: everything under the session (its agents among them).
+fn run_card(run: &Agent, subs: &[&Agent], now: i64, view: &RunView) -> RunCard {
+    let phases = &run.details.phases;
+    let mine = |id: &str| subs.iter().copied().find(|s| s.id == id && s.parent.as_deref() == Some(run.id.as_str()));
+    let working = |p: &agents::Phase| p.agents.iter().any(|id| mine(id).is_some_and(|s| s.state == State::Working));
+    let states: Vec<&'static str> = phases
+        .iter()
+        .map(|p| match p.done as usize {
+            _ if p.agents.is_empty() => "todo",
+            _ if working(p) => "current",
+            d if d >= p.agents.len() => "done",
+            _ if run.state == State::Working => "current",
+            _ => "stopped",
+        })
+        .collect();
+    // where it is: the phase running (the last one, if several), or the last that started
+    let now_at = states.iter().rposition(|s| *s == "current").or_else(|| phases.iter().rposition(|p| !p.agents.is_empty()));
+    let picked = view.phase.get(&run.id).copied().filter(|&i| i < phases.len()).or(now_at);
+    let open = view.open.contains(&run.id);
+    let caption = match now_at {
+        Some(i) => {
+            let p = &phases[i];
+            tr!("phase {} of {}: {} · {}/{}", i + 1, phases.len(), p.title, p.done, p.agents.len())
+        }
+        None => run.action.clone(),
+    };
+    let lines: Vec<PhaseLine> = phases
+        .iter()
+        .zip(&states)
+        .enumerate()
+        .map(|(i, (p, state))| PhaseLine {
+            title: if p.title.is_empty() { "—".into() } else { p.title.clone() },
+            state,
+            count: if p.agents.is_empty() { String::new() } else { format!("{}/{}", p.done, p.agents.len()) },
+            fill_permille: (p.done as usize * 1000).checked_div(p.agents.len()).unwrap_or(0).min(1000) as u16,
+            selected: open && Some(i) == picked,
+        })
+        .collect();
+    let listed: Vec<&Agent> = match picked.filter(|_| open) {
+        Some(i) => phases[i].agents.iter().filter_map(|id| mine(id)).collect(),
+        None => Vec::new(),
+    };
+    let agents: Vec<RunAgentLine> = listed.iter().take(MAX_RUN_AGENTS).map(|s| run_agent_line(s, now)).collect();
+    let more_agents = listed.len().saturating_sub(MAX_RUN_AGENTS);
+    RunCard {
+        key: run.id.clone(),
+        title: run.title.clone(),
+        state: run.state,
+        state_text: state_text(run, now),
+        caption,
+        open,
+        lines: 2 + if open { lines.len() + agents.len() + usize::from(more_agents > 0) } else { 0 },
+        phases: lines,
+        agents,
+        more_agents,
+        top: 0,
+    }
+}
+
+/// An agent of an expanded run: working, what it is calling; done, model and output
+/// tokens (the total would count the cache reads, the same context again on every call);
+/// stopped, why.
+fn run_agent_line(s: &Agent, now: i64) -> RunAgentLine {
+    let (state, text) = match s.state {
+        State::Working if !s.action.is_empty() => ("working", s.action.clone()),
+        State::Working | State::Waiting => ("working", state_text(s, now)),
+        State::Idle if s.detail.is_empty() => {
+            let model = s.details.model.strip_prefix("claude-").unwrap_or(&s.details.model);
+            let tokens = s.details.tokens.map(|t| tr!("{} output", compact(t.output)));
+            let parts: Vec<String> = [Some(model.to_string()), tokens].into_iter().flatten().filter(|p| !p.is_empty()).collect();
+            ("done", parts.join(" · "))
+        }
+        State::Idle => ("stopped", s.detail.clone()),
+    };
+    RunAgentLine { title: s.title.clone(), state, text }
 }
 
 /// The subagents walking with the imported mascots: one strip (`Stage`) per card, each
@@ -729,7 +969,7 @@ fn session_key(a: &Agent) -> String {
     format!("{}:{}", a.tool.name(), a.id)
 }
 
-fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool) -> Card {
+fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool, view: &RunView) -> Card {
     let d = &a.details;
     let mut note = Vec::new();
     if let Some((_, messages)) = d.last_turn.filter(|(_, m)| *m > 0) {
@@ -739,18 +979,26 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool) -> Card {
     if a.state == State::Idle && !d.stop_reason.is_empty() {
         note.push(stop_text(&d.stop_reason));
     }
+    let walking: Vec<String> = walkers(subs).take(MAX_WALKERS).map(|s| s.id.clone()).collect();
+    let mut runs: Vec<RunCard> = Vec::new();
+    for r in direct(subs).into_iter().filter(|s| s.details.kind == WORKFLOW) {
+        let mut c = run_card(r, subs, now, view);
+        c.top = runs.iter().map(|r| r.lines).sum();
+        runs.push(c);
+    }
+    let subs: Vec<&Agent> = direct(subs).into_iter().filter(|s| s.details.kind != WORKFLOW).collect();
     Card {
         key: session_key(a),
-        walking: subs.iter().filter(|s| s.state == State::Working).take(MAX_WALKERS).map(|s| s.id.clone()).collect(),
+        walkers: walking.len(),
+        walking,
         tool: a.tool,
         state: a.state,
         title: a.title.clone(),
-        info: info(a, subs, dir),
+        info: info(a, &subs, runs.len(), dir),
         state_text: state_text(a, now),
         sub: a.parent.is_some(),
         can_resume: resume_argv(a).is_some(),
         open,
-        walkers: subs.iter().filter(|s| s.state == State::Working).count().min(MAX_WALKERS),
         model: d.model.strip_prefix("claude-").unwrap_or(&d.model).to_string(),
         effort: d.effort.clone(),
         branch: d.branch.clone(),
@@ -763,12 +1011,14 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool) -> Card {
             .take(MAX_SUB_LINES)
             .map(|s| SubLine {
                 kind: if s.details.kind == s.title { String::new() } else { s.details.kind.clone() },
-                title: s.title.clone(),
+                // a workflow run says its phase and progress
+                title: if s.action.is_empty() { s.title.clone() } else { format!("{} · {}", s.title, s.action) },
                 state: s.state,
                 state_text: state_text(s, now),
             })
             .collect(),
         more_subs: subs.len().saturating_sub(MAX_SUB_LINES),
+        runs,
     }
 }
 
@@ -1166,7 +1416,7 @@ mod tests {
         use crate::providers::agents::{Details, Tokens};
         let now = 10 * 3_600_000;
         // a tool that reports nothing extra: no details on the card
-        let bare = card(&agent(State::Idle, 1, ""), &[], "~/p", now, false);
+        let bare = card(&agent(State::Idle, 1, ""), &[], "~/p", now, false, &RunView::default());
         assert_eq!((bare.model.as_str(), bare.tokens.is_some(), bare.turn.as_str(), bare.prompt.as_str()), ("", false, "", ""));
         assert!(bare.subs.is_empty() && bare.turn_note.is_empty());
 
@@ -1188,7 +1438,7 @@ mod tests {
             details: Details { kind: "web-fetch".into(), ..Details::default() },
             ..agent(State::Working, now - 3 * 60_000, "")
         };
-        let c = card(&full, &[&sub], "~/p", now, true);
+        let c = card(&full, &[&sub], "~/p", now, true, &RunView::default());
         assert_eq!((c.model.as_str(), c.effort.as_str(), c.branch.as_str()), ("fable-5-2", "medium", "master"));
         assert_eq!(c.tokens, Some(["950".to_string(), "45 k".to_string(), "1.2 M".to_string()]));
         assert_eq!((c.turn.as_str(), c.turn_note.as_str()), ("2 min 05 s", "316 messages · complete reply"));
@@ -1198,11 +1448,11 @@ mod tests {
 
         // working: the reason of the last reply isn't the reason it stopped yet
         let busy = Agent { state: State::Working, ..full.clone() };
-        assert_eq!(card(&busy, &[], "~/p", now, false).turn_note, "316 messages");
+        assert_eq!(card(&busy, &[], "~/p", now, false, &RunView::default()).turn_note, "316 messages");
         // subagents past the limit become a number; a kind equal to the title isn't repeated
         let same = Agent { title: "Explore".into(), details: Details { kind: "Explore".into(), ..Details::default() }, ..sub.clone() };
         let many = vec![&same; MAX_SUB_LINES + 2];
-        let c = card(&full, &many, "~/p", now, false);
+        let c = card(&full, &many, "~/p", now, false, &RunView::default());
         assert_eq!((c.subs.len(), c.more_subs, c.subs[0].kind.as_str()), (MAX_SUB_LINES, 2, ""));
         assert_eq!(c.walkers, MAX_WALKERS.min(MAX_SUB_LINES + 2));
         assert_eq!(c.walking.len(), c.walkers);
@@ -1234,14 +1484,99 @@ mod tests {
         assert_eq!(ids, [("a", 2), ("c1", 0), ("b", 0), ("orphan", 0)]);
 
         let (a, subs) = &list[0];
-        assert_eq!(info(a, subs, "~/p"), "Claude · 1 of 2 subagents active · ~/p");
-        assert_eq!(info(&all[3], &[], "~/p"), "Claude · ~/p");
-        assert_eq!(info(&all[4], &[], ""), "Claude · subagent");
+        assert_eq!(info(a, subs, 0, "~/p"), "Claude · 1 of 2 subagents active · ~/p");
+        assert_eq!(info(&all[3], &[], 0, "~/p"), "Claude · ~/p");
+        assert_eq!(info(&all[4], &[], 0, ""), "Claude · subagent");
         let busy = Agent { action: "Edit: bus.rs".into(), ..named("w", None, State::Working, 1) };
-        assert_eq!(info(&busy, &[&all[1]], "~/p"), "Claude · 1 active subagent · Edit: bus.rs");
+        assert_eq!(info(&busy, &[&all[1]], 0, "~/p"), "Claude · 1 active subagent · Edit: bus.rs");
         // an old action of a stopped session doesn't show
         let stale = Agent { action: "Edit: bus.rs".into(), ..named("w", None, State::Idle, 1) };
-        assert_eq!(info(&stale, &[], "~/p"), "Claude · ~/p");
+        assert_eq!(info(&stale, &[], 0, "~/p"), "Claude · ~/p");
+    }
+
+    #[test]
+    fn workflow_run_card_with_its_phases_and_agents() {
+        let named = |id: &str, parent: Option<&str>, state: State| Agent {
+            id: id.into(),
+            title: id.into(),
+            parent: parent.map(String::from),
+            ..agent(state, 10, "")
+        };
+        let phase = |title: &str, agents: &[&str], done: u32| agents::Phase {
+            title: title.into(),
+            agents: agents.iter().map(|a| a.to_string()).collect(),
+            done,
+        };
+        let run = Agent {
+            title: "sweep".into(),
+            details: agents::Details {
+                kind: WORKFLOW.into(),
+                phase: "Review".into(),
+                phases: vec![phase("Find", &["w1"], 1), phase("Review", &["w2", "w3"], 1), phase("Fix", &[], 0)],
+                ..Default::default()
+            },
+            ..named("wf_1", Some("s"), State::Working)
+        };
+        let done = Agent {
+            details: agents::Details {
+                model: "claude-opus-5-5".into(),
+                tokens: Some(agents::Tokens { input: 1_000, output: 2_000, cache_read: 70_000, cache_write: 0 }),
+                ..Default::default()
+            },
+            ..named("w2", Some("wf_1"), State::Idle)
+        };
+        let all = [
+            named("s", None, State::Idle),
+            named("sub", Some("s"), State::Idle),
+            run,
+            named("w1", Some("wf_1"), State::Idle),
+            done,
+            Agent { action: "Bash: cargo test".into(), ..named("w3", Some("wf_1"), State::Working) },
+        ];
+        let list = group(&all);
+        // one row: the workflow agents are not rows of their own
+        assert_eq!(list.len(), 1);
+        let (s, subs) = &list[0];
+        assert_eq!((s.id.as_str(), row_state(s, subs)), ("s", State::Working));
+
+        // collapsed: the run leaves the subagent lines and becomes a block with its bar
+        let c = card(s, subs, "~/p", 10, false, &RunView::default());
+        assert_eq!(c.subs.iter().map(|l| l.title.as_str()).collect::<Vec<_>>(), ["sub"]);
+        assert_eq!(c.info, "Claude · 1 subagent · 1 workflow · ~/p");
+        assert_eq!(c.runs.len(), 1);
+        let r = &c.runs[0];
+        assert_eq!((r.caption.as_str(), r.lines, r.open), ("phase 2 of 3: Review · 1/2", 2, false));
+        let bar: Vec<(&str, u16)> = r.phases.iter().map(|p| (p.state, p.fill_permille)).collect();
+        assert_eq!(bar, [("done", 1000), ("current", 500), ("todo", 0)]);
+        assert!(r.agents.is_empty());
+        // the run's working agents walk, not the run itself
+        assert_eq!(c.walking, ["w3"]);
+
+        // expanded: the running phase's agents, in the order they started
+        let mut view = RunView::default();
+        view.open.insert("wf_1".into());
+        let r = &card(s, subs, "~/p", 10, false, &view).runs[0];
+        let agents: Vec<(&str, &str, &str)> = r.agents.iter().map(|g| (g.title.as_str(), g.state, g.text.as_str())).collect();
+        assert_eq!(agents, [("w2", "done", "opus-5-5 · 2.0 k output"), ("w3", "working", "Bash: cargo test")]);
+        assert_eq!((r.lines, r.phases[1].selected), (2 + 3 + 2, true));
+        // another phase picked
+        view.phase.insert("wf_1".into(), 0);
+        let r = &card(s, subs, "~/p", 10, false, &view).runs[0];
+        assert_eq!(r.agents.iter().map(|g| g.title.as_str()).collect::<Vec<_>>(), ["w1"]);
+    }
+
+    #[test]
+    fn a_quiet_session_stays_while_something_under_it_is_recent() {
+        let named = |id: &str, parent: Option<&str>, since: i64| Agent { id: id.into(), parent: parent.map(String::from), ..agent(State::Idle, since, "") };
+        let all = [
+            named("old", None, 0),
+            named("s", None, 0),
+            named("wf", Some("s"), 0),
+            named("w1", Some("wf"), 90),
+            Agent { tool: Tool::Codex, ..named("other", None, 0) },
+        ];
+        let ids: Vec<&str> = visible(&all, 100, 50).iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["s", "wf", "w1"]);
     }
 
     #[test]
