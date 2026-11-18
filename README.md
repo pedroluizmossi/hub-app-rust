@@ -41,6 +41,7 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 | App | O que faz | Começa |
 |---|---|---|
 | **Docker** | Containers e stacks com ações rápidas: iniciar, parar, reiniciar, logs e shell. Notifica quando algo cai, entra em loop ou fica *unhealthy*. | ligado |
+| **Kubernetes** | O que roda no cluster local (minikube, kind, k3d…) pelo `kubectl`: workloads por namespace, prontos x/y, estado em palavras (`CrashLoopBackOff`, `OOMKilled`), reinícios e idade, problemas primeiro. Para e inicia (volta ao número de réplicas de antes), reinicia e abre os logs. Notifica quando algo falha. | desligado |
 | **Sinais vitais** | CPU, RAM, GPU (NVIDIA ou AMD), disco e rede, cada um com a própria mascote, histórico do último minuto e temperatura. | ligado |
 | **CD Player** | O que está tocando (MPRIS no Linux, controles de mídia no Windows): disco em pixel art girando com a capa do álbum no rótulo, faixa, progresso (clique para pular) e controles. Pode pôr a música no menu da bandeja. | ligado |
 | **Assinaturas de IA** | Janelas de uso do Codex, Claude Code e OpenCode Go e créditos do Kiro, com previsão de quando o limite acaba. [Detalhes](#assinaturas-de-ia) | desligado |
@@ -48,7 +49,7 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 | **To-do rápido** | Lista curta de tarefas: Enter acrescenta, clique marca como feita, e a mascote comemora quando a lista zera. | desligado |
 | **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
 | **Mascotes** | Suas mascotes num lugar só: importa uma pasta ou um `.zip` baixado (mascotes em código e sprites PNG), renomeia, escolhe a animação de cada humor, as cores que seguem o tema, onde os subagentes param, e coloca a mascote num app, numa página ou na bandeja. | desligado |
-| **Agentes de IA** | Sessões do Claude Code, Codex e OpenCode: quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes. Abre a pasta, um terminal ou retoma a sessão. | desligado |
+| **Agentes de IA** | Sessões do Claude Code, Codex e OpenCode: quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes e os workflows do Claude Code (fases e agentes de cada uma). Abre a pasta, um terminal ou retoma a sessão. | desligado |
 
 Os apps desligados se ligam em **Configurações › Apps**.
 
