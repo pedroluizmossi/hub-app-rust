@@ -47,6 +47,9 @@ msgstr "último turno · {}"
 msgid "more subagents: {}"
 msgstr "mais subagentes: {}"
 
+msgid "more agents: {}"
+msgstr "mais agentes: {}"
+
 msgid "Details"
 msgstr "Detalhes"
 

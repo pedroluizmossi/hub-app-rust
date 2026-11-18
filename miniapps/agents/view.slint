@@ -9,7 +9,7 @@
 // A session with working subagents gets a strip where they walk back and forth.
 import { ListView } from "std-widgets.slint";
 import { Colors, Skin, Icons, Anim } from "../../ui/theme.slint";
-import { Mascot, Counter, TextButton } from "../../ui/widgets.slint";
+import { Mascot, Counter, TextButton, Icon } from "../../ui/widgets.slint";
 
 // A subagent on the card of the session that spawned it.
 export struct AgentSub {
@@ -19,6 +19,49 @@ export struct AgentSub {
     // "working" | "idle"
     state: string,
     state-text: string,
+}
+
+// A phase of a workflow run.
+export struct AgentPhase {
+    title: string,
+    // "done" | "current" (running now) | "stopped" (some agents didn't return) | "todo"
+    state: string,
+    // "4/5": agents returned of those started
+    count: string,
+    // part done, 0..1
+    fill: float,
+    // its agents are the ones listed below the phases
+    selected: bool,
+}
+
+// An agent of a workflow run, in the expanded run.
+export struct AgentRunAgent {
+    title: string,
+    // "working" | "done" | "stopped"
+    state: string,
+    // working: the tool it is calling (or for how long); done: model and tokens
+    text: string,
+}
+
+// A workflow run on the card of the session that started it. Collapsed: name, state and a
+// bar with one segment per phase. Expanded: the phases and the agents of one of them.
+export struct AgentRun {
+    // identifies the run in clicks
+    key: string,
+    title: string,
+    // "working" | "idle"
+    state: string,
+    state-text: string,
+    // "phase 3 of 4 · Review · 4/5"
+    caption: string,
+    open: bool,
+    phases: [AgentPhase],
+    agents: [AgentRunAgent],
+    // agents of the selected phase beyond the listed ones
+    more-agents: int,
+    // lines before this run and lines it takes (Rust counts them: the card's height)
+    top: int,
+    lines: int,
 }
 
 // A subagent walking as an imported mascot (PNG; see mascot/stroll.rs).
@@ -71,6 +114,9 @@ export struct AgentRow {
     subs: [AgentSub],
     // subagents beyond the listed ones
     more-subs: int,
+    // workflow runs the session started, and the lines they take in all
+    runs: [AgentRun],
+    run-lines: int,
 }
 
 // Mini-app state, filled in by Rust (src/apps/agents.rs).
@@ -96,6 +142,8 @@ export global AgentsApp {
     callback open-terminal(string);   // terminal in the folder
     callback resume(string);          // resumes the session in a terminal
     callback details(string);         // opens the session detail window
+    callback toggle-run(string);      // expands or collapses a workflow run (gets its `key`)
+    callback run-phase(string, int);  // lists the agents of phase `index` of run `key`
 }
 
 // Small chip: model, effort, branch.
@@ -156,6 +204,223 @@ component Stat inherits HorizontalLayout {
     }
 }
 
+// Small square that says how a phase or an agent is: filled (done), pulsing (running),
+// hollow (not started), in the warning color (stopped).
+component StateMark inherits Rectangle {
+    in property <string> state;
+    property <Colors> t: AgentsApp.theme;
+    property <bool> live: state == "working" || state == "current";
+    width: 7px;
+    height: 7px;
+    border-width: state == "todo" ? 1px : 0;
+    border-color: t.muted;
+    background: state == "done" ? t.ok.with-alpha(0.75) : live ? t.ok : state == "stopped" ? t.warn : transparent;
+    opacity: live && !Anim.calm && mod(Anim.frame, 4) >= 2 ? 0.3 : 1;
+    animate opacity { duration: 250ms; easing: ease-in-out; }
+}
+
+// A workflow run: header and phase bar; clicking expands the phases and the agents.
+component RunBlock inherits Rectangle {
+    in property <AgentRun> r;
+    // height of each line (the text size scales it)
+    in property <length> line-h;
+    property <Colors> t: AgentsApp.theme;
+    property <bool> live: r.state == "working";
+    property <color> ink: live ? t.ok : t.sub;
+    property <length> pad: 4px;
+    clip: true;
+    border-width: 1px;
+    border-color: (live ? t.ok : t.muted).with-alpha(r.open ? 0.6 : 0.35);
+    background: t.visor.with-alpha(r.open ? 0.08 : head.has-hover ? 0.06 : 0.03);
+    animate height { duration: 180ms; easing: ease-out; }
+
+    // header and bar: a click expands or collapses
+    head := TouchArea {
+        y: 0;
+        height: pad + 2 * line-h;
+        mouse-cursor: pointer;
+        clicked => { AgentsApp.toggle-run(root.r.key); }
+    }
+
+    HorizontalLayout {
+        x: 6px;
+        y: pad;
+        width: parent.width - 12px;
+        height: line-h;
+        spacing: 6px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            icon: r.open ? Icons.chevron : Icons.chevron-right;
+            ink: ink;
+            size: 12px * Skin.text-scale;
+        }
+        Text {
+            horizontal-stretch: 0;
+            text: "workflow";
+            color: t.fur.mix(t.text, 0.6);
+            font-family: Skin.font-mono;
+            font-size: 12px * Skin.text-scale;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: r.title;
+            color: live ? t.text : t.sub;
+            font-size: 12px * Skin.text-scale;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            horizontal-stretch: 0;
+            text: r.state-text;
+            color: ink;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            vertical-alignment: center;
+        }
+    }
+
+    // one segment per phase, filled as its agents return; the running one shimmers
+    HorizontalLayout {
+        x: 6px;
+        y: pad + line-h;
+        width: parent.width - 12px;
+        height: line-h;
+        spacing: 8px;
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 3px;
+            for p in r.phases: VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Rectangle {
+                    height: 6px;
+                    clip: true;
+                    background: p.state == "todo" ? t.muted.with-alpha(0.25) : t.muted.with-alpha(0.45);
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * p.fill;
+                        background: p.state == "stopped" ? t.warn : p.state == "current" ? t.visor : t.ok;
+                        animate width { duration: 400ms; easing: ease-out; }
+                    }
+                    if p.state == "current" && !Anim.calm: Rectangle {
+                        property <float> sweep: mod(Anim.time, 1600) / 1600;
+                        width: max(10px, parent.width * 0.3);
+                        x: -self.width + sweep * (parent.width + self.width);
+                        background: @linear-gradient(90deg, transparent 0%, t.text.with-alpha(0.45) 50%, transparent 100%);
+                    }
+                }
+            }
+        }
+        Text {
+            horizontal-stretch: 0;
+            max-width: root.width * 0.6;
+            text: r.caption;
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    // expanded: the phases (a click lists that phase's agents)...
+    if r.open: Rectangle {
+        x: 6px;
+        y: pad + 2 * line-h;
+        width: parent.width - 12px;
+        height: 1px;
+        background: t.muted.with-alpha(0.3);
+    }
+    for p[i] in (r.open ? r.phases : []): Rectangle {
+        x: 6px;
+        y: pad + (2 + i) * line-h;
+        width: parent.width - 12px;
+        height: line-h;
+        background: p.selected ? t.visor.with-alpha(0.12) : pick.has-hover ? t.visor.with-alpha(0.06) : transparent;
+        pick := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { AgentsApp.run-phase(root.r.key, i); }
+        }
+        HorizontalLayout {
+            padding-left: 4px;
+            padding-right: 4px;
+            spacing: 8px;
+            VerticalLayout {
+                alignment: center;
+                StateMark { state: p.state; }
+            }
+            Text {
+                horizontal-stretch: 0;
+                text: i + 1;
+                color: t.sub;
+                font-family: Skin.font-mono;
+                font-size: 11px * Skin.text-scale;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: p.title;
+                color: p.state == "current" ? t.text : p.state == "todo" ? t.sub : t.text.mix(t.sub, 0.5);
+                font-size: 12px * Skin.text-scale;
+                font-weight: p.selected ? 700 : 400;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                horizontal-stretch: 0;
+                text: p.count;
+                color: p.state == "current" ? t.ok : t.sub;
+                font-family: Skin.font-mono;
+                font-size: 11px * Skin.text-scale;
+                vertical-alignment: center;
+            }
+        }
+    }
+    // ...and the agents of the selected phase
+    for g[i] in (r.open ? r.agents : []): HorizontalLayout {
+        x: 18px;
+        y: pad + (2 + r.phases.length + i) * line-h;
+        width: parent.width - 24px;
+        height: line-h;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            StateMark { state: g.state; }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: g.title;
+            color: g.state == "working" ? t.text : t.sub;
+            font-size: 12px * Skin.text-scale;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            horizontal-stretch: 0;
+            max-width: root.width * 0.55;
+            text: g.text;
+            color: g.state == "working" ? t.ok : g.state == "stopped" ? t.warn : t.sub;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    if r.open && r.more-agents > 0: Text {
+        x: 18px;
+        y: pad + (2 + r.phases.length + r.agents.length) * line-h;
+        height: line-h;
+        text: @tr("more agents: {}", r.more-agents);
+        color: t.sub;
+        font-family: Skin.font-mono;
+        font-size: 11px * Skin.text-scale;
+        vertical-alignment: center;
+    }
+}
+
 component Row inherits Rectangle {
     in property <AgentRow> a;
     in property <int> index;
@@ -182,8 +447,11 @@ component Row inherits Rectangle {
     property <length> prompt-h: has-prompt ? 20px * Skin.text-scale : 0;
     property <length> sub-h: 19px * Skin.text-scale;
     property <length> subs-h: sub-lines * sub-h + (sub-lines > 0 ? 4px : 0);
-    property <length> details-h: chips-h + stats-h + prompt-h + subs-h
-        + (has-chips || has-stats || has-prompt || sub-lines > 0 ? 8px : 0);
+    // workflow runs: their lines, plus padding and a gap per run
+    property <length> run-gap: 14px;
+    property <length> runs-h: compact || a.runs.length == 0 ? 0 : a.run-lines * sub-h + a.runs.length * run-gap;
+    property <length> details-h: chips-h + stats-h + prompt-h + subs-h + runs-h
+        + (has-chips || has-stats || has-prompt || sub-lines > 0 || runs-h > 0 ? 8px : 0);
     // strip of working subagents (taller with the imported mascots, up to 32 px)
     property <length> walk-h: a.heroes.length > 0 ? 42px : a.walkers > 0 ? 30px : 0;
     property <length> options-h: a.open ? max(1, Skin.text-scale) * 46px : 0;
@@ -362,6 +630,16 @@ component Row inherits Rectangle {
             font-family: Skin.font-mono;
             font-size: 11px * Skin.text-scale;
             vertical-alignment: center;
+        }
+
+        // workflow runs
+        for r[i] in (compact ? [] : a.runs): RunBlock {
+            r: r;
+            line-h: sub-h;
+            x: 0;
+            y: chips-h + stats-h + prompt-h + subs-h + 4px + r.top * sub-h + i * run-gap;
+            width: parent.width;
+            height: r.lines * sub-h + 8px;
         }
     }
 

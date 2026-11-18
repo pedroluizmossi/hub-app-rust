@@ -110,6 +110,23 @@ pub struct Details {
     /// every tool call and every result: writing steadily, it is calling tools; quiet, it is
     /// thinking (or in a slow tool).
     pub wrote_ms: i64,
+    /// Workflow agent: the phase it belongs to. Workflow run: the phase running now.
+    pub phase: String,
+    /// Workflow run: its phases in order (empty for anything else).
+    pub phases: Vec<Phase>,
+}
+
+/// `Details::kind` of a workflow run (Claude Code): an entry under the session that stands
+/// for the run, with its agents as children.
+pub const WORKFLOW: &str = "workflow";
+
+/// A phase of a workflow run: the agents it started and how many of them returned.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Phase {
+    pub title: String,
+    /// Ids of its agents (as in `Agent::id`), in the order they started.
+    pub agents: Vec<String>,
+    pub done: u32,
 }
 
 /// An agent session.

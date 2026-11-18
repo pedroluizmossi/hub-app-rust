@@ -6,11 +6,15 @@
 //!   tool called.
 //! - `projects/<folder>/<session>/subagents/agent-*.meta.json`: type, description, model,
 //!   depth and how each subagent ended (`finished`, `stoppedByUser`).
+//! - `projects/<folder>/<session>/subagents/workflows/<run>/`: the agents of a workflow run
+//!   (same files as a subagent) and its `journal.jsonl`; `<session>/workflows/<run>.json`
+//!   appears when the run ends. Each run becomes one entry under the session, and its agents
+//!   hang from the run.
 //!
 //! The transcript only grows: each reading takes the new lines and updates what was already
 //! known (`Log`), instead of re-reading the file, which easily exceeds tens of MB.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -18,13 +22,18 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde_json::Value;
 
 use super::{
-    Agent, Details, LIMIT, RECENT, Source, State, Step, StepKind, Tokens, Tool, base_name, clip, describe, home_dir, iso_ms,
+    Agent, Details, LIMIT, Phase, WORKFLOW, RECENT, Source, State, Step, StepKind, Tokens, Tool, base_name, clip, describe, home_dir, iso_ms,
     last_steps, mtime_ms, one_line, push_step, read_last,
 };
 use crate::tr;
 
-/// Maximum subagents read per session.
+/// Maximum subagents read per session (not counting workflow agents).
 const SUBS: usize = 50;
+/// Maximum workflow runs read per session.
+const RUNS: usize = 10;
+/// Maximum agents read per workflow run: a run easily starts dozens (a deep research
+/// started over a hundred), and they all count in its progress.
+const RUN_AGENTS: usize = 250;
 /// Subagent with no end mark and no writes for this long: it is no longer running (the
 /// session that spawned it closed or died). An active subagent writes on every model
 /// call; only a very slow tool stays quiet longer than this.
@@ -42,10 +51,16 @@ pub(super) struct Claude {
     /// Whether each unfinished subagent transcript ends interrupted, by its (size, mtime):
     /// the end is only read again when the file changes.
     interrupts: Interrupts,
+    /// What was read about each workflow run, by its folder.
+    runs: Runs,
+    /// What has already been read from each workflow agent's transcript.
+    run_logs: HashMap<PathBuf, Log>,
 }
 
 /// Subagent transcript → ((size, mtime), ends interrupted).
 type Interrupts = HashMap<PathBuf, ((u64, i64), bool)>;
+/// Workflow run folder → what was read about it.
+type Runs = HashMap<PathBuf, Run>;
 
 impl Source for Claude {
     fn tool(&self) -> Tool {
@@ -78,18 +93,29 @@ impl Source for Claude {
         let mut subs = Vec::new();
         let mut used = Vec::new();
         let mut seen = Interrupts::new();
+        let mut runs = Runs::new();
+        let mut run_logs = Vec::new();
         for a in &mut agents {
             let Some(transcript) = self.transcript(home, &a.id, &a.cwd) else { continue };
             let log = self.logs.entry(transcript.clone()).or_default();
             log.read(&transcript);
             log.fill(a);
             a.log = Some(transcript.clone());
-            let dir = transcript.with_extension("").join("subagents");
-            subs.extend(subagents(&dir, a, now, &self.interrupts, &mut seen));
+            let session = transcript.with_extension("");
+            subs.extend(subagents(&session.join("subagents"), a, now, SUBS, &HashSet::new(), &self.interrupts, &mut seen));
+            for mut run in workflows(&session, a, now, &mut self.runs, &mut runs) {
+                let mut agents = subagents(&run.dir, &run.agent, now, RUN_AGENTS, &run.journal.ended, &self.interrupts, &mut seen);
+                fill_run_agents(&mut agents, &run.journal, &mut self.run_logs, &mut run_logs);
+                sum_run(&mut run, &agents);
+                subs.push(run.agent);
+                subs.extend(agents);
+            }
             used.push(transcript);
         }
         self.logs.retain(|p, _| used.contains(p));
         self.interrupts = seen;
+        self.runs = runs;
+        self.run_logs.retain(|p, _| run_logs.contains(p));
         agents.extend(subs);
         Ok(agents)
     }
@@ -197,6 +223,8 @@ struct Log {
     /// reasoning, text, tool), all with the same id and the same usage; it only enters
     /// the sum when the next reply starts, so it isn't counted twice.
     open: Option<(String, Tokens)>,
+    /// A subagent's own transcript, where every reply is `isSidechain`.
+    sidechain: bool,
 }
 
 impl Log {
@@ -206,7 +234,7 @@ impl Log {
         let len = file.metadata().map_or(0, |m| m.len());
         if len < self.offset {
             // the file shrank (it was rewritten): start over
-            *self = Log::default();
+            *self = Log { sidechain: self.sidechain, ..Log::default() };
         }
         if len == self.offset || file.seek(SeekFrom::Start(self.offset)).is_err() {
             return;
@@ -256,7 +284,7 @@ impl Log {
                 self.action.clear();
             }
             // `isSidechain`: a subagent's reply written to the main transcript
-            Some("assistant") if v["isSidechain"] != Value::Bool(true) => {
+            Some("assistant") if self.sidechain || v["isSidechain"] != Value::Bool(true) => {
                 let m = &v["message"];
                 // "<synthetic>": a message Claude Code built itself, with no model
                 if m["model"].as_str().is_some_and(|s| !s.starts_with('<')) {
@@ -308,9 +336,7 @@ impl Log {
             tokens: (total != Tokens::default()).then_some(total),
             last_turn: self.last_turn,
             stop_reason: self.stop_reason.clone(),
-            kind: String::new(),
-            depth: None,
-            wrote_ms: 0,
+            ..Details::default()
         };
     }
 }
@@ -324,11 +350,21 @@ fn sum(a: Tokens, b: Tokens) -> Tokens {
     }
 }
 
-/// A session's subagents: an `agent-<id>.meta.json` and the transcript `agent-<id>.jsonl`
-/// for each one.
+/// A session's subagents (or a workflow run's agents): an `agent-<id>.meta.json` and the
+/// transcript `agent-<id>.jsonl` for each one, the `max` most recent.
+/// `ended`: ids of agents known to have returned although their file has no `finished`
+/// (a workflow's journal says so).
 /// `cache`: what the last collection found about interruptions; `seen` gets what this one
 /// used, so files that went away leave the cache.
-fn subagents(dir: &Path, parent: &Agent, now: i64, cache: &Interrupts, seen: &mut Interrupts) -> Vec<Agent> {
+fn subagents(
+    dir: &Path,
+    parent: &Agent,
+    now: i64,
+    max: usize,
+    ended: &HashSet<String>,
+    cache: &Interrupts,
+    seen: &mut Interrupts,
+) -> Vec<Agent> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut subs = Vec::new();
     for entry in entries.flatten() {
@@ -343,7 +379,9 @@ fn subagents(dir: &Path, parent: &Agent, now: i64, cache: &Interrupts, seen: &mu
             continue;
         }
         let Ok(text) = std::fs::read_to_string(log.with_extension("meta.json")) else { continue };
-        let Some(sub) = parse_sub_meta(&text) else { continue };
+        let Some(mut sub) = parse_sub_meta(&text) else { continue };
+        let id = log.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        sub.finished |= id.strip_prefix("agent-").is_some_and(|i| ended.contains(i));
         // a forced stop doesn't get `finished`: either the file says `stoppedByUser`, or
         // the transcript ends with the interruption notice
         let stopped = sub.stopped || (!sub.finished && interrupted(&log, (meta.len(), mtime), cache, seen));
@@ -352,7 +390,7 @@ fn subagents(dir: &Path, parent: &Agent, now: i64, cache: &Interrupts, seen: &mu
         let born = meta.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
         subs.push(Agent {
             tool: Tool::Claude,
-            id: log.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            id,
             title: sub.title,
             cwd: parent.cwd.clone(),
             state: if working { State::Working } else { State::Idle },
@@ -372,8 +410,271 @@ fn subagents(dir: &Path, parent: &Agent, now: i64, cache: &Interrupts, seen: &mu
         });
     }
     subs.sort_by_key(|a| std::cmp::Reverse(a.since_ms));
-    subs.truncate(SUBS);
+    subs.truncate(max);
     subs
+}
+
+/// A workflow run found in a session, with the agent that stands for it (its state comes
+/// from its agents afterwards, in `sum_run`).
+struct RunDir {
+    dir: PathBuf,
+    agent: Agent,
+    journal: Journal,
+    /// How the run ended ("" = no end file yet).
+    status: String,
+    /// The phases the script declares, in order (empty = it declares none, or they
+    /// couldn't be read).
+    phases: Vec<String>,
+}
+
+/// What was read about a workflow run: the journal by its (size, mtime), so it is only
+/// parsed again when it grows; the script once; the end file once it appears.
+#[derive(Debug, Default, Clone)]
+struct Run {
+    stamp: (u64, i64),
+    journal: Journal,
+    script: Option<Script>,
+    end: Option<RunEnd>,
+}
+
+/// The run's script, `workflows/scripts/<name>-<run>.js`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Script {
+    name: String,
+    /// Titles in `meta.phases`.
+    phases: Vec<String>,
+}
+
+/// A run's `journal.jsonl`: one line when each agent starts (with its label and phase) and
+/// one when it returns.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Journal {
+    /// The agents in the order they started.
+    agents: Vec<RunAgent>,
+    ended: HashSet<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct RunAgent {
+    id: String,
+    label: String,
+    phase: String,
+}
+
+impl Journal {
+    /// Phase of the last agent started.
+    fn phase(&self) -> &str {
+        self.agents.last().map_or("", |a| a.phase.as_str())
+    }
+}
+
+/// `workflows/<run>.json`, written when the run ends.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct RunEnd {
+    name: String,
+    /// "completed", or how else it ended.
+    status: String,
+    model: String,
+    phases: Vec<String>,
+}
+
+/// The session's workflow runs (the `RUNS` most recent), each with an agent that stands
+/// for it, child of the session. `cache`: what the last collection read; `seen` gets what
+/// this one used.
+fn workflows(session: &Path, parent: &Agent, now: i64, cache: &mut Runs, seen: &mut Runs) -> Vec<RunDir> {
+    let Ok(entries) = std::fs::read_dir(session.join("subagents").join("workflows")) else { return Vec::new() };
+    let mut runs = Vec::new();
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Some(id) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+        let Ok(meta) = std::fs::metadata(dir.join("journal.jsonl")) else { continue };
+        let mtime = mtime_ms(&meta);
+        if now - mtime > RECENT.as_millis() as i64 {
+            continue;
+        }
+        let born = meta.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+        let stamp = (meta.len(), mtime);
+        let mut run = cache.remove(&dir).unwrap_or_default();
+        if run.stamp != stamp {
+            let Ok(text) = std::fs::read_to_string(dir.join("journal.jsonl")) else { continue };
+            run.journal = parse_journal(&text);
+            run.stamp = stamp;
+        }
+        if run.end.is_none() {
+            run.end = std::fs::read_to_string(session.join("workflows").join(format!("{id}.json")))
+                .ok()
+                .and_then(|t| parse_run_end(&t));
+        }
+        if run.script.is_none() {
+            run.script = Some(read_script(&session.join("workflows").join("scripts"), &id).unwrap_or_default());
+        }
+        let end = run.end.clone().unwrap_or_default();
+        let script = run.script.clone().unwrap_or_default();
+        let name = [end.name.as_str(), script.name.as_str()].into_iter().find(|n| !n.is_empty()).unwrap_or(&id).to_string();
+        let agent = Agent {
+            tool: Tool::Claude,
+            id: id.clone(),
+            title: clip(&name, 60),
+            cwd: parent.cwd.clone(),
+            state: State::Idle,
+            // until `sum_run` knows whether an agent works: start (working) or last write
+            since_ms: born,
+            detail: String::new(),
+            action: String::new(),
+            parent: Some(parent.id.clone()),
+            details: Details { kind: WORKFLOW.into(), model: end.model, wrote_ms: mtime, ..Details::default() },
+            log: None,
+        };
+        let phases = if end.phases.is_empty() { script.phases } else { end.phases };
+        runs.push(RunDir { dir: dir.clone(), agent, journal: run.journal.clone(), status: end.status, phases });
+        seen.insert(dir, run);
+    }
+    runs.sort_by_key(|r| std::cmp::Reverse(r.agent.details.wrote_ms));
+    runs.truncate(RUNS);
+    runs
+}
+
+/// Fills in a run's agents what the journal says (label and phase) and what their
+/// transcripts say (tokens; the tool being called, while working). `logs`: what was
+/// already read of each transcript; `used` gets the transcripts read now.
+fn fill_run_agents(agents: &mut [Agent], journal: &Journal, logs: &mut HashMap<PathBuf, Log>, used: &mut Vec<PathBuf>) {
+    for a in agents {
+        if let Some(j) = a.id.strip_prefix("agent-").and_then(|id| journal.agents.iter().find(|j| j.id == id)) {
+            if !j.label.is_empty() {
+                a.title = clip(&j.label, 60);
+            }
+            a.details.phase = j.phase.clone();
+        }
+        let Some(path) = a.log.clone() else { continue };
+        let log = logs.entry(path.clone()).or_insert_with(|| Log { sidechain: true, ..Log::default() });
+        log.read(&path);
+        let total = log.open.as_ref().map_or(log.tokens, |(_, t)| sum(log.tokens, *t));
+        a.details.tokens = (total != Tokens::default()).then_some(total);
+        if a.details.model.is_empty() {
+            a.details.model = log.model.clone();
+        }
+        if a.state == State::Working {
+            a.action = log.action.clone();
+        }
+        used.push(path);
+    }
+}
+
+/// The run takes its state from its agents: working while one of them works; stopped,
+/// with how it ended, otherwise. Its phases get the count of agents started and returned
+/// (a phase the script doesn't declare goes at the end); its `action` is the progress,
+/// "<phase> · <returned>/<started>" while working and "<returned>/<started>" afterwards.
+fn sum_run(run: &mut RunDir, agents: &[Agent]) {
+    let a = &mut run.agent;
+    let j = &run.journal;
+    let mut phases: Vec<Phase> = run.phases.iter().map(|t| Phase { title: t.clone(), ..Phase::default() }).collect();
+    for ag in &j.agents {
+        let i = match phases.iter().position(|p| p.title == ag.phase) {
+            Some(i) => i,
+            None => {
+                phases.push(Phase { title: ag.phase.clone(), ..Phase::default() });
+                phases.len() - 1
+            }
+        };
+        phases[i].agents.push(format!("agent-{}", ag.id));
+        phases[i].done += u32::from(j.ended.contains(&ag.id));
+    }
+    a.details.phases = phases;
+    a.details.phase = j.phase().to_string();
+    a.details.wrote_ms = agents.iter().map(|s| s.details.wrote_ms).fold(a.details.wrote_ms, i64::max);
+    if a.details.model.is_empty() {
+        a.details.model = agents.iter().map(|s| s.details.model.clone()).find(|m| !m.is_empty()).unwrap_or_default();
+    }
+    let progress = format!("{}/{}", j.ended.len(), j.agents.len().max(j.ended.len()));
+    if agents.iter().any(|s| s.state == State::Working) {
+        a.state = State::Working;
+        a.action = if j.phase().is_empty() { progress } else { format!("{} · {progress}", j.phase()) };
+        return;
+    }
+    a.since_ms = a.details.wrote_ms;
+    a.action = progress;
+    a.detail = match run.status.as_str() {
+        "completed" => String::new(),
+        // no end file and nobody working: the session that ran it stopped
+        "" if agents.iter().any(|s| s.detail == tr!("interrupted")) => tr!("interrupted").into(),
+        "" => tr!("inactive").into(),
+        s if s.contains("fail") || s.contains("error") => tr!("failed").into(),
+        _ => tr!("interrupted").into(),
+    };
+}
+
+/// Reads a run's `journal.jsonl`.
+fn parse_journal(text: &str) -> Journal {
+    let mut j = Journal::default();
+    for line in text.lines() {
+        // a `result` line carries the agent's whole answer: only the head says what it is
+        let head = &line[..line.floor_char_boundary(200)];
+        let started = head.starts_with(r#"{"type":"started""#);
+        if !started && !head.starts_with(r#"{"type":"result""#) {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Some(id) = v["agentId"].as_str() else { continue };
+        if started {
+            let text_of = |key: &str| v[key].as_str().unwrap_or_default().to_string();
+            j.agents.push(RunAgent { id: id.to_string(), label: text_of("label"), phase: text_of("phase") });
+        } else {
+            j.ended.insert(id.to_string());
+        }
+    }
+    j
+}
+
+/// Reads a `workflows/<run>.json`.
+fn parse_run_end(text: &str) -> Option<RunEnd> {
+    let v: Value = serde_json::from_str(text).ok()?;
+    let text_of = |key: &str| v[key].as_str().unwrap_or_default().to_string();
+    let phases = v["phases"].as_array().map_or(Vec::new(), |list| {
+        list.iter().filter_map(|p| p["title"].as_str()).map(String::from).collect()
+    });
+    Some(RunEnd { name: text_of("workflowName"), status: text_of("status"), model: text_of("defaultModel"), phases })
+}
+
+/// Script of run `id`, `<name>-<id>.js`: its name and the phases it declares.
+fn read_script(scripts: &Path, id: &str) -> Option<Script> {
+    let suffix = format!("-{id}.js");
+    let (name, path) = std::fs::read_dir(scripts)
+        .ok()?
+        .flatten()
+        .find_map(|e| e.file_name().to_string_lossy().strip_suffix(&suffix).map(|n| (n.to_string(), e.path())))?;
+    let phases = std::fs::read_to_string(path).map(|js| script_phases(&js)).unwrap_or_default();
+    Some(Script { name, phases })
+}
+
+/// Phase titles in a workflow script's `meta` (`phases: [{ title: '…', … }, …]`). The
+/// script is JavaScript, not JSON: the titles are found by their key and quotes.
+fn script_phases(js: &str) -> Vec<String> {
+    let Some(rest) = js.find("phases").map(|i| &js[i..]) else { return Vec::new() };
+    let Some(open) = rest.find('[') else { return Vec::new() };
+    let mut depth = 0;
+    let Some(close) = rest[open..].char_indices().find_map(|(i, c)| {
+        match c {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            _ => {}
+        }
+        (depth == 0).then_some(open + i)
+    }) else {
+        return Vec::new();
+    };
+    let mut list = &rest[open..close];
+    let mut titles = Vec::new();
+    while let Some(i) = list.find("title") {
+        list = list[i + 5..].trim_start_matches(['"', '\'']).trim_start();
+        let Some(after) = list.strip_prefix(':') else { continue };
+        let after = after.trim_start();
+        let Some(quote) = after.chars().next().filter(|c| matches!(c, '\'' | '"' | '`')) else { continue };
+        let body = &after[1..];
+        let Some(end) = body.find(quote) else { break };
+        titles.push(body[..end].to_string());
+        list = &body[end + 1..];
+    }
+    titles
 }
 
 /// Timeline of a transcript chunk: prompts, replies, tools and errors.
@@ -617,6 +918,120 @@ mod tests {
         // forced stop: no `finished`, with `stoppedByUser`; the actual model beats the picked one
         let killed = parse_sub_meta(r#"{"agentType":"Explore","stoppedByUser":true,"model":"claude-z","pickedEffortModel":"claude-y"}"#).unwrap();
         assert_eq!((killed.finished, killed.stopped, killed.model.as_str()), (false, true, "claude-z"));
+    }
+
+    #[test]
+    fn workflow_journal_and_end() {
+        let journal = [
+            r#"{"type":"launched"}"#,
+            r#"{"type":"started","key":"v2:1","agentId":"a1","label":"find:core","phase":"Discover"}"#,
+            r#"{"type":"started","key":"v2:2","agentId":"a2","label":"find:hub","phase":"Discover"}"#,
+            r#"{"type":"result","key":"v2:1","agentId":"a1","result":{"type":"started","phase":"not a phase"}}"#,
+            r#"{"type":"started","key":"v2:3","agentId":"a3","label":"fix","phase":"Fix"}"#,
+            r#"{"type":"started", broken"#,
+        ]
+        .join("\n");
+        let j = parse_journal(&journal);
+        let started: Vec<(&str, &str, &str)> = j.agents.iter().map(|a| (a.id.as_str(), a.label.as_str(), a.phase.as_str())).collect();
+        assert_eq!(started, [("a1", "find:core", "Discover"), ("a2", "find:hub", "Discover"), ("a3", "fix", "Fix")]);
+        assert_eq!((j.phase(), &j.ended), ("Fix", &HashSet::from(["a1".to_string()])));
+
+        let end = parse_run_end(
+            r#"{"runId":"wf_1","workflowName":"sweep","status":"completed","defaultModel":"claude-x","phases":[{"title":"Find"},{"title":"Fix"}]}"#,
+        );
+        let phases = vec!["Find".to_string(), "Fix".to_string()];
+        assert_eq!(end, Some(RunEnd { name: "sweep".into(), status: "completed".into(), model: "claude-x".into(), phases }));
+        assert_eq!(parse_run_end("garbage"), None);
+    }
+
+    #[test]
+    fn phases_declared_in_the_script() {
+        let js = r#"export const meta = {
+  name: 'k8s',
+  phases: [
+    { title: 'Inventário', detail: 'map [cli] to routes' },
+    { "title": "Review" },
+    {title:`Fix: it's done`},
+  ],
+}
+const phases = [{ title: 'not meta' }]"#;
+        assert_eq!(script_phases(js), ["Inventário", "Review", "Fix: it's done"]);
+        assert!(script_phases("export const meta = { name: 'x' }").is_empty());
+        assert!(script_phases("phases: [ { title: 'open").is_empty());
+    }
+
+    #[test]
+    fn workflow_run_under_its_session() {
+        let session = std::env::temp_dir().join(format!("miniutils-claude-wf-{}", std::process::id()));
+        let run = session.join("subagents").join("workflows").join("wf_1");
+        let scripts = session.join("workflows").join("scripts");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(scripts.join("big-sweep-wf_1.js"), "export const meta = { phases: [{ title: 'Discover' }, { title: 'Fix' }, { title: 'Check' }] }").unwrap();
+        let journal = [
+            r#"{"type":"started","agentId":"a1","label":"look around","phase":"Discover"}"#,
+            r#"{"type":"started","agentId":"a2","phase":"Fix"}"#,
+            r#"{"type":"result","agentId":"a1","result":{}}"#,
+        ];
+        std::fs::write(run.join("journal.jsonl"), journal.join("\n")).unwrap();
+        // workflow agents have no `finished`: the journal says who returned
+        let meta = r#"{"agentType":"workflow-subagent","description":"find:core","workflowPhase":"Discover"}"#;
+        // a workflow agent's own replies are all `isSidechain`
+        let reply = json!({"type":"assistant","isSidechain":true,"message":{"id":"m1","model":"claude-y",
+            "usage":{"input_tokens":10,"output_tokens":20},
+            "content":[{"type":"tool_use","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}]}});
+        for id in ["a1", "a2"] {
+            std::fs::write(run.join(format!("agent-{id}.meta.json")), meta).unwrap();
+            std::fs::write(run.join(format!("agent-{id}.jsonl")), format!("{reply}\n")).unwrap();
+        }
+        let parent = parse_session(r#"{"pid":1,"sessionId":"s","cwd":"/p","status":"idle"}"#).unwrap().2;
+        let now = mtime_ms(&std::fs::metadata(run.join("journal.jsonl")).unwrap());
+        let read = |cache: &mut Runs| {
+            let mut seen = Runs::new();
+            let mut runs = workflows(&session, &parent, now, cache, &mut seen);
+            assert_eq!(runs.len(), 1);
+            let mut r = runs.remove(0);
+            let mut agents = subagents(&r.dir, &r.agent, now, RUN_AGENTS, &r.journal.ended, &Interrupts::new(), &mut Interrupts::new());
+            fill_run_agents(&mut agents, &r.journal, &mut HashMap::new(), &mut Vec::new());
+            sum_run(&mut r, &agents);
+            *cache = seen;
+            (r.agent, agents)
+        };
+
+        // running: no end file yet, the name comes from the script; a2 is still writing
+        let mut cache = Runs::new();
+        let (a, agents) = read(&mut cache);
+        assert_eq!((a.title.as_str(), a.parent.as_deref(), a.details.kind.as_str()), ("big-sweep", Some("s"), WORKFLOW));
+        assert_eq!((a.state, a.action.as_str()), (State::Working, "Fix · 1/2"));
+        let state = |id: &str| agents.iter().find(|s| s.id == format!("agent-{id}")).map(|s| (s.state, s.parent.clone()));
+        assert_eq!(state("a1"), Some((State::Idle, Some("wf_1".into()))));
+        assert_eq!(state("a2"), Some((State::Working, Some("wf_1".into()))));
+        // the journal's label and phase; the transcript's tokens and (working) tool
+        let a1 = agents.iter().find(|s| s.id == "agent-a1").unwrap();
+        let a2 = agents.iter().find(|s| s.id == "agent-a2").unwrap();
+        assert_eq!((a1.title.as_str(), a1.details.phase.as_str(), a1.action.as_str()), ("look around", "Discover", ""));
+        assert_eq!((a2.title.as_str(), a2.action.as_str()), ("find:core", "Bash: Run the tests"));
+        assert_eq!(a2.details.tokens.map(|t| t.input + t.output), Some(30));
+        // the script's phases, each with its agents (the third hasn't started)
+        let phases: Vec<(&str, usize, u32)> = a.details.phases.iter().map(|p| (p.title.as_str(), p.agents.len(), p.done)).collect();
+        assert_eq!(phases, [("Discover", 1, 1), ("Fix", 1, 0), ("Check", 0, 0)]);
+        assert_eq!(a.details.phase, "Fix");
+
+        // ended: the end file gives the name and the status
+        std::fs::write(run.join("journal.jsonl"), [&journal[..], &[r#"{"type":"result","agentId":"a2"}"#]].concat().join("\n")).unwrap();
+        std::fs::write(session.join("workflows").join("wf_1.json"), r#"{"workflowName":"sweep","status":"completed"}"#).unwrap();
+        let (a, _) = read(&mut cache);
+        assert_eq!((a.title.as_str(), a.state, a.detail.as_str(), a.action.as_str()), ("sweep", State::Idle, "", "2/2"));
+
+        // stopped midway: no end file and nobody working
+        std::fs::remove_file(session.join("workflows").join("wf_1.json")).unwrap();
+        std::fs::write(run.join("journal.jsonl"), journal.join("\n") + "\n").unwrap();
+        let later = now + SUB_STALE.as_millis() as i64 + 1;
+        let mut r = workflows(&session, &parent, later, &mut Runs::new(), &mut Runs::new()).remove(0);
+        let agents = subagents(&r.dir, &r.agent, later, RUN_AGENTS, &r.journal.ended, &Interrupts::new(), &mut Interrupts::new());
+        sum_run(&mut r, &agents);
+        assert_eq!((r.agent.state, r.agent.detail.as_str()), (State::Idle, "inactive"));
+        std::fs::remove_dir_all(&session).unwrap();
     }
 
     #[test]

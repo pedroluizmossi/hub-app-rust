@@ -229,7 +229,8 @@ hub-app-rust/
       mascots.rs              Mascotes: importar, janela de gerenciar (renomear, animações,
                               cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
-                              detalhe de uma sessão com a linha do tempo; subagentes andando
+                              detalhe de uma sessão com a linha do tempo; subagentes andando;
+                              workflows do Claude Code (fases e agentes, abre ao clicar)
       plugin/                 plugins da comunidade: tela genérica, tela interpretada + Rhai,
                               ou tela interpretada + processo do app externo
         mod.rs                conjunto de plugins carregados e o mini-app; API do script no topo
