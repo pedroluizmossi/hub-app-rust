@@ -3,10 +3,12 @@ pub mod agents;
 pub mod ai_usage;
 pub mod docker;
 pub mod gpu;
+pub mod kube;
 pub mod media;
 pub mod ports;
 pub mod procs;
 pub mod sys;
+pub mod watch;
 
 use std::time::Duration;
 
@@ -25,6 +27,9 @@ pub fn spawn_all(bus: &mut Bus) {
     bus.spawn_polled(Topic::Docker, Duration::from_secs(1), move |poker, poked| {
         docker.collect(poker, poked).map(Event::Docker)
     });
+    // Kubernetes: a pod watch brings the changes; the full reading is a safety net
+    let mut kube = kube::KubeProvider::default();
+    bus.spawn_polled(Topic::Kube, Duration::from_secs(1), move |poker, poked| kube.collect(poker, poked).map(Event::Kube));
     // MPRIS: reads the active player every second and only publishes what changed
     let mut media = media::MediaProvider::default();
     bus.spawn_polled(Topic::Media, Duration::from_secs(1), move |_, poked| media.collect(poked).map(Event::Media));

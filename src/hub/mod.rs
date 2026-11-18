@@ -205,6 +205,7 @@ impl Hub {
 
         let registry = Registry::new(host.clone());
         registry.add(crate::apps::docker::DockerMini::create(host.clone(), &ui) as AppRef, None);
+        registry.add(crate::apps::kube::KubeMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::vitals::VitalsMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::cdplayer::CdPlayerMini::create(host.clone(), &ui) as AppRef, None);
         registry.add(crate::apps::ai_usage::AiUsageMini::create(host.clone(), &ui) as AppRef, None);

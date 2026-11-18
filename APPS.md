@@ -86,6 +86,7 @@ algum app ligado usa aquele provedor.
 | `sys` | CPU (uso, frequência, temperatura, carga), memória e swap, rede, discos |
 | `gpu` | NVIDIA (`nvidia-smi`) ou AMD (sysfs) |
 | `docker` | containers, stacks, uso de cada um |
+| `kube` | workloads do contexto atual do kubectl (deployments, statefulsets, daemonsets e os pods de cada um) |
 | `media` | o que está tocando (MPRIS no Linux, controles de mídia no Windows) |
 | `ai_usage` | uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go) |
 | `ports` | portas escutando e o processo de cada uma |

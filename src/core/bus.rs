@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use super::wake::Waker;
 
-use crate::providers::{agents::AgentsSnapshot, ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, media::MediaSnapshot, ports::PortsSnapshot, procs::ProcsSnapshot, sys::SysSnapshot};
+use crate::providers::{agents::AgentsSnapshot, ai_usage::UsageSnapshot, docker::DockerSnapshot, gpu::GpuSnapshot, kube::KubeSnapshot, media::MediaSnapshot, ports::PortsSnapshot, procs::ProcsSnapshot, sys::SysSnapshot};
 
 /// A data provider. It is the name used in `uses` in the manifest (in snake_case) and the
 /// key of everything on the bus: a wrong name does not compile (or fails manifest parsing).
@@ -25,6 +25,8 @@ pub enum Topic {
     Sys,
     Gpu,
     Docker,
+    /// Kubernetes (kubectl's current context).
+    Kube,
     Media,
     AiUsage,
     Ports,
@@ -39,6 +41,7 @@ impl Topic {
             Topic::Sys => "sys",
             Topic::Gpu => "gpu",
             Topic::Docker => "docker",
+            Topic::Kube => "kube",
             Topic::Media => "media",
             Topic::AiUsage => "ai_usage",
             Topic::Ports => "ports",
@@ -54,6 +57,7 @@ pub enum Event {
     Sys(SysSnapshot),
     Gpu(GpuSnapshot),
     Docker(DockerSnapshot),
+    Kube(KubeSnapshot),
     Media(MediaSnapshot),
     AiUsage(UsageSnapshot),
     Ports(PortsSnapshot),
@@ -68,6 +72,7 @@ impl Event {
             Event::Sys(_) => Topic::Sys,
             Event::Gpu(_) => Topic::Gpu,
             Event::Docker(_) => Topic::Docker,
+            Event::Kube(_) => Topic::Kube,
             Event::Media(_) => Topic::Media,
             Event::AiUsage(_) => Topic::AiUsage,
             Event::Ports(_) => Topic::Ports,
@@ -287,7 +292,7 @@ mod tests {
         struct Uses {
             uses: Vec<Topic>,
         }
-        let all = [Topic::Sys, Topic::Gpu, Topic::Docker, Topic::Media, Topic::AiUsage, Topic::Ports, Topic::Agents];
+        let all = [Topic::Sys, Topic::Gpu, Topic::Docker, Topic::Kube, Topic::Media, Topic::AiUsage, Topic::Ports, Topic::Agents];
         let text = format!("uses = [{}]", all.map(|t| format!("\"{}\"", t.name())).join(", "));
         assert_eq!(toml::from_str::<Uses>(&text).unwrap().uses, all);
         assert!(toml::from_str::<Uses>("uses = [\"dockre\"]").is_err());
