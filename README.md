@@ -173,6 +173,7 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 - Uma bandeja do sistema (StatusNotifierItem): KDE, XFCE, Cinnamon e MATE já têm. No GNOME,
   instale a extensão *AppIndicator*. Sem bandeja, o hub continua funcionando como janela.
 - Docker acessível sem `sudo` (usuário no grupo `docker`).
+- `kubectl` no PATH, apontando para o cluster, para o app Kubernetes (usa o contexto atual).
 - Um player MPRIS para o CD Player (Firefox, Chromium, VLC, mpv, Spotify…). Sem player, o app
   mostra "sem disco".
 - `nvidia-smi` para GPUs NVIDIA. Placas AMD são lidas direto do driver `amdgpu`.
@@ -184,6 +185,7 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 
 - Ícone na área de notificação: clique abre o popup, clique direito abre o menu.
 - Docker Desktop para o app Docker (`docker` no PATH).
+- `kubectl` no PATH para o app Kubernetes (o do Docker Desktop serve).
 - CD Player pelos controles de mídia do sistema, o que aparece no painel de volume.
 - `nvidia-smi` para GPUs NVIDIA. Placas AMD e Intel ainda não são lidas no Windows.
 - Sinais vitais sem carga média e sem temperatura da CPU (o Windows não as entrega sem driver
