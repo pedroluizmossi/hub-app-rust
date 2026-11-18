@@ -1026,7 +1026,9 @@ const phases = [{ title: 'not meta' }]"#;
         // stopped midway: no end file and nobody working
         std::fs::remove_file(session.join("workflows").join("wf_1.json")).unwrap();
         std::fs::write(run.join("journal.jsonl"), journal.join("\n") + "\n").unwrap();
-        let later = now + SUB_STALE.as_millis() as i64 + 1;
+        // well past stale: the agent files are written after the journal (`now`), a few ms
+        // later on Windows
+        let later = now + SUB_STALE.as_millis() as i64 + 60_000;
         let mut r = workflows(&session, &parent, later, &mut Runs::new(), &mut Runs::new()).remove(0);
         let agents = subagents(&r.dir, &r.agent, later, RUN_AGENTS, &r.journal.ended, &Interrupts::new(), &mut Interrupts::new());
         sum_run(&mut r, &agents);
