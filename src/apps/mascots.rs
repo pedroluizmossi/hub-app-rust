@@ -220,11 +220,18 @@ impl MascotsMini {
         }
         me.fill_manager();
         let win = me.manager.as_ref().map(|m| m.win.clone_strong());
+        // taskbar icon: the app's mascot (set after `show`, when the native window exists)
+        let icon = super::kit::window_icon(
+            crate::mascot::sprites::get(&me.mascot_key()),
+            me.host.theme_for(&me.manifest),
+            None,
+        );
         drop(me);
         if let Some(win) = win {
             if let Err(e) = win.show() {
                 log::warn!("couldn't show the mascots window: {e}");
             }
+            crate::popup::set_icon_after_show(&win, icon);
             crate::popup::focus(win.window());
         }
     }
