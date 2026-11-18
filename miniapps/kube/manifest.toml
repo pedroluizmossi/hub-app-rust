@@ -1,0 +1,41 @@
+id = "cyber.kube"
+name = "Kubernetes"
+description = "Workloads of the local cluster (kubectl's current context): stop, start, restart and logs; the mascot reacts when a pod fails."
+icon = "polvo"
+api = 1
+uses = ["kube"]
+
+[permissions]
+exec = ["kubectl"]
+
+[[settings]]
+key = "theme"
+label = "Theme"
+type = "choice"
+default = "auto"
+# options: "auto" and every theme, filled in by the hub (SettingDef::live_options)
+
+[[settings]]
+key = "hide_system"
+label = "Hide the cluster's own namespaces (kube-system…)"
+type = "bool"
+default = true
+
+[[settings]]
+key = "notify"
+label = "Notify when a workload fails"
+type = "bool"
+default = true
+
+[[settings]]
+key = "notify_recovery"
+label = "Notify when it comes back"
+type = "bool"
+default = false
+
+[[settings]]
+key = "mascot"
+label = "Mascot"
+type = "choice"
+default = "polvo"
+options = ["polvo", "neko", "pato", "coruja", "robo", "kitsune", "usagi", "yurei", "hacker"]

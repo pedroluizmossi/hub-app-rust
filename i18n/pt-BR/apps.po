@@ -644,3 +644,53 @@ msgstr "netstat não encontrado"
 
 msgid "netstat is needed to see the ports."
 msgstr "O netstat é necessário para ver as portas."
+
+# Kubernetes (src/apps/kube.rs)
+
+msgid "A container went down ({}) and came back."
+msgstr "Um container caiu ({}) e voltou."
+
+msgid "A container went down and came back."
+msgstr "Um container caiu e voltou."
+
+msgid "Every pod is running again."
+msgstr "Todos os pods estão rodando de novo."
+
+msgid "Kubernetes: cluster offline"
+msgstr "Kubernetes: cluster desligado"
+
+msgid "Kubernetes: kubectl not installed"
+msgstr "Kubernetes: kubectl não instalado"
+
+msgid "Kubernetes: {}/{} running"
+msgstr "Kubernetes: {}/{} rodando"
+
+msgid "Nothing running in the cluster… zzz"
+msgstr "Nada rodando no cluster… zzz"
+
+msgid "The kubectl command was not found in PATH."
+msgstr "O comando kubectl não foi encontrado no PATH."
+
+msgid "The pod says: {}."
+msgstr "O pod diz: {}."
+
+msgid "age {}"
+msgstr "idade {}"
+
+msgid "starting"
+msgstr "iniciando"
+
+msgid "starting: {}"
+msgstr "iniciando: {}"
+
+msgid "{} logs"
+msgstr "logs de {}"
+
+msgid "{} workload(s) with problems!"
+msgstr "{} workload(s) com problemas!"
+
+msgid "💥 {} is failing"
+msgstr "💥 {} está falhando"
+
+msgid "🔁 {} restarted"
+msgstr "🔁 {} reiniciou"

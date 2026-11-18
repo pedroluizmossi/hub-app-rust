@@ -43,8 +43,8 @@ está em [DESIGN.md](DESIGN.md).
  │  Núcleo        Registro de mini-apps ── manifest.toml, liga/desliga            │
  │                Serviços: Executor (allowlist) · Config (TOML, versionada) ·    │
  │                          Visuais + temas + mascotes · Notificações · Grade     │
- │                Provedores: sys · gpu · docker · media (MPRIS) · ai_usage ·     │
- │                           ports · agents · procs                               │
+ │                Provedores: sys · gpu · docker · kube · media (MPRIS) ·         │
+ │                           ai_usage · ports · agents · procs                    │
  │                           (thread própria, coleta 1×, distribui)               │
  └────────────────────────────────────────────────────────────────────────────────┘
    /proc + /sys + hwmon     nvidia-smi / amdgpu      docker CLI      D-Bus (MPRIS)
@@ -90,7 +90,7 @@ hub-app-rust/
     <app>/manifest.toml       manifesto (id, provedores, permissões, configurações)
     <app>/view.slint          tela do app (global <App>App + componente <App>View)
     <app>/lines.toml          falas da mascote na conversa (opcional; ver "Conversa entre mascotes")
-    docker/ vitals/ cdplayer/ ai_usage/ ports/ todo/ agents/ (com detail.slint, a janela
+    docker/ kube/ vitals/ cdplayer/ ai_usage/ ports/ todo/ agents/ (com detail.slint, a janela
                               de detalhe de uma sessão) terminal/ (com window.slint, a
                               janela do terminal)
   src/
@@ -159,6 +159,9 @@ hub-app-rust/
                               (interface, IP), partições e leitura/escrita dos discos
       gpu.rs                  NVIDIA por um `nvidia-smi -l` de vida longa; senão amdgpu via sysfs
       docker.rs               docker ps / stats / events
+      kube.rs                 kubectl get … -o json (workloads e pods) / get pods --watch-only
+      watch.rs                segue um comando que imprime uma linha por mudança
+                              (docker events, kubectl --watch-only) e pede leitura
       media.rs, media/        o que está tocando e comandos do player: MPRIS pelo D-Bus no
                               Linux, controles de mídia do sistema no Windows; a capa do
                               álbum (arquivo, URL ou `Thumbnail`) já sai pixelizada
@@ -215,6 +218,9 @@ hub-app-rust/
       kit.rs                  peças comuns: mascote do cabeçalho (`HeaderMascot`), fala
                               com prazo (`Speech`), `plural`, `unix_now`
       docker.rs  vitals.rs    lógica de cada mini-app
+      kube.rs                 Kubernetes: workloads do cluster local por namespace; parar e
+                              iniciar (escala, guardando as réplicas numa anotação),
+                              reiniciar e logs
       cdplayer.rs             CD Player: faixa, capa, progresso (clicável), comandos e humor
       ai_usage.rs             Assinaturas de IA: um cartão por conta, barras de uso
       ai_pace.rs              previsão de esgotamento pelo ritmo de uso (duas janelas) e gráfico da última hora
@@ -267,7 +273,7 @@ default = "auto"
 ```
 
 - `uses` liga os provedores quando o app é ativado e os solta quando é desativado. Os nomes
-  são os do enum `Topic` (`sys`, `gpu`, `docker`, `media`, `ai_usage`, `ports`, `agents`, `procs`): um nome desconhecido
+  são os do enum `Topic` (`sys`, `gpu`, `docker`, `kube`, `media`, `ai_usage`, `ports`, `agents`, `procs`): um nome desconhecido
   faz o manifesto falhar no parse, e no Rust o provedor é sempre `Topic::…`, nunca uma string.
 - `permissions.exec` é a allowlist do executor para aquele app.
 - `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice` e, com
@@ -353,6 +359,10 @@ provedor (thread) ──snapshot──► canal ──► Waker ──► thread
   escondida os dados só alimentam a bandeja: `ps` a cada 60 s e `stats` a cada 30 s; ao abrir
   a janela, o app pede uma leitura completa (`MiniApp::window_shown`; `Bus::set_visible`,
   `Poker::visible`).
+- O Kubernetes segue o mesmo desenho: um `kubectl get pods --watch-only` pede leitura a cada
+  mudança de pod, e a leitura completa (um `kubectl get … -o json`) vem a cada 15 s de
+  reserva (60 s com a janela escondida). Cluster desligado não é alarme: a mascote dorme e a
+  tela diz a causa ("connection refused").
 - Nenhuma chamada externa espera para sempre: comandos têm prazo (`exec::run_timeout` mata o
   grupo de processos ao estourar) e as chamadas D-Bus do MPRIS têm `method_timeout`. Um
   daemon ou player travado vira erro na tela, não uma thread presa mostrando dado velho.
@@ -460,7 +470,7 @@ Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se 
 
 **Fase 1 (atual)** — mini-apps compilados junto, contrato estável:
 - [x] Manifesto, registro, ligar/desligar, configuração em TOML com migrações
-- [x] Provedores sys, gpu, docker, media, ai_usage, ports, agents e procs compartilhados
+- [x] Provedores sys, gpu, docker, kube, media, ai_usage, ports, agents e procs compartilhados
 - [x] Mini-apps Docker e Sinais vitais (com avisos sustentados)
 - [x] Mini-app CD Player (MPRIS: faixa, progresso, comandos, notificação opcional)
 - [x] Mini-app Assinaturas de IA (limites e créditos por conta)

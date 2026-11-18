@@ -4,6 +4,7 @@
 import { Colors, Anim, Skin, Icons } from "theme.slint";
 import { TextButton, Stepper, HeaderButton } from "widgets.slint";
 import { DockerApp, ContainerRow } from "../miniapps/docker/view.slint";
+import { KubeApp, KubeRow } from "../miniapps/kube/view.slint";
 import { VitalsApp, VitalCard } from "../miniapps/vitals/view.slint";
 import { CdPlayerApp } from "../miniapps/cdplayer/view.slint";
 import { AiUsageApp, UsageCard, UsageLine } from "../miniapps/ai_usage/view.slint";
@@ -34,7 +35,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, KubeApp, KubeRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
 // windows besides the hub: each has its own globals (Rust applies the skin to them)
 export { AgentDetailWindow, MascotsWindow, TerminalWindow }
 // structs Rust fills in (defined in models.slint)

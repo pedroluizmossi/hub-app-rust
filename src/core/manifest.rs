@@ -233,6 +233,7 @@ mod tests {
     fn built_in_manifests_are_valid() {
         for text in [
             include_str!("../../miniapps/docker/manifest.toml"),
+            include_str!("../../miniapps/kube/manifest.toml"),
             include_str!("../../miniapps/vitals/manifest.toml"),
             include_str!("../../miniapps/cdplayer/manifest.toml"),
             include_str!("../../miniapps/ai_usage/manifest.toml"),

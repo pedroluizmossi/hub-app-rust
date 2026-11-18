@@ -246,6 +246,7 @@ pub(super) fn event_data(ev: &Event) -> serde_json::Value {
         Event::Sys(s) => serde_json::to_value(s),
         Event::Gpu(s) => serde_json::to_value(s),
         Event::Docker(s) => serde_json::to_value(s),
+        Event::Kube(s) => serde_json::to_value(s),
         Event::Media(s) => serde_json::to_value(s),
         Event::AiUsage(s) => serde_json::to_value(s),
         Event::Ports(s) => serde_json::to_value(s),

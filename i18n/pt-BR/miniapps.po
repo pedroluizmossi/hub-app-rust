@@ -809,3 +809,44 @@ msgstr "O shell terminou com código {}"
 
 msgid "{} — press Enter to start again"
 msgstr "{} — Enter para começar de novo"
+
+# Kubernetes (miniapps/kube)
+
+msgid "Cluster offline"
+msgstr "Cluster desligado"
+
+msgid "Hide the cluster's own namespaces (kube-system…)"
+msgstr "Esconder os namespaces do próprio cluster (kube-system…)"
+
+msgid "Install kubectl to see the cluster here."
+msgstr "Instale o kubectl para ver o cluster aqui."
+
+msgid "Kubernetes"
+msgstr "Kubernetes"
+
+msgid "Nothing matches this filter."
+msgstr "Nada combina com este filtro."
+
+msgid "Nothing running in the cluster."
+msgstr "Nada rodando no cluster."
+
+msgid "Notify when a workload fails"
+msgstr "Avisar quando um workload falhar"
+
+msgid "Start the local cluster (minikube start, kind, k3d) to see it here."
+msgstr "Ligue o cluster local (minikube start, kind, k3d) para vê-lo aqui."
+
+msgid "System namespaces"
+msgstr "Namespaces do sistema"
+
+msgid "Workloads of the local cluster (kubectl's current context): stop, start, restart and logs; the mascot reacts when a pod fails."
+msgstr "Workloads do cluster local (contexto atual do kubectl): parar, iniciar, reiniciar e logs; a mascote reage quando um pod falha."
+
+msgid "kubectl not installed"
+msgstr "kubectl não instalado"
+
+msgid "search by name, namespace or image"
+msgstr "buscar por nome, namespace ou imagem"
+
+msgid "system"
+msgstr "sistema"

@@ -1,11 +1,8 @@
 //! Docker through the CLI: `docker ps -a`, `docker stats` and `docker events`, all in JSON.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -87,14 +84,6 @@ const STATS_EVERY_HIDDEN: Duration = Duration::from_secs(30);
 /// provider thread (`stats --no-stream` takes 1 to 2 s on its own).
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 const STATS_TIMEOUT: Duration = Duration::from_secs(15);
-/// Wait before reconnecting `docker events`: grows from 2 s up to 30 s.
-const RETRY_FIRST: Duration = Duration::from_secs(2);
-const RETRY_MAX: Duration = Duration::from_secs(30);
-/// Bursts of events (e.g. `compose up`) become a single reading.
-const DEBOUNCE: Duration = Duration::from_millis(300);
-/// How often the idle events thread checks whether it still has subscribers (the delay
-/// before it stops once the Docker app is turned off).
-const IDLE_CHECK: Duration = Duration::from_secs(1);
 /// Container actions that change what the mini-app shows.
 const RELEVANT: &[&str] = &[
     "create", "start", "restart", "die", "stop", "kill", "oom", "pause", "unpause", "destroy", "rename", "update",
@@ -149,7 +138,9 @@ impl DockerProvider {
         // without the command there is nothing to watch; the thread starts once it shows up
         if !self.missing && !self.watching.swap(true, Ordering::Relaxed) {
             let (p, flag) = (poker.clone(), self.watching.clone());
-            let spawned = std::thread::Builder::new().name("docker-events".into()).spawn(move || watch(p, flag));
+            let spawned = std::thread::Builder::new()
+                .name("docker-events".into())
+                .spawn(move || super::watch::follow(p, flag, "docker", &events_args(), relevant));
             if let Err(e) = spawned {
                 // polling with `ps` keeps working; the next collect tries again
                 log::warn!("docker: could not start the events watcher: {e}");
@@ -271,82 +262,6 @@ pub fn format_age(secs: i64) -> String {
     }
 }
 
-/// Reads `docker events` while the provider has subscribers; if it drops, retries with a wait.
-fn watch(poker: Poker, watching: Arc<AtomicBool>) {
-    let mut retry = RETRY_FIRST;
-    let mut first = true;
-    while poker.subscribed() {
-        let started = Instant::now();
-        let spawned = crate::core::exec::command("docker")
-            .args(events_args())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
-        let mut child = match spawned {
-            Ok(child) => child,
-            // the command vanished: `collect` decides to watch again, once ps answers
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-            Err(_) => {
-                if !sleep_subscribed(&poker, retry) {
-                    break;
-                }
-                retry = (retry * 2).min(RETRY_MAX);
-                continue;
-            }
-        };
-        // reconnected: events missed while it was down are picked up by a ps
-        if !first {
-            poker.poke();
-        }
-        first = false;
-
-        if let Some(stdout) = child.stdout.take() {
-            let (tx, rx) = mpsc::channel::<String>();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
-            });
-            let mut due: Option<Instant> = None;
-            loop {
-                if !poker.subscribed() {
-                    break;
-                }
-                // waits for the pending debounce, or else up to IDLE_CHECK to see the subscription
-                let wait = due.map_or(IDLE_CHECK, |t| t.saturating_duration_since(Instant::now()));
-                match rx.recv_timeout(wait) {
-                    Ok(line) => {
-                        if relevant(&line) && due.is_none() {
-                            due = Some(Instant::now() + DEBOUNCE);
-                        }
-                    }
-                    Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => break, // docker events ended
-                }
-                if due.is_some_and(|t| Instant::now() >= t) {
-                    due = None;
-                    poker.poke();
-                }
-            }
-        }
-        let _ = child.kill();
-        let _ = child.wait();
-
-        // it ran for a good while: the next drop starts waiting from 2 s again
-        if started.elapsed() >= RETRY_MAX {
-            retry = RETRY_FIRST;
-        }
-        if !sleep_subscribed(&poker, retry) {
-            break;
-        }
-        retry = (retry * 2).min(RETRY_MAX);
-    }
-    watching.store(false, Ordering::Relaxed);
-}
-
 /// Arguments of `docker events`: the filter goes to the daemon, so irrelevant events (every
 /// `exec_*` of a healthcheck, for example) don't even wake the thread up.
 /// The daemon matches `health_status` by prefix ("health_status: healthy").
@@ -358,21 +273,6 @@ fn events_args() -> Vec<String> {
     }
     a.extend(["--format".into(), "{{json .}}".into()]);
     a
-}
-
-/// Sleeps `d`, unless the provider loses its subscribers. `false` if it lost them.
-fn sleep_subscribed(poker: &Poker, d: Duration) -> bool {
-    let end = Instant::now() + d;
-    loop {
-        if !poker.subscribed() {
-            return false;
-        }
-        let left = end.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return true;
-        }
-        std::thread::sleep(left.min(IDLE_CHECK));
-    }
 }
 
 /// Tells whether a `docker events` line changes what the mini-app shows.

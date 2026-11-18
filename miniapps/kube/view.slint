@@ -1,0 +1,413 @@
+// View of the Kubernetes mini-app. Responsive: adapts to the panel cell it is in.
+//   narrow (< 560 px): no big counters and no image; smaller buttons
+//   very narrow (< 420 px): only the start/stop and logs actions
+//   short (< 260 px): smaller mascot
+// One row per workload (Deployment, StatefulSet, DaemonSet, the pods of another controller,
+// or a loose pod), grouped by namespace; problems first.
+import { ListView } from "std-widgets.slint";
+import { Colors, Skin, Icons } from "../../ui/theme.slint";
+import { Mascot, Icon, IconButton, TextButton, Counter, SearchBox, SqSwitch } from "../../ui/widgets.slint";
+
+export struct KubeRow {
+    // workload: "ns/Kind/name" (actions arrive with it); header: the namespace
+    key: string,
+    name: string,
+    // "deploy", "sts", "ds", the controller's kind ("Cluster", "Job") or "pod"
+    kind: string,
+    // "running" | "starting" | "problem" | "stopped"
+    state: string,
+    // "running", "CrashLoopBackOff (OOMKilled)", "starting: ContainerCreating", "stopped"
+    state-text: string,
+    // pods ready of those wanted: "2/2" ("" when stopped)
+    ready-text: string,
+    // "age 3 d"
+    age-text: string,
+    restarts: int,
+    restarts-text: string,
+    image: string,
+    // Deployment or StatefulSet: stop (scale to 0) and start
+    can-scale: bool,
+    // something restarts it: a workload (rollout restart) or another controller (recreates the pods)
+    can-restart: bool,
+    // it has pods: logs
+    can-logs: bool,
+    // namespace header: name = namespace, state-text = counts
+    header: bool,
+    collapsed: bool,
+}
+
+// Mini-app state, filled in by Rust (src/apps/kube.rs).
+export global KubeApp {
+    in property <Colors> theme;
+    in property <[KubeRow]> rows;
+    in property <int> running;
+    in property <int> stopped;
+    in property <int> errors;
+    // the cluster answered the last reading
+    in property <bool> ok: true;
+    // the `kubectl` command does not exist on this machine
+    in property <bool> missing;
+    in property <string> error-text;
+    // kubectl's current context ("minikube")
+    in property <string> context;
+    in property <image> mascot;
+    in property <string> mood: "sleep";
+    in property <string> reaction;
+    in property <string> speech;
+    // mascot id in the mascot chatter (comes from Rust)
+    in property <string> voice;
+    in property <bool> hide-system;
+    in-out property <string> search;
+
+    // "start" | "stop" | "restart" | "logs", and the row's key
+    callback action(string, string);
+    callback toggle-group(string /* namespace */);
+    callback mascot-poked();
+    callback search-edited(string);
+    callback toggle-hide-system();
+    callback refresh();
+}
+
+component Row inherits Rectangle {
+    in property <KubeRow> w;
+    in property <bool> narrow;
+    in property <bool> tiny;
+    property <Colors> t: KubeApp.theme;
+    property <color> state-color: w.state == "problem" ? t.alarm : w.state == "running" ? t.ok : w.state == "starting" ? t.warn : t.muted;
+    property <length> btn: narrow ? 34px : 40px;
+    property <color> act-edge: t.visor.with-alpha(0.4);
+    height: narrow ? 56px : 62px;
+    background: w.state == "problem" ? t.alarm.with-alpha(0.08) : hover.has-hover ? t.visor.with-alpha(0.05) : transparent;
+
+    hover := TouchArea { }
+
+    Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.35); }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        // state: square with a glow
+        Rectangle {
+            width: 18px;
+            if w.state != "stopped": Rectangle {
+                width: 18px;
+                height: 18px;
+                background: state-color.with-alpha(0.18);
+            }
+            Rectangle {
+                width: 10px;
+                height: 10px;
+                background: state-color;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 4px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: w.name;
+                    color: w.state == "stopped" ? t.sub : t.text;
+                    font-size: 15px * Skin.text-scale;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                Rectangle {
+                    border-width: 1px;
+                    border-color: t.fur.with-alpha(0.5);
+                    background: t.fur.with-alpha(0.14);
+                    width: kind.preferred-width + 12px;
+                    horizontal-stretch: 0;
+                    kind := Text {
+                        text: w.kind;
+                        color: t.fur.mix(t.text, 0.7);
+                        font-family: Skin.font-mono;
+                        font-size: 11px * Skin.text-scale;
+                    }
+                }
+                if w.ready-text != "": Text {
+                    text: w.ready-text;
+                    color: state-color;
+                    font-family: Skin.font-mono;
+                    font-size: 12px * Skin.text-scale;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 0;
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            // "running · age 3 d · 2 restarts · image"
+            HorizontalLayout {
+                Text {
+                    text: w.age-text != "" && !tiny ? w.state-text + " · " + w.age-text : w.state-text;
+                    color: w.state == "problem" ? t.alarm.mix(t.text, 0.6) : w.state == "starting" ? t.warn.mix(t.text, 0.5) : t.sub;
+                    font-family: Skin.font-mono;
+                    font-size: 12px * Skin.text-scale;
+                    overflow: elide;
+                    horizontal-stretch: narrow ? 1 : 0;
+                }
+                if w.restarts > 0 && !tiny: Text {
+                    text: " · " + w.restarts-text;
+                    color: t.warn;
+                    font-family: Skin.font-mono;
+                    font-size: 12px * Skin.text-scale;
+                    horizontal-stretch: 0;
+                }
+                Text {
+                    text: narrow || w.image == "" ? "" : " · " + w.image;
+                    color: t.sub;
+                    font-family: Skin.font-mono;
+                    font-size: 12px * Skin.text-scale;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        // actions: pushed to the right, so the button columns line up across rows
+        HorizontalLayout {
+            alignment: end;
+            horizontal-stretch: 0;
+            spacing: 6px;
+            padding-top: (root.height - btn) / 2;
+            padding-bottom: (root.height - btn) / 2;
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: w.state == "stopped" ? Icons.play : Icons.stop;
+                ink: w.state == "stopped" ? t.ok : t.fur;
+                edge: w.state == "stopped" ? t.ok : t.fur;
+                enabled: w.can-scale;
+                label: w.state == "stopped" ? @tr("Start") : @tr("Stop");
+                clicked => { KubeApp.action(w.state == "stopped" ? "start" : "stop", w.key); }
+            }
+            if !tiny: IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.refresh;
+                ink: t.visor;
+                edge: act-edge;
+                enabled: w.can-restart;
+                label: @tr("Restart");
+                clicked => { KubeApp.action("restart", w.key); }
+            }
+            IconButton {
+                width: btn;
+                height: btn;
+                icon: Icons.logs;
+                ink: t.visor;
+                edge: act-edge;
+                enabled: w.can-logs;
+                label: @tr("Logs");
+                clicked => { KubeApp.action("logs", w.key); }
+            }
+        }
+    }
+}
+
+// Namespace header: name and counts; a click collapses or expands it.
+component GroupHeader inherits Rectangle {
+    in property <KubeRow> g;
+    property <Colors> t: KubeApp.theme;
+    height: 40px;
+    background: g.state == "problem" ? t.alarm.with-alpha(0.1) : toggle.has-hover ? t.fur.with-alpha(0.12) : t.fur.with-alpha(0.07);
+
+    toggle := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { KubeApp.toggle-group(g.key); }
+    }
+
+    Rectangle { y: parent.height - 1px; height: 1px; background: t.muted.with-alpha(0.5); }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                icon: g.collapsed ? Icons.chevron-right : Icons.chevron;
+                ink: t.sub;
+                size: 14px;
+            }
+        }
+        Text {
+            text: g.name;
+            color: t.text;
+            font-family: Skin.font-mono;
+            font-size: 13px * Skin.text-scale;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 0;
+        }
+        Text {
+            text: g.state-text;
+            color: g.state == "problem" ? t.alarm.mix(t.text, 0.6) : g.state == "running" ? t.ok.mix(t.sub, 0.5) : t.muted;
+            font-family: Skin.font-mono;
+            font-size: 12px * Skin.text-scale;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+export component KubeView inherits Rectangle {
+    // the pointer is over the app's card (the mascot perks up)
+    in property <bool> hovered;
+    property <Colors> t: KubeApp.theme;
+    property <bool> narrow: self.width < 560px;
+    property <bool> tiny: self.width < 420px;
+    property <bool> short: self.height < 260px;
+    property <bool> bad: KubeApp.errors > 0;
+    property <length> mascot-w: short ? Skin.mascot-size * 2 / 3 : Skin.mascot-size;
+    property <length> mascot-h: mascot-w * 14 / 16;
+
+  VerticalLayout {
+    spacing: 12px;
+
+    // mascot + speech + counters
+    HorizontalLayout {
+        spacing: 16px;
+        Rectangle {
+            width: mascot-w + 8px;
+            height: mascot-h + 8px;
+            background: bad ? t.alarm.with-alpha(0.18) : t.fur.with-alpha(0.1);
+            Mascot {
+                noticed: root.hovered;
+                theme: t;
+                frame: KubeApp.mascot;
+                mood: KubeApp.mood;
+                reaction: KubeApp.reaction;
+                voice: KubeApp.voice;
+                poked => { KubeApp.mascot-poked(); }
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 4px;
+            Text {
+                text: KubeApp.missing ? @tr("kubectl not installed") : !KubeApp.ok ? @tr("Cluster offline") : KubeApp.speech;
+                color: bad ? t.alarm.mix(t.text, 0.75) : t.text;
+                font-size: (short ? 15px : 19px) * Skin.text-scale;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                if KubeApp.context != "": Rectangle {
+                    border-width: 1px;
+                    border-color: t.visor.with-alpha(0.5);
+                    background: t.visor.with-alpha(0.12);
+                    width: ctx.preferred-width + 12px;
+                    horizontal-stretch: 0;
+                    ctx := Text {
+                        text: KubeApp.context;
+                        color: t.visor.mix(t.text, 0.6);
+                        font-family: Skin.font-mono;
+                        font-size: 11px * Skin.text-scale;
+                        font-weight: 700;
+                    }
+                }
+                Text {
+                    text: !KubeApp.ok ? KubeApp.error-text
+                        : @tr("{} running · {} stopped · {} with errors", KubeApp.running, KubeApp.stopped, KubeApp.errors);
+                    color: !KubeApp.ok ? t.sub : KubeApp.errors > 0 ? t.alarm : t.sub;
+                    font-family: Skin.font-mono;
+                    font-size: 12px * Skin.text-scale;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+        if !narrow: HorizontalLayout {
+            spacing: 8px;
+            alignment: center;
+            Counter { theme: t; label: "RUN"; value: KubeApp.running; tint: t.ok; }
+            Counter { theme: t; label: "STOP"; value: KubeApp.stopped; tint: t.sub; }
+            Counter { theme: t; label: "ERR"; value: KubeApp.errors; tint: t.alarm; }
+        }
+    }
+
+    // search and filters
+    HorizontalLayout {
+        spacing: 12px;
+        SearchBox {
+            theme: t;
+            text <=> KubeApp.search;
+            placeholder: narrow ? @tr("search…") : @tr("search by name, namespace or image");
+            horizontal-stretch: 1;
+            edited(text) => { KubeApp.search-edited(text); }
+        }
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 8px;
+            alignment: center;
+            SqSwitch {
+                width: 34px;
+                height: 18px;
+                knob: 12px;
+                accent: t.fur;
+                label: @tr("System namespaces");
+                off-track: t.bg1;
+                off-edge: t.muted;
+                off-knob: t.sub;
+                on-knob: t.bg0;
+                checked: !KubeApp.hide-system;
+                toggled => { KubeApp.toggle-hide-system(); }
+            }
+            if !tiny: Text { text: @tr("system"); color: t.sub; font-size: 14px * Skin.text-scale; vertical-alignment: center; }
+        }
+        TextButton {
+            text: @tr("refresh");
+            icon: Icons.refresh;
+            ink: t.visor;
+            compact: narrow;
+            horizontal-stretch: 0;
+            width: narrow ? 40px : self.min-width;
+            clicked => { KubeApp.refresh(); }
+        }
+    }
+
+    // list
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 56px;
+        border-width: 1px;
+        border-color: t.muted.with-alpha(0.45);
+        background: t.bg1.mix(t.bg0, 0.6);
+
+        if KubeApp.rows.length == 0: Text {
+            x: 16px;
+            width: parent.width - 32px;
+            text: KubeApp.missing ? @tr("Install kubectl to see the cluster here.")
+                : !KubeApp.ok ? @tr("Start the local cluster (minikube start, kind, k3d) to see it here.")
+                : KubeApp.search != "" ? @tr("Nothing matches this filter.") : @tr("Nothing running in the cluster.");
+            color: t.sub;
+            font-family: Skin.font-mono;
+            font-size: 13px * Skin.text-scale;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        ListView {
+            // flat model: namespace headers and workloads in the same list
+            for w in KubeApp.rows: Rectangle {
+                height: w.header ? 40px : narrow ? 56px : 62px;
+                if w.header: GroupHeader { width: parent.width; g: w; }
+                if !w.header: Row { width: parent.width; w: w; narrow: narrow; tiny: tiny; }
+            }
+        }
+    }
+  }
+}
