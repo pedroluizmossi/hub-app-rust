@@ -42,6 +42,12 @@ float timeOfDay();   // 0 morning, 1 afternoon, 2 night
 // Haze toward the background color (0 = sharp)
 // [0, 1]
 #define HAZE 0.25
+// On a light theme: the darkest tone of the scene (part of the paper's brightness)
+// [0.3, 0.95]
+#define LIGHT_SHADE 0.62
+// On a light theme: how much of the art's own colors shows
+// [0, 1]
+#define LIGHT_COLOR 0.35
 // Lit windows
 // [0, 1]
 #define WINDOWS 0.5
@@ -1033,16 +1039,29 @@ float timeOfDay() {
     return h >= 5.0 && h < 12.0 ? 0.0 : (h >= 12.0 && h < 18.0 ? 1.0 : 2.0);
 }
 
+// On a light theme the scene is drawn over a dark copy of the paper, then put on the
+// paper: its lightness squeezed between LIGHT_SHADE of the paper (the darkest parts: the
+// ground, near hills) and the paper itself (the sky, lights), with a little of its colors.
+// The text, dark on such a theme, stays readable over it.
+vec3 onPaper(vec3 dark, vec3 paper) {
+    float l = dot(dark, vec3(0.299, 0.587, 0.114));
+    vec3 hue = dark / max(l, 0.002);
+    vec3 shade = mix(paper * LIGHT_SHADE, paper, clamp(l / 0.5, 0.0, 1.0));
+    return clamp(shade * mix(vec3(1.0), hue, LIGHT_COLOR), 0.0, 1.0);
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec4 term = texture(iChannel0, fragCoord / iResolution.xy);
-    // the background as drawn (the theme's, with the window's veil over it): the darker of
-    // two corners, which are background
+    // the background as drawn (the theme's, with the window's veil over it): of two
+    // corners, the one nearer the theme's background
     vec2 px = 1.0 / iResolution.xy;
     vec3 c1 = texture(iChannel0, px * 0.5).rgb;
     vec3 c2 = texture(iChannel0, 1.0 - px * 0.5).rgb;
-    vec3 bg = dot(c1, vec3(1.0)) < dot(c2, vec3(1.0)) ? c1 : c2;
-    vec3 col = sceneColor(fragCoord, iResolution.xy, iTime, bg);
-    // How much of this pixel is text. A glyph's edge pixels are part text, part the dark
+    vec3 bg = length(c1 - iBackgroundColor) < length(c2 - iBackgroundColor) ? c1 : c2;
+    bool light = dot(bg, vec3(0.299, 0.587, 0.114)) > 0.5;
+    vec3 col = light ? onPaper(sceneColor(fragCoord, iResolution.xy, iTime, bg * 0.12), bg)
+                     : sceneColor(fragCoord, iResolution.xy, iTime, bg);
+    // How much of this pixel is text. A glyph's edge pixels are part text, part the
     // background it was smoothed against: the strongest pixel around stands for the full
     // text color, and this one's share of it is its coverage.
     float d = length(term.rgb - bg);

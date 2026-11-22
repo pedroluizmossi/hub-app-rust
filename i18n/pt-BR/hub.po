@@ -568,3 +568,9 @@ msgstr "Tarde"
 
 msgid "Night"
 msgstr "Noite"
+
+msgid "Light theme: darkest tone of the scene"
+msgstr "Tema claro: tom mais escuro da cena"
+
+msgid "Light theme: how much of the scene's colors"
+msgstr "Tema claro: quanto das cores da cena"
