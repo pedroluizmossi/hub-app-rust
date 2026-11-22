@@ -122,9 +122,9 @@ hub-app-rust/
       bind.rs                 callbacks da tela e eventos da janela
       library.rs              a janela da Biblioteca (`ui/library.slint`): lista, detalhe,
                               prévia do shader, sequência do Terminal, ajustes, copiar,
-                              importar, remover; relê as pastas sozinha enquanto aberta. A
-                              aba Mascotes é o editor do app Mascotes (`on_created`,
-                              `on_mascots_tab`)
+                              importar, remover; relê as pastas sozinha enquanto aberta
+      mascots.rs              a aba Mascotes da Biblioteca (`ui/mascots.slint`): importar,
+                              renomear, animações, cores do tema, paradas, usar em, remover
     instance.rs, instance/    instância única (a 2ª só pede para abrir ou alternar): socket
                               Unix no Linux, named pipe no Windows. No Linux o mesmo socket
                               responde `status`/`subscribe` com o estado do hub em JSON
@@ -225,7 +225,7 @@ hub-app-rust/
                               opcional), sem recompilar; `--import-mascot` copia para lá
       walkers.rs              quem anda, dos dois tipos (PNG com `walk`, código com `[anim.walk]`):
                               roteiro e quadros para os subagentes
-      check.rs                o que uma mascote tem (`--check-mascot` e a ficha do app Mascotes)
+      check.rs                o que uma mascote tem (`--check-mascot` e a ficha da aba Mascotes)
       import.rs               importar pasta ou .zip (os dois tipos, sem sobrescrever)
       edit.rs                 mudar o arquivo de uma mascote (`toml_edit`), conferindo ao gravar
       stroll.rs               subagentes andando na faixa do app Agentes com as mascotes
@@ -251,8 +251,6 @@ hub-app-rust/
                               os efeitos da janela, desenhados uma vez por tamanho (fx.rs), e
                               com o OpenGL a sequência de shaders do ajuste `shaders` sobre a
                               tela (`library::postfx`; os embutidos em miniapps/terminal/shaders)
-      mascots.rs              Mascotes: importar e o editor da aba Mascotes da Biblioteca
-                              (renomear, animações, cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
                               detalhe de uma sessão com a linha do tempo; subagentes andando;
                               workflows do Claude Code (fases e agentes, abre ao clicar)

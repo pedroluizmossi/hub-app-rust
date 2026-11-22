@@ -466,39 +466,15 @@ msgstr "Mascote da rede"
 msgid "not found"
 msgstr "não encontrado"
 
-# Mascots (miniapps/mascots, src/apps/mascots.rs, src/mascot/import.rs, src/mascot/edit.rs)
+# Library › Mascots (ui/mascots.slint, src/hub/mascots.rs, src/mascot/import.rs, src/mascot/edit.rs)
 msgid "Mascots"
 msgstr "Mascotes"
-
-msgid "Your mascots in one place: import a folder or a .zip, rename, choose animations and colors, and put them to use."
-msgstr "Suas mascotes num lugar só: importe uma pasta ou um .zip, renomeie, escolha animações e cores e coloque-as em uso."
-
-msgid "Mascots: {}"
-msgstr "Mascotes: {}"
-
-msgid "{} mascots · {} walk"
-msgstr "{} mascotes · {} andam"
-
-msgid "{} of your own: {} in code · {} PNG sprites"
-msgstr "{} suas: {} em código · {} sprites PNG"
-
-msgid "No mascots of your own yet. Import a folder or a .zip."
-msgstr "Ainda não há mascotes suas. Importe uma pasta ou um .zip."
 
 msgid "Import folder…"
 msgstr "Importar pasta…"
 
 msgid "Import .zip…"
 msgstr "Importar .zip…"
-
-msgid "Folder…"
-msgstr "Pasta…"
-
-msgid ".zip…"
-msgstr ".zip…"
-
-msgid "Manage"
-msgstr "Gerenciar"
 
 msgid "Import mascots from a folder"
 msgstr "Importar mascotes de uma pasta"

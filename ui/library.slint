@@ -6,12 +6,12 @@
 // Left: the kinds. Middle: the items of the kind, with a search; built-in, yours or from the
 // store, and the ones whose file failed with the reason. Right: the chosen one — preview,
 // what it is, its adjustments (shaders), where it is used, and the actions. The Mascots tab
-// is the Mascots app's own editor (miniapps/mascots/manager.slint).
+// is its own panel (ui/mascots.slint, src/hub/mascots.rs).
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "theme.slint";
 import { TextButton, HeaderButton, SearchBox, IconButton } from "widgets.slint";
 import { Bar, Frame, ResizeHandles } from "frame.slint";
-import { MascotsPanel, MascotsManager } from "../miniapps/mascots/manager.slint";
+import { MascotsPanel, MascotsManager } from "mascots.slint";
 
 export struct LibItem {
     key: string,

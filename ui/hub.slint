@@ -14,8 +14,7 @@ import { TerminalApp } from "../miniapps/terminal/view.slint";
 import { TerminalWindow, TerminalScreen, TermLine, TermRun, TermTab } from "../miniapps/terminal/window.slint";
 import { AgentsApp, AgentRow, AgentSub, AgentWalker } from "../miniapps/agents/view.slint";
 import { AgentDetailWindow, AgentDetail, AgentStep } from "../miniapps/agents/detail.slint";
-import { MascotsApp } from "../miniapps/mascots/view.slint";
-import { MascotsManager, MascotItem, PaletteRow, StopRow } from "../miniapps/mascots/manager.slint";
+import { MascotsManager, MascotItem, PaletteRow, StopRow } from "mascots.slint";
 import { LibraryWindow, LibraryUi, LibItem, LibParam, LibLink } from "library.slint";
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
@@ -36,7 +35,7 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, KubeApp, KubeRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow, LibraryUi, LibItem, LibParam, LibLink }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, KubeApp, KubeRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow, LibraryUi, LibItem, LibParam, LibLink }
 // windows besides the hub: each has its own globals (Rust applies the skin to them)
 export { AgentDetailWindow, LibraryWindow, TerminalWindow }
 // structs Rust fills in (defined in models.slint)
@@ -431,6 +430,16 @@ export component HubWindow inherits Window {
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                         overflow: elide;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        HeaderButton {
+                            text: @tr("Library");
+                            short: @tr("library");
+                            icon: Icons.grid;
+                            show-text: true;
+                            clicked => { root.open-library(); }
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
