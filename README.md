@@ -47,7 +47,7 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 | **Assinaturas de IA** | Janelas de uso do Codex, Claude Code e OpenCode Go e créditos do Kiro, com previsão de quando o limite acaba. [Detalhes](#assinaturas-de-ia) | desligado |
 | **Portas abertas** | Quem escuta em cada porta, se é só local ou aberta para a rede, atalho para abrir no navegador e botão de encerrar (dois cliques). | desligado |
 | **To-do rápido** | Lista curta de tarefas: Enter acrescenta, clique marca como feita, e a mascote comemora quando a lista zera. | desligado |
-| **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. Com o renderizador OpenGL (Configurações › Sistema), shaders na GPU em sequência, escolhidos e ajustados na [Biblioteca](#biblioteca): onze embutidos (CRT, Bloom, rastro do cursor, escurecer sem foco, tom do tema, falha no erro, fósforo, pontilhado, chuva, varredura, vinheta do humor) e os seus, no formato do Ghostty (cursor, cores e paleta incluídos). O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
+| **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. Com o renderizador OpenGL (Configurações › Sistema), shaders na GPU em sequência, escolhidos e ajustados na [Biblioteca](#biblioteca): doze embutidos (CRT, Bloom, rastro do cursor, escurecer sem foco, tom do tema, falha no erro, fósforo, pontilhado, chuva, varredura, vinheta do humor e cenas em pixel art) e os seus, no formato do Ghostty (cursor, cores e paleta incluídos). O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
 | **Agentes de IA** | Sessões do Claude Code, Codex, OpenCode e Oh My Pi (OMP): quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes e os workflows do Claude Code (fases e agentes de cada uma). Abre a pasta, um terminal ou retoma a sessão. | desligado |
 
 Os apps desligados se ligam em **Configurações › Apps**.
@@ -157,12 +157,21 @@ carrega, o porquê, ali mesmo.
   **Varredura** (uma faixa de luz desce a tela de tempos em tempos) e **Vinheta do humor**
   (os cantos pulsam na cor do humor da mascote). Os de ambiente se mexem sozinhos, então a
   janela redesenha a cada quadro enquanto aparece.
+- **Cenas em pixel art** (de Pedro Mossi): uma paisagem atrás do texto, nas cores do tema
+  (cidade, campo, montanhas e lago, litoral, avenida), com chuva, céu limpo ou neblina e
+  manhã, tarde ou noite. Nos ajustes, **Cena** pode ser fixa, **revezar** de tempos em
+  tempos (cada aba começa numa cena diferente) ou **uma nova a cada aba**; **Clima** fixo ou
+  revezando; **Horário** pelo relógio ou fixo. Com ela na sequência, o Terminal pinta o
+  fundo liso no lugar do fundo do visual, e ela roda antes dos outros shaders.
 - **Para quem escreve shaders**: além do que o Ghostty passa, há `iTimeError` (quando foi o
   último erro, no relógio do `iTime`), `iChannel1` (o que o próprio shader desenhou no
-  quadro anterior) e `iMoodColor` (a cor do humor da mascote da janela, no tema do app).
-  Um shader que usa o relógio só para animar depois de um evento (cursor,
-  foco, erro) pode dizer `#pragma miniutils events`: a janela então só redesenha a cada
-  quadro por 2,5 s depois de cada evento, em vez de o tempo todo.
+  quadro anterior), `iMoodColor` (a cor do humor da mascote da janela, no tema do app) e
+  `iSeed` (o número da aba: cada aba nova recebe o seguinte). Um shader que usa o relógio
+  só para animar depois de um evento (cursor, foco, erro) pode dizer
+  `#pragma miniutils events`: a janela então só redesenha a cada quadro por 2,5 s depois
+  de cada evento, em vez de o tempo todo. Um que desenha o fundo sob o texto diz
+  `#pragma miniutils background`. No `.toml` ao lado, `[params.NOME.options]` (ex.:
+  `"0" = "Cidade"`) transforma um ajuste numa lista; trocar a opção não recompila o shader.
 - **Mascotes**: suas mascotes num lugar só: importa uma pasta ou um `.zip` baixado
   (mascotes em código e sprites PNG), renomeia, escolhe a animação de cada humor, as cores
   que seguem o tema, onde os subagentes param, e coloca a mascote num app, numa página ou

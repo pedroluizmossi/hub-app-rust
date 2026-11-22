@@ -60,6 +60,8 @@ struct Tab {
     error: String,
     /// The shell's exit was already handled.
     exit_seen: bool,
+    /// The shaders' `iSeed` while this tab is in front (a scene of its own).
+    seed: u32,
 }
 
 impl Tab {
@@ -116,6 +118,12 @@ pub struct TerminalMini {
     shader_stamp: u64,
     /// When the shader folder was last looked at.
     shaders_checked: Instant,
+    /// The `iSeed` the next new tab gets (counts up from a random start, so each tab differs
+    /// from the one before).
+    next_seed: u32,
+    /// A shader of the chain paints the background (`#pragma miniutils background`): the
+    /// skin's backdrop is not drawn under it.
+    background_shader: bool,
 }
 
 /// What the effects were last drawn for, and the drawing on its way.
@@ -161,6 +169,8 @@ impl TerminalMini {
             shaders: None,
             shader_stamp: 0,
             shaders_checked: Instant::now(),
+            next_seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos() % 1000),
+            background_shader: false,
         }));
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
 
@@ -356,7 +366,8 @@ impl TerminalMini {
             let cfg = self.host.config.borrow();
             let m = &self.manifest;
             (
-                cfg.bool(m, "skin_background"),
+                // a background shader draws its own: the skin's would hide it
+                cfg.bool(m, "skin_background") && !self.background_shader,
                 cfg.bool(m, "crt"),
                 cfg.bool(m, "rain"),
                 cfg.int(m, "opacity"),
@@ -435,7 +446,9 @@ impl TerminalMini {
         if self.tabs.len() >= MAX_TABS {
             return;
         }
-        self.tabs.push(Tab { session: None, error: String::new(), exit_seen: false });
+        let seed = self.next_seed;
+        self.next_seed = self.next_seed.wrapping_add(1);
+        self.tabs.push(Tab { session: None, error: String::new(), exit_seen: false, seed });
         self.active = self.tabs.len() - 1;
         self.start(self.active);
     }
@@ -515,7 +528,15 @@ impl TerminalMini {
         }
         self.refresh_card();
         self.push_mascot();
+        self.push_seed();
         self.redraw();
+    }
+
+    /// The tab in front's number, for the shaders (`iSeed`).
+    fn push_seed(&self) {
+        if let (Some(win), Some(fx), Some(tab)) = (&self.win, &self.shaders, self.tabs.get(self.active)) {
+            fx.set_seed(win, tab.seed as f32);
+        }
     }
 
     /// Something arrived from a shell (output or its exit).
@@ -692,25 +713,33 @@ impl TerminalMini {
         self.apply_shaders();
     }
 
-    /// The Library shaders of the `shaders` setting, in its order, each with the user's
-    /// adjustments written in. One that is gone (removed file) is left out.
+    /// The Library shaders of the `shaders` setting, in its order (the ones that paint the
+    /// background first, under the rest), each with the user's adjustments. One that is
+    /// gone (removed file) is left out.
     fn apply_shaders(&mut self) {
         self.shader_stamp = crate::library::shaders::current_stamp();
         let (Some(win), Some(fx)) = (&self.win, &self.shaders) else { return };
-        let cfg = self.host.config.borrow();
-        let sources = cfg
-            .list(&self.manifest, "shaders")
-            .into_iter()
-            .filter_map(|key| {
-                let Some(s) = crate::library::shaders::find(&key) else {
-                    log::warn!("terminal: shader {key} is not in the Library");
-                    return None;
-                };
-                let values = cfg.shader_params.get(&key).cloned().unwrap_or_default();
-                Some(Source { glsl: crate::library::shaders::with_values(&s, &values), name: key })
-            })
-            .collect();
+        let mut sources: Vec<Source> = {
+            let cfg = self.host.config.borrow();
+            cfg.list(&self.manifest, "shaders")
+                .into_iter()
+                .filter_map(|key| {
+                    let Some(s) = crate::library::shaders::find(&key) else {
+                        log::warn!("terminal: shader {key} is not in the Library");
+                        return None;
+                    };
+                    Some(crate::library::shaders::source(&s, &cfg.shader_params.get(&key).cloned().unwrap_or_default()))
+                })
+                .collect()
+        };
+        sources.sort_by_key(|s| !s.paints_background());
+        let background = sources.first().is_some_and(Source::paints_background);
         fx.set(win, sources);
+        self.push_seed();
+        if background != self.background_shader {
+            self.background_shader = background;
+            self.request_fx();
+        }
     }
 
     fn refresh_mascot(&mut self) -> bool {

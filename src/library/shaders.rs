@@ -12,9 +12,11 @@
 //!
 //! The adjustments are the shader's own number `#define`s (`#define BLOOM_STRENGTH 0.04`),
 //! found by reading it: the line above (a comment) becomes the label, and a `[min, max]` in
-//! those comments the range. The `.toml` can name, limit or hide them (`[params.NAME]`).
-//! A changed value is written into the `#define` line when the shader is compiled; the file
-//! itself is never touched.
+//! those comments the range. The `.toml` can name, limit or hide them (`[params.NAME]`),
+//! or make one a choice among named values (`[params.NAME.options]`, `"0" = "City"`).
+//! A changed value is written into the `#define` line when the shader is compiled; a
+//! choice becomes a uniform instead (changing it compiles nothing). The file itself is
+//! never touched.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -23,6 +25,7 @@ use std::time::SystemTime;
 use serde::Deserialize;
 
 use super::Origin;
+use super::postfx::Source;
 use crate::tr;
 
 /// Subfolder of the appearance folder (`skin::user::dir`).
@@ -58,6 +61,10 @@ pub struct Param {
     pub step: f64,
     /// Written without a decimal point (an `int` in GLSL).
     pub integer: bool,
+    /// A choice among named values (`[params.NAME.options]`), sorted by value; empty for a
+    /// number on a slider. A choice reaches the shader as a uniform, so changing it does
+    /// not compile the shader again (see `source`).
+    pub options: Vec<(f64, String)>,
 }
 
 /// A file of the folder that did not get in, and why.
@@ -87,31 +94,54 @@ struct ParamMeta {
     max: Option<f64>,
     step: Option<f64>,
     hidden: bool,
+    /// Named values: `{ "-1" = "Rotate", "0" = "City" }`.
+    options: std::collections::BTreeMap<String, String>,
+}
+
+/// What a built-in shader says about itself, for `built`.
+struct Builtin<'a> {
+    key: &'a str,
+    name: &'a str,
+    description: &'a str,
+    author: &'a str,
+    glsl: &'a str,
+    labels: &'a [(&'a str, &'a str)],
+    hidden: &'a [&'a str],
+    /// Choices: the parameter and its named values.
+    choices: &'a [(&'a str, &'a [(f64, &'a str)])],
+}
+
+fn built(b: Builtin) -> Shader {
+    let mut meta = Meta::default();
+    for (param, label) in b.labels {
+        meta.params.entry((*param).into()).or_default().label = Some((*label).into());
+    }
+    for param in b.hidden {
+        meta.params.entry((*param).into()).or_default().hidden = true;
+    }
+    for (param, options) in b.choices {
+        meta.params.entry((*param).into()).or_default().options =
+            options.iter().map(|(v, label)| (literal(*v, false), (*label).to_string())).collect();
+    }
+    Shader {
+        key: b.key.into(),
+        name: b.name.into(),
+        origin: Origin::Builtin,
+        path: None,
+        meta_path: None,
+        glsl: b.glsl.into(),
+        author: b.author.into(),
+        license: "MIT".into(),
+        description: b.description.into(),
+        params: params_of(b.glsl, &meta),
+    }
 }
 
 /// The built-in shaders: written for MiniUtils (MIT), like the rest of it. Their
 /// adjustments get translated labels here (a user's shader shows its own comments).
 pub fn builtin() -> Vec<Shader> {
     let make = |key: &str, name: &str, description: &str, glsl: &str, labels: &[(&str, &str)], hidden: &[&str]| {
-        let mut meta = Meta::default();
-        for (param, label) in labels {
-            meta.params.insert((*param).into(), ParamMeta { label: Some((*label).into()), ..ParamMeta::default() });
-        }
-        for param in hidden {
-            meta.params.insert((*param).into(), ParamMeta { hidden: true, ..ParamMeta::default() });
-        }
-        Shader {
-            key: key.into(),
-            name: name.into(),
-            origin: Origin::Builtin,
-            path: None,
-            meta_path: None,
-            glsl: glsl.into(),
-            author: "MiniUtils".into(),
-            license: "MIT".into(),
-            description: description.into(),
-            params: params_of(glsl, &meta),
-        }
+        built(Builtin { key, name, description, author: "MiniUtils", glsl, labels, hidden, choices: &[] })
     };
     vec![
         make(
@@ -242,6 +272,49 @@ pub fn builtin() -> Vec<Shader> {
             ],
             &[],
         ),
+        built(Builtin {
+            key: "pixel_scenes",
+            name: tr!("Pixel scenes"),
+            description: tr!("A pixel-art landscape behind the text: city, countryside, mountains and lake, coast and avenue, with rain, clear sky or fog, by the time of day."),
+            author: "Pedro Mossi",
+            glsl: include_str!("../../miniapps/terminal/shaders/pixel_scenes.glsl"),
+            labels: &[
+                ("SCENE", tr!("Scene")),
+                ("WEATHER", tr!("Weather")),
+                ("DAYTIME", tr!("Time of day")),
+                ("SCENE_MINUTES", tr!("Minutes per scene (when they take turns)")),
+                ("WEATHER_MINUTES", tr!("Minutes per weather (when it takes turns)")),
+                ("PIXEL", tr!("Pixel size")),
+                ("BRIGHTNESS", tr!("Brightness")),
+                ("HAZE", tr!("Haze toward the background")),
+                ("WINDOWS", tr!("Lit windows")),
+                ("RAIN_SPEED", tr!("Rain speed")),
+                ("RAIN_OPACITY", tr!("Rain strength")),
+                ("FLASH", tr!("Lightning")),
+                ("FOG_AMOUNT", tr!("Fog density")),
+                ("TRAFFIC", tr!("Cars on the avenue")),
+            ],
+            hidden: &[],
+            choices: &[
+                (
+                    "SCENE",
+                    &[
+                        (-2.0, tr!("A new one for each tab")),
+                        (-1.0, tr!("Take turns")),
+                        (0.0, tr!("City")),
+                        (1.0, tr!("Countryside")),
+                        (2.0, tr!("Mountains and lake")),
+                        (3.0, tr!("Coast")),
+                        (4.0, tr!("Avenue")),
+                    ],
+                ),
+                ("WEATHER", &[(-1.0, tr!("Take turns")), (0.0, tr!("Rain")), (1.0, tr!("Clear sky")), (2.0, tr!("Fog"))]),
+                (
+                    "DAYTIME",
+                    &[(-1.0, tr!("From the clock")), (0.0, tr!("Morning")), (1.0, tr!("Afternoon")), (2.0, tr!("Night"))],
+                ),
+            ],
+        }),
     ]
 }
 
@@ -416,15 +489,23 @@ fn params_of(glsl: &str, meta: &Meta) -> Vec<Param> {
             continue;
         }
         let comments = comments_above(&lines, i);
-        let (guess_min, guess_max) = range_in(&comments).unwrap_or_else(|| guess_range(value, integer));
+        // named values: the choice's range is theirs (a key that is not a number is skipped)
+        let mut options: Vec<(f64, String)> = pm
+            .map(|p| p.options.iter().filter_map(|(v, label)| Some((v.trim().parse::<f64>().ok()?, label.clone()))).collect())
+            .unwrap_or_default();
+        options.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (guess_min, guess_max) = match (options.first(), options.last()) {
+            (Some(first), Some(last)) => (first.0, last.0),
+            _ => range_in(&comments).unwrap_or_else(|| guess_range(value, integer)),
+        };
         let min = pm.and_then(|p| p.min).unwrap_or(guess_min.min(value));
         let max = pm.and_then(|p| p.max).unwrap_or(guess_max.max(value));
-        let step = pm.and_then(|p| p.step).unwrap_or(if integer { 1.0 } else { nice_step(max - min) });
+        let step = pm.and_then(|p| p.step).unwrap_or(if integer || !options.is_empty() { 1.0 } else { nice_step(max - min) });
         let label = pm
             .and_then(|p| p.label.clone())
             .or_else(|| comments.iter().find(|c| range_in(&[c.as_str()]).is_none() && !c.contains("\\in")).cloned())
             .unwrap_or_else(|| name.to_string());
-        out.push(Param { name: name.to_string(), label, default: value, min, max, step, integer });
+        out.push(Param { name: name.to_string(), label, default: value, min, max, step, integer, options });
     }
     out
 }
@@ -507,25 +588,31 @@ fn nice_step(range: f64) -> f64 {
     nice * pow
 }
 
-/// The shader with the values the user changed written into its `#define` lines.
-pub fn with_values(shader: &Shader, values: &toml::Table) -> String {
-    if values.is_empty() {
-        return shader.glsl.clone();
-    }
-    let mut out = String::with_capacity(shader.glsl.len());
+/// The shader ready for the chain: the numbers the user changed written into their
+/// `#define` lines, and each choice turned into a uniform (`uniform float NAME;`) whose
+/// value goes along, so changing it does not compile the shader again.
+pub fn source(shader: &Shader, values: &toml::Table) -> Source {
+    let value_of = |param: &Param| {
+        values.get(&param.name).and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64))).map(|v| v.clamp(param.min, param.max))
+    };
+    let mut glsl = String::with_capacity(shader.glsl.len());
+    let mut uniforms = Vec::new();
     for line in shader.glsl.split_inclusive('\n') {
         let replaced = number_define(line).and_then(|(name, _, _)| {
             let param = shader.params.iter().find(|p| p.name == name)?;
-            let v = values.get(name).and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))?;
-            let v = v.clamp(param.min, param.max);
             let indent = &line[..line.len() - line.trim_start().len()];
-            let comment = line.find("//").map(|i| format!(" {}", line[i..].trim_end())).unwrap_or_default();
             let newline = if line.ends_with('\n') { "\n" } else { "" };
+            if !param.options.is_empty() {
+                uniforms.push((name.to_string(), value_of(param).unwrap_or(param.default) as f32));
+                return Some(format!("{indent}uniform float {name};{newline}"));
+            }
+            let v = value_of(param)?;
+            let comment = line.find("//").map(|i| format!(" {}", line[i..].trim_end())).unwrap_or_default();
             Some(format!("{indent}#define {name} {}{comment}{newline}", literal(v, param.integer)))
         });
-        out.push_str(replaced.as_deref().unwrap_or(line));
+        glsl.push_str(replaced.as_deref().unwrap_or(line));
     }
-    out
+    Source { name: shader.key.clone(), glsl, uniforms }
 }
 
 /// GLSL text of a value: `3` for an int, `0.25` / `4.0` for a float (never a comma).
@@ -582,9 +669,8 @@ void mainImage(out vec4 c, in vec2 p) { c = vec4(BLOOM_STRENGTH); }
         assert_eq!((p[0].label.as_str(), p[0].max), ("Glow", 0.5));
     }
 
-    #[test]
-    fn values_go_into_the_define_lines_only() {
-        let s = Shader {
+    fn sample(meta: &Meta) -> Shader {
+        Shader {
             key: "t".into(),
             name: "t".into(),
             origin: Origin::User,
@@ -594,17 +680,36 @@ void mainImage(out vec4 c, in vec2 p) { c = vec4(BLOOM_STRENGTH); }
             author: String::new(),
             license: String::new(),
             description: String::new(),
-            params: params_of(SAMPLE, &Meta::default()),
-        };
+            params: params_of(SAMPLE, meta),
+        }
+    }
+
+    #[test]
+    fn values_go_into_the_define_lines_only() {
+        let s = sample(&Meta::default());
         let values: toml::Table = toml::from_str("BLOOM_STRENGTH = 0.5\nSAMPLES = 7.6\nCURVE = 1.0\nBOGUS = 2").unwrap();
-        let out = with_values(&s, &values);
+        let out = source(&s, &values).glsl;
         assert!(out.contains("#define BLOOM_STRENGTH 0.5\n"));
         assert!(out.contains("#define SAMPLES 8 // count\n"));
         // not an adjustment: left alone
         assert!(out.contains("#define CURVE 13.0, 11.0\n"));
         // out of range is clamped
-        let out = with_values(&s, &toml::from_str("BLOOM_STRENGTH = 9.0").unwrap());
+        let out = source(&s, &toml::from_str("BLOOM_STRENGTH = 9.0").unwrap()).glsl;
         assert!(out.contains("#define BLOOM_STRENGTH 1.0\n"));
+    }
+
+    #[test]
+    fn a_choice_is_a_uniform_and_changing_it_keeps_the_code() {
+        let meta: Meta = toml::from_str("[params.BLOOM_STRENGTH.options]\n\"0\" = \"Off\"\n\"1\" = \"On\"").unwrap();
+        let s = sample(&meta);
+        let p = s.params.iter().find(|p| p.name == "BLOOM_STRENGTH").unwrap();
+        assert_eq!((p.min, p.max, p.options.len()), (0.0, 1.0, 2));
+        let off = source(&s, &toml::from_str("BLOOM_STRENGTH = 0.0").unwrap());
+        let on = source(&s, &toml::from_str("BLOOM_STRENGTH = 1.0").unwrap());
+        assert!(off.glsl.contains("uniform float BLOOM_STRENGTH;\n"));
+        // the same code (no new compile), only the value differs
+        assert_eq!(off.glsl, on.glsl);
+        assert_eq!((off.uniforms[0].1, on.uniforms[0].1), (0.0, 1.0));
     }
 
     #[test]

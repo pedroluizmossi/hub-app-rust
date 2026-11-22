@@ -11,8 +11,9 @@
 //!
 //! MiniUtils adds inputs of its own: `iTimeError` (when the shell last rang the bell or
 //! reported a failed command, on the `iTime` clock; far in the past when it never did),
-//! `iChannel1` (what this same shader drew the frame before, for trails that fade) and
-//! `iMoodColor` (the theme's color for the mood of the window's mascot).
+//! `iChannel1` (what this same shader drew the frame before, for trails that fade),
+//! `iMoodColor` (the theme's color for the mood of the window's mascot) and `iSeed` (a
+//! number of the tab on screen: each new tab gets the next one).
 //!
 //! After Slint draws the window (`RenderingState::AfterRendering`), the area is copied into
 //! a texture and drawn back in place through the chain. Every GL state touched is restored,
@@ -20,7 +21,9 @@
 //! …) makes the window draw on every frame while it is visible; the others only when
 //! something changes, like the rest of the window. A shader whose animation only follows
 //! events says so with `#pragma miniutils events`: the window then draws on every frame
-//! only for `EVENT_TAIL` after the cursor moves, the focus changes or an error comes.
+//! only for `EVENT_TAIL` after the cursor moves, the focus changes or an error comes. One
+//! that draws a background under the text says `#pragma miniutils background`
+//! (`Source::paints_background`).
 //!
 //! Compile errors are kept by shader name (`errors`), for the Library to show.
 
@@ -38,6 +41,8 @@ const FRAME: Duration = Duration::from_millis(16);
 const EVENT_TAIL: Duration = Duration::from_millis(2500);
 /// The line that makes a shader animate on events only (see the module's comment).
 const EVENTS_PRAGMA: &str = "#pragma miniutils events";
+/// The line of a shader that paints the background (see the module's comment).
+const BACKGROUND_PRAGMA: &str = "#pragma miniutils background";
 
 /// GLSL headers tried, newest first. 4.30 takes what Ghostty shaders use (array
 /// initializers); 3.30 gets the same through an extension, for a driver that gives exactly
@@ -70,6 +75,7 @@ uniform sampler2D iChannel0;
 uniform sampler2D iChannel1;
 uniform float iTimeError;
 uniform vec3 iMoodColor;
+uniform float iSeed;
 uniform vec3 iChannelResolution[4];
 uniform vec4 iCurrentCursor;
 uniform vec4 iPreviousCursor;
@@ -94,15 +100,23 @@ void main() {
 }
 ";
 
-/// One shader of the chain: its name (the Library key, for errors and the log) and the
-/// GLSL to compile (with the user's adjustments already written in).
+/// One shader of the chain: its name (the Library key, for errors and the log), the GLSL
+/// to compile (with the user's adjustments already written in) and the values of its
+/// choices, which it declares as `uniform float NAME;` (see `shaders::source`).
 #[derive(Clone, PartialEq)]
 pub struct Source {
     pub name: String,
     pub glsl: String,
+    pub uniforms: Vec<(String, f32)>,
 }
 
 impl Source {
+    /// It draws a background (the text stays on top): it goes first in the chain, and the
+    /// Terminal paints a plain background under it instead of the skin's.
+    pub fn paints_background(&self) -> bool {
+        without_comments(&self.glsl).contains(BACKGROUND_PRAGMA)
+    }
+
     /// How the window must draw for it: a shader that reads the clock changes on its own
     /// (on every frame, or after events when it says so). Comments don't count (a shader
     /// may say it doesn't use `iTime`).
@@ -230,6 +244,8 @@ struct Shared {
     error: Option<Instant>,
     /// The mascot's mood color (`iMoodColor`).
     mood: [f32; 3],
+    /// The tab's number (`iSeed`).
+    seed: f32,
 }
 
 impl Shared {
@@ -305,12 +321,24 @@ impl PostFx {
             let mut shared = self.shared.borrow_mut();
             shared.redraw = sources.iter().map(Source::redraw).max_by_key(|r| *r as u8).unwrap_or_default();
             if shared.sources != sources {
+                // only the choices changed: the same programs, new values
+                let same_code = shared.sources.len() == sources.len()
+                    && shared.sources.iter().zip(&sources).all(|(a, b)| a.name == b.name && a.glsl == b.glsl);
+                shared.changed |= !same_code;
                 shared.sources = sources;
-                shared.changed = true;
                 win.window().request_redraw();
             }
         }
         run_clock(&self.clock, win.as_weak(), &self.shared);
+    }
+
+    /// The shaders' `iSeed`: a number of the tab on screen (each new tab gets the next).
+    pub fn set_seed<C: ComponentHandle + 'static>(&self, win: &C, seed: f32) {
+        let mut shared = self.shared.borrow_mut();
+        if shared.seed != seed {
+            shared.seed = seed;
+            win.window().request_redraw();
+        }
     }
 
     /// The colors the shaders see (`iBackgroundColor`, `iPalette`…).
@@ -399,9 +427,11 @@ struct Pass {
     /// reads it.
     history: Option<glow::Texture>,
     history_size: (i32, i32),
+    /// Where the values of the source's choices go, in the order of `Source::uniforms`.
+    choices: Vec<Option<glow::UniformLocation>>,
 }
 
-const UNIFORMS: [&str; 23] = [
+const UNIFORMS: [&str; 24] = [
     "iResolution",
     "iTime",
     "iTimeDelta",
@@ -412,6 +442,7 @@ const UNIFORMS: [&str; 23] = [
     "iChannel1",
     "iTimeError",
     "iMoodColor",
+    "iSeed",
     "iChannelResolution",
     "iCurrentCursor",
     "iPreviousCursor",
@@ -506,7 +537,7 @@ impl Gl {
     fn build(&mut self, sources: &[Source]) {
         self.drop_passes();
         for source in sources {
-            match self.compile(&source.glsl) {
+            match self.compile(source) {
                 Ok(pass) => {
                     set_error(&source.name, None);
                     self.passes.push(pass);
@@ -524,11 +555,11 @@ impl Gl {
 
     /// Compiles one shader with the newest GLSL version the driver takes. The error lists
     /// every attempt: which one matters depends on the driver.
-    fn compile(&self, glsl: &str) -> Result<Pass, String> {
+    fn compile(&self, source: &Source) -> Result<Pass, String> {
         let mut errors = Vec::new();
         for header in VERSIONS {
             // `#line` keeps the driver's line numbers pointing into the shader's own file
-            let fragment = format!("{header}{PRELUDE}#line 1\n{glsl}\n{MAIN}");
+            let fragment = format!("{header}{PRELUDE}#line 1\n{}\n{MAIN}", source.glsl);
             // SAFETY: the renderer's context is current while it notifies.
             match unsafe { self.program(&format!("{header}{VERTEX}"), &fragment) } {
                 Ok(program) => {
@@ -537,7 +568,9 @@ impl Gl {
                         // SAFETY: as above
                         .filter_map(|name| unsafe { self.gl.get_uniform_location(program, name) }.map(|l| (*name, l)))
                         .collect();
-                    return Ok(Pass { program, at, history: None, history_size: (0, 0) });
+                    // SAFETY: as above
+                    let choices = source.uniforms.iter().map(|(name, _)| unsafe { self.gl.get_uniform_location(program, name) }).collect();
+                    return Ok(Pass { program, at, history: None, history_size: (0, 0), choices });
                 }
                 Err(e) => errors.push(format!("[{}] {e}", header.lines().next().unwrap_or_default())),
             }
@@ -644,7 +677,7 @@ impl Gl {
         unsafe {
             let saved = self.save();
             self.ensure_targets(area.w, area.h);
-            self.run(&area, &saved, shared.colors.as_ref(), shared.mood);
+            self.run(&area, &saved, shared);
             self.restore(&saved);
         }
         event
@@ -746,7 +779,8 @@ impl Gl {
     }
 
     /// Copies the area out of the frame and draws it back through every pass.
-    unsafe fn run(&mut self, area: &Area, saved: &Saved, colors: Option<&Colors>, mood: [f32; 3]) {
+    unsafe fn run(&mut self, area: &Area, saved: &Saved, shared: &Shared) {
+        let (colors, mood) = (shared.colors.as_ref(), shared.mood);
         let [Some(first), Some(second)] = self.textures else { return };
         let now = Instant::now();
         let time = now.duration_since(self.start).as_secs_f32();
@@ -802,6 +836,13 @@ impl Gl {
                 gl.uniform_1_i32(u("iChannel1"), 1);
                 gl.uniform_1_f32(u("iTimeError"), self.error);
                 gl.uniform_3_f32_slice(u("iMoodColor"), &mood);
+                gl.uniform_1_f32(u("iSeed"), shared.seed);
+                // the source's choices (the chain is built from these sources, in order)
+                if let Some(source) = shared.sources.get(i) {
+                    for (at, (_, value)) in pass.choices.iter().zip(&source.uniforms) {
+                        gl.uniform_1_f32(at.as_ref(), *value);
+                    }
+                }
                 gl.uniform_3_f32_slice(u("iChannelResolution"), &[w, h, 1.0]);
                 gl.uniform_4_f32_slice(u("iCurrentCursor"), &self.cursor);
                 gl.uniform_4_f32_slice(u("iPreviousCursor"), &self.previous);
@@ -914,10 +955,10 @@ mod tests {
 
     #[test]
     fn only_shaders_reading_the_clock_redraw() {
-        let src = |glsl: &str| Source { name: String::new(), glsl: glsl.into() };
+        let src = |glsl: &str| Source { name: String::new(), glsl: glsl.into(), uniforms: Vec::new() };
         // the built-in ones that only follow events say so; only the ambient ones (that move
         // on their own) ask for every frame
-        let ambient = ["rain", "scan_sweep", "mood_vignette"];
+        let ambient = ["rain", "scan_sweep", "mood_vignette", "pixel_scenes"];
         for s in super::super::shaders::builtin() {
             let redraw = src(&s.glsl).redraw();
             assert_eq!(redraw == Redraw::Always, ambient.contains(&s.key.as_str()), "{}: {redraw:?}", s.key);
