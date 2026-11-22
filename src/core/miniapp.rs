@@ -76,8 +76,8 @@ impl Reporter {
 }
 
 /// Services the host offers every mini-app.
-/// An app setting that picks a mascot (a mascot choice in its manifest): where the Mascots
-/// app can put one ("Use in").
+/// An app setting that picks a mascot (a mascot choice in its manifest): where the
+/// Library's Mascots tab can put one ("Use in").
 #[derive(Debug, Clone, PartialEq)]
 pub struct MascotTarget {
     pub app: String,

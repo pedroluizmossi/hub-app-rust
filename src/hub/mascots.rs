@@ -188,6 +188,9 @@ impl MascotsTab {
                 let mut t = t.borrow_mut();
                 t.filter = text.to_string();
                 t.fill_list();
+                if t.keep_choice() {
+                    t.fill_card();
+                }
             }
         });
         g.on_preview_mode(on(|m, i| {
@@ -315,12 +318,24 @@ impl MascotsTab {
     /// The list and the chosen one's card, from scratch.
     fn fill(&mut self) {
         self.generation = Some(sprites::generation());
-        // the chosen one may have left (removed, folder changed)
-        if self.selected.as_deref().is_some_and(|k| sprites::find(k).is_none()) {
-            self.selected = None;
-        }
         self.fill_list();
+        self.keep_choice();
         self.fill_card();
+    }
+
+    /// After the list changed: the chosen one stays if it is still listed, else the first
+    /// listed one (none when the search lets nothing through). `true` when it changed.
+    fn keep_choice(&mut self) -> bool {
+        if self.selected.as_ref().is_some_and(|k| self.listed.contains(k)) {
+            return false;
+        }
+        let first = self.listed.first().cloned();
+        let changed = first != self.selected;
+        self.selected = first;
+        self.mode = 0;
+        self.armed = None;
+        self.restart_preview();
+        changed
     }
 
     /// The list on the left: every mascot that passes the search.

@@ -3,10 +3,12 @@
 // the skin's own frame like the terminal: drags by the header, resizes by the edges,
 // closes with the header button or Esc.
 //
-// Left: the kinds. Middle: the items of the kind, with a search; built-in, yours or from the
-// store, and the ones whose file failed with the reason. Right: the chosen one — preview,
-// what it is, its adjustments (shaders), where it is used, and the actions. The Mascots tab
-// is its own panel (ui/mascots.slint, src/hub/mascots.rs).
+// Header: the title and the actions of the whole kind (import, open its folder). Below it
+// the kinds, as tabs with how many items each has. Shaders get the Terminal's chain in a
+// strip of its own. Then the items of the kind, with a search and a small picture each, and
+// the chosen one: preview, what it is, its actions, its adjustments (shaders; in a column
+// of their own when the window is wide). The Mascots tab is its own panel
+// (ui/mascots.slint, src/hub/mascots.rs) inside the same frame.
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "theme.slint";
 import { TextButton, HeaderButton, SearchBox, IconButton } from "widgets.slint";
@@ -20,8 +22,11 @@ export struct LibItem {
     origin: string,
     // why the file did not load ("" = it did)
     error: string,
-    // in use: the Terminal's chain (shaders), the window skin, an app's theme…
-    in-use: bool,
+    // where it is used: "2nd in the Terminal", "Docker, Terminal", "window skin"… ("" = nowhere)
+    usage: string,
+    // a few of its colors (themes, skins) or a small picture (backdrops), for the list
+    swatches: [color],
+    thumb: image,
 }
 
 // One adjustment of a shader: a number `#define`.
@@ -45,9 +50,28 @@ export struct LibLink {
     bad: bool,
 }
 
+// The colors of a window skin, for its preview.
+export struct LibSkin {
+    bg: color,
+    panel: color,
+    edge: color,
+    surface: color,
+    surface-edge: color,
+    field: color,
+    field-edge: color,
+    ink: color,
+    sub: color,
+    dim: color,
+    accent: color,
+    accent-ink: color,
+    accent2: color,
+}
+
 export global LibraryUi {
     // "shader" | "theme" | "skin" | "backdrop" | "mascot"
     in-out property <string> tab: "shader";
+    // how many items each kind has, in the tabs' order
+    in property <[int]> counts;
     in property <[LibItem]> items;
     in property <string> selected;
     // the chosen one
@@ -61,6 +85,10 @@ export global LibraryUi {
     // theme and skin colors; a backdrop's picture
     in property <[color]> swatches;
     in property <image> picture;
+    // a theme's colors and a mascot drawn in them; a skin's colors
+    in property <Colors> theme-colors;
+    in property <image> theme-mascot;
+    in property <LibSkin> skin-colors;
     // "Add to the Terminal", "Use as the window skin"… ("" = no such action)
     in property <string> use-label;
     in property <bool> can-duplicate;
@@ -80,7 +108,7 @@ export global LibraryUi {
     callback step(int);
     callback filter-edited(string);
     callback use();
-    callback chain-move(int /* index */, int /* -1 up, 1 down */);
+    callback chain-move(int /* index */, int /* -1 earlier, 1 later */);
     callback chain-remove(int);
     callback param-edited(string /* name */, float);
     callback param-reset(string);
@@ -103,30 +131,81 @@ component Heading inherits Text {
     font-weight: 700;
 }
 
-// A kind on the left.
-component TabRow inherits Rectangle {
+// A kind, as a tab under the header, with how many items it has.
+component KindTab inherits Rectangle {
     in property <string> key;
     in property <string> label;
+    in property <int> count;
     property <bool> on: LibraryUi.tab == key;
-    height: max(40px, text.preferred-height + 16px);
-    background: on ? Skin.accent.with-alpha(0.16) : touch.has-hover ? Skin.hover : transparent;
-    border-width: on ? 1px : 0;
-    border-color: Skin.accent;
+    min-height: max(36px, row.preferred-height + 12px);
+    background: touch.has-hover && !on ? Skin.hover : transparent;
     touch := TouchArea {
         mouse-cursor: pointer;
         accessible-role: tab;
         accessible-label: label;
         clicked => { LibraryUi.tab-chosen(key); }
     }
-    text := Text {
-        x: 12px;
-        width: parent.width - 24px;
-        text: label;
-        color: on ? Skin.accent : Skin.ink;
-        font-size: 14px * Skin.text-scale;
-        font-weight: on ? 700 : 400;
-        vertical-alignment: center;
-        overflow: elide;
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        Text {
+            text: label;
+            color: on ? Skin.accent : Skin.ink;
+            font-size: 14px * Skin.text-scale;
+            font-weight: on ? 700 : 400;
+            vertical-alignment: center;
+        }
+        Text {
+            text: count;
+            color: on ? Skin.accent : Skin.dim;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle {
+        y: parent.height - self.height;
+        height: 2px;
+        background: on ? Skin.accent : transparent;
+    }
+}
+
+// The small picture of an item: a few colors, a picture, or a mark for a shader.
+component Thumb inherits Rectangle {
+    in property <LibItem> item;
+    width: 40px;
+    height: 28px;
+    border-width: 1px;
+    border-color: item.error != "" ? Skin.bad : Skin.surface-edge;
+    background: #0c0c14;
+    clip: true;
+    if item.swatches.length > 0: HorizontalLayout {
+        padding: 1px;
+        for c in item.swatches: Rectangle { background: c; }
+    }
+    if item.swatches.length == 0 && item.thumb.width > 0: Image {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 2px;
+        source: item.thumb;
+        image-fit: cover;
+    }
+    // shaders: a little screen with scanlines
+    if item.swatches.length == 0 && item.thumb.width == 0: Rectangle {
+        for i in 6: Rectangle {
+            y: (i * 4 + 3) * 1px;
+            height: 1px;
+            background: (item.error != "" ? Skin.bad : Skin.accent).with-alpha(i / 2 == floor(i / 2) ? 0.25 : 0.35);
+        }
+        Text {
+            text: "fx";
+            color: item.error != "" ? Skin.bad : Skin.accent;
+            font-family: Skin.font-mono;
+            font-size: 11px;
+            font-weight: 700;
+        }
     }
 }
 
@@ -145,9 +224,13 @@ component ItemRow inherits Rectangle {
         }
     }
     row := HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 8px;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Thumb { item: item; }
+        }
         VerticalLayout {
             alignment: center;
             horizontal-stretch: 1;
@@ -158,23 +241,22 @@ component ItemRow inherits Rectangle {
                 font-weight: chosen ? 700 : 400;
                 overflow: elide;
             }
-            Text {
-                text: item.error != "" ? @tr("{} · does not load", item.origin) : item.origin;
-                color: item.error != "" ? Skin.bad : Skin.dim;
-                font-family: Skin.font-mono;
-                font-size: 10px * Skin.text-scale;
-                overflow: elide;
-            }
-        }
-        if item.in-use: VerticalLayout {
-            alignment: center;
-            Rectangle {
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
-                background: Skin.accent;
-                accessible-role: text;
-                accessible-label: @tr("in use");
+            HorizontalLayout {
+                spacing: 0;
+                Text {
+                    text: item.error != "" ? @tr("{} · does not load", item.origin) : item.origin;
+                    color: item.error != "" ? Skin.bad : Skin.dim;
+                    font-family: Skin.font-mono;
+                    font-size: 10px * Skin.text-scale;
+                }
+                if item.usage != "" && item.error == "": Text {
+                    text: " · " + item.usage;
+                    color: Skin.accent;
+                    font-family: Skin.font-mono;
+                    font-size: 10px * Skin.text-scale;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
             }
         }
     }
@@ -278,15 +360,287 @@ component SampleScreen inherits Rectangle {
     out property <length> cursor-h: cursor.height;
 }
 
-// The chosen item: what it is, its error, colors or picture, the Terminal's chain and the
-// shader's adjustments (shaders), and the actions.
-component Detail inherits VerticalLayout {
+// One shader of the Terminal's chain: its name (click: choose it), earlier, later, out.
+component ChainChip inherits Rectangle {
+    in property <LibLink> link;
+    in property <int> index;
+    in property <int> count;
+    property <bool> chosen: link.key == LibraryUi.selected;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: link.bad ? Skin.bad : chosen ? Skin.accent : Skin.surface-edge;
+    background: chosen ? Skin.accent.with-alpha(0.12) : Skin.surface;
+    horizontal-stretch: 0;
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 2px;
+        IconButton {
+            width: 22px;
+            height: 22px;
+            icon-size: 12px;
+            icon: Icons.chevron-left;
+            enabled: index > 0;
+            label: @tr("Earlier in the chain");
+            clicked => { LibraryUi.chain-move(index, -1); }
+        }
+        Rectangle {
+            width: min(name.preferred-width + 8px, 180px);
+            name := Text {
+                width: parent.width - 8px;
+                text: (index + 1) + ". " + link.name;
+                color: link.bad ? Skin.bad : chosen ? Skin.accent : Skin.ink;
+                font-size: 12px * Skin.text-scale;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { LibraryUi.select(link.key); }
+            }
+        }
+        IconButton {
+            width: 22px;
+            height: 22px;
+            icon-size: 12px;
+            icon: Icons.chevron-right;
+            enabled: index + 1 < count;
+            label: @tr("Later in the chain");
+            clicked => { LibraryUi.chain-move(index, 1); }
+        }
+        IconButton {
+            width: 22px;
+            height: 22px;
+            icon-size: 12px;
+            icon: Icons.close;
+            ink: Skin.bad;
+            label: @tr("Remove from the Terminal");
+            clicked => { LibraryUi.chain-remove(index); }
+        }
+    }
+}
+
+// The Terminal's chain, in the order the shaders run.
+component ChainStrip inherits Rectangle {
+    border-width: 1px;
+    border-color: Skin.surface-edge;
+    background: Skin.surface;
+    min-height: max(40px, row.preferred-height);
+    row := HorizontalLayout {
+        padding: 6px;
+        padding-left: 10px;
+        spacing: 6px;
+        Text {
+            text: @tr("Terminal:");
+            color: Skin.sub;
+            font-size: 12px * Skin.text-scale;
+            vertical-alignment: center;
+        }
+        if LibraryUi.chain.length == 0: Text {
+            text: @tr("no shaders yet. Choose one and click \"Add to the Terminal\".");
+            color: Skin.dim;
+            font-size: 12px * Skin.text-scale;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        for link[i] in LibraryUi.chain: HorizontalLayout {
+            spacing: 6px;
+            horizontal-stretch: 0;
+            if i > 0: Text {
+                text: "→";
+                color: Skin.dim;
+                vertical-alignment: center;
+            }
+            ChainChip {
+                link: link;
+                index: i;
+                count: LibraryUi.chain.length;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if !LibraryUi.gl: Text {
+            text: @tr("needs the OpenGL renderer");
+            color: Skin.bad;
+            font-size: 12px * Skin.text-scale;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// An app drawn in a theme's colors: how the theme looks.
+component ThemeCard inherits Rectangle {
+    property <Colors> t: LibraryUi.theme-colors;
+    width: 340px;
+    height: card.preferred-height;
+    background: t.bg0.mix(t.bg1, 0.75);
+    border-width: 1px;
+    border-color: t.muted.mix(t.bg0, 0.55);
+    card := VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Image {
+                source: LibraryUi.theme-mascot;
+                image-rendering: pixelated;
+                width: 48px;
+                height: 42px;
+            }
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: @tr("Sample app");
+                    color: t.text;
+                    font-size: 15px * Skin.text-scale;
+                    font-weight: 700;
+                }
+                Text {
+                    text: @tr("This is how an app looks in this theme.");
+                    color: t.sub;
+                    font-size: 11px * Skin.text-scale;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            for p in [{ label: @tr("Happy"), c: t.ok }, { label: @tr("Busy"), c: t.warn }, { label: @tr("Alarm"), c: t.alarm }, { label: @tr("Sleeping"), c: t.sleep }]: Rectangle {
+                border-width: 1px;
+                border-color: p.c;
+                background: p.c.with-alpha(0.14);
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 2px;
+                    padding-bottom: 2px;
+                    Text {
+                        text: p.label;
+                        color: p.c;
+                        font-family: Skin.font-mono;
+                        font-size: 10px * Skin.text-scale;
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 6px;
+            background: t.muted.with-alpha(0.35);
+            Rectangle {
+                x: 0;
+                width: parent.width * 0.62;
+                background: t.visor;
+            }
+        }
+    }
+}
+
+// A small window in a skin's colors: how the skin looks.
+component SkinCard inherits Rectangle {
+    property <LibSkin> s: LibraryUi.skin-colors;
+    width: 340px;
+    height: 190px;
+    background: s.bg;
+    border-width: 1px;
+    border-color: s.edge;
+    VerticalLayout {
+        padding: 1px;
+        Rectangle {
+            height: 30px;
+            background: s.panel;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+                Text {
+                    text: "MiniUtils";
+                    color: s.ink;
+                    font-size: 13px * Skin.text-scale;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                for c in [s.accent, s.accent2]: VerticalLayout {
+                    alignment: center;
+                    Rectangle { width: 8px; height: 8px; border-radius: 4px; background: c; }
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: s.edge;
+            }
+        }
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+            Rectangle {
+                height: 26px;
+                background: s.field;
+                border-width: 1px;
+                border-color: s.field-edge;
+                Text {
+                    x: 8px;
+                    text: @tr("Search");
+                    color: s.dim;
+                    font-size: 11px * Skin.text-scale;
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                background: s.surface;
+                border-width: 1px;
+                border-color: s.surface-edge;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: @tr("Sample app");
+                            color: s.ink;
+                            font-size: 12px * Skin.text-scale;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: @tr("This is how an app looks in this theme.");
+                            color: s.sub;
+                            font-size: 10px * Skin.text-scale;
+                            overflow: elide;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            background: s.accent;
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 4px;
+                                padding-bottom: 4px;
+                                Text {
+                                    text: @tr("Close");
+                                    color: s.accent-ink;
+                                    font-size: 11px * Skin.text-scale;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// What the chosen item is: name, origin, error, its look, the actions and the last message.
+component Info inherits VerticalLayout {
     alignment: start;
     spacing: 10px;
-    padding-right: 8px;
 
     if LibraryUi.selected == "": Text {
-        text: @tr("Choose an item on the left.");
+        text: @tr("Nothing here matches the search.");
         color: Skin.sub;
     }
 
@@ -321,6 +675,46 @@ component Detail inherits VerticalLayout {
         }
     }
 
+    // every action of the chosen one, in one row: the main one first
+    if LibraryUi.selected != "": HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        if LibraryUi.use-label != "": TextButton {
+            text: LibraryUi.use-label;
+            fill: Skin.accent;
+            ink: Skin.accent-ink;
+            edge: Skin.accent;
+            font-size: 12px * Skin.text-scale;
+            clicked => { LibraryUi.use(); }
+        }
+        if LibraryUi.can-duplicate: TextButton {
+            text: @tr("Copy to edit");
+            icon: Icons.copy;
+            font-size: 12px * Skin.text-scale;
+            clicked => { LibraryUi.duplicate(); }
+        }
+        if LibraryUi.can-open: TextButton {
+            text: @tr("Open file");
+            font-size: 12px * Skin.text-scale;
+            clicked => { LibraryUi.open-file(); }
+        }
+        if LibraryUi.can-remove: TextButton {
+            text: LibraryUi.armed-remove ? @tr("Confirm removal") : @tr("Remove");
+            icon: Icons.close;
+            ink: Skin.bad;
+            font-size: 12px * Skin.text-scale;
+            clicked => { LibraryUi.remove(); }
+        }
+    }
+
+    if LibraryUi.status != "": Text {
+        text: LibraryUi.status;
+        color: LibraryUi.status-bad ? Skin.bad : Skin.accent;
+        font-family: Skin.font-mono;
+        font-size: 12px * Skin.text-scale;
+        wrap: word-wrap;
+    }
+
     if LibraryUi.error != "": Rectangle {
         border-width: 1px;
         border-color: Skin.bad;
@@ -344,20 +738,28 @@ component Detail inherits VerticalLayout {
         }
     }
 
-    // theme and skin colors, a backdrop's picture
+    // how it looks: an app in the theme, a window in the skin, the backdrop's picture
+    if LibraryUi.selected != "" && LibraryUi.error == "" && LibraryUi.tab == "theme": HorizontalLayout {
+        alignment: start;
+        ThemeCard { }
+    }
+    if LibraryUi.selected != "" && LibraryUi.error == "" && LibraryUi.tab == "skin": HorizontalLayout {
+        alignment: start;
+        SkinCard { }
+    }
     if LibraryUi.swatches.length > 0: HorizontalLayout {
         spacing: 4px;
         alignment: start;
         for c in LibraryUi.swatches: Rectangle {
-            width: 26px;
-            height: 26px;
+            width: 22px;
+            height: 22px;
             background: c;
             border-width: 1px;
             border-color: Skin.surface-edge;
         }
     }
     if LibraryUi.tab == "backdrop" && LibraryUi.selected != "" && LibraryUi.error == "": Rectangle {
-        height: 160px;
+        height: 200px;
         border-width: 1px;
         border-color: Skin.surface-edge;
         Image {
@@ -369,143 +771,54 @@ component Detail inherits VerticalLayout {
             image-fit: cover;
         }
     }
+}
 
-    if LibraryUi.use-label != "": HorizontalLayout {
-        alignment: start;
-        TextButton {
-            text: LibraryUi.use-label;
-            fill: Skin.accent;
-            ink: Skin.accent-ink;
-            edge: Skin.accent;
-            font-size: 13px * Skin.text-scale;
-            clicked => { LibraryUi.use(); }
-        }
-    }
-
-    // the Terminal's chain, in the order the shaders run
-    if LibraryUi.tab == "shader": VerticalLayout {
-        spacing: 4px;
-        Heading { text: @tr("In use in the Terminal, in order"); }
-        if LibraryUi.chain.length == 0: Text {
-            text: @tr("None. Choose a shader and click \"Add to the Terminal\".");
-            color: Skin.sub;
+// The shader's adjustments: its number #defines.
+component Params inherits VerticalLayout {
+    alignment: start;
+    spacing: 4px;
+    HorizontalLayout {
+        min-height: 30px;
+        Heading { text: @tr("Adjustments"); horizontal-stretch: 1; vertical-alignment: center; }
+        if LibraryUi.params-changed: TextButton {
+            text: @tr("Reset all");
             font-size: 12px * Skin.text-scale;
-            wrap: word-wrap;
-        }
-        for link[i] in LibraryUi.chain: HorizontalLayout {
-            spacing: 6px;
-            min-height: max(32px, self.preferred-height);
-            Text {
-                text: (i + 1) + ". " + link.name;
-                color: link.bad ? Skin.bad : link.key == LibraryUi.selected ? Skin.accent : Skin.ink;
-                font-size: 13px * Skin.text-scale;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-            IconButton {
-                width: 28px;
-                height: 28px;
-                icon: Icons.chevron-up;
-                enabled: i > 0;
-                label: @tr("Earlier in the chain");
-                clicked => { LibraryUi.chain-move(i, -1); }
-            }
-            IconButton {
-                width: 28px;
-                height: 28px;
-                icon: Icons.chevron;
-                enabled: i + 1 < LibraryUi.chain.length;
-                label: @tr("Later in the chain");
-                clicked => { LibraryUi.chain-move(i, 1); }
-            }
-            IconButton {
-                width: 28px;
-                height: 28px;
-                icon: Icons.close;
-                ink: Skin.bad;
-                label: @tr("Remove from the Terminal");
-                clicked => { LibraryUi.chain-remove(i); }
-            }
+            clicked => { LibraryUi.params-reset(); }
         }
     }
-
-    // the shader's adjustments: its number #defines
-    if LibraryUi.params.length > 0: VerticalLayout {
-        spacing: 4px;
+    for p in LibraryUi.params: VerticalLayout {
+        spacing: 2px;
         HorizontalLayout {
-            Heading { text: @tr("Adjustments"); horizontal-stretch: 1; vertical-alignment: center; }
-            if LibraryUi.params-changed: TextButton {
-                text: @tr("Reset all");
+            spacing: 8px;
+            Text {
+                text: p.label;
+                color: Skin.sub;
                 font-size: 12px * Skin.text-scale;
-                clicked => { LibraryUi.params-reset(); }
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
+            Text {
+                text: p.integer ? round(p.value) : round(p.value * 1000) / 1000;
+                color: p.changed ? Skin.accent : Skin.ink;
+                font-family: Skin.font-mono;
+                font-size: 12px * Skin.text-scale;
+            }
+            if p.changed: IconButton {
+                width: 22px;
+                height: 22px;
+                icon-size: 12px;
+                icon: Icons.reset;
+                label: @tr("Back to the shader's value");
+                clicked => { LibraryUi.param-reset(p.name); }
             }
         }
-        for p in LibraryUi.params: VerticalLayout {
-            spacing: 2px;
-            HorizontalLayout {
-                spacing: 8px;
-                Text {
-                    text: p.label;
-                    color: Skin.sub;
-                    font-size: 12px * Skin.text-scale;
-                    horizontal-stretch: 1;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: p.integer ? round(p.value) : round(p.value * 1000) / 1000;
-                    color: p.changed ? Skin.accent : Skin.ink;
-                    font-family: Skin.font-mono;
-                    font-size: 12px * Skin.text-scale;
-                }
-                if p.changed: IconButton {
-                    width: 22px;
-                    height: 22px;
-                    icon-size: 12px;
-                    icon: Icons.refresh;
-                    label: @tr("Back to the shader's value");
-                    clicked => { LibraryUi.param-reset(p.name); }
-                }
-            }
-            ParamSlider {
-                value: p.value;
-                minimum: p.minimum;
-                maximum: p.maximum;
-                step: p.step;
-                label: p.label;
-                edited(v) => { LibraryUi.param-edited(p.name, v); }
-            }
-        }
-    }
-
-    if LibraryUi.status != "": Text {
-        text: LibraryUi.status;
-        color: LibraryUi.status-bad ? Skin.bad : Skin.accent;
-        font-family: Skin.font-mono;
-        font-size: 12px * Skin.text-scale;
-        wrap: word-wrap;
-    }
-
-    if LibraryUi.selected != "": HorizontalLayout {
-        spacing: 8px;
-        alignment: end;
-        if LibraryUi.can-duplicate: TextButton {
-            text: @tr("Copy to edit");
-            icon: Icons.copy;
-            font-size: 12px * Skin.text-scale;
-            clicked => { LibraryUi.duplicate(); }
-        }
-        if LibraryUi.can-open: TextButton {
-            text: @tr("Open file");
-            font-size: 12px * Skin.text-scale;
-            clicked => { LibraryUi.open-file(); }
-        }
-        if LibraryUi.can-remove: TextButton {
-            text: LibraryUi.armed-remove ? @tr("Confirm removal") : @tr("Remove");
-            icon: Icons.close;
-            ink: Skin.bad;
-            font-size: 12px * Skin.text-scale;
-            clicked => { LibraryUi.remove(); }
+        ParamSlider {
+            value: p.value;
+            minimum: p.minimum;
+            maximum: p.maximum;
+            step: p.step;
+            label: p.label;
+            edited(v) => { LibraryUi.param-edited(p.name, v); }
         }
     }
 }
@@ -532,6 +845,19 @@ export component LibraryWindow inherits Window {
     background: transparent;
     default-font-family: Skin.font-ui;
     default-font-size: 13px * Skin.text-scale;
+
+    // room for a second column (the adjustments, a mascot's editing) and the shader
+    // preview's height. Set when the size changes: a binding on it would loop through the
+    // layout it changes.
+    property <bool> roomy;
+    property <length> preview-tall: 150px;
+    function fit() {
+        self.roomy = self.width >= 1100px;
+        self.preview-tall = max(150px, min(300px, self.height * 0.36));
+    }
+    init => { self.fit(); }
+    changed width => { self.fit(); }
+    changed height => { self.fit(); }
 
     // Rust calls this when the window is shown again
     public function focus-list() {
@@ -561,7 +887,7 @@ export component LibraryWindow inherits Window {
     VerticalLayout {
         padding: Skin.border;
 
-        // header: drags the window
+        // header: drags the window; the actions of the whole kind
         Bar {
             TouchArea {
                 pointer-event(ev) => {
@@ -573,7 +899,7 @@ export component LibraryWindow inherits Window {
             HorizontalLayout {
                 padding-left: 16px;
                 padding-right: 12px;
-                spacing: 10px;
+                spacing: 8px;
                 Text {
                     text: @tr("Library");
                     color: Skin.panel-ink;
@@ -590,6 +916,26 @@ export component LibraryWindow inherits Window {
                         icon: Icons.plus;
                         font-size: 12px * Skin.text-scale;
                         clicked => { LibraryUi.import(); }
+                    }
+                }
+                if LibraryUi.tab == "mascot": VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: @tr("Import folder…");
+                        icon: Icons.plus;
+                        font-size: 12px * Skin.text-scale;
+                        enabled: !MascotsManager.busy;
+                        clicked => { MascotsManager.import-folder(); }
+                    }
+                }
+                if LibraryUi.tab == "mascot": VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: @tr("Import .zip…");
+                        icon: Icons.plus;
+                        font-size: 12px * Skin.text-scale;
+                        enabled: !MascotsManager.busy;
+                        clicked => { MascotsManager.import-zip(); }
                     }
                 }
                 VerticalLayout {
@@ -613,40 +959,54 @@ export component LibraryWindow inherits Window {
             }
         }
 
-        HorizontalLayout {
+        // the kinds
+        Rectangle {
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 2px;
+                alignment: start;
+                KindTab { key: "shader"; label: @tr("Shaders"); count: LibraryUi.counts[0]; }
+                KindTab { key: "theme"; label: @tr("App themes"); count: LibraryUi.counts[1]; }
+                KindTab { key: "skin"; label: @tr("Window skins"); count: LibraryUi.counts[2]; }
+                KindTab { key: "backdrop"; label: @tr("Backdrops"); count: LibraryUi.counts[3]; }
+                KindTab { key: "mascot"; label: @tr("Mascots"); count: LibraryUi.counts[4]; }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Skin.surface-edge;
+            }
+        }
+
+        VerticalLayout {
             vertical-stretch: 1;
             padding: 12px;
-            spacing: 12px;
+            spacing: 10px;
 
-            // the kinds
-            VerticalLayout {
-                width: min(150px * Skin.text-scale, 210px);
-                spacing: 4px;
-                alignment: start;
-                TabRow { key: "shader"; label: @tr("Shaders"); }
-                TabRow { key: "theme"; label: @tr("App themes"); }
-                TabRow { key: "skin"; label: @tr("Window skins"); }
-                TabRow { key: "backdrop"; label: @tr("Backdrops"); }
-                TabRow { key: "mascot"; label: @tr("Mascots"); }
-            }
+            if LibraryUi.tab == "shader": ChainStrip { }
 
             Rectangle {
-                horizontal-stretch: 1;
+                vertical-stretch: 1;
 
                 if LibraryUi.tab == "mascot": MascotsPanel {
                     width: parent.width;
                     height: parent.height;
+                    roomy: root.roomy;
                 }
 
-                HorizontalLayout {
+                body := HorizontalLayout {
                     visible: LibraryUi.tab != "mascot";
                     width: parent.width;
                     height: parent.height;
                     spacing: 12px;
+                    // the adjustments get a column of their own when there is room (from the
+                    // window's width: the layout's own would loop through its columns)
+                    property <bool> wide: LibraryUi.params.length > 0 && root.roomy;
 
                     // the items of the kind
                     VerticalLayout {
-                        width: min(240px * Skin.text-scale, 330px);
+                        width: min(260px * Skin.text-scale, 340px);
                         spacing: 6px;
                         SearchBox {
                             theme: MascotsManager.theme;
@@ -671,42 +1031,69 @@ export component LibraryWindow inherits Window {
                         }
                     }
 
-                    VerticalLayout {
-                        horizontal-stretch: 1;
+                    // the chosen one: preview (shaders), what it is and the adjustments, in
+                    // a column of their own when there is room. Placed by hand inside a plain
+                    // rectangle: as layout children their widest sizes would cap the window's.
+                    Rectangle {
+                      horizontal-stretch: 1;
+                      property <length> side: body.wide ? 432px : 0px;
+                      detail := VerticalLayout {
+                        x: 0;
+                        y: 0;
+                        width: min(760px, parent.width - parent.side);
+                        height: parent.height;
                         spacing: 10px;
 
                         // shaders: the preview, drawn over by the shader with its adjustments
                         // (not inside the scrolling part: the drawing would not follow it)
-                        Rectangle {
+                        HorizontalLayout {
                             property <bool> shown: LibraryUi.tab == "shader" && LibraryUi.selected != "";
                             visible: shown;
-                            height: shown ? 180px : 0px;
-                            border-width: 1px;
-                            border-color: Skin.surface-edge;
-                            sample := SampleScreen {
-                                x: 1px;
-                                y: 1px;
-                                width: parent.width - 2px;
-                                height: max(0px, parent.height - 2px);
-                            }
-                            if !LibraryUi.gl: Rectangle {
-                                background: Skin.bg.with-alpha(0.85);
-                                Text {
-                                    width: parent.width - 32px;
-                                    text: @tr("The preview and the shaders need the OpenGL renderer: Settings › System › Renderer.");
-                                    color: Skin.ink;
-                                    font-size: 13px * Skin.text-scale;
-                                    wrap: word-wrap;
-                                    horizontal-alignment: center;
+                            height: shown ? root.preview-tall : 0px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                max-width: 760px;
+                                border-width: 1px;
+                                border-color: Skin.surface-edge;
+                                sample := SampleScreen {
+                                    x: 1px;
+                                    y: 1px;
+                                    width: parent.width - 2px;
+                                    height: max(0px, parent.height - 2px);
+                                }
+                                if !LibraryUi.gl: Rectangle {
+                                    background: Skin.bg.with-alpha(0.85);
+                                    Text {
+                                        width: parent.width - 32px;
+                                        text: @tr("The preview and the shaders need the OpenGL renderer: Settings › System › Renderer.");
+                                        color: Skin.ink;
+                                        font-size: 13px * Skin.text-scale;
+                                        wrap: word-wrap;
+                                        horizontal-alignment: center;
+                                    }
                                 }
                             }
                         }
 
-                        // the chosen one
                         ScrollView {
                             vertical-stretch: 1;
-                            Detail { }
+                            VerticalLayout {
+                                alignment: start;
+                                spacing: 14px;
+                                padding-right: 8px;
+                                Info { }
+                                if !body.wide && LibraryUi.params.length > 0: Params { }
+                            }
                         }
+                      }
+
+                      if body.wide: ScrollView {
+                        x: detail.width + 12px;
+                        y: 0;
+                        width: 420px;
+                        height: parent.height;
+                        Params { padding-right: 8px; }
+                      }
                     }
                 }
             }
