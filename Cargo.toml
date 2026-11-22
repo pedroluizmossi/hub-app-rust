@@ -1,6 +1,6 @@
 [package]
 name = "miniutils"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 description = "Desktop hub of mini-apps (Linux and Windows), with pixel-art mascots and swappable skins"
 license = "MIT"
