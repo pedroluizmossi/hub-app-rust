@@ -113,6 +113,9 @@ export component HubWindow inherits Window {
     in property <int> place-index;
     in property <bool> desktop-app: false;
     in property <bool> can-place: true;
+    // renderer: chosen in Settings and running (indexes into `popup::Renderer::KEYS`)
+    in property <int> renderer-index;
+    in property <int> renderer-running;
     in property <string> version;
     in property <string> log-dir;
     // CPU and memory of the hub and its external apps (src/hub/usage.rs)
@@ -180,6 +183,7 @@ export component HubWindow inherits Window {
     callback autostart-toggled();
     callback place-chosen(int);
     callback desktop-app-toggled();
+    callback renderer-chosen(int);
     callback open-logs();
     callback open-apps-dir();
     callback reload-apps();
@@ -568,6 +572,9 @@ export component HubWindow inherits Window {
                 desktop-app: desktop-app;
                 desktop-app-toggled => { root.desktop-app-toggled(); }
                 can-place: can-place;
+                renderer-index: renderer-index;
+                renderer-running: renderer-running;
+                renderer-chosen(i) => { root.renderer-chosen(i); }
                 version: version;
                 log-dir: log-dir;
                 usage-rows: usage-rows;

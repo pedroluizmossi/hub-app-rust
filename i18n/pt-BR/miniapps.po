@@ -728,6 +728,15 @@ msgstr "Efeito CRT: linhas de varredura, cantos escuros e uma faixa descendo"
 msgid "Rain falling behind the text"
 msgstr "Chuva caindo atrás do texto"
 
+msgid "CRT shader: curved glass, scanlines and a phosphor grille (OpenGL renderer)"
+msgstr "Shader CRT: vidro curvo, linhas de varredura e grade de fósforo (renderizador OpenGL)"
+
+msgid "Bloom shader: bright text glows (OpenGL renderer)"
+msgstr "Shader Bloom: o texto claro brilha (renderizador OpenGL)"
+
+msgid "Your shaders, in Ghostty's format (.glsl files separated by ;)"
+msgstr "Seus shaders, no formato do Ghostty (arquivos .glsl separados por ;)"
+
 msgid "Mascot in the window, reacting to the shell"
 msgstr "Mascote na janela, reagindo ao shell"
 

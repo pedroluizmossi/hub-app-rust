@@ -534,8 +534,9 @@ Um agente faz o mesmo, e ainda vê e clica, com `tools/dev-ui.sh` (ver AGENTS.md
 
 ## 8. Limites do renderizador
 
-O MiniUtils usa o renderizador **por software** do Slint (economiza ~240 MB de memória).
-O que isso impõe:
+O MiniUtils usa por padrão o renderizador **por software** do Slint (economiza ~240 MB de
+memória); o OpenGL é opcional (Configurações › Sistema) e só serve aos shaders do Terminal.
+O visual tem de funcionar no de software. O que isso impõe:
 
 | Limite | Como contornar |
 |---|---|

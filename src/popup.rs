@@ -42,23 +42,85 @@ const GAP: i32 = 10;
 /// Half of a typical panel: the click lands in its middle.
 const PANEL_HALF: i32 = 24;
 
-/// Picks the backend (winit + software renderer). On Windows the popup can always be
-/// positioned.
+/// How the windows are drawn, chosen once at start (`renderer` in the config, or
+/// `MINIUTILS_RENDERER`): Slint can't change it while running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Renderer {
+    /// On the CPU, repainting only what changed: light (~30 MB), the default.
+    Software,
+    /// femtovg on OpenGL: the whole window each frame and the GPU driver in memory, but the
+    /// terminal can run shaders (`apps/terminal/shader.rs`).
+    OpenGl,
+}
+
+impl Renderer {
+    /// The config values, in the order of the Settings choice.
+    pub const KEYS: [&'static str; 2] = ["software", "opengl"];
+
+    /// From the config value, unless `MINIUTILS_RENDERER` names one (to start with the
+    /// software one when OpenGL fails to open a window, or to try OpenGL once). Anything
+    /// else is `Software`.
+    pub fn from_setting(key: &str) -> Self {
+        let env = std::env::var("MINIUTILS_RENDERER").ok();
+        match env.as_deref().filter(|e| Self::KEYS.contains(e)).unwrap_or(key) {
+            "opengl" => Renderer::OpenGl,
+            _ => Renderer::Software,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Renderer::Software => "software",
+            Renderer::OpenGl => "opengl",
+        }
+    }
+
+    /// Slint's name for the backend with this renderer.
+    fn backend(self) -> &'static str {
+        match self {
+            Renderer::Software => "winit-software",
+            Renderer::OpenGl => "winit-femtovg",
+        }
+    }
+
+    /// Slint's selector for this renderer. OpenGL asks for a 3.3 context (core profile):
+    /// the shaders are desktop GLSL, and Slint's default would be OpenGL ES 2.0. A driver
+    /// without it falls back to its default context, where only the shaders fail.
+    fn selector(self) -> slint::BackendSelector {
+        let selector = slint::BackendSelector::new().backend_name(self.backend().into());
+        match self {
+            Renderer::Software => selector,
+            Renderer::OpenGl => selector.require_opengl_with_version(3, 3),
+        }
+    }
+}
+
+/// The renderer in use (`select_backend`).
+static RENDERER: std::sync::OnceLock<Renderer> = std::sync::OnceLock::new();
+
+/// The renderer this run uses (`Software` before `select_backend`).
+pub fn renderer() -> Renderer {
+    RENDERER.get().copied().unwrap_or(Renderer::Software)
+}
+
+/// Picks the backend (winit + `renderer`). On Windows the popup can always be positioned.
 #[cfg(windows)]
-pub fn select_backend() -> anyhow::Result<bool> {
-    slint::BackendSelector::new().backend_name("winit-software".into()).select()?;
+pub fn select_backend(renderer: Renderer) -> anyhow::Result<bool> {
+    renderer.selector().select()?;
+    let _ = RENDERER.set(renderer);
+    log::info!("renderer: {}", renderer.key());
     Ok(true)
 }
 
-/// Picks the backend (winit + software renderer): native Wayland on Hyprland, which places
-/// the popup through its socket; otherwise X11 if possible.
+/// Picks the backend (winit + `renderer`): native Wayland on Hyprland, which places the
+/// popup through its socket; otherwise X11 if possible.
 /// Returns `true` when the popup can be positioned.
 #[cfg(target_os = "linux")]
-pub fn select_backend() -> anyhow::Result<bool> {
+pub fn select_backend(renderer: Renderer) -> anyhow::Result<bool> {
     let native_wayland = std::env::var_os("MINIUTILS_NATIVE_WAYLAND").is_some();
     let hyprland = !native_wayland && hyprland::detect();
     let x11 = std::env::var_os("DISPLAY").is_some() && !native_wayland && !hyprland;
-    let mut selector = slint::BackendSelector::new().backend_name("winit-software".into());
+    let mut selector = renderer.selector();
     if x11 {
         use winit::platform::x11::EventLoopBuilderExtX11;
         let mut builder = winit::event_loop::EventLoop::<slint::winit_030::SlintEvent>::with_user_event();
@@ -66,6 +128,8 @@ pub fn select_backend() -> anyhow::Result<bool> {
         selector = selector.with_winit_event_loop_builder(builder);
     }
     selector.select()?;
+    let _ = RENDERER.set(renderer);
+    log::info!("renderer: {}", renderer.key());
     if !x11 {
         // winit sets no app id by itself on Wayland (on X11 the class comes from the program name)
         slint::set_xdg_app_id(APP_ID)?;

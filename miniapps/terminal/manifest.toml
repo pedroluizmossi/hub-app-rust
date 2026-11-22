@@ -95,6 +95,26 @@ label = "Rain falling behind the text"
 type = "bool"
 default = false
 
+# GPU shaders over the screen: only with the OpenGL renderer (Settings › System)
+[[settings]]
+key = "shader_crt"
+label = "CRT shader: curved glass, scanlines and a phosphor grille (OpenGL renderer)"
+type = "bool"
+default = false
+
+[[settings]]
+key = "shader_bloom"
+label = "Bloom shader: bright text glows (OpenGL renderer)"
+type = "bool"
+default = false
+
+[[settings]]
+key = "shader_files"
+label = "Your shaders, in Ghostty's format (.glsl files separated by ;)"
+type = "text"
+default = ""
+max_len = 1000
+
 [[settings]]
 key = "window_mascot"
 label = "Mascot in the window, reacting to the shell"

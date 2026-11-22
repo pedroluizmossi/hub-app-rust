@@ -189,8 +189,8 @@ impl Hub {
         }
     }
 
-    /// Where the window opens and whether it is a desktop app, on the screen (the System
-    /// card and the window's own "on top").
+    /// Where the window opens, whether it is a desktop app and the renderer, on the screen
+    /// (the System card and the window's own "on top").
     fn apply_window_mode(&self) {
         let cfg = self.host.config.borrow();
         let place = popup::Place::index_of(&cfg.window_place).unwrap_or(0);
@@ -198,6 +198,24 @@ impl Hub {
         self.ui.set_desktop_app(cfg.desktop_app);
         // on native Wayland the system decides where windows go and what the taskbar shows
         self.ui.set_can_place(self.positionable);
+        let keys = popup::Renderer::KEYS;
+        self.ui.set_renderer_index(keys.iter().position(|k| *k == cfg.renderer).unwrap_or(0) as i32);
+        self.ui.set_renderer_running(keys.iter().position(|k| *k == popup::renderer().key()).unwrap_or(0) as i32);
+    }
+
+    /// Renderer: index in `popup::Renderer::KEYS`. Saved for the next start (Slint can't
+    /// switch while running); Settings says so until then.
+    pub(super) fn choose_renderer(&self, i: usize) {
+        let Some(key) = popup::Renderer::KEYS.get(i).copied() else { return };
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.renderer == key {
+                return;
+            }
+            cfg.renderer = key.into();
+            cfg.save();
+        }
+        self.apply_window_mode();
     }
 
     /// Where the window opens: index in `popup::Place::KEYS`. The window goes there now,

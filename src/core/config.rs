@@ -77,6 +77,10 @@ pub struct Config {
     /// Desktop app: the window shows up in the taskbar and the window switcher, is not
     /// above the others and does not hide when it loses focus (the tray icon stays).
     pub desktop_app: bool,
+    /// How windows are drawn: `"software"` (on the CPU, light) or `"opengl"` (femtovg on the
+    /// GPU: the terminal's shaders). Read once at start (`popup::select_backend`); an unknown
+    /// value means `"software"`.
+    pub renderer: String,
     /// Enabled mini-apps, in tab order.
     pub enabled: Vec<String>,
     /// Settings of each mini-app: `[apps."cyber.docker"]`.
@@ -149,6 +153,7 @@ impl Default for Config {
             window_place: "tray".into(),
             window_pos: None,
             desktop_app: false,
+            renderer: "software".into(),
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
             apps: BTreeMap::new(),

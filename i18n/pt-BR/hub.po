@@ -25,6 +25,10 @@ msgstr "boa noite"
 msgid "Could not change it: {}"
 msgstr "Não foi possível mudar: {}"
 
+# Window (src/hub/window.rs)
+msgid "OpenGL could not open the window. MiniUtils goes back to the software renderer: restart it."
+msgstr "O OpenGL não conseguiu abrir a janela. O MiniUtils volta ao renderizador software: reinicie-o."
+
 # App settings (src/hub/settings.rs)
 msgid "Follows the window"
 msgstr "Acompanha a janela"

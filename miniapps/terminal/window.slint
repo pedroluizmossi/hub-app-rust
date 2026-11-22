@@ -197,9 +197,12 @@ export component TerminalWindow inherits Window {
     // the grid in cells (the shell gets it through `resized`)
     out property <int> term-cols: max(10, floor(area.width / cell-w));
     out property <int> term-rows: max(2, floor(area.height / cell-h));
-    // size of the screen area, for the effects drawn in Rust
+    // size of the screen area, for the effects drawn in Rust; its position too, for the
+    // GPU shaders (`shader.rs`), which redraw only that part of the window
     out property <length> screen-width: screen.width;
     out property <length> screen-height: screen.height;
+    out property <length> screen-x: screen.absolute-position.x;
+    out property <length> screen-y: screen.absolute-position.y;
 
     title: TerminalScreen.title == "" ? @tr("Terminal") : TerminalScreen.title;
     preferred-width: 820px;

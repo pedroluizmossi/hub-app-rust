@@ -6,10 +6,12 @@
 //! runs in a pseudo-terminal (`session.rs`) and keeps running while the window is closed
 //! (setting `keep_running`); the emulator's screen becomes runs of text for the window
 //! (`grid.rs`). The window's effects (skin backdrop, CRT, rain) are drawn once per size
-//! and skin (`fx.rs`), and its mascot follows the shell.
+//! and skin (`fx.rs`), and its mascot follows the shell. With the OpenGL renderer, GPU
+//! shaders run over the screen too (`shader.rs`).
 
 mod fx;
 mod grid;
+mod shader;
 mod session;
 
 use std::cell::RefCell;
@@ -105,6 +107,8 @@ pub struct TerminalMini {
     /// The window has the focus (without it, nothing animates).
     focused: bool,
     fx: Fx,
+    /// The window's GPU shaders (`None` with the software renderer, or before the window).
+    shaders: Option<shader::PostFx>,
 }
 
 /// What the effects were last drawn for, and the drawing on its way.
@@ -147,6 +151,7 @@ impl TerminalMini {
             frame: 0,
             focused: true,
             fx: Fx::default(),
+            shaders: None,
         }));
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
 
@@ -191,6 +196,8 @@ impl TerminalMini {
                 match TerminalWindow::new() {
                     Ok(win) => {
                         bind(&win, app);
+                        // before the first show: the hook must be there when the GL context is made
+                        me.shaders = shader::PostFx::attach(&win);
                         let g = win.global::<TerminalScreen>();
                         g.set_lines(ModelRc::from(me.lines.clone()));
                         g.set_tabs(ModelRc::from(me.tab_rows.clone()));
@@ -220,6 +227,8 @@ impl TerminalMini {
         me.focused = true;
         me.start_clock();
         me.request_fx();
+        // the files may have changed since the window was last open
+        me.apply_shaders();
         if me.tabs.is_empty() || new_tab {
             me.new_tab();
         } else {
@@ -641,6 +650,35 @@ impl TerminalMini {
         self.shown.clear();
         // new skin or settings: the effects too
         self.request_fx();
+        self.apply_shaders();
+    }
+
+    /// The shaders the settings ask for: bloom, then CRT (the glow curves with the glass),
+    /// then the user's files, in the order written.
+    fn apply_shaders(&self) {
+        let (Some(win), Some(fx)) = (&self.win, &self.shaders) else { return };
+        let (crt, bloom, files) = {
+            let cfg = self.host.config.borrow();
+            let m = &self.manifest;
+            (cfg.bool(m, "shader_crt"), cfg.bool(m, "shader_bloom"), cfg.string(m, "shader_files"))
+        };
+        let builtin = |name: &str, glsl: &str| shader::Source { name: name.into(), glsl: glsl.into() };
+        let mut sources = Vec::new();
+        if bloom {
+            sources.push(builtin("bloom", shader::BLOOM));
+        }
+        if crt {
+            sources.push(builtin("crt", shader::CRT));
+        }
+        let home = dirs::home_dir().unwrap_or_default();
+        for written in files.split(';').map(str::trim).filter(|f| !f.is_empty()) {
+            let path = session::expand_home(written, &home);
+            match std::fs::read_to_string(&path) {
+                Ok(glsl) => sources.push(shader::Source { name: path.display().to_string(), glsl }),
+                Err(e) => log::warn!("terminal: shader {}: {e}", path.display()),
+            }
+        }
+        fx.set(win, sources);
     }
 
     fn refresh_mascot(&mut self) -> bool {
