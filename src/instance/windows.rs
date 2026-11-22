@@ -175,7 +175,7 @@ mod tests {
         };
         let (tx, rx) = mpsc::channel();
         server
-            .serve(move |cmd| {
+            .serve(Arc::default(), move |cmd| {
                 let _ = tx.send(cmd);
             })
             .unwrap();
