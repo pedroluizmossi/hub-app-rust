@@ -201,14 +201,17 @@ msgstr "o id do manifest.toml é \"{}\": a pasta tem de se chamar assim"
 msgid "usage:"
 msgstr "uso:"
 
-msgid "miniutils [--hidden] [--tab <name>] [--plugin-dev <folder>]"
-msgstr "miniutils [--hidden] [--tab <nome>] [--plugin-dev <pasta>]"
+msgid "miniutils [--hidden] [--toggle] [--tab <name>] [--plugin-dev <folder>]"
+msgstr "miniutils [--hidden] [--toggle] [--tab <nome>] [--plugin-dev <pasta>]"
 
 msgid "miniutils --import-mascot <folder>"
 msgstr "miniutils --import-mascot <pasta>"
 
 msgid "starts in the tray only (for autostart)"
 msgstr "inicia só na bandeja (para o autostart)"
+
+msgid "hides the window if it is open, shows it otherwise (for a\nkeyboard shortcut); with --tab, shows it on that page"
+msgstr "esconde a janela se estiver aberta, senão mostra (para um\natalho de teclado); com --tab, mostra naquela página"
 
 msgid "--tab <name>"
 msgstr "--tab <nome>"

@@ -90,7 +90,7 @@ algum app ligado usa aquele provedor.
 | `media` | o que está tocando (MPRIS no Linux, controles de mídia no Windows) |
 | `ai_usage` | uso das assinaturas de IA (Codex, Claude, Kiro, OpenCode Go) |
 | `ports` | portas escutando e o processo de cada uma |
-| `agents` | sessões do Claude Code, Codex e OpenCode e o estado delas |
+| `agents` | sessões do Claude Code, Codex, OpenCode e Oh My Pi e o estado delas |
 | `procs` | processos mais pesados por CPU e por memória (igual no Linux e no Windows) |
 
 Os campos de cada um estão nos `struct …Snapshot` de `src/providers/`.

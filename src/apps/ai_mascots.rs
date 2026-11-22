@@ -101,13 +101,40 @@ pub static MASCOTS: &[Sprite] = &[
             "................",
         ],
     },
+    Sprite {
+        key: "omp", label: "omp", eye_bg: b'.', shade_from: 99, fur: None, ear: None,
+        pixel: Some(Pixel { eye: 0xc8d9ff, pal: &[
+            (b'k', 0x38244f),
+            (b'm', 0xf15ac8),
+            (b'h', 0xffa7ec),
+            (b'v', 0xad67ee),
+            (b'b', 0x83a9fa),
+            (b'd', 0x241239),
+        ] }),
+        grid: [
+            ".......kk.......",
+            ".......mk.......",
+            "...kkkkkkkkkk...",
+            "..khmmmmvvvvvk..",
+            ".kmddddddddddvk.",
+            ".kmdedddddedvvk.",
+            ".kmdedddddedvvk.",
+            "..kvddddddddvk..",
+            "...kvvbbvvvk....",
+            "...kvvkkvvbk....",
+            "...kkk..kbbk....",
+            "........kbbk....",
+            "........kkkk....",
+            "................",
+        ],
+    },
 ];
 
 /// Mascot of an AI source by its display name (`providers::ai_usage::SOURCES`).
 pub fn get(name: &str) -> Option<&'static Sprite> {
     let key = match name {
         "Claude" => "claude", "Codex" => "codex", "Kiro" => "kiro",
-        "OpenCode Go" => "opencode", _ => return None,
+        "OpenCode Go" => "opencode", "OMP" => "omp", _ => return None,
     };
     MASCOTS.iter().find(|sprite| sprite.key == key)
 }
@@ -141,7 +168,7 @@ mod tests {
         for name in crate::providers::ai_usage::SOURCES {
             assert!(get(name).is_some(), "no mascot for the source {name}");
         }
-        for tool in [Tool::Claude, Tool::Codex, Tool::OpenCode] {
+        for tool in [Tool::Claude, Tool::Codex, Tool::OpenCode, Tool::Omp] {
             assert!(for_tool(tool).is_some(), "no mascot for the tool {}", tool.name());
         }
         let mut keys: Vec<&str> = MASCOTS.iter().map(|s| s.key).collect();

@@ -119,6 +119,8 @@ pub struct Hub {
     /// The window icon (side, RGBA), kept to set it again when the native window is
     /// created (it does not exist before the first `show`).
     window_icon: RefCell<Option<(i32, Vec<u8>)>>,
+    /// How the hub is doing, for whoever asks on the instance channel (see `sync_status`).
+    status: std::sync::Arc<crate::instance::StatusFeed>,
     /// Pin mode: losing focus does not hide the popup.
     pinned: Cell<bool>,
     /// Last tray point where the popup opened (to reopen in the same place).
@@ -229,6 +231,7 @@ impl Hub {
             focus_hidden_at: Cell::new(None),
             had_focus: Cell::new(false),
             window_icon: RefCell::new(None),
+            status: Default::default(),
             pinned: Cell::new(false),
             last_anchor: Cell::new(None),
             resize_until: Cell::new(None),
@@ -336,6 +339,7 @@ impl Hub {
         // the sidebar shows the mood of each page
         self.rebuild_pages(false);
         self.sync_tray();
+        self.sync_status();
         // conversation between mascots: new facts and the line being "typed"
         self.chat_tick();
     }
@@ -389,6 +393,34 @@ impl Hub {
             media: enabled.iter().find_map(|a| a.borrow().tray_media()),
             tooltip: Registry::summary_of(&enabled),
         }
+    }
+
+    /// Publishes how the hub is doing for bars and scripts (`status` and `subscribe` on the
+    /// instance channel, see `instance.rs`): one line of JSON, sent on only when it changes.
+    /// The same the tray shows, plus each app on its own and whether the window is open.
+    fn sync_status(&self) {
+        let now = self.tray_state();
+        let apps: Vec<serde_json::Value> = self
+            .registry
+            .enabled()
+            .iter()
+            .map(|app| {
+                let a = app.borrow();
+                let m = a.manifest();
+                serde_json::json!({ "id": m.id, "name": m.name, "mood": a.mood().as_str(), "summary": a.summary() })
+            })
+            .collect();
+        let media = now.media.map(|m| serde_json::json!({ "summary": m.summary, "playing": m.playing }));
+        let line = serde_json::json!({
+            "shown": self.shown.get(),
+            "pinned": self.pinned.get(),
+            "mood": now.mood.as_str(),
+            "mascot": now.sprite,
+            "theme": now.theme,
+            "media": media,
+            "apps": apps,
+        });
+        self.status.publish(line.to_string());
     }
 
     /// Takes the state to the tray only when it changes. Talking to it is costly: it is a

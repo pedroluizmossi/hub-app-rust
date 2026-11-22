@@ -333,6 +333,7 @@ impl MascotsMini {
                 log::warn!("couldn't show the mascots window: {e}");
             }
             crate::popup::set_icon_after_show(&win, icon);
+            crate::popup::label_after_show(&win, crate::popup::Kind::Detail);
             crate::popup::focus(win.window());
         }
     }

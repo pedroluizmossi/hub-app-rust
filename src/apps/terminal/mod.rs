@@ -236,6 +236,7 @@ impl TerminalMini {
             Some(Badge::Prompt),
         );
         crate::popup::set_icon_after_show(win, icon);
+        crate::popup::label_after_show(win, crate::popup::Kind::Detail);
     }
 
     fn toggle_maximize(&mut self) {

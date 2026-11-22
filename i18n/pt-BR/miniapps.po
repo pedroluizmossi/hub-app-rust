@@ -11,8 +11,8 @@ msgstr "Mascote"
 msgid "AI agents"
 msgstr "Agentes de IA"
 
-msgid "Claude Code, Codex and OpenCode sessions: who is working, who is waiting for you and who is done."
-msgstr "Sessões do Claude Code, Codex e OpenCode: quem está trabalhando, quem espera você e quem já terminou."
+msgid "Claude Code, Codex, OpenCode and OMP sessions: who is working, who is waiting for you and who is done."
+msgstr "Sessões do Claude Code, Codex, OpenCode e OMP: quem está trabalhando, quem espera você e quem já terminou."
 
 msgid "Show sessions idle for up to (min)"
 msgstr "Mostrar sessões paradas há até (min)"
@@ -71,6 +71,21 @@ msgstr "Retomar"
 msgid "Resume session"
 msgstr "Retomar sessão"
 
+msgid "Open in OMP"
+msgstr "Aberta no OMP"
+
+msgid "OMP session closed"
+msgstr "Sessão do OMP encerrada"
+
+msgid "OMP session closed · {}"
+msgstr "Sessão do OMP encerrada · {}"
+
+msgid "OMP session status unknown"
+msgstr "Não foi possível verificar a sessão do OMP"
+
+msgid "The OMP session is open or its status could not be checked."
+msgstr "A sessão do OMP está aberta ou não foi possível verificar seu estado."
+
 msgid "{} working · {} waiting for you · {} idle"
 msgstr "{} trabalhando · {} esperando você · {} parados"
 
@@ -83,8 +98,8 @@ msgstr "ESPERA"
 msgid "IDLE"
 msgstr "LIVRES"
 
-msgid "Could not find Claude Code, Codex or OpenCode on this machine."
-msgstr "Não achei Claude Code, Codex nem OpenCode nesta máquina."
+msgid "Could not find Claude Code, Codex, OpenCode or OMP on this machine."
+msgstr "Não achei Claude Code, Codex, OpenCode nem OMP nesta máquina."
 
 msgid "No open or recent sessions."
 msgstr "Nenhuma sessão aberta ou recente."
@@ -113,6 +128,18 @@ msgstr "Lendo a conversa…"
 
 msgid "Nothing to show for this session."
 msgstr "Nada para mostrar desta sessão."
+
+msgid "Conversation"
+msgstr "Conversa"
+
+msgid "Saved result"
+msgstr "Resultado salvo"
+
+msgid "Patch"
+msgstr "Patch"
+
+msgid "Preview limited to the first 64 KiB."
+msgstr "Prévia limitada aos primeiros 64 KiB."
 
 # AI subscriptions (miniapps/ai_usage)
 msgid "AI subscriptions"

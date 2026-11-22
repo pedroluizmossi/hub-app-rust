@@ -3388,6 +3388,7 @@ dependencies = [
  "rhai",
  "ring",
  "rusqlite",
+ "same-file",
  "serde",
  "serde_json",
  "slint",

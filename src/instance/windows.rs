@@ -7,7 +7,7 @@
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, HANDLE};
@@ -18,7 +18,7 @@ use windows::Win32::System::Pipes::{
 };
 use windows::core::HSTRING;
 
-use super::{Command, Role, clean, parse, stem};
+use super::{Command, Role, StatusFeed, clean, parse, stem};
 
 /// `ERROR_PIPE_BUSY`: the main instance exists, but is serving another request right now.
 const PIPE_BUSY: i32 = 231;
@@ -103,8 +103,10 @@ pub struct Server {
 }
 
 impl Server {
-    /// Serves requests on a thread of its own; `on_command` runs on that thread.
-    pub fn serve<F>(&self, on_command: F) -> io::Result<()>
+    /// Serves requests on a thread of its own; `on_command` runs on that thread. The pipe
+    /// is one-way (the clients only write), so the questions `feed` answers on Linux
+    /// (`status`, `subscribe`) get no answer here: they are read and ignored.
+    pub fn serve<F>(&self, _feed: Arc<StatusFeed>, on_command: F) -> io::Result<()>
     where
         F: Fn(Command) + Send + 'static,
     {

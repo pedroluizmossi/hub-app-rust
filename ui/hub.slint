@@ -166,6 +166,8 @@ export component HubWindow inherits Window {
     callback toggle-requested(int, int);
     // another instance asked to open: tab ("apps", "panel" or empty = keep the current one)
     callback show-requested(string);
+    // another instance asked to hide the window if it is open, or to show it as above
+    callback toggle-window-requested(string);
     callback quit();
     callback skin-chosen(int);
     callback tray-icon-chosen(int);

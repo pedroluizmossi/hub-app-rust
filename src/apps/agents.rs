@@ -1,4 +1,4 @@
-//! AI Agents mini-app: the Claude Code, Codex and OpenCode sessions and the state of each.
+//! AI Agents mini-app: monitors sessions from Claude Code, Codex, OpenCode and Oh My Pi.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -18,7 +18,7 @@ use crate::mascot::stroll::{Pose, Script, Stage};
 use crate::mascot::themes::Theme;
 use crate::mascot::{Mood, anim, render, sprites, walkers};
 use crate::core::bus::Topic;
-use crate::providers::agents::{self, Agent, AgentsSnapshot, State, Step, StepKind, Tool, WORKFLOW, clip};
+use crate::providers::agents::{self, Agent, AgentsSnapshot, Artifact, Lease, State, Step, StepKind, Tool, WORKFLOW, clip};
 use crate::tr;
 use crate::ui::{
     AgentDetail, AgentDetailWindow, AgentPhase, AgentRow, AgentRun, AgentRunAgent, AgentStep, AgentSub, AgentWalker, AgentsApp,
@@ -48,6 +48,7 @@ pub struct AgentsMini {
     /// Session with its options open (the clicked row). By session, not by index: the
     /// list reorders itself.
     selected: Option<(Tool, String)>,
+    checking_resume: HashSet<String>,
     /// What each row on screen shows now: only the row that changed is replaced (replacing
     /// the whole list recreates every row and the screen flickers).
     cards: Vec<Card>,
@@ -102,6 +103,7 @@ impl AgentsMini {
             mood: Mood::Sleep,
             rows,
             selected: None,
+            checking_resume: HashSet::new(),
             cards: Vec::new(),
             faces: HashMap::new(),
             heroes: Heroes::default(),
@@ -174,6 +176,23 @@ impl AgentsMini {
         });
         let a = Rc::downgrade(&app);
         let w = ui.as_weak();
+        ui.global::<AgentsApp>().on_resume_checked(move |key, free| {
+            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
+                let mut a = a.borrow_mut();
+                if !a.checking_resume.remove(key.as_str()) {
+                    return;
+                }
+                if free {
+                    a.launch_resume(&key, &ui);
+                } else {
+                    a.host.bus.poke(Topic::Agents);
+                    a.speech.say(tr!("The OMP session is open or its status could not be checked.").into());
+                    a.refresh(&ui);
+                }
+            }
+        });
+        let a = Rc::downgrade(&app);
+        let w = ui.as_weak();
         ui.global::<AgentsApp>().on_details(move |key| {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
                 AgentsMini::open_detail(&a, &key, &ui);
@@ -211,6 +230,28 @@ impl AgentsMini {
 
     /// Resumes a stopped session in a new terminal, in its folder.
     fn resume(&mut self, key: &str, ui: &HubWindow) {
+        let Some(a) = self.find(key) else { return };
+        if a.tool != Tool::Omp {
+            self.launch_resume(key, ui);
+            return;
+        }
+        if resume_argv(a).is_none() {
+            return;
+        }
+        let id = a.id.clone();
+        if !self.checking_resume.insert(key.to_owned()) {
+            return;
+        }
+        let w = ui.as_weak();
+        let key = key.to_owned();
+        // Recheck off the UI thread just before launching; the last poll may be stale.
+        std::thread::spawn(move || {
+            let free = agents::session_leases(std::iter::once(id.as_str())).is_some_and(|leases| leases.get(&id) == Lease::Free);
+            let _ = w.upgrade_in_event_loop(move |ui| ui.global::<AgentsApp>().invoke_resume_checked(key.into(), free));
+        });
+    }
+
+    fn launch_resume(&mut self, key: &str, ui: &HubWindow) {
         let Some(a) = self.find(key).cloned() else { return };
         let Some(argv) = resume_argv(&a) else { return };
         let dir = std::path::Path::new(&a.cwd);
@@ -362,6 +403,8 @@ impl AgentsMini {
             .subs
             .iter()
             .map(|s| AgentSub {
+                key: s.key.as_str().into(),
+                depth: s.depth,
                 kind: s.kind.as_str().into(),
                 title: s.title.as_str().into(),
                 state: state_key(s.state).into(),
@@ -517,7 +560,8 @@ impl Counts {
 /// just ended, keeps its card; otherwise the run would show up loose).
 fn visible(all: &[Agent], now: i64, recent: i64) -> Vec<&Agent> {
     let mut keep: HashSet<(Tool, &str)> =
-        all.iter().filter(|a| a.state != State::Idle || now - a.since_ms <= recent).map(|a| (a.tool, a.id.as_str())).collect();
+        all.iter().filter(|a| a.state != State::Idle || a.details.lease == Lease::Held || now - a.since_ms <= recent)
+            .map(|a| (a.tool, a.id.as_str())).collect();
     loop {
         let parents: Vec<(Tool, &str)> = all
             .iter()
@@ -553,17 +597,24 @@ fn group(all: &[Agent]) -> Vec<(&Agent, Vec<&Agent>)> {
         .iter()
         .filter(|a| is_top(a))
         .map(|a| {
-            let children = |p: &Agent| -> Vec<&Agent> {
-                all.iter().filter(|s| s.tool == p.tool && s.parent.as_deref() == Some(p.id.as_str())).collect()
-            };
-            let mut subs = children(a);
-            let grand: Vec<&Agent> = subs.iter().flat_map(|s| children(s)).collect();
-            subs.extend(grand);
+            let mut subs = Vec::new();
+            descendants(all, a, &mut subs);
             (a, subs)
         })
         .collect();
     list.sort_by_key(|(a, subs)| (rank(row_state(a, subs)), -a.since_ms));
     list
+}
+
+/// Parent-first order keeps each subtree contiguous in the card.
+fn descendants<'a>(all: &'a [Agent], parent: &Agent, out: &mut Vec<&'a Agent>) {
+    for child in all.iter().filter(|s| s.tool == parent.tool && s.parent.as_deref() == Some(parent.id.as_str())) {
+        if out.iter().any(|seen| std::ptr::eq(*seen, child)) {
+            continue;
+        }
+        out.push(child);
+        descendants(all, child, out);
+    }
 }
 
 /// A workflow run in the screen's format.
@@ -638,6 +689,8 @@ fn info(a: &Agent, subs: &[&Agent], runs: usize, dir: &str) -> String {
 /// A subagent on the card of the session that started it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SubLine {
+    key: String,
+    depth: i32,
     /// Kind of subagent ("" = the tool doesn't say, or it equals the title).
     kind: String,
     title: String,
@@ -986,7 +1039,12 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool, view: &RunV
         c.top = runs.iter().map(|r| r.lines).sum();
         runs.push(c);
     }
-    let subs: Vec<&Agent> = direct(subs).into_iter().filter(|s| s.details.kind != WORKFLOW).collect();
+    let subs: Vec<&Agent> = if a.tool == Tool::Omp {
+        subs.to_vec()
+    } else {
+        direct(subs).into_iter().filter(|s| s.details.kind != WORKFLOW).collect()
+    };
+    let max_sub_lines = if a.tool == Tool::Omp { subs.len() } else { MAX_SUB_LINES };
     Card {
         key: session_key(a),
         walkers: walking.len(),
@@ -1002,14 +1060,16 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool, view: &RunV
         model: d.model.strip_prefix("claude-").unwrap_or(&d.model).to_string(),
         effort: d.effort.clone(),
         branch: d.branch.clone(),
-        tokens: d.tokens.map(|t| [compact(t.input), compact(t.output), compact(t.cache_read + t.cache_write)]),
+        tokens: d.tokens.map(|t| [compact(t.input), compact(t.output), compact(t.cache_read.saturating_add(t.cache_write))]),
         turn: d.last_turn.map(|(ms, _)| duration(ms)).unwrap_or_default(),
         turn_note: note.join(" · "),
         prompt: clip(&d.last_prompt, 140),
         subs: subs
             .iter()
-            .take(MAX_SUB_LINES)
+            .take(max_sub_lines)
             .map(|s| SubLine {
+                key: if a.tool == Tool::Omp { session_key(s) } else { String::new() },
+                depth: if a.tool == Tool::Omp { s.details.depth.unwrap_or(1).saturating_sub(1).min(4) as i32 } else { 0 },
                 kind: if s.details.kind == s.title { String::new() } else { s.details.kind.clone() },
                 // a workflow run says its phase and progress
                 title: if s.action.is_empty() { s.title.clone() } else { format!("{} · {}", s.title, s.action) },
@@ -1017,7 +1077,7 @@ fn card(a: &Agent, subs: &[&Agent], dir: &str, now: i64, open: bool, view: &RunV
                 state_text: state_text(s, now),
             })
             .collect(),
-        more_subs: subs.len().saturating_sub(MAX_SUB_LINES),
+        more_subs: subs.len().saturating_sub(max_sub_lines),
         runs,
     }
 }
@@ -1058,19 +1118,25 @@ fn stop_text(reason: &str) -> String {
     }
 }
 
-/// Command that resumes the session in a terminal. Only for a stopped Codex or OpenCode
-/// session: a Claude session is open in its own terminal, and resuming a session mid-turn
-/// would put two processes writing to it.
+/// Resume idle top-level sessions. OMP takes its own writer lease; a session still
+/// owned by another process isn't overwritten.
 fn resume_argv(a: &Agent) -> Option<[&str; 3]> {
-    // the id goes as an argument: nothing that looks like an option or a path
-    let safe = !a.id.is_empty() && !a.id.starts_with('-') && a.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if a.state != State::Idle || a.parent.is_some() || !safe {
+    if a.state != State::Idle || a.parent.is_some() {
         return None;
     }
+    // Codex and OpenCode take a session ID, never an option or path.
+    let safe_id = || !a.id.is_empty() && !a.id.starts_with('-') && a.id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_');
     match a.tool {
-        Tool::Codex => Some(["codex", "resume", a.id.as_str()]),
-        Tool::OpenCode => Some(["opencode", "-s", a.id.as_str()]),
-        Tool::Claude => None,
+        Tool::Codex if safe_id() => Some(["codex", "resume", a.id.as_str()]),
+        Tool::OpenCode if safe_id() => Some(["opencode", "-s", a.id.as_str()]),
+        Tool::Omp => {
+            if a.details.lease != Lease::Free {
+                return None;
+            }
+            let path = a.log.as_deref().filter(|p| p.is_absolute())?;
+            Some(["omp", "--resume", path.to_str()?])
+        }
+        _ => None,
     }
 }
 
@@ -1111,6 +1177,12 @@ fn state_text(a: &Agent, now: i64) -> String {
         State::Working => elapsed.map_or(tr!("just started").into(), |t| tr!("working for {}", t)),
         State::Waiting if a.detail.is_empty() => tr!("waiting for you").into(),
         State::Waiting => tr!("waiting for you: {}", a.detail),
+        State::Idle if a.tool == Tool::Omp && a.parent.is_none() => match a.details.lease {
+            Lease::Held => tr!("Open in OMP").into(),
+            Lease::Free if a.detail.is_empty() => tr!("OMP session closed").into(),
+            Lease::Free => tr!("OMP session closed · {}", a.detail),
+            Lease::Unknown => tr!("OMP session status unknown").into(),
+        },
         State::Idle => {
             let what = if a.detail.is_empty() { tr!("stopped") } else { a.detail.as_str() };
             match elapsed {
@@ -1155,6 +1227,7 @@ impl AgentsMini {
         let Some(d) = me.detail.as_mut() else { return };
         if d.key != id {
             d.key = id.clone();
+            d.win.global::<AgentDetail>().set_section(0);
             d.shown.clear();
             d.loaded = false;
             d.steps.set_vec(Vec::new());
@@ -1176,6 +1249,7 @@ impl AgentsMini {
                 log::warn!("couldn't show the detail window: {e}");
             }
             crate::popup::set_icon_after_show(&win, icon);
+            crate::popup::label_after_show(&win, crate::popup::Kind::Detail);
             crate::popup::focus(win.window());
         }
     }
@@ -1209,7 +1283,7 @@ impl AgentsMini {
         let now = now_ms();
         let found = self.snap.agents.iter().find(|a| a.tool == key.0 && a.id == key.1).cloned();
         let face = found.as_ref().map(|a| self.face(a.tool, a.state));
-        let timeline = self.snap.timeline.as_ref().filter(|t| t.tool == key.0 && t.id == key.1).map(|t| t.steps.clone());
+        let timeline = self.snap.timeline.as_ref().filter(|t| t.tool == key.0 && t.id == key.1);
         let Some(d) = self.detail.as_mut() else { return };
         let g = d.win.global::<AgentDetail>();
         g.set_gone(found.is_none());
@@ -1225,23 +1299,40 @@ impl AgentsMini {
             g.set_effort(det.effort.as_str().into());
             g.set_branch(det.branch.as_str().into());
             g.set_tokens(det.tokens.map_or(String::new(), |t| {
-                tr!("in {} · out {} · cache {}", compact(t.input), compact(t.output), compact(t.cache_read + t.cache_write))
+                tr!("in {} · out {} · cache {}", compact(t.input), compact(t.output), compact(t.cache_read.saturating_add(t.cache_write)))
             })
             .into());
+            g.set_turn(det.last_turn.map(|(ms, _)| duration(ms)).unwrap_or_default().into());
             g.set_can_resume(resume_argv(a).is_some());
         }
-        if let Some(steps) = timeline {
-            if steps != d.shown {
+        let (result, patch) = timeline.map_or((None, None), |t| (t.result.as_ref(), t.patch.as_ref()));
+        update_artifact(result, g.get_result_text(), |text| g.set_result_text(text));
+        update_artifact(patch, g.get_patch_text(), |text| g.set_patch_text(text));
+        g.set_result_truncated(result.is_some_and(|a| a.truncated));
+        g.set_patch_truncated(patch.is_some_and(|a| a.truncated));
+        if (g.get_section() == 1 && result.is_none()) || (g.get_section() == 2 && patch.is_none()) {
+            g.set_section(0);
+        }
+        if let Some(timeline) = timeline {
+            let steps = &timeline.steps;
+            if *steps != d.shown {
                 let today = chrono::Local::now().date_naive();
                 let rows: Vec<AgentStep> = steps.iter().rev().map(|s| step_row(s, today)).collect();
                 // the date only takes room when some step is from another day
                 g.set_dated_steps(rows.iter().any(|r| r.time.len() > 5));
                 d.steps.set_vec(rows);
-                d.shown = steps;
+                d.shown.clone_from(steps);
             }
             d.loaded = true;
         }
         g.set_loading(!d.loaded && found.is_some());
+    }
+}
+
+fn update_artifact(artifact: Option<&Artifact>, current: slint::SharedString, set: impl FnOnce(slint::SharedString)) {
+    let text = artifact.map_or("", |a| a.text.as_ref());
+    if current.as_str() != text {
+        set(text.into());
     }
 }
 
@@ -1580,7 +1671,7 @@ mod tests {
     }
 
     #[test]
-    fn only_resumes_stopped_codex_and_opencode_sessions() {
+    fn only_resumes_idle_top_level_sessions_of_supported_tools() {
         let of = |tool: Tool, state: State, id: &str| Agent { tool, id: id.into(), ..agent(state, 1, "") };
         assert_eq!(resume_argv(&of(Tool::Codex, State::Idle, "01a1-c8")), Some(["codex", "resume", "01a1-c8"]));
         assert_eq!(resume_argv(&of(Tool::OpenCode, State::Idle, "ses_f6e8")), Some(["opencode", "-s", "ses_f6e8"]));
@@ -1590,6 +1681,17 @@ mod tests {
         assert_eq!(resume_argv(&of(Tool::Codex, State::Idle, "a b")), None);
         let sub = Agent { parent: Some("p".into()), ..of(Tool::Codex, State::Idle, "abc") };
         assert_eq!(resume_argv(&sub), None);
+        let path = std::env::temp_dir().join("omp session.jsonl");
+        let mut omp = of(Tool::Omp, State::Idle, "abc");
+        omp.log = Some(path.clone());
+        omp.details.lease = Lease::Free;
+        assert_eq!(resume_argv(&omp), Some(["omp", "--resume", path.to_str().unwrap()]));
+        for lease in [Lease::Held, Lease::Unknown] {
+            let mut blocked = omp.clone();
+            blocked.details.lease = lease;
+            assert_eq!(resume_argv(&blocked), None);
+        }
+        assert_eq!(resume_argv(&Agent { state: State::Working, ..omp }), None);
     }
 
     #[test]

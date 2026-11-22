@@ -120,13 +120,16 @@ hub-app-rust/
                               e só com a aba de Configurações aberta
       chatter.rs, lines.toml  diretor da conversa entre mascotes e as falas genéricas
       bind.rs                 callbacks da tela e eventos da janela
-    instance.rs, instance/    instância única (a 2ª só pede para abrir): socket Unix no Linux,
-                              named pipe no Windows
+    instance.rs, instance/    instância única (a 2ª só pede para abrir ou alternar): socket
+                              Unix no Linux, named pipe no Windows. No Linux o mesmo socket
+                              responde `status`/`subscribe` com o estado do hub em JSON
+                              (`StatusFeed`), para barras e scripts
     ui.rs                     tipos gerados do Slint
     tray.rs, tray/            ícone na bandeja com a mascote do app em pior estado: SNI (ksni)
                               no Linux, área de notificação (tray-icon) no Windows
     popup.rs                  popup de bandeja: posição, fora da barra de tarefas, fade;
-                              X11/XWayland no Linux, Win32 no Windows
+                              X11/XWayland no Linux, Win32 no Windows; no Hyprland, Wayland
+                              nativo com a posição pedida ao socket dele (`popup/hyprland.rs`)
     core/
       miniapp.rs              o trait MiniApp, o Host (serviços) e o Reporter (recado de
                               uma ação em segundo plano para o app que a pediu)
@@ -178,7 +181,7 @@ hub-app-rust/
                               mede uns poucos pids (`usage`, `Meter`) para o `hub/usage.rs`
       agents/                 sessões dos codificadores de IA e o estado de cada uma, lido dos
                               arquivos que as ferramentas já gravam (só leitura). Uma fonte por
-                              ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`) atrás do trait
+                              ferramenta (`claude.rs`, `codex.rs`, `opencode.rs`, `omp.rs`) atrás do trait
                               `Source`; o que cada uma sabe a mais vai em `Details` (opcional).
                               A linha do tempo (`Timeline`: pedidos, respostas e ferramentas,
                               cortados) só é lida da sessão aberta no detalhe e não vai para
@@ -475,7 +478,7 @@ Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se 
 - [x] Mini-app CD Player (MPRIS: faixa, progresso, comandos, notificação opcional)
 - [x] Mini-app Assinaturas de IA (limites e créditos por conta)
 - [x] Mini-apps Portas abertas e To-do rápido
-- [x] Mini-app Agentes de IA (Claude Code, Codex e OpenCode, só leitura)
+- [x] Mini-app Agentes de IA (Claude Code, Codex, OpenCode e Oh My Pi, só leitura)
 - [x] Bandeja com a mascote no humor do hub, notificações, instância única
 - [x] Grade com arrastar/redimensionar, visuais da janela, temas claros, 31 mascotes
 - [x] Temas, visuais, fundos e sprites por arquivo (`skin/user.rs`, `mascot/file.rs`) e mascotes importadas de PNG
@@ -568,7 +571,9 @@ Campos sem migração (têm padrão): `name` (nome exibido, gravado ao abrir se 
 **Fase 2** (resto) — widget flutuante na área de trabalho (layer-shell no KDE/wlroots;
 janela comum no GNOME).
 
-**Fase 3 (talvez)** — expor o hub por D-Bus para cascas nativas (plasmoid, extensão GNOME).
+**Fase 3 (em parte)** — o estado do hub para cascas nativas sai pelo socket da instância
+(`status`/`subscribe`, uma linha de JSON; ver `instance.rs`). Falta, talvez, o mesmo por D-Bus
+(plasmoid, extensão GNOME).
 
 ## Decisões e por quês
 
@@ -586,6 +591,8 @@ janela comum no GNOME).
 | Threads em vez de tokio | Poucos provedores com polling/eventos não justificam um runtime async |
 | Mini-apps compilados na fase 1 | Contrato de plugin nasce de apps reais (princípio 6) |
 | Popup de bandeja via X11/XWayland | O Wayland não deixa o app escolher onde a janela abre. Com `$DISPLAY` o hub roda como cliente X11: abre junto do ícone clicado, sem moldura, fora da barra de tarefas e some ao perder o foco ou com Esc. `MINIUTILS_NATIVE_WAYLAND=1` força Wayland nativo (sem posição) |
+| Popup no Hyprland pelo socket do compositor | O Hyprland aceita o que o Wayland não dá: uma regra de janela registrada em tempo de execução (`eval`) faz o popup nascer flutuando, em todas as áreas e na posição junto da bandeja, sem XWayland; monitores, barras e ponteiro vêm do mesmo socket. A regra é refeita a cada abertura (recarregar a config do Hyprland apaga as regras de tempo de execução). Enquanto o popup está na tela, o hub troca `input:follow_mouse` para 2 (foco só no clique) e devolve o valor ao esconder ou sair: com o foco seguindo o mouse, o popup sumia só de o ponteiro sair de cima dele. Precisa da API Lua (0.56+); versões antigas seguem pelo XWayland |
+| Estado do hub pelo socket da instância | Uma barra (Quickshell, Waybar) lê socket Unix direto; um JSON por linha no canal que já existe dispensa D-Bus e dependência nova. O hub só publica quando o estado muda, e um assinante travado é descartado |
 | Instância única por socket | Abrir de novo (atalho, autostart) só traz a janela da instância que já roda |
 | `ksni` para a bandeja | StatusNotifierItem puro em Rust (D-Bus); funciona em KDE, XFCE, Cinnamon, MATE e GNOME com AppIndicator |
 | Uma implementação por sistema atrás da mesma interface (`linux.rs` / `windows.rs`) | O Linux segue lendo `/proc`, D-Bus e X11 direto (leve e já testado); o Windows ganha o equivalente nativo (`sysinfo`, `tray-icon`, Win32/WinRT pelo crate `windows`) sem camada genérica no meio. As regras estão em "Plataformas" no AGENTS.md |

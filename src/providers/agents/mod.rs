@@ -1,6 +1,6 @@
 //! Agents running in the AI coding tools.
 //!
-//! Each tool has its own source (`claude.rs`, `codex.rs`, `opencode.rs`), which knows where
+//! Each tool has its own source (`claude.rs`, `codex.rs`, `opencode.rs`, `omp.rs`), which knows where
 //! it keeps its state and what can be taken from there. They all implement `Source` and
 //! return `Agent`: the basics (state, title, folder) are required; the rest goes in
 //! `Details`, with optional fields each source fills as far as the tool reports. The screen
@@ -20,6 +20,9 @@
 mod claude;
 mod codex;
 mod opencode;
+mod omp;
+
+pub(crate) use omp::session_leases;
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -54,6 +57,7 @@ pub enum Tool {
     Claude,
     Codex,
     OpenCode,
+    Omp,
 }
 
 impl Tool {
@@ -62,6 +66,7 @@ impl Tool {
             Tool::Claude => "Claude",
             Tool::Codex => "Codex",
             Tool::OpenCode => "OpenCode",
+            Tool::Omp => "OMP",
         }
     }
 }
@@ -84,6 +89,15 @@ pub struct Tokens {
     pub output: u64,
     pub cache_read: u64,
     pub cache_write: u64,
+}
+
+/// OMP's writer lease is independent of whether a turn is running.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Lease {
+    #[default]
+    Unknown,
+    Held,
+    Free,
 }
 
 /// What a tool knows beyond the basics about a session. All optional ("" or `None` = the
@@ -114,6 +128,9 @@ pub struct Details {
     pub phase: String,
     /// Workflow run: its phases in order (empty for anything else).
     pub phases: Vec<Phase>,
+    /// Only checked for top-level OMP sessions.
+    #[serde(skip)]
+    pub lease: Lease,
 }
 
 /// `Details::kind` of a workflow run (Claude Code): an entry under the session that stands
@@ -182,6 +199,15 @@ pub struct Timeline {
     pub tool: Tool,
     pub id: String,
     pub steps: Vec<Step>,
+    pub result: Option<Artifact>,
+    pub patch: Option<Artifact>,
+}
+
+/// A bounded, plain-text preview of a subagent's local output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    pub text: std::sync::Arc<str>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -233,6 +259,7 @@ pub struct AgentsProvider {
     /// Last timeline read: from which file, its (size, mtime) and the steps. Only re-read
     /// when the file changes.
     timeline: Option<(PathBuf, (u64, i64), Vec<Step>)>,
+    artifacts: omp::Artifacts,
 }
 
 impl Default for AgentsProvider {
@@ -242,8 +269,10 @@ impl Default for AgentsProvider {
                 Box::new(claude::Claude::default()),
                 Box::new(codex::Codex::default()),
                 Box::new(opencode::OpenCode),
+                Box::new(omp::Omp::default()),
             ],
             timeline: None,
+            artifacts: omp::Artifacts::default(),
         }
     }
 }
@@ -270,11 +299,18 @@ impl AgentsProvider {
     fn timeline_of(&mut self, agents: &[Agent]) -> Option<Timeline> {
         let Some((tool, id)) = watched() else {
             self.timeline = None;
+            self.artifacts = omp::Artifacts::default();
             return None;
         };
         let a = agents.iter().find(|a| a.tool == tool && a.id == id)?;
         let steps = self.steps_of(a).unwrap_or_default();
-        Some(Timeline { tool, id, steps })
+        let (result, patch) = if a.tool == Tool::Omp && a.parent.is_some() {
+            self.artifacts.read(a.log.as_deref())
+        } else {
+            self.artifacts = omp::Artifacts::default();
+            (None, None)
+        };
+        Some(Timeline { tool, id, steps, result, patch })
     }
 
     /// Steps of `a`'s conversation; `None` if it has no log or the log can't be read.
@@ -283,7 +319,7 @@ impl AgentsProvider {
         let steps = match a.tool {
             // database: the query is small and the main file doesn't even change on every write (WAL)
             Tool::OpenCode => opencode::timeline(&path, &a.id),
-            Tool::Claude | Tool::Codex => {
+            Tool::Claude | Tool::Codex | Tool::Omp => {
                 let meta = std::fs::metadata(&path).ok()?;
                 let stamp = (meta.len(), mtime_ms(&meta));
                 match &self.timeline {
@@ -293,10 +329,11 @@ impl AgentsProvider {
                         // start cut in the middle of a line: that line is left out
                         let text =
                             if meta.len() > TIMELINE_TAIL { text.split_once('\n').map_or("", |(_, r)| r) } else { &text };
-                        let steps = if a.tool == Tool::Claude {
-                            claude::timeline(text, a.parent.is_some())
-                        } else {
-                            codex::timeline(text)
+                        let steps = match a.tool {
+                            Tool::Claude => claude::timeline(text, a.parent.is_some()),
+                            Tool::Codex => codex::timeline(text),
+                            Tool::Omp => omp::timeline(text),
+                            Tool::OpenCode => unreachable!("OpenCode has a database timeline"),
                         };
                         self.timeline = Some((path.clone(), stamp, steps.clone()));
                         steps
@@ -467,13 +504,15 @@ mod tests {
             details: Details::default(),
             log: None,
         };
-        let mut provider = AgentsProvider { sources: Vec::new(), timeline: None };
+        let mut provider = AgentsProvider { sources: Vec::new(), timeline: None, artifacts: omp::Artifacts::default() };
         // the only test that watches: nothing else reads `WATCH` in the tests
         watch(Some((Tool::Claude, agent.id.clone())));
         let timeline = provider.timeline_of(std::slice::from_ref(&agent));
         let other = provider.timeline_of(&[]);
         watch(None);
-        assert_eq!(timeline, Some(Timeline { tool: Tool::Claude, id: agent.id.clone(), steps: Vec::new() }));
+        assert_eq!(timeline, Some(Timeline {
+            tool: Tool::Claude, id: agent.id.clone(), steps: Vec::new(), result: None, patch: None,
+        }));
         assert_eq!(other, None, "a session that is not in the list has no timeline");
     }
 

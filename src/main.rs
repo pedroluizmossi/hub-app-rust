@@ -27,7 +27,7 @@ fn help() -> String {
     out.push_str(tr!("usage:"));
     out.push('\n');
     for line in [
-        tr!("miniutils [--hidden] [--tab <name>] [--plugin-dev <folder>]"),
+        tr!("miniutils [--hidden] [--toggle] [--tab <name>] [--plugin-dev <folder>]"),
         tr!("miniutils --import-mascot <folder>"),
         tr!("miniutils --check-mascot <folder or .toml>"),
         "miniutils --quit",
@@ -41,6 +41,7 @@ fn help() -> String {
     out.push('\n');
     for (flag, desc) in [
         ("--hidden", tr!("starts in the tray only (for autostart)")),
+        ("--toggle", tr!("hides the window if it is open, shows it otherwise (for a\nkeyboard shortcut); with --tab, shows it on that page")),
         (
             tr!("--tab <name>"),
             tr!("opens on a panel page (by its name or the name of an app on it,\ne.g. General, docker), on apps (settings) or on store"),
@@ -125,6 +126,8 @@ fn dirs_text() -> String {
 struct Cli {
     /// `--hidden`: in the tray only (autostart).
     hidden: bool,
+    /// `--toggle`: hide the window if it is open (a keyboard shortcut).
+    toggle: bool,
     /// `--tab <name>`: the page to open on.
     tab: Option<String>,
     /// `--plugin-dev <folder>`, as given (it may repeat).
@@ -162,6 +165,10 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
         let command = match arg.as_str() {
             "--hidden" => {
                 cli.hidden = true;
+                None
+            }
+            "--toggle" => {
+                cli.toggle = true;
                 None
             }
             "--tab" => {
@@ -275,12 +282,12 @@ fn main() -> anyhow::Result<()> {
     if dev {
         core::plugins::set_dev(dev_dirs);
     }
-    let Cli { hidden, tab, .. } = cli;
+    let Cli { hidden, toggle, tab, .. } = cli;
 
     // is there an instance already? it gets the request and this one exits, with no window or tray
     let socket = instance::socket_path();
     let mut claim_error = None;
-    let server = match instance::claim(&socket, instance::message(tab.as_deref(), hidden).as_deref()) {
+    let server = match instance::claim(&socket, instance::message(tab.as_deref(), hidden, toggle).as_deref()) {
         Ok(instance::Role::Second) if dev => {
             eprintln!(
                 "{}",
@@ -398,8 +405,9 @@ mod tests {
         let cli = parse_args(&args("--hidden --tab apps --plugin-dev a --plugin-dev b")).unwrap();
         assert_eq!(
             cli,
-            Cli { hidden: true, tab: Some("apps".into()), dev_dirs: vec!["a".into(), "b".into()], command: None }
+            Cli { hidden: true, toggle: false, tab: Some("apps".into()), dev_dirs: vec!["a".into(), "b".into()], command: None }
         );
+        assert!(parse_args(&args("--toggle --tab apps")).unwrap().toggle);
         // a page name with spaces comes as one argument
         let cli = parse_args(&["--tab".to_string(), "My page".to_string()]).unwrap();
         assert_eq!(cli.tab.as_deref(), Some("My page"));

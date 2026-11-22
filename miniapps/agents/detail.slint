@@ -35,6 +35,7 @@ export global AgentDetail {
     in property <string> branch;
     // "input 950 · output 45.3k · cache 1.2M"
     in property <string> tokens;
+    in property <string> turn;
     // newest to oldest
     in property <[AgentStep]> steps;
     // some step is from another day: its time has the date, and the column is wider
@@ -44,6 +45,12 @@ export global AgentDetail {
     // the session left the list (closed or got too old)
     in property <bool> gone;
     in property <bool> can-resume;
+    // Section 0: conversation; 1: saved result; 2: patch preview.
+    in-out property <int> section;
+    in property <string> result-text;
+    in property <string> patch-text;
+    in property <bool> result-truncated;
+    in property <bool> patch-truncated;
 
     callback open-dir();
     callback open-terminal();
@@ -279,12 +286,13 @@ export component AgentDetailWindow inherits Window {
                 }
 
                 // chips and tokens (whatever the tool reports)
-                if AgentDetail.model != "" || AgentDetail.effort != "" || AgentDetail.branch != "": HorizontalLayout {
+                if AgentDetail.model != "" || AgentDetail.effort != "" || AgentDetail.branch != "" || AgentDetail.turn != "": HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
                     if AgentDetail.model != "": DetailChip { label: @tr("model"); text: AgentDetail.model; ink: t.visor; }
                     if AgentDetail.effort != "": DetailChip { label: @tr("effort"); text: AgentDetail.effort; ink: t.fur; }
                     if AgentDetail.branch != "": DetailChip { label: "branch"; text: AgentDetail.branch; ink: t.sub; }
+                    if AgentDetail.turn != "": DetailChip { label: @tr("last turn"); text: AgentDetail.turn; ink: t.sub; }
                 }
                 if AgentDetail.tokens != "": Text {
                     text: AgentDetail.tokens;
@@ -295,7 +303,29 @@ export component AgentDetailWindow inherits Window {
                 }
 
                 Rectangle { height: 1px; background: t.muted.with-alpha(0.5); }
-                Text {
+                if AgentDetail.result-text != "" || AgentDetail.patch-text != "": HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    TextButton {
+                        text: @tr("Conversation");
+                        ink: AgentDetail.section == 0 ? t.visor : t.sub;
+                        font-size: 13px * Skin.text-scale;
+                        clicked => { AgentDetail.section = 0; }
+                    }
+                    if AgentDetail.result-text != "": TextButton {
+                        text: @tr("Saved result");
+                        ink: AgentDetail.section == 1 ? t.visor : t.sub;
+                        font-size: 13px * Skin.text-scale;
+                        clicked => { AgentDetail.section = 1; }
+                    }
+                    if AgentDetail.patch-text != "": TextButton {
+                        text: @tr("Patch");
+                        ink: AgentDetail.section == 2 ? t.visor : t.sub;
+                        font-size: 13px * Skin.text-scale;
+                        clicked => { AgentDetail.section = 2; }
+                    }
+                }
+                if AgentDetail.section == 0: Text {
                     text: @tr("WHAT IT IS DOING");
                     color: t.sub;
                     font-family: Skin.font-mono;
@@ -304,7 +334,7 @@ export component AgentDetailWindow inherits Window {
                 }
 
                 // steps, newest on top
-                ScrollView {
+                if AgentDetail.section == 0: ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
                         alignment: start;
@@ -315,6 +345,28 @@ export component AgentDetailWindow inherits Window {
                             color: t.sub;
                             font-size: 13px * Skin.text-scale;
                             wrap: word-wrap;
+                        }
+                    }
+                }
+
+                if AgentDetail.section != 0: ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        if AgentDetail.section == 1 ? AgentDetail.result-truncated : AgentDetail.patch-truncated: Text {
+                            text: @tr("Preview limited to the first 64 KiB.");
+                            color: t.warn;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: AgentDetail.section == 1 ? AgentDetail.result-text : AgentDetail.patch-text;
+                            color: t.text;
+                            font-family: Skin.font-mono;
+                            font-size: 12px * Skin.text-scale;
+                            wrap: char-wrap;
                         }
                     }
                 }

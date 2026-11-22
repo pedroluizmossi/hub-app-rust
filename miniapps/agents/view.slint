@@ -13,6 +13,8 @@ import { Mascot, Counter, TextButton, Icon } from "../../ui/widgets.slint";
 
 // A subagent on the card of the session that spawned it.
 export struct AgentSub {
+    key: string,
+    depth: int,
     // type ("Explore", "web-fetch"…; "" = unknown)
     kind: string,
     title: string,
@@ -86,7 +88,7 @@ export struct AgentRow {
     sub: bool,
     // the tool mascot, already in the mood of the state
     mascot: image,
-    // idle Codex or OpenCode session: can be resumed in a terminal
+    // idle session with terminal resume support
     can-resume: bool,
     // clicked card: shows the buttons
     open: bool,
@@ -141,6 +143,7 @@ export global AgentsApp {
     callback open-dir(string);        // folder in the file manager
     callback open-terminal(string);   // terminal in the folder
     callback resume(string);          // resumes the session in a terminal
+    callback resume-checked(string, bool);
     callback details(string);         // opens the session detail window
     callback toggle-run(string);      // expands or collapses a workflow run (gets its `key`)
     callback run-phase(string, int);  // lists the agents of phase `index` of run `key`
@@ -584,12 +587,14 @@ component Row inherits Rectangle {
         }
 
         // subagents: state dot, type, what it does and for how long
-        for s[i] in a.subs: HorizontalLayout {
+        for s[i] in a.subs: Rectangle {
+          x: 0;
+          y: chips-h + stats-h + prompt-h + 4px + i * sub-h;
+          height: sub-h;
+          width: parent.width;
+          HorizontalLayout {
             property <color> dot: s.state == "working" ? t.ok : t.muted;
-            x: 0;
-            y: chips-h + stats-h + prompt-h + 4px + i * sub-h;
-            width: parent.width;
-            height: sub-h;
+            padding-left: s.depth * 12px;
             spacing: 6px;
             VerticalLayout {
                 alignment: center;
@@ -620,6 +625,16 @@ component Row inherits Rectangle {
                 font-size: 11px * Skin.text-scale;
                 vertical-alignment: center;
             }
+          }
+          if s.key != "": Rectangle {
+            accessible-role: button;
+            accessible-label: s.title;
+            accessible-action-default => { AgentsApp.details(s.key); }
+            TouchArea {
+              mouse-cursor: pointer;
+              clicked => { AgentsApp.details(s.key); }
+            }
+          }
         }
         if !compact && a.more-subs > 0: Text {
             x: 12px;
@@ -798,7 +813,7 @@ export component AgentsView inherits Rectangle {
         background: t.bg1.mix(t.bg0, 0.6);
 
         if AgentsApp.rows.length == 0: Text {
-            text: AgentsApp.missing ? @tr("Could not find Claude Code, Codex or OpenCode on this machine.") : @tr("No open or recent sessions.");
+            text: AgentsApp.missing ? @tr("Could not find Claude Code, Codex, OpenCode or OMP on this machine.") : @tr("No open or recent sessions.");
             color: t.sub;
             font-family: Skin.font-mono;
             font-size: 13px * Skin.text-scale;

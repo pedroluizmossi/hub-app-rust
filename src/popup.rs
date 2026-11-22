@@ -5,11 +5,37 @@
 //! (XFCE, Cinnamon, MATE). With `MINIUTILS_NATIVE_WAYLAND=1` it stays on native Wayland:
 //! frameless and closing when it loses focus, but wherever the compositor puts it.
 //!
+//! Hyprland is the exception: its own socket takes the position, so there the hub is a
+//! native Wayland client and still opens next to the tray (see `popup/hyprland.rs`).
+//!
 //! On Windows the window positions itself freely; what changes is how to ask for "out of
 //! the taskbar" and the fade opacity (see the `#[cfg(windows)]` blocks).
 
 use slint::winit_030::{WinitWindowAccessor, winit};
 use winit::dpi::PhysicalPosition;
+
+#[cfg(target_os = "linux")]
+mod hyprland;
+
+/// App id of every window on Wayland (the class a compositor rule matches, and the name of
+/// the desktop entry the taskbar takes the icon from).
+#[cfg(target_os = "linux")]
+const APP_ID: &str = "miniutils";
+
+/// What a window is. On Hyprland each one is tagged with it (`miniutils-popup`,
+/// `miniutils-app`, `miniutils-detail`), so a window rule can tell them apart
+/// (`match = { tag = "miniutils-detail" }`); the other systems have no such label.
+// on Windows nothing reads the hub's own kinds (they are set where the label is applied)
+#[cfg_attr(windows, allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// The hub as a tray popup.
+    Popup,
+    /// The hub as a desktop app.
+    App,
+    /// A window opened by a mini-app (terminal, agent details, mascots).
+    Detail,
+}
 
 /// Distance between the popup and the clicked point / screen edges.
 const GAP: i32 = 10;
@@ -24,12 +50,14 @@ pub fn select_backend() -> anyhow::Result<bool> {
     Ok(true)
 }
 
-/// Picks the backend (winit + software renderer) and, if possible, X11.
+/// Picks the backend (winit + software renderer): native Wayland on Hyprland, which places
+/// the popup through its socket; otherwise X11 if possible.
 /// Returns `true` when the popup can be positioned.
 #[cfg(target_os = "linux")]
 pub fn select_backend() -> anyhow::Result<bool> {
     let native_wayland = std::env::var_os("MINIUTILS_NATIVE_WAYLAND").is_some();
-    let x11 = std::env::var_os("DISPLAY").is_some() && !native_wayland;
+    let hyprland = !native_wayland && hyprland::detect();
+    let x11 = std::env::var_os("DISPLAY").is_some() && !native_wayland && !hyprland;
     let mut selector = slint::BackendSelector::new().backend_name("winit-software".into());
     if x11 {
         use winit::platform::x11::EventLoopBuilderExtX11;
@@ -38,7 +66,11 @@ pub fn select_backend() -> anyhow::Result<bool> {
         selector = selector.with_winit_event_loop_builder(builder);
     }
     selector.select()?;
-    Ok(x11)
+    if !x11 {
+        // winit sets no app id by itself on Wayland (on X11 the class comes from the program name)
+        slint::set_xdg_app_id(APP_ID)?;
+    }
+    Ok(x11 || hyprland)
 }
 
 /// Rectangle in physical pixels.
@@ -266,7 +298,7 @@ fn to_physical((x, y): (i32, i32), scale: f64) -> (i32, i32) {
     ((x as f64 * scale).round() as i32, (y as f64 * scale).round() as i32)
 }
 
-fn contains(m: &Monitor, (x, y): (i32, i32)) -> bool {
+pub(crate) fn contains(m: &Monitor, (x, y): (i32, i32)) -> bool {
     x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h
 }
 
@@ -274,6 +306,13 @@ fn contains(m: &Monitor, (x, y): (i32, i32)) -> bool {
 /// tray reports it; with `Place::Tray` and no anchor, it goes to the bottom-right corner,
 /// where the tray usually is. `last`: where the window was left (`Place::Last`).
 pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>, place: Place, last: Option<(i32, i32)>) {
+    #[cfg(target_os = "linux")]
+    if hyprland::active() {
+        if let Some(title) = title(window) {
+            hyprland_apply(window, &title, HYPRLAND_DESKTOP.get(), Some((anchor, place, last)));
+        }
+        return;
+    }
     window.with_winit_window(|w| {
         let size = w.outer_size();
         let handles: Vec<_> = w.available_monitors().collect();
@@ -295,6 +334,107 @@ pub fn place(window: &slint::Window, anchor: Option<(i32, i32)>, place: Place, l
             w.set_outer_position(PhysicalPosition::new(x, y));
         }
     });
+}
+
+/// Called right before the hub window is shown, while it is still unmapped: lets the
+/// compositor know where it goes, so it opens in place. Only Hyprland takes that (a window
+/// rule); everywhere else the window is moved after it is shown (`place`).
+#[cfg(target_os = "linux")]
+pub fn prepare(window: &slint::Window, title: &str, anchor: Option<(i32, i32)>, place: Place, last: Option<(i32, i32)>, desktop: bool) {
+    if hyprland::active() {
+        HYPRLAND_DESKTOP.set(desktop);
+        hyprland_apply(window, title, desktop, Some((anchor, place, last)));
+    }
+}
+
+/// On Windows the window is placed after it is shown (`place`).
+#[cfg(windows)]
+pub fn prepare(_: &slint::Window, _: &str, _: Option<(i32, i32)>, _: Place, _: Option<(i32, i32)>, _: bool) {}
+
+/// Where the pointer is, in the coordinates `place` takes as the anchor, when the system
+/// tells: the anchor for a tray host that reports no click position. Only Hyprland does.
+#[cfg(target_os = "linux")]
+pub fn pointer() -> Option<(i32, i32)> {
+    hyprland::active().then(hyprland::pointer).flatten()
+}
+
+/// Windows reports the click position itself (`tray/windows.rs`).
+#[cfg(windows)]
+pub fn pointer() -> Option<(i32, i32)> {
+    None
+}
+
+/// The hub window went away (hidden, closed or the app is quitting): gives back whatever
+/// the system was asked to do differently while it was on screen. On Hyprland, the focus
+/// follows the pointer again (see `hyprland::hold_focus`).
+#[cfg(target_os = "linux")]
+pub fn released() {
+    if hyprland::active() {
+        hyprland::hold_focus(false);
+    }
+}
+
+/// Nothing is held on Windows.
+#[cfg(windows)]
+pub fn released() {}
+
+/// Labels a window just shown with what it is (see `Kind`). The native window only exists
+/// once the event loop has run, so it is tried again shortly after, as `set_icon_after_show`.
+#[cfg(target_os = "linux")]
+pub fn label_after_show<C: slint::ComponentHandle + 'static>(win: &C, kind: Kind) {
+    if !hyprland::active() {
+        return;
+    }
+    let weak = win.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
+        if let Some(win) = weak.upgrade()
+            && let Some(title) = title(win.window())
+        {
+            hyprland::tag(&title, kind);
+        }
+    });
+}
+
+/// Windows has no label for a rule to match.
+#[cfg(windows)]
+pub fn label_after_show<C: slint::ComponentHandle + 'static>(_: &C, _: Kind) {}
+
+/// The title of the native window (`None` before it exists).
+#[cfg(target_os = "linux")]
+fn title(window: &slint::Window) -> Option<String> {
+    window.with_winit_window(|w| w.title())
+}
+
+/// Logical size of the window (`None` while it has none: never laid out).
+#[cfg(target_os = "linux")]
+fn logical_size(window: &slint::Window) -> Option<(i32, i32)> {
+    let size = window.size().to_logical(window.scale_factor());
+    let (w, h) = (size.width.round() as i32, size.height.round() as i32);
+    (w > 0 && h > 0).then_some((w, h))
+}
+
+/// Where the hub window opens: `anchor`, `place` and `last`, as in `place`.
+#[cfg(target_os = "linux")]
+type Destination = (Option<(i32, i32)>, Place, Option<(i32, i32)>);
+
+#[cfg(target_os = "linux")]
+thread_local! {
+    /// The hub is a desktop app (as last told by `set_taskbar` or `prepare`): on Hyprland
+    /// `place` must know, because a desktop app is tiled and is not moved.
+    static HYPRLAND_DESKTOP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The hub window on Hyprland: popup or desktop app and, with `to`, where it opens.
+#[cfg(target_os = "linux")]
+fn hyprland_apply(window: &slint::Window, title: &str, desktop: bool, to: Option<Destination>) {
+    let size = logical_size(window);
+    let target = match (to, size, desktop) {
+        (Some((anchor, place, last)), Some(size), false) => hyprland::target(place, anchor, size, last),
+        _ => None,
+    };
+    let rule = format!("{}-popup", crate::instance::channel_name());
+    hyprland::apply(&hyprland::Request { title, class: APP_ID, size, desktop, target }, &rule);
+    hyprland::tag(title, if desktop { Kind::App } else { Kind::Popup });
 }
 
 /// Work area of a monitor (without the taskbar), physical. Windows gives it per monitor.
@@ -331,9 +471,14 @@ fn desktop_work_area() -> Option<Rect> {
     None
 }
 
-/// Top-left corner of the window, physical pixels (`None` before it exists, or on native
-/// Wayland, which does not tell).
+/// Top-left corner of the window, in the pixels `place` works in (`None` before it exists,
+/// or on native Wayland, which does not tell).
 pub fn outer_position(window: &slint::Window) -> Option<(i32, i32)> {
+    // Hyprland tells (in its layout coordinates, the ones `place` works in there)
+    #[cfg(target_os = "linux")]
+    if hyprland::active() {
+        return title(window).and_then(|t| hyprland::position(&t));
+    }
     window.with_winit_window(|w| w.outer_position().ok().map(|p| (p.x, p.y))).flatten()
 }
 
@@ -370,6 +515,11 @@ pub fn drag_resize(window: &slint::Window, dir: &str) {
 
 /// Asks for focus (the popup needs it to close when the user clicks outside).
 pub fn focus(window: &slint::Window) {
+    // on Wayland a client cannot take the focus by itself; Hyprland gives it when asked
+    #[cfg(target_os = "linux")]
+    if hyprland::active() && title(window).is_some_and(|t| hyprland::focus(&t)) {
+        return;
+    }
     window.with_winit_window(|w| w.focus_window());
 }
 
@@ -479,6 +629,15 @@ fn x11_id(w: &winit::window::Window) -> Option<u32> {
 /// workspace. Desktop app: the other way round, a normal window (EWMH, X11).
 #[cfg(target_os = "linux")]
 pub fn set_taskbar(window: &slint::Window, desktop: bool) {
+    if hyprland::active() {
+        HYPRLAND_DESKTOP.set(desktop);
+        // a popup on screen closes on a click outside, not when the pointer leaves it
+        hyprland::hold_focus(!desktop);
+        if let Some(title) = title(window) {
+            hyprland_apply(window, &title, desktop, None);
+        }
+        return;
+    }
     let done = window.with_winit_window(|w| {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         let Ok(handle) = w.window_handle() else { return };

@@ -107,10 +107,12 @@ impl Hub {
         });
         ui.on_quit(|| {
             with_hub(|h| h.remember_window());
+            popup::released();
             let _ = slint::quit_event_loop();
         });
         ui.on_toggle_requested(|x, y| with_hub(|h| h.toggle((x != 0 || y != 0).then_some((x, y)))));
         ui.on_show_requested(|tab| with_hub(|h| h.show_from_command(&tab)));
+        ui.on_toggle_window_requested(|tab| with_hub(|h| h.toggle_from_command(&tab)));
 
         // popup: clicked outside (lost focus) -> hide
         {

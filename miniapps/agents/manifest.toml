@@ -1,13 +1,13 @@
 id = "cyber.agents"
 name = "AI agents"
-description = "Claude Code, Codex and OpenCode sessions: who is working, who is waiting for you and who is done."
+description = "Claude Code, Codex, OpenCode and OMP sessions: who is working, who is waiting for you and who is done."
 icon = "robo"
 api = 1
 uses = ["agents"]
 
 [permissions]
-# only to resume an idle session in a terminal (`codex resume <id>`, `opencode -s <id>`)
-exec = ["codex", "opencode"]
+# Only to resume an idle session in a terminal.
+exec = ["codex", "opencode", "omp"]
 
 [[settings]]
 key = "theme"

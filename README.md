@@ -49,7 +49,7 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 | **To-do rápido** | Lista curta de tarefas: Enter acrescenta, clique marca como feita, e a mascote comemora quando a lista zera. | desligado |
 | **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
 | **Mascotes** | Suas mascotes num lugar só: importa uma pasta ou um `.zip` baixado (mascotes em código e sprites PNG), renomeia, escolhe a animação de cada humor, as cores que seguem o tema, onde os subagentes param, e coloca a mascote num app, numa página ou na bandeja. | desligado |
-| **Agentes de IA** | Sessões do Claude Code, Codex e OpenCode: quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes e os workflows do Claude Code (fases e agentes de cada uma). Abre a pasta, um terminal ou retoma a sessão. | desligado |
+| **Agentes de IA** | Sessões do Claude Code, Codex, OpenCode e Oh My Pi (OMP): quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes e os workflows do Claude Code (fases e agentes de cada uma). Abre a pasta, um terminal ou retoma a sessão. | desligado |
 
 Os apps desligados se ligam em **Configurações › Apps**.
 
@@ -63,9 +63,19 @@ Os apps desligados se ligam em **Configurações › Apps**.
 Cada sessão é um cartão com o que a ferramenta informa (no Claude: modelo, esforço, branch,
 tokens, duração do último turno, último pedido e os subagentes), e a última ferramenta usada
 aparece sem o comando inteiro. Clicar no cartão mostra as opções: abrir a pasta do projeto,
-abrir um terminal nela e, numa sessão parada do Codex ou do OpenCode, retomar a sessão. O app
-só lê o que as ferramentas já gravam no disco, sem mexer na configuração delas, e pode
+abrir um terminal nela e, numa sessão livre do Codex, OpenCode ou OMP, retomar a sessão. O app
+só consulta os dados locais das ferramentas, sem mexer na configuração delas, e pode
 notificar quando um agente termina ou espera por você.
+
+No OMP, o painel lê os registros de sessão do perfil que o MiniUtils herdou (o padrão se
+nenhum perfil estiver configurado). Mostra modelo, último pedido, resumo das ferramentas,
+linha do tempo, tokens de entrada/saída/cache e a duração do último turno registrado.
+Os tokens incluem os usos auxiliares gravados na sessão. Os subagentes persistidos
+aparecem em árvore; clique num deles para ver a conversa, o resultado salvo e a prévia do
+patch, quando disponíveis. A prévia é só leitura e não aplica alterações.
+O painel usa `omp session lease` para identificar sessões que ainda pertencem a um processo
+do OMP e só oferece **Retomar sessão** quando a consulta confirma que estão livres.
+Sessões ainda não gravadas e pedidos de aprovação ao vivo não aparecem como tais no painel.
 
 </details>
 
@@ -216,9 +226,19 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
   barra de tarefas e no Alt+Tab, sem ficar por cima das outras nem sumir ao clicar fora; o
   ícone da bandeja minimiza e restaura, e fechar deixa o MiniUtils na bandeja. (No Wayland
   nativo, quem decide a posição e a barra de tarefas é o sistema.)
-- **Atalho de teclado:** com o MiniUtils aberto, `miniutils --tab <nome>` traz a janela naquela
-  página (pelo nome dela ou de um app nela, ex. `Geral`, `docker`), em `apps` ou em `store`.
-  Ligue esse comando a um atalho do sistema.
+- **Atalho de teclado:** com o MiniUtils aberto, `miniutils --toggle` abre e fecha a janela, e
+  `miniutils --tab <nome>` traz a janela naquela página (pelo nome dela ou de um app nela, ex.
+  `Geral`, `docker`), em `apps` ou em `store`. Ligue esses comandos a atalhos do sistema.
+- **No Hyprland** (0.56 ou mais novo) o MiniUtils roda em Wayland nativo e pede a posição ao
+  próprio Hyprland: abre junto do ícone da bandeja sem regra nenhuma na sua config, e some só com um clique
+  fora (enquanto está aberto, o foco do teclado deixa de seguir o mouse). Cada
+  janela leva uma tag, para as suas regras: `miniutils-popup` (o popup), `miniutils-app` (como
+  app de desktop) e `miniutils-detail` (terminal, detalhes de agente, mascotes); ex.:
+  `match = { tag = "miniutils-detail" }`.
+- **Numa barra ou script (Linux):** o socket da instância (`$XDG_RUNTIME_DIR/miniutils.sock`)
+  responde `status` com uma linha de JSON (janela aberta, fixada, humor, mascote, mídia e, por
+  app, humor e resumo) e `subscribe` com uma linha agora e outra a cada mudança. Ex.:
+  `echo status | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/miniutils.sock`.
 
 <br clear="right">
 
@@ -227,6 +247,8 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 
 ```text
 --hidden              inicia só na bandeja (para o autostart)
+--toggle              esconde a janela se estiver aberta, senão mostra (para um atalho
+                      de teclado); com --tab, mostra naquela página
 --tab <nome>          abre numa página do painel (pelo nome dela ou de um app nela,
                       ex.: Geral, docker), em apps (configurações) ou em store (loja)
 --plugin-dev <pasta>  carrega o plugin da pasta e recarrega ao salvar (ver APPS.md);
@@ -245,7 +267,8 @@ curl -fsSL https://raw.githubusercontent.com/pedroluizmossi/hub-app-rust/master/
 MiniUtils aberto reler a pasta dos apps).
 
 ```text
-MINIUTILS_NATIVE_WAYLAND=1   usa Wayland nativo em vez de XWayland (o popup perde a posição)
+MINIUTILS_NATIVE_WAYLAND=1   usa Wayland nativo em vez de XWayland (o popup perde a posição;
+                             no Hyprland já é nativo e mantém a posição: ali, desliga isso)
 MINIUTILS_DEBUG=1            registra também os detalhes (foco, janela, debug() dos plugins)
 ```
 

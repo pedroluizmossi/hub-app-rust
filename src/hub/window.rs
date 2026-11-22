@@ -30,6 +30,9 @@ pub(super) fn wait_for_tray(tries: u32) {
     });
 }
 
+/// How long after showing the window its states are applied a last time (see `Hub::show`).
+const LATE_STATES: Duration = Duration::from_millis(350);
+
 impl Hub {
     /// Shows the popup next to `anchor` (point clicked on the tray).
     pub(super) fn show(&self, anchor: Option<(i32, i32)>) {
@@ -43,6 +46,14 @@ impl Hub {
             self.ui.window().set_minimized(false);
         }
         self.covered.set(false);
+        // a compositor that takes the position before the window is mapped (Hyprland)
+        if self.positionable && !restoring {
+            let (place, last) = {
+                let cfg = self.host.config.borrow();
+                (popup::Place::from_key(&cfg.window_place), cfg.window_pos)
+            };
+            popup::prepare(self.ui.window(), &self.ui.get_app_name(), anchor, place, last, desktop);
+        }
         // reopening the popup: starts transparent and fades in (the first time the window
         // does not exist yet). A desktop app just shows up, like any window.
         let fade_in = !desktop && self.positionable && popup::has_window(self.ui.window());
@@ -71,12 +82,25 @@ impl Hub {
         Timer::single_shot(Duration::from_millis(60), move || {
             with_hub(|h| {
                 if h.shown.get() {
+                    // on Wayland a window first shown from inside the event loop (started
+                    // hidden, opened by the tray or a command) is only mapped once a frame
+                    // is drawn, and nothing asks for one
+                    h.ui.window().request_redraw();
                     // restored from minimized: the system reports it a little later
                     h.sync_on_screen();
                     h.apply_icon();
                     if positionable {
                         h.place_window(anchor, !restoring);
                     }
+                }
+            });
+        });
+        // the states once more, without moving: a window mapped only by the frame asked for
+        // above was not on screen yet when the first pass looked for it
+        Timer::single_shot(LATE_STATES, move || {
+            with_hub(|h| {
+                if positionable && h.shown.get() {
+                    h.place_window(None, false);
                 }
             });
         });
@@ -121,11 +145,25 @@ impl Hub {
         }
     }
 
+    /// Request from another instance (a keyboard shortcut): hides the window if it is on
+    /// screen; otherwise opens it, as `show_from_command`.
+    pub(super) fn toggle_from_command(&self, tab: &str) {
+        if self.shown.get() && !popup::is_minimized(self.ui.window()) {
+            self.hide();
+        } else {
+            self.show_from_command(tab);
+        }
+    }
+
     /// Serves the other instances (see `instance.rs`) through the UI thread.
     pub fn serve_commands(&self, server: &instance::Server) {
         let weak = self.ui.as_weak();
-        let served = server.serve(move |cmd| {
+        let served = server.serve(self.status.clone(), move |cmd| {
             match cmd {
+                instance::Command::Toggle(tab) => {
+                    let tab = tab.unwrap_or_default();
+                    let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_toggle_window_requested(tab.into()));
+                }
                 instance::Command::Show(tab) => {
                     let tab = tab.unwrap_or_default();
                     let _ = weak.upgrade_in_event_loop(move |ui| ui.invoke_show_requested(tab.into()));
@@ -155,8 +193,11 @@ impl Hub {
             for app in self.registry.enabled() {
                 app.borrow_mut().window_shown(&self.ui);
             }
+        } else {
+            popup::released();
         }
         self.sync_on_screen();
+        self.sync_status();
     }
 
     /// The window was minimized or covered (`true`), or came back (`false`), without being
@@ -284,6 +325,7 @@ impl Hub {
         if let Some(tray) = self.tray.borrow().as_ref() {
             tray.set_pinned(on);
         }
+        self.sync_status();
     }
 
     /// An edge drag is in progress (or just ended).
@@ -292,6 +334,8 @@ impl Hub {
     }
 
     pub(super) fn toggle(&self, anchor: Option<(i32, i32)>) {
+        // a tray host that does not say where the click was: the pointer is on the icon
+        let anchor = anchor.or_else(popup::pointer);
         // desktop app: the tray icon minimizes and brings back, like its taskbar button
         if self.desktop_app() {
             if self.shown.get() && !popup::is_minimized(self.ui.window()) {

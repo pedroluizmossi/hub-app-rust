@@ -6,7 +6,12 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::{Command, Role, parse, stem};
+use std::sync::Arc;
+
+use super::{Command, Query, Role, StatusFeed, parse, parse_query, stem};
+
+/// A subscriber that stops reading must not hold the hub (the feed writes on the UI thread).
+const SUBSCRIBER_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Hands a command line to the instance listening at `path`. `false` = nobody listened.
 pub fn send(path: &Path, message: &str) -> bool {
@@ -39,15 +44,16 @@ pub struct Server {
 }
 
 impl Server {
-    /// Serves requests on a thread of its own; `on_command` runs on that thread.
-    pub fn serve<F>(&self, on_command: F) -> io::Result<()>
+    /// Serves requests on a thread of its own; `on_command` runs on that thread. The
+    /// questions (`status`, `subscribe`) are answered from `feed`.
+    pub fn serve<F>(&self, feed: Arc<StatusFeed>, on_command: F) -> io::Result<()>
     where
         F: Fn(Command) + Send + 'static,
     {
         let listener = self.listener.try_clone()?;
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                handle(stream, &on_command);
+                handle(stream, &feed, &on_command);
             }
         });
         Ok(())
@@ -60,15 +66,29 @@ impl Drop for Server {
     }
 }
 
-fn handle<F: Fn(Command)>(stream: UnixStream, on_command: &F) {
+fn handle<F: Fn(Command)>(stream: UnixStream, feed: &StatusFeed, on_command: &F) {
     // a client that sends nothing must not block the others
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let mut line = String::new();
     // 256-byte limit: a command line is never longer
-    if BufReader::new((&stream).take(256)).read_line(&mut line).is_ok()
-        && let Some(cmd) = parse(&line) {
-            on_command(cmd);
+    if BufReader::new((&stream).take(256)).read_line(&mut line).is_err() {
+        return;
+    }
+    match parse_query(&line) {
+        Some(Query::Status) => {
+            let _ = stream.set_write_timeout(Some(SUBSCRIBER_TIMEOUT));
+            feed.answer(&stream);
         }
+        Some(Query::Subscribe) => {
+            let _ = stream.set_write_timeout(Some(SUBSCRIBER_TIMEOUT));
+            feed.subscribe(Box::new(stream));
+        }
+        None => {
+            if let Some(cmd) = parse(&line) {
+                on_command(cmd);
+            }
+        }
+    }
 }
 
 /// Tries to be the main instance at `path`. If there already is one, hands it `message`
@@ -137,7 +157,9 @@ mod tests {
             panic!("the first instance should become the main one");
         };
         let (tx, rx) = mpsc::channel();
-        server.serve(move |cmd| {
+        let feed = Arc::new(StatusFeed::default());
+        feed.publish("{\"mood\":\"idle\"}".into());
+        server.serve(feed.clone(), move |cmd| {
             let _ = tx.send(cmd);
         }).unwrap();
         assert!(matches!(claim(&path, Some("show apps")).unwrap(), Role::Second));
@@ -149,6 +171,27 @@ mod tests {
         let cmd = rx.recv_timeout(Duration::from_secs(2)).expect("command did not arrive");
         assert_eq!(cmd, Command::Quit, "the empty connection must not produce a command");
         assert!(!send(&test_path("nobody"), "quit"));
+
+        // a question is answered on the connection and is not a command
+        let ask = |what: &str| {
+            let mut stream = UnixStream::connect(&path).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            stream.write_all(format!("{what}\n").as_bytes()).unwrap();
+            BufReader::new(stream)
+        };
+        let mut line = String::new();
+        ask("status").read_line(&mut line).unwrap();
+        assert_eq!(line, "{\"mood\":\"idle\"}\n");
+        // a subscriber gets the current line and then each change
+        let mut follow = ask("subscribe");
+        line.clear();
+        follow.read_line(&mut line).unwrap();
+        assert_eq!(line, "{\"mood\":\"idle\"}\n");
+        feed.publish("{\"mood\":\"alarm\"}".into());
+        line.clear();
+        follow.read_line(&mut line).unwrap();
+        assert_eq!(line, "{\"mood\":\"alarm\"}\n");
+        assert!(rx.try_recv().is_err(), "a question must not produce a command");
     }
 
     #[test]
