@@ -429,13 +429,13 @@ impl MascotsMini {
         let w = win.as_weak();
         g.on_start_move(move || {
             if let Some(win) = w.upgrade() {
-                crate::popup::drag_move(win.window());
+                crate::popup::drag_move(&win);
             }
         });
         let w = win.as_weak();
         g.on_start_resize(move |dir| {
             if let Some(win) = w.upgrade() {
-                crate::popup::drag_resize(win.window(), &dir);
+                crate::popup::drag_resize(&win, &dir);
             }
         });
         let a = Rc::downgrade(app);

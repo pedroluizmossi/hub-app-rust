@@ -92,7 +92,7 @@ impl Hub {
         ui.on_start_resize(|dir| {
             with_hub(|h| {
                 h.resize_until.set(Some(Instant::now() + RESIZE_QUIET));
-                popup::drag_resize(h.ui.window(), &dir);
+                popup::drag_resize(&h.ui, &dir);
             })
         });
         ui.on_toggle_pin(|| {
