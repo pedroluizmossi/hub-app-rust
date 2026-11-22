@@ -3,7 +3,7 @@
 //!
 //! - the card counts them, shows the person's own ones and imports a folder or a `.zip`
 //!   (`mascot::import`), chosen in the system's dialog (`rfd`, in a thread);
-//! - the manager window lists every mascot and edits the chosen one's file
+//! - the editor, the Library's Mascots tab (`hub::library`), lists every mascot and edits the chosen one's file
 //!   (`mascot::edit`): name, the animation of each mood (PNG), the `[palette]` colors (PNG),
 //!   the walking stops (`extras`); shows what it has (`mascot::check`); puts it to use (an
 //!   app's mascot setting, a page, the tray) and removes the person's own ones.
@@ -28,7 +28,7 @@ use crate::mascot::sprites::{self, Sprite};
 use crate::mascot::walkers::{self, Walker};
 use crate::mascot::{Mood, edit, file, pack, render};
 use crate::tr;
-use crate::ui::{Anim, HubWindow, MascotItem, MascotsApp, MascotsManager, MascotsWindow, PaletteRow, StopRow};
+use crate::ui::{Anim, HubWindow, LibraryWindow, MascotItem, MascotsApp, MascotsManager, PaletteRow, StopRow};
 
 /// The color roles a PNG color can take, in the order of the "role" list (after "keeps its
 /// own color").
@@ -39,7 +39,7 @@ const MAPPED: [&str; 7] = ["sleep", "idle", "happy", "busy", "alarm", "celebrate
 const ARM: Duration = Duration::from_secs(6);
 /// Most person's mascots on the card.
 const GALLERY: usize = 10;
-/// Pace of the manager window's preview (its own timer: the hub may be hidden).
+/// Pace of the editor's preview (its own timer: the hub may be hidden).
 const MANAGER_TICK: Duration = Duration::from_millis(125);
 
 pub struct MascotsMini {
@@ -61,7 +61,8 @@ pub struct MascotsMini {
 
 /// The manager window and what it shows.
 struct Manager {
-    win: MascotsWindow,
+    /// The Library window, whose Mascots tab is this editor.
+    win: LibraryWindow,
     open: bool,
     /// The chosen mascot's key.
     selected: Option<String>,
@@ -73,7 +74,7 @@ struct Manager {
     /// What "Use in" lists, in order (the first entry is "Choose…").
     targets: Vec<Place>,
     /// Drives the preview and the end of "Confirm removal" while the window is open: the
-    /// hub's frame stops when its popup hides, and the manager stays on screen.
+    /// hub's frame stops when its popup hides, and the Library stays on screen.
     timer: slint::Timer,
     ticks: u32,
     /// The preview draws like a header mascot: blinking, drawn animations, reactions.
@@ -145,6 +146,18 @@ impl MascotsMini {
             manager: None,
         }));
         Self::bind(&app, ui);
+        let a = Rc::downgrade(&app);
+        crate::hub::library::on_created(move |win| {
+            if let Some(a) = a.upgrade() {
+                Self::attach(&a, win);
+            }
+        });
+        let a = Rc::downgrade(&app);
+        crate::hub::library::on_mascots_tab(move |shown| {
+            if let Some(a) = a.upgrade() {
+                Self::tab_shown(&a, shown);
+            }
+        });
         app
     }
 
@@ -162,12 +175,7 @@ impl MascotsMini {
                 a.borrow_mut().pick(true);
             }
         });
-        let (a, w) = (Rc::downgrade(app), ui.as_weak());
-        g.on_manage(move || {
-            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
-                Self::open_manager(&a, &ui);
-            }
-        });
+        g.on_manage(Self::open_manager);
         let (a, w) = (Rc::downgrade(app), ui.as_weak());
         g.on_mascot_poked(move || {
             if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
@@ -273,72 +281,61 @@ impl MascotsMini {
         }
     }
 
-    // ---- manager window ---------------------------------------------------------------
+    // ---- editor (the Library's Mascots tab) -----------------------------------------
 
-    fn open_manager(app: &Rc<RefCell<Self>>, ui: &HubWindow) {
-        let mut me = app.borrow_mut();
-        if me.manager.is_none() {
-            match MascotsWindow::new() {
-                Ok(win) => {
-                    Self::bind_manager(&win, app, ui);
-                    me.manager = Some(Manager {
-                        win,
-                        open: false,
-                        selected: None,
-                        modes: Vec::new(),
-                        mode: 0,
-                        walker: None,
-                        armed: None,
-                        targets: Vec::new(),
-                        timer: slint::Timer::default(),
-                        ticks: 0,
-                        animator: Animator::new(43),
-                        cache: render::Cache::default(),
-                        walk_shown: None,
-                        generation: None,
-                        filter: String::new(),
-                        listed: Vec::new(),
-                    });
-                    me.style_manager();
-                }
-                Err(e) => {
-                    log::warn!("couldn't create the mascots window: {e}");
-                    return;
-                }
-            }
-        }
-        if let Some(m) = me.manager.as_mut() {
-            m.open = true;
-            let a = Rc::downgrade(app);
-            m.timer.start(slint::TimerMode::Repeated, MANAGER_TICK, move || {
-                // already borrowed (a callback running): this tick is skipped
-                if let Some(a) = a.upgrade()
-                    && let Ok(mut a) = a.try_borrow_mut()
-                {
-                    a.manager_tick();
-                }
-            });
-        }
-        me.fill_manager();
-        let win = me.manager.as_ref().map(|m| m.win.clone_strong());
-        // taskbar icon: the app's mascot (set after `show`, when the native window exists)
-        let icon = super::kit::window_icon(
-            crate::mascot::sprites::get(&me.mascot_key()),
-            me.host.theme_for(&me.manifest),
-            None,
-        );
-        drop(me);
-        if let Some(win) = win {
-            if let Err(e) = win.show() {
-                log::warn!("couldn't show the mascots window: {e}");
-            }
-            crate::popup::set_icon_after_show(&win, icon);
-            crate::popup::label_after_show(&win, crate::popup::Kind::Detail);
-            crate::popup::focus(win.window());
-        }
+    /// "Manage": the Library, on the Mascots tab.
+    fn open_manager() {
+        crate::hub::library::open(Some(crate::library::Kind::Mascot), None);
     }
 
-    fn bind_manager(win: &MascotsWindow, app: &Rc<RefCell<Self>>, ui: &HubWindow) {
+    /// The Library window exists: the editor binds to its Mascots tab.
+    fn attach(app: &Rc<RefCell<Self>>, win: &LibraryWindow) {
+        Self::bind_manager(win, app);
+        let mut me = app.borrow_mut();
+        me.manager = Some(Manager {
+            win: win.clone_strong(),
+            open: false,
+            selected: None,
+            modes: Vec::new(),
+            mode: 0,
+            walker: None,
+            armed: None,
+            targets: Vec::new(),
+            timer: slint::Timer::default(),
+            ticks: 0,
+            animator: Animator::new(43),
+            cache: render::Cache::default(),
+            walk_shown: None,
+            generation: None,
+            filter: String::new(),
+            listed: Vec::new(),
+        });
+        me.style_manager();
+    }
+
+    /// The Mascots tab came into view (`true`) or left it: the preview runs only meanwhile.
+    fn tab_shown(app: &Rc<RefCell<Self>>, shown: bool) {
+        let mut me = app.borrow_mut();
+        let Some(m) = me.manager.as_mut() else { return };
+        if !shown {
+            m.closed();
+            return;
+        }
+        m.open = true;
+        let a = Rc::downgrade(app);
+        m.timer.start(slint::TimerMode::Repeated, MANAGER_TICK, move || {
+            // already borrowed (a callback running): this tick is skipped
+            if let Some(a) = a.upgrade()
+                && let Ok(mut a) = a.try_borrow_mut()
+            {
+                a.manager_tick();
+            }
+        });
+        me.style_manager();
+        me.fill_manager();
+    }
+
+    fn bind_manager(win: &LibraryWindow, app: &Rc<RefCell<Self>>) {
         let g = win.global::<MascotsManager>();
         // an action on the open window, with the app borrowed
         let on = |run: fn(&mut MascotsMini, i32)| {
@@ -417,40 +414,9 @@ impl MascotsMini {
                 a.borrow_mut().pick(true);
             }
         });
-        let a = Rc::downgrade(app);
-        g.on_close(move || {
-            if let Some(a) = a.upgrade()
-                && let Some(m) = a.borrow_mut().manager.as_mut()
-            {
-                let _ = m.win.hide();
-                m.closed();
-            }
-        });
-        let w = win.as_weak();
-        g.on_start_move(move || {
-            if let Some(win) = w.upgrade() {
-                crate::popup::drag_move(&win);
-            }
-        });
-        let w = win.as_weak();
-        g.on_start_resize(move |dir| {
-            if let Some(win) = w.upgrade() {
-                crate::popup::drag_resize(&win, &dir);
-            }
-        });
-        let a = Rc::downgrade(app);
-        win.window().on_close_requested(move || {
-            if let Some(a) = a.upgrade()
-                && let Some(m) = a.borrow_mut().manager.as_mut()
-            {
-                m.closed();
-            }
-            slint::CloseRequestResponse::HideWindow
-        });
-        let _ = ui;
     }
 
-    /// The window follows the hub's look and the app's theme.
+    /// The editor follows the hub's look and the app's theme.
     fn style_manager(&self) {
         let Some(m) = &self.manager else { return };
         crate::skin::apply_current(&m.win);
@@ -878,7 +844,6 @@ impl MiniApp for MascotsMini {
 
     fn disable(&mut self, _ui: &HubWindow) {
         if let Some(m) = self.manager.as_mut() {
-            let _ = m.win.hide();
             m.closed();
         }
     }
@@ -952,7 +917,7 @@ impl MiniApp for MascotsMini {
 }
 
 impl Manager {
-    /// The window was closed (button, Esc, the system): the timer stops with it.
+    /// The Mascots tab left view (another tab, the Library closed): the timer stops with it.
     fn closed(&mut self) {
         self.open = false;
         self.armed = None;

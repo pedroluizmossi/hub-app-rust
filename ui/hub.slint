@@ -15,7 +15,8 @@ import { TerminalWindow, TerminalScreen, TermLine, TermRun, TermTab } from "../m
 import { AgentsApp, AgentRow, AgentSub, AgentWalker } from "../miniapps/agents/view.slint";
 import { AgentDetailWindow, AgentDetail, AgentStep } from "../miniapps/agents/detail.slint";
 import { MascotsApp } from "../miniapps/mascots/view.slint";
-import { MascotsWindow, MascotsManager, MascotItem, PaletteRow, StopRow } from "../miniapps/mascots/manager.slint";
+import { MascotsManager, MascotItem, PaletteRow, StopRow } from "../miniapps/mascots/manager.slint";
+import { LibraryWindow, LibraryUi, LibItem, LibParam, LibLink } from "library.slint";
 import { Chatter } from "chatter.slint";
 import { PluginApps, PluginCard } from "plugin.slint";
 import { StoreView, StoreApp, StoreRow } from "store.slint";
@@ -35,9 +36,9 @@ import "fonts/JetBrainsMono-Bold.ttf";
 import "fonts/PixelifySans-Regular.ttf";
 import "fonts/PixelifySans-Bold.ttf";
 
-export { Colors, Anim, Skin, DockerApp, ContainerRow, KubeApp, KubeRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow }
+export { Colors, Anim, Skin, DockerApp, ContainerRow, KubeApp, KubeRow, VitalsApp, VitalCard, CdPlayerApp, AiUsageApp, UsageCard, UsageLine, PortsApp, PortRow, TodoApp, TodoRow, TerminalApp, TerminalScreen, TermLine, TermRun, TermTab, AgentsApp, AgentRow, AgentSub, AgentWalker, AgentDetail, AgentStep, MascotsApp, MascotsManager, MascotItem, PaletteRow, StopRow, Chatter, PluginApps, PluginCard, StoreApp, StoreRow, LibraryUi, LibItem, LibParam, LibLink }
 // windows besides the hub: each has its own globals (Rust applies the skin to them)
-export { AgentDetailWindow, MascotsWindow, TerminalWindow }
+export { AgentDetailWindow, LibraryWindow, TerminalWindow }
 // structs Rust fills in (defined in models.slint)
 export { GridCell, Ghost, SettingRow, AppInfo, PageInfo, AmbientItem, DataRow, ProcUsage }
 
@@ -162,6 +163,9 @@ export component HubWindow inherits Window {
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
     callback setting-text(string, string, string);
+    callback setting-float(string, string, int);
+    callback setting-reset(string, string);
+    callback setting-pick(string, string);
     callback hide-window();
     // started dragging an edge/corner ("n", "se", …)
     callback start-resize(string);
@@ -192,6 +196,7 @@ export component HubWindow inherits Window {
     callback ambient-toggled();
     callback open-looks-dir();
     callback reload-looks();
+    callback open-library();
     callback page-selected(int);
     callback page-added();
     callback page-removed(int);
@@ -603,6 +608,7 @@ export component HubWindow inherits Window {
                 looks-skipped: looks-skipped;
                 open-looks-dir => { root.open-looks-dir(); }
                 reload-looks => { root.reload-looks(); }
+                open-library => { root.open-library(); }
                 page-added => { root.page-added(); }
                 page-removed(i) => { root.page-removed(i); }
                 page-renamed(i, n) => { root.page-renamed(i, n); }
@@ -628,6 +634,9 @@ export component HubWindow inherits Window {
                 setting-int(a, k, v) => { root.setting-int(a, k, v); }
                 setting-chosen(a, k, i) => { root.setting-chosen(a, k, i); }
                 setting-text(a, k, t) => { root.setting-text(a, k, t); }
+                setting-float(a, k, i) => { root.setting-float(a, k, i); }
+                setting-reset(a, k) => { root.setting-reset(a, k); }
+                setting-pick(a, k) => { root.setting-pick(a, k); }
             }
 
             if nav == "right": Rail {

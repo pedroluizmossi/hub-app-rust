@@ -47,7 +47,7 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 | **Assinaturas de IA** | Janelas de uso do Codex, Claude Code e OpenCode Go e créditos do Kiro, com previsão de quando o limite acaba. [Detalhes](#assinaturas-de-ia) | desligado |
 | **Portas abertas** | Quem escuta em cada porta, se é só local ou aberta para a rede, atalho para abrir no navegador e botão de encerrar (dois cliques). | desligado |
 | **To-do rápido** | Lista curta de tarefas: Enter acrescenta, clique marca como feita, e a mascote comemora quando a lista zera. | desligado |
-| **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. Com o renderizador OpenGL (Configurações › Sistema), shaders na GPU: CRT e Bloom embutidos e os seus, no formato do Ghostty. O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
+| **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. Com o renderizador OpenGL (Configurações › Sistema), shaders na GPU em sequência, escolhidos e ajustados na [Biblioteca](#biblioteca): CRT e Bloom embutidos e os seus, no formato do Ghostty (cursor, cores e paleta incluídos). O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
 | **Mascotes** | Suas mascotes num lugar só: importa uma pasta ou um `.zip` baixado (mascotes em código e sprites PNG), renomeia, escolhe a animação de cada humor, as cores que seguem o tema, onde os subagentes param, e coloca a mascote num app, numa página ou na bandeja. | desligado |
 | **Agentes de IA** | Sessões do Claude Code, Codex, OpenCode e Oh My Pi (OMP): quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes e os workflows do Claude Code (fases e agentes de cada uma). Abre a pasta, um terminal ou retoma a sessão. | desligado |
 
@@ -126,10 +126,30 @@ para continuar legível), o **tamanho do texto** (90 a 125%) e desligar o **fund
 (chuva, estrelas que piscam, varredura do tubo).
 
 Temas, visuais e fundos também podem ser seus, sem recompilar: arquivos `.toml` em
-`themes/`, `skins/` e `backdrops/` na pasta de dados (`miniutils --dirs` mostra onde) e
-**Configurações › Aparência › Recarregar**. Há um exemplo de cada em
-[examples/appearance](examples/appearance), e o formato está no
+`themes/`, `skins/` e `backdrops/` na pasta de dados (`miniutils --dirs` mostra onde). Há
+um exemplo de cada em [examples/appearance](examples/appearance), e o formato está no
 [DESIGN.md](DESIGN.md#temas-visuais-e-fundos-por-arquivo).
+
+## Biblioteca
+
+A **Biblioteca** (Configurações › Aparência › Biblioteca, ou o botão de um ajuste que aponta
+para ela) é a janela de tudo o que você escolhe, vê e edita como arquivo: **shaders**, **temas
+dos apps**, **visuais da janela**, **fundos** e **mascotes**. Cada item diz de onde vem
+(embutido, seu ou da loja) e, se o arquivo não carrega, o porquê, ali mesmo.
+
+- **Copiar para editar** põe na sua pasta uma cópia de um item embutido (um tema ou visual
+  vira um arquivo que parte dele, com `base`) e **Abrir arquivo** abre no editor do sistema.
+  O que você salva aparece sozinho (shaders) ou depois da releitura que a Biblioteca faz.
+- **Importar…** copia arquivos `.glsl` ou `.toml` para a pasta do tipo.
+- **Shaders**: com o renderizador OpenGL, a prévia roda o shader sobre um texto de exemplo.
+  **Adicionar ao Terminal** põe o shader na sequência do Terminal (a ordem muda com as
+  setas). Os `#define` numéricos do shader viram **ajustes** com controle deslizante: o
+  comentário acima de cada um vira o rótulo e um `[min, max]` ali, a faixa. O valor ajustado
+  vai para a config (`[shader_params.<shader>]`); o arquivo não muda. Um `.toml` ao lado do
+  shader (`nome.toml`, ou `shader.toml` numa pasta `nome/`) pode dar nome, autor, licença e
+  rótulos ou faixas próprias (`[params.NOME]`). Erro de compilação aparece no item.
+- **Mascotes**: a aba é o editor do app Mascotes (animações, cores que seguem o tema,
+  paradas, onde usar).
 
 ## Instalar
 

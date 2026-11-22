@@ -1,6 +1,5 @@
-// Manager window of the Mascots app (src/apps/mascots.rs), outside the hub popup (it shows
-// in the taskbar), like the agents' detail window: no system frame (the skin's `Frame`),
-// drags by the header, resizes by the edges, closes with the header button or Esc.
+// The Mascots app's editor (src/apps/mascots.rs), shown as the Mascots tab of the Library
+// window (ui/library.slint).
 //
 // Left: every mascot (built-in, yours, from the store), with its kind. Right: the card of
 // the chosen one: preview, name, what it has (the same report as `--check-mascot`), which
@@ -8,8 +7,7 @@
 // stops, and where to use it. Every change is written to the mascot's own file.
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "../../ui/theme.slint";
-import { TextButton, HeaderButton, Select, SqSwitch, SearchBox } from "../../ui/widgets.slint";
-import { Bar, Frame, ResizeHandles } from "../../ui/frame.slint";
+import { TextButton, Select, SqSwitch, SearchBox } from "../../ui/widgets.slint";
 
 export struct MascotItem {
     key: string,
@@ -89,10 +87,6 @@ export global MascotsManager {
     callback open-folder();
     callback import-folder();
     callback import-zip();
-    // own frame: close, drag by the header, resize by the `dir` edge
-    callback close();
-    callback start-move();
-    callback start-resize(string);
 }
 
 // Section title inside the card.
@@ -167,25 +161,11 @@ component ItemRow inherits Rectangle {
     }
 }
 
-export component MascotsWindow inherits Window {
+export component MascotsPanel inherits Rectangle {
     property <Colors> t: MascotsManager.theme;
-    title: @tr("Mascots");
-    preferred-width: 820px;
-    preferred-height: 640px;
-    min-width: 640px;
-    min-height: 420px;
-    no-frame: true;
-    background: transparent;
-    default-font-family: Skin.font-ui;
-    default-font-size: 13px * Skin.text-scale;
 
   keys := FocusScope {
-    init => { self.focus(); }
     key-pressed(e) => {
-        if e.text == Key.Escape {
-            MascotsManager.close();
-            return accept;
-        }
         if e.text == Key.UpArrow {
             MascotsManager.step(-1);
             return accept;
@@ -197,80 +177,37 @@ export component MascotsWindow inherits Window {
         reject
     }
 
-    Frame { }
+    // in the Mascots app's theme
+    Rectangle {
+        background: t.bg0.mix(t.bg1, 0.75).with-alpha(Skin.card-alpha);
+        border-width: 1px;
+        border-color: t.muted.mix(t.bg0, 0.55);
 
-    VerticalLayout {
-        padding: Skin.border;
-
-        // header: drags the window
-        Bar {
-            TouchArea {
-                pointer-event(ev) => {
-                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                        MascotsManager.start-move();
-                    }
-                }
-            }
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 12px;
-                spacing: 10px;
-                Text {
-                    text: @tr("Mascots");
-                    color: Skin.panel-ink;
-                    font-family: Skin.font-title;
-                    font-size: 16px * Skin.text-scale;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    TextButton {
-                        text: @tr("Import folder…");
-                        icon: Icons.plus;
-                        font-size: 12px * Skin.text-scale;
-                        enabled: !MascotsManager.busy;
-                        clicked => { MascotsManager.import-folder(); }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    TextButton {
-                        text: @tr("Import .zip…");
-                        icon: Icons.plus;
-                        font-size: 12px * Skin.text-scale;
-                        enabled: !MascotsManager.busy;
-                        clicked => { MascotsManager.import-zip(); }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    HeaderButton {
-                        text: @tr("Close");
-                        short: @tr("close");
-                        icon: Icons.close;
-                        px-icon: Icons.px-close;
-                        clicked => { MascotsManager.close(); }
-                    }
-                }
-            }
-        }
-
-        // content in the app theme, in a card away from the edge (the cut corner)
-        Rectangle {
-            vertical-stretch: 1;
-          Rectangle {
-            x: 12px;
-            y: 12px;
-            width: parent.width - 24px;
-            height: parent.height - 24px;
-            background: t.bg0.mix(t.bg1, 0.75).with-alpha(Skin.card-alpha);
-            border-width: 1px;
-            border-color: t.muted.mix(t.bg0, 0.55);
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
 
             HorizontalLayout {
-                padding: 10px;
+                spacing: 8px;
+                alignment: end;
+                TextButton {
+                    text: @tr("Import folder…");
+                    icon: Icons.plus;
+                    font-size: 12px * Skin.text-scale;
+                    enabled: !MascotsManager.busy;
+                    clicked => { MascotsManager.import-folder(); }
+                }
+                TextButton {
+                    text: @tr("Import .zip…");
+                    icon: Icons.plus;
+                    font-size: 12px * Skin.text-scale;
+                    enabled: !MascotsManager.busy;
+                    clicked => { MascotsManager.import-zip(); }
+                }
+            }
+
+            HorizontalLayout {
+                vertical-stretch: 1;
                 spacing: 12px;
 
                 // every mascot, with a search; Up/Down move the choice
@@ -518,12 +455,7 @@ export component MascotsWindow inherits Window {
                     }
                 }
             }
-          }
         }
-    }
-
-    ResizeHandles {
-        start(dir) => { MascotsManager.start-resize(dir); }
     }
   }
 }

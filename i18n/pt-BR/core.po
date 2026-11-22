@@ -329,6 +329,24 @@ msgstr "mini-app {}: o padrão (default) da opção {} não está entre as opç�
 msgid "mini-app {}: setting {} has max_len = 0"
 msgstr "mini-app {}: a opção {} tem max_len = 0"
 
+msgid "mini-app {}: setting {} uses {}, which needs api = {}"
+msgstr "mini-app {}: a opção {} usa {}, que pede api = {}"
+
+msgid "mini-app {}: setting {} needs asset = one of shader, theme, skin, backdrop, mascot"
+msgstr "mini-app {}: a opção {} precisa de asset = shader, theme, skin, backdrop ou mascot"
+
+msgid "mini-app {}: setting {} needs whole numbers in min, max and step"
+msgstr "mini-app {}: a opção {} precisa de números inteiros em min, max e step"
+
+msgid "mini-app {}: setting {} needs min and max"
+msgstr "mini-app {}: a opção {} precisa de min e max"
+
+msgid "mini-app {}: setting {} has an invalid when: {}"
+msgstr "mini-app {}: a opção {} tem um when inválido: {}"
+
+msgid "mini-app {}: the when of setting {} reads {}, which is not another setting of this app"
+msgstr "mini-app {}: o when da opção {} lê {}, que não é outra opção deste app"
+
 # App data checks (src/core/appdata.rs)
 msgid "[data] version = {}: use 1 to 1000000"
 msgstr "[data] version = {}: use de 1 a 1000000"

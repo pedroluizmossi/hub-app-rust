@@ -311,6 +311,13 @@ pub fn open_dir(dir: &Path) -> bool {
     dir.is_absolute() && dir.is_dir() && shell_open(dir.as_os_str())
 }
 
+/// Opens a Library file (`.toml`, `.glsl`) in the system's default program for it, so the
+/// user can edit it. Other kinds of file are refused: this never runs a program.
+pub fn open_file(path: &Path) -> bool {
+    let editable = path.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e, "toml" | "glsl" | "frag"));
+    editable && path.is_absolute() && path.is_file() && shell_open(path.as_os_str())
+}
+
 /// Hands an address or folder to the system's default program.
 #[cfg(not(windows))]
 fn shell_open(target: &OsStr) -> bool {

@@ -120,6 +120,11 @@ hub-app-rust/
                               e só com a aba de Configurações aberta
       chatter.rs, lines.toml  diretor da conversa entre mascotes e as falas genéricas
       bind.rs                 callbacks da tela e eventos da janela
+      library.rs              a janela da Biblioteca (`ui/library.slint`): lista, detalhe,
+                              prévia do shader, sequência do Terminal, ajustes, copiar,
+                              importar, remover; relê as pastas sozinha enquanto aberta. A
+                              aba Mascotes é o editor do app Mascotes (`on_created`,
+                              `on_mascots_tab`)
     instance.rs, instance/    instância única (a 2ª só pede para abrir ou alternar): socket
                               Unix no Linux, named pipe no Windows. No Linux o mesmo socket
                               responde `status`/`subscribe` com o estado do hub em JSON
@@ -186,6 +191,15 @@ hub-app-rust/
                               A linha do tempo (`Timeline`: pedidos, respostas e ferramentas,
                               cortados) só é lida da sessão aberta no detalhe e não vai para
                               os plugins
+    library/                  a Biblioteca: tudo que a pessoa escolhe e edita como arquivo
+      mod.rs                  tipos (`Kind`: shader, tema, visual, fundo, mascote), itens com
+                              origem e erro de carga, copiar/importar/remover
+      shaders.rs              shaders embutidos e de `<dados>/miniutils/shaders/` (formato do
+                              Ghostty); os `#define` numéricos viram ajustes, gravados na
+                              linha ao compilar (o arquivo não muda)
+      postfx.rs               roda uma sequência de shaders sobre parte de uma janela com o
+                              renderizador OpenGL (Terminal e prévia da Biblioteca): uniforms
+                              do Shadertoy e do Ghostty (cursor, foco, cores, paleta)
     skin/
       mod.rs                  visuais da janela (tabela SKINS) e `apply` para o global Skin
       backdrop.rs             fundos desenhados em Rust (pontos, CRT, papel, cidade) e os
@@ -235,10 +249,10 @@ hub-app-rust/
                               ConPTY no Windows), emulador VT (vt100) numa thread por aba
                               (session.rs), a tela em trechos de texto com cor (grid.rs),
                               os efeitos da janela, desenhados uma vez por tamanho (fx.rs), e
-                              com o OpenGL os shaders na GPU sobre a tela, no formato do
-                              Ghostty (shader.rs; os embutidos em miniapps/terminal/shaders)
-      mascots.rs              Mascotes: importar, janela de gerenciar (renomear, animações,
-                              cores do tema, paradas, usar em, remover)
+                              com o OpenGL a sequência de shaders do ajuste `shaders` sobre a
+                              tela (`library::postfx`; os embutidos em miniapps/terminal/shaders)
+      mascots.rs              Mascotes: importar e o editor da aba Mascotes da Biblioteca
+                              (renomear, animações, cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
                               detalhe de uma sessão com a linha do tempo; subagentes andando;
                               workflows do Claude Code (fases e agentes, abre ao clicar)
@@ -263,7 +277,7 @@ id = "cyber.docker"
 name = "Docker"
 description = "Containers and stacks with quick actions; the mascot reacts when something goes down."
 icon = "neko"            # mascote do app (configurações, bandeja)
-api = 1                  # versão do contrato com o host
+api = 3                  # versão do contrato com o host (3: opções com rótulo, abaixo)
 uses = ["docker"]        # provedores que assina enquanto ativo
 
 [permissions]
@@ -281,10 +295,15 @@ default = "auto"
   são os do enum `Topic` (`sys`, `gpu`, `docker`, `kube`, `media`, `ai_usage`, `ports`, `agents`, `procs`): um nome desconhecido
   faz o manifesto falhar no parse, e no Rust o provedor é sempre `Topic::…`, nunca uma string.
 - `permissions.exec` é a allowlist do executor para aquele app.
-- `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice` e, com
-  `api = 2`, `text` e `secret`). Um rótulo terminado em ` (%)` ou ` (°C)` vira a unidade
-  do stepper. O hub aceita manifestos de `api = 1` até `API_VERSION`; `text`/`secret`
-  exigem `api = 2`, e o arquivo de configuração é gravado com modo 0600.
+- `settings` vira formulário nas **Configurações** (tipos `bool`, `int`, `choice`; com
+  `api = 2`, `text` e `secret`; com `api = 3`, `float`, `color`, `file`, `folder` e os
+  campos `help`, `group`, `when`, `restart` e opções `{ value, label }`; formato completo em
+  [APPS.md](APPS.md)). Um rótulo terminado em ` (%)` ou ` (°C)` vira a unidade do stepper.
+  O hub aceita manifestos de `api = 1` até `API_VERSION`; cada recurso exige a `api` que o
+  trouxe (`SettingKind::api`, `API_SETTINGS_V2`), e o arquivo de configuração é gravado com
+  modo 0600. Opção cujo `when` não vale fica fora da lista (`settings_of`); mudar uma opção
+  muda `cfg.apps`, que está na impressão digital de `rebuild_settings`, então a lista é
+  refeita e a visibilidade acompanha.
 
 O lado Rust implementa o trait `MiniApp` (`src/core/miniapp.rs`). Todas as chamadas são na
 thread da UI; um app desligado não recebe nada.

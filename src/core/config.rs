@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::layout::{self, Rect};
-use super::manifest::{Manifest, SettingKind};
+use super::manifest::{self, Manifest};
 use crate::tr;
 
 /// App name (default display name; lowercased for the config folder, socket and binary).
@@ -81,6 +81,9 @@ pub struct Config {
     /// GPU: the terminal's shaders). Read once at start (`popup::select_backend`); an unknown
     /// value means `"software"`.
     pub renderer: String,
+    /// Adjustments of each Library shader, by its key: `[shader_params.crt]` with the values
+    /// of its number `#define`s that differ from the shader's own (`library::shaders`).
+    pub shader_params: BTreeMap<String, toml::Table>,
     /// Enabled mini-apps, in tab order.
     pub enabled: Vec<String>,
     /// Settings of each mini-app: `[apps."cyber.docker"]`.
@@ -154,6 +157,7 @@ impl Default for Config {
             window_pos: None,
             desktop_app: false,
             renderer: "software".into(),
+            shader_params: BTreeMap::new(),
             layout: BTreeMap::new(),
             enabled: vec!["cyber.docker".into(), "cyber.vitals".into(), "cyber.cd".into()],
             apps: BTreeMap::new(),
@@ -432,23 +436,22 @@ impl Config {
     }
 
     /// Value of an app setting, or the manifest default. A saved value of the wrong type
-    /// (`alarm = "90"` edited by hand) is ignored in favor of the default.
+    /// (`alarm = "90"` edited by hand, a color that is not `#rrggbb`) is ignored in favor of
+    /// the default.
     pub fn value(&self, m: &Manifest, key: &str) -> toml::Value {
         let def = m.setting(key);
-        let saved = self.apps.get(&m.id).and_then(|t| t.get(key));
-        if let Some(v) = saved {
-            let typed = match def.map(|d| d.kind) {
-                None => true,
-                Some(SettingKind::Bool) => v.is_bool(),
-                Some(SettingKind::Int) => v.is_integer(),
-                Some(SettingKind::Choice | SettingKind::Text | SettingKind::Secret) => v.is_str(),
-            };
-            if typed {
+        if let Some(v) = self.saved(m, key) {
+            if def.is_none_or(|d| d.kind.accepts(v)) {
                 return v.clone();
             }
             log::debug!("{}: setting {key} = {v} has the wrong type; using the default", m.id);
         }
         def.map(|s| s.default.clone()).unwrap_or(toml::Value::Boolean(false))
+    }
+
+    /// What the user saved for an app setting (of any type), if anything.
+    pub fn saved(&self, m: &Manifest, key: &str) -> Option<&toml::Value> {
+        self.apps.get(&m.id).and_then(|t| t.get(key))
     }
 
     pub fn bool(&self, m: &Manifest, key: &str) -> bool {
@@ -463,12 +466,56 @@ impl Config {
         def.and_then(|d| d.max).map_or(v, |max| v.min(max))
     }
 
+    /// A float setting, within the manifest's `min` and `max`.
+    pub fn float(&self, m: &Manifest, key: &str) -> f64 {
+        let v = manifest::as_float(&self.value(m, key)).unwrap_or(0.0);
+        let def = m.setting(key);
+        let v = def.and_then(|d| d.float_min).map_or(v, |min| v.max(min));
+        def.and_then(|d| d.float_max).map_or(v, |max| v.min(max))
+    }
+
     pub fn string(&self, m: &Manifest, key: &str) -> String {
         self.value(m, key).as_str().unwrap_or_default().to_string()
     }
 
+    /// An `asset-list` setting: the item keys, in order.
+    pub fn list(&self, m: &Manifest, key: &str) -> Vec<String> {
+        let v = self.value(m, key);
+        v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    }
+
+    /// A `file` or `folder` setting as a path, with a leading `~` turned into the home
+    /// folder. Empty when nothing was chosen.
+    pub fn setting_path(&self, m: &Manifest, key: &str) -> PathBuf {
+        expand_home(&self.string(m, key), dirs::home_dir().as_deref())
+    }
+
     pub fn set(&mut self, app: &str, key: &str, value: toml::Value) {
         self.apps.entry(app.to_string()).or_default().insert(key.to_string(), value);
+    }
+
+    /// Forgets the saved value of an app setting (it goes back to the manifest default).
+    /// Whether there was one.
+    pub fn unset(&mut self, app: &str, key: &str) -> bool {
+        let Some(table) = self.apps.get_mut(app) else { return false };
+        let had = table.remove(key).is_some();
+        if table.is_empty() {
+            self.apps.remove(app);
+        }
+        had
+    }
+}
+
+/// `~` or `~/…` (also `~\…`) under `home`; anything else as written.
+pub fn expand_home(written: &str, home: Option<&Path>) -> PathBuf {
+    let rest = match written.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => rest.trim_start_matches(['/', '\\']),
+        _ => return PathBuf::from(written),
+    };
+    match home {
+        Some(home) if rest.is_empty() => home.to_path_buf(),
+        Some(home) => home.join(rest),
+        None => PathBuf::from(written),
     }
 }
 
@@ -857,6 +904,56 @@ mod tests {
         assert_eq!(cfg.int(&m, "alarm"), 50);
         cfg.set("a.b", "alarm", toml::Value::Integer(70));
         assert_eq!(cfg.int(&m, "alarm"), 70);
+    }
+
+    #[test]
+    fn settings_v2_values_are_typed_and_clamped() {
+        let m = Manifest::parse(
+            "id='a.b'\nname='x'\napi=3\n\
+             [[settings]]\nkey='scale'\nlabel='S'\ntype='float'\ndefault=1\nmin=0.5\nmax=2.5\n\
+             [[settings]]\nkey='tint'\nlabel='T'\ntype='color'\ndefault='#ff8800'\n\
+             [[settings]]\nkey='dir'\nlabel='D'\ntype='folder'\ndefault='~/notes'\n",
+        )
+        .unwrap();
+        let mut cfg = Config::default();
+        // the integer default reads as a float
+        assert_eq!(cfg.float(&m, "scale"), 1.0);
+        cfg.set("a.b", "scale", toml::Value::Float(9.0));
+        assert_eq!(cfg.float(&m, "scale"), 2.5);
+        cfg.set("a.b", "scale", toml::Value::Integer(0));
+        assert_eq!(cfg.float(&m, "scale"), 0.5);
+        cfg.set("a.b", "scale", toml::Value::Float(1.75));
+        assert_eq!(cfg.float(&m, "scale"), 1.75);
+        cfg.set("a.b", "scale", toml::Value::String("1.5".into()));
+        assert_eq!(cfg.float(&m, "scale"), 1.0, "wrong type");
+        // a color that is not #rrggbb is ignored
+        cfg.set("a.b", "tint", toml::Value::String("orange".into()));
+        assert_eq!(cfg.string(&m, "tint"), "#ff8800");
+        cfg.set("a.b", "tint", toml::Value::String("#00ff00".into()));
+        assert_eq!(cfg.string(&m, "tint"), "#00ff00");
+        // a folder expands ~
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(cfg.setting_path(&m, "dir"), home.join("notes"));
+        }
+        // unset goes back to the default and drops the empty table
+        assert!(cfg.unset("a.b", "tint"));
+        assert_eq!(cfg.string(&m, "tint"), "#ff8800");
+        assert!(cfg.unset("a.b", "scale"));
+        assert!(!cfg.unset("a.b", "scale"));
+        assert!(!cfg.apps.contains_key("a.b"));
+    }
+
+    #[test]
+    fn expands_the_home_folder() {
+        let home = Path::new("/home/u");
+        let norm = |p: PathBuf| p.to_string_lossy().replace('\\', "/");
+        assert_eq!(norm(expand_home("~", Some(home))), "/home/u");
+        assert_eq!(norm(expand_home("~/a/b", Some(home))), "/home/u/a/b");
+        assert_eq!(norm(expand_home("~\\a", Some(home))), "/home/u/a");
+        assert_eq!(norm(expand_home("~other/a", Some(home))), "~other/a");
+        assert_eq!(norm(expand_home("/abs", Some(home))), "/abs");
+        assert_eq!(norm(expand_home("", Some(home))), "");
+        assert_eq!(norm(expand_home("~/a", None)), "~/a");
     }
 
     #[test]

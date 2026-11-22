@@ -23,22 +23,31 @@ export struct Ghost {
     ok: bool,        // it fits (the others find a place)
 }
 
-// A setting declared in an app's manifest.
+// A setting declared in an app's manifest (src/hub/settings.rs › settings_of; hidden ones,
+// whose `when` does not hold, are left out).
 export struct SettingRow {
     app: string,
     key: string,
     label: string,
+    help: string,        // explanation under the label ("" = none)
+    group-head: string,  // header above this row: the first of a run in the same group ("" = none)
+    restart: bool,       // takes effect after restarting MiniUtils (a tag next to the label)
+    modified: bool,      // the saved value is not the default (shows the reset button)
     unit: string,        // "%", "°C", " s", " min", " px" or empty (taken from the end of the label)
-    kind: string,        // "bool" | "int" | "choice" | "text" | "secret"
+    kind: string,        // "bool" | "int" | "float" | "choice" | "text" | "secret" | "color" | "file" | "folder"
     bool-value: bool,
+    // int: the value and its range; float: the position on the stepper (0..maximum, step 1)
     int-value: int,
     minimum: int,
     maximum: int,
     step: int,
+    float-text: string,  // float: the value as written, with the unit ("0.5", "1,25 s")
+    float-widest: string,// float: the maximum as written (sizes the stepper)
     options: [string],   // labels of a choice
     index: int,          // selected option
     images: [image],     // drawing of each option, if it is a mascot choice (otherwise empty)
-    text-value: string,  // value of a text or secret
+    text-value: string,  // value of a text, secret, color ("#rrggbb"), file or folder
+    color-value: color,  // color: the swatch
 }
 
 export struct AppInfo {

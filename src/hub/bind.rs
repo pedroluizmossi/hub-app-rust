@@ -41,6 +41,7 @@ impl Hub {
         ui.on_ambient_toggled(|| with_hub(|h| h.toggle_ambient()));
         ui.on_open_looks_dir(|| with_hub(|h| h.open_looks_dir()));
         ui.on_reload_looks(|| with_hub(|h| h.reload_looks()));
+        ui.on_open_library(|| with_hub(|h| h.open_library(None, None)));
         ui.on_tray_icon_chosen(|i| with_hub(|h| h.choose_tray_icon(idx(i))));
         ui.on_tray_theme_chosen(|i| with_hub(|h| h.choose_tray_theme(idx(i))));
         ui.on_nav_chosen(|i| with_hub(|h| h.choose_nav(idx(i))));
@@ -63,6 +64,9 @@ impl Hub {
         ui.on_setting_int(|app, key, v| with_hub(|h| h.change_setting(&app, &key, Input::Int(v as i64))));
         ui.on_setting_chosen(|app, key, i| with_hub(|h| h.change_setting(&app, &key, Input::Choice(idx(i)))));
         ui.on_setting_text(|app, key, t| with_hub(|h| h.change_setting(&app, &key, Input::Text(t.to_string()))));
+        ui.on_setting_float(|app, key, i| with_hub(|h| h.change_setting(&app, &key, Input::Step(i as i64))));
+        ui.on_setting_reset(|app, key| with_hub(|h| h.reset_setting(&app, &key)));
+        ui.on_setting_pick(|app, key| with_hub(|h| h.pick_setting_path(&app, &key)));
 
         // pages
         ui.on_page_selected(|i| with_hub(|h| h.select_page(idx(i))));

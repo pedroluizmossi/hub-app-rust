@@ -55,64 +55,184 @@ component SettingLine inherits Rectangle {
     in property <color> accent;
     callback toggled;
     callback int-edited(int);
+    callback float-stepped(int);    // position on the float stepper
     callback chosen(int);
     callback text-edited(string);
+    callback reset;                 // back to the manifest default
+    callback pick;                  // file/folder: the system dialog; asset: the Library
 
-    HorizontalLayout {
-        spacing: 16px;
-        // the minimum height goes on the label: on the Rectangle, reading its preferred height makes a
-        // loop; on the inner layout, it has no effect
-        Text {
-            min-height: 44px;
-            text: s.label;
-            color: Skin.ink;
-            font-size: 14px * Skin.text-scale;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
+    VerticalLayout {
+        spacing: 2px;
+        // group header: above the first of a run of settings in the same group
+        if s.group-head != "": Text {
+            text: s.group-head;
+            color: Skin.dim;
+            font-family: Skin.font-mono;
+            font-size: 11px * Skin.text-scale;
+            font-weight: 700;
             wrap: word-wrap;
         }
-        VerticalLayout {
-            alignment: center;
-            if s.kind == "bool": SqSwitch {
-                checked: s.bool-value;
-                accent: accent;
-                label: s.label;
-                toggled => { root.toggled(); }
+        HorizontalLayout {
+            spacing: 16px;
+            // the minimum height goes on the label column: on the Rectangle, reading its
+            // preferred height makes a loop; on the row layout, it has no effect
+            VerticalLayout {
+                min-height: max(44px, self.preferred-height);
+                alignment: center;
+                horizontal-stretch: 1;
+                spacing: 2px;
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 8px;
+                    Text {
+                        text: s.label;
+                        color: Skin.ink;
+                        font-size: 14px * Skin.text-scale;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    if s.restart: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            border-width: 1px;
+                            border-color: Skin.field-edge;
+                            HorizontalLayout {
+                                padding-left: 5px;
+                                padding-right: 5px;
+                                padding-top: 1px;
+                                padding-bottom: 1px;
+                                Text {
+                                    text: @tr("needs restart");
+                                    color: Skin.dim;
+                                    font-family: Skin.font-mono;
+                                    font-size: 10px * Skin.text-scale;
+                                }
+                            }
+                        }
+                    }
+                }
+                if s.help != "": Text {
+                    text: s.help;
+                    color: Skin.sub;
+                    font-size: 12px * Skin.text-scale;
+                    wrap: word-wrap;
+                }
             }
-            if s.kind == "int": Stepper {
-                value: s.int-value;
-                minimum: s.minimum;
-                maximum: s.maximum;
-                step: s.step;
-                unit: s.unit;
-                accent: accent;
-                edited(v) => { root.int-edited(v); }
+            if s.modified: VerticalLayout {
+                alignment: center;
+                TextButton {
+                    icon: Icons.reset;
+                    compact: true;
+                    text: @tr("Reset {} to the default", s.label);
+                    ink: Skin.dim;
+                    edge: Skin.field-edge;
+                    clicked => { root.reset(); }
+                }
             }
-            if s.kind == "choice" && s.images.length == 0: Select {
-                width: 220px;
-                options: s.options;
-                index: s.index;
-                accent: accent;
-                label: s.label;
-                chosen(i) => { root.chosen(i); }
-            }
-            if s.kind == "text" || s.kind == "secret": TextField {
-                width: 220px;
-                value: s.text-value;
-                secret: s.kind == "secret";
-                accent: accent;
-                label: s.label;
-                committed(t) => { root.text-edited(t); }
-            }
-            // mascot choice: picker with each one's drawing
-            if s.kind == "choice" && s.images.length > 0: MascotSelect {
-                width: 220px;
-                options: s.options;
-                images: s.images;
-                index: s.index;
-                accent: accent;
-                label: s.label;
-                chosen(i) => { root.chosen(i); }
+            VerticalLayout {
+                alignment: center;
+                if s.kind == "bool": SqSwitch {
+                    checked: s.bool-value;
+                    accent: accent;
+                    label: s.label;
+                    toggled => { root.toggled(); }
+                }
+                if s.kind == "int": Stepper {
+                    value: s.int-value;
+                    minimum: s.minimum;
+                    maximum: s.maximum;
+                    step: s.step;
+                    unit: s.unit;
+                    accent: accent;
+                    edited(v) => { root.int-edited(v); }
+                }
+                // float: the stepper walks positions 0..maximum; Rust writes the value
+                if s.kind == "float": Stepper {
+                    value: s.int-value;
+                    minimum: s.minimum;
+                    maximum: s.maximum;
+                    step: 1;
+                    text: s.float-text;
+                    widest-text: s.float-widest;
+                    accent: accent;
+                    edited(v) => { root.float-stepped(v); }
+                }
+                if s.kind == "choice" && s.images.length == 0: Select {
+                    width: 220px;
+                    options: s.options;
+                    index: s.index;
+                    accent: accent;
+                    label: s.label;
+                    chosen(i) => { root.chosen(i); }
+                }
+                if s.kind == "text" || s.kind == "secret": TextField {
+                    width: 220px;
+                    value: s.text-value;
+                    secret: s.kind == "secret";
+                    accent: accent;
+                    label: s.label;
+                    committed(t) => { root.text-edited(t); }
+                }
+                // color: the swatch and "#rrggbb" (anything else goes back to the saved value)
+                if s.kind == "color": HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        width: 34px;
+                        height: 34px;
+                        background: s.color-value;
+                        border-width: 1px;
+                        border-color: Skin.field-edge;
+                    }
+                    TextField {
+                        width: 178px;
+                        value: s.text-value;
+                        accent: accent;
+                        label: s.label;
+                        committed(t) => { root.text-edited(t); }
+                    }
+                }
+                // file or folder: typed, or picked in the system dialog
+                if s.kind == "file" || s.kind == "folder": HorizontalLayout {
+                    spacing: 8px;
+                    TextField {
+                        width: 180px;
+                        value: s.text-value;
+                        accent: accent;
+                        label: s.label;
+                        committed(t) => { root.text-edited(t); }
+                    }
+                    TextButton {
+                        text: @tr("Choose…");
+                        clicked => { root.pick(); }
+                    }
+                }
+                // Library items: what is chosen (in order) and the Library, where it is chosen
+                if s.kind == "asset" || s.kind == "asset-list": HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        width: 160px;
+                        text: s.text-value == "" ? @tr("none") : s.text-value;
+                        color: s.text-value == "" ? Skin.dim : Skin.ink;
+                        font-size: 13px * Skin.text-scale;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                        overflow: elide;
+                    }
+                    TextButton {
+                        text: @tr("Library…");
+                        clicked => { root.pick(); }
+                    }
+                }
+                // mascot choice: picker with each one's drawing
+                if s.kind == "choice" && s.images.length > 0: MascotSelect {
+                    width: 220px;
+                    options: s.options;
+                    images: s.images;
+                    index: s.index;
+                    accent: accent;
+                    label: s.label;
+                    chosen(i) => { root.chosen(i); }
+                }
             }
         }
     }
@@ -231,6 +351,7 @@ export component AppsView inherits ScrollView {
     in property <string> looks-skipped;
     callback open-looks-dir();
     callback reload-looks();
+    callback open-library();
     // pages: list, names (for each app's picker) and available mascots
     in property <[PageInfo]> pages;
     in property <[string]> page-names;
@@ -254,6 +375,9 @@ export component AppsView inherits ScrollView {
     callback setting-int(string, string, int);
     callback setting-chosen(string, string, int);
     callback setting-text(string, string, string);
+    callback setting-float(string, string, int /* position on the stepper */);
+    callback setting-reset(string, string);
+    callback setting-pick(string, string);
 
     VerticalLayout {
         alignment: start;
@@ -491,6 +615,12 @@ export component AppsView inherits ScrollView {
                         VerticalLayout {
                             alignment: center;
                             spacing: 6px;
+                            TextButton {
+                                text: @tr("Library");
+                                ink: Skin.accent;
+                                font-size: 13px * Skin.text-scale;
+                                clicked => { root.open-library(); }
+                            }
                             TextButton {
                                 text: @tr("Open folder");
                                 font-size: 13px * Skin.text-scale;
@@ -1117,6 +1247,9 @@ export component AppsView inherits ScrollView {
                         int-edited(v) => { root.setting-int(s.app, s.key, v); }
                         chosen(i) => { root.setting-chosen(s.app, s.key, i); }
                         text-edited(t) => { root.setting-text(s.app, s.key, t); }
+                        float-stepped(i) => { root.setting-float(s.app, s.key, i); }
+                        reset => { root.setting-reset(s.app, s.key); }
+                        pick => { root.setting-pick(s.app, s.key); }
                     }
                     // what the app stores (core/appdata.rs): export and delete with two clicks
                     if app.data != "": HorizontalLayout {

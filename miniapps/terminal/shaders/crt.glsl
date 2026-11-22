@@ -1,24 +1,35 @@
 // CRT: curved glass, scanlines, an aperture grille, a little color fringing and dark
 // corners. Ghostty's custom-shader format (mainImage, iChannel0 = the terminal screen).
-// Static (no iTime): the window is only drawn again when something on it changes.
+// Static (no clock): the window is only drawn again when something on it changes.
+// Each number #define is an adjustment in the Library; the [min, max] above it is its range.
 
-// How flat the glass is in x and y (higher = flatter)
-#define CURVE vec2(14.0, 11.0)
-// Pixels per scanline, and how dark the gap between lines gets
+// How flat the glass is, across and down (higher = flatter)
+// [4, 60]
+#define CURVE_X 14.0
+// [4, 60]
+#define CURVE_Y 11.0
+// Pixels per scanline
+// [1.5, 8]
 #define SCANLINE_PERIOD 3.0
+// How dark the gap between lines gets
+// [0, 0.6]
 #define SCANLINE_DEPTH 0.16
 // How much the grille dims the two channels a column doesn't favor
+// [0, 0.5]
 #define MASK_DEPTH 0.12
 // Pixels between the red and blue channels
+// [0, 3]
 #define FRINGE 0.6
-// How fast the corners darken (lower = only right at the edge), and how wide the bright
-// middle is (higher = wider)
+// How fast the corners darken (lower = only right at the edge)
+// [0, 1]
 #define VIGNETTE 0.25
+// How wide the bright middle is (higher = wider)
+// [1, 4]
 #define VIGNETTE_PLATEAU 1.6
 
 vec2 curve(vec2 uv) {
     vec2 c = uv * 2.0 - 1.0;
-    c *= 1.0 + pow(abs(c.yx) / CURVE, vec2(2.0));
+    c *= 1.0 + pow(abs(c.yx) / vec2(CURVE_X, CURVE_Y), vec2(2.0));
     return c * 0.5 + 0.5;
 }
 

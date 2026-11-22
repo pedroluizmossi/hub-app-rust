@@ -1,14 +1,18 @@
 // Bloom: bright text glows. Ghostty's custom-shader format (mainImage, iChannel0 = the
-// terminal screen). Static (no iTime).
+// terminal screen). Static (no clock).
 //
 // Around each pixel, samples on a golden-angle spiral (even coverage with few samples),
-// weighted by closeness; only what is brighter than THRESHOLD adds light.
+// weighted by closeness; only what is brighter than THRESHOLD adds light. Each number
+// #define is an adjustment in the Library; the [min, max] above it is its range.
 
 // Pixels between the spiral's rings
+// [0.5, 6]
 #define SPREAD 1.6
-// Luminance where the glow starts
+// Brightness where the glow starts
+// [0, 1]
 #define THRESHOLD 0.2
 // How much light the glow adds
+// [0, 0.5]
 #define STRENGTH 0.12
 #define SAMPLES 24
 

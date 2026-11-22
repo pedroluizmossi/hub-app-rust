@@ -198,11 +198,19 @@ export component TerminalWindow inherits Window {
     out property <int> term-cols: max(10, floor(area.width / cell-w));
     out property <int> term-rows: max(2, floor(area.height / cell-h));
     // size of the screen area, for the effects drawn in Rust; its position too, for the
-    // GPU shaders (`shader.rs`), which redraw only that part of the window
+    // GPU shaders (`library::postfx`), which redraw only that part of the window
     out property <length> screen-width: screen.width;
     out property <length> screen-height: screen.height;
     out property <length> screen-x: screen.absolute-position.x;
     out property <length> screen-y: screen.absolute-position.y;
+    // the text cursor within the screen area and the focus, for the shaders (Ghostty's
+    // iCurrentCursor, iFocus)
+    out property <bool> cursor-shown: TerminalScreen.cursor-visible && TerminalScreen.scrolled == 0 && !TerminalScreen.ended;
+    out property <length> cursor-x: area.x + TerminalScreen.cursor-col * cell-w;
+    out property <length> cursor-y: area.y + TerminalScreen.cursor-row * cell-h;
+    out property <length> cursor-w: cell-w;
+    out property <length> cursor-h: cell-h;
+    out property <bool> has-focus: keys.has-focus;
 
     title: TerminalScreen.title == "" ? @tr("Terminal") : TerminalScreen.title;
     preferred-width: 820px;

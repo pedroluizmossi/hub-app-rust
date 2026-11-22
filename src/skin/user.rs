@@ -82,10 +82,20 @@ pub fn reload() -> Loaded {
     for s in &loaded.skipped {
         log::warn!("{} skipped: {}", root.join(&s.file).display(), s.reason);
     }
+    if let Ok(mut last) = SKIPPED.write() {
+        last.clone_from(&loaded.skipped);
+    }
     backdrop::set_extra(loaded.backdrops.clone());
     themes::set_extra(loaded.themes.clone());
     super::set_extra(loaded.skins.clone());
     loaded
+}
+
+/// The files the last `reload` left out, with the reason (the Library lists them).
+static SKIPPED: std::sync::RwLock<Vec<Skipped>> = std::sync::RwLock::new(Vec::new());
+
+pub fn skipped() -> Vec<Skipped> {
+    SKIPPED.read().map(|s| s.clone()).unwrap_or_default()
 }
 
 /// Reads `root` without touching the program: backdrops and themes first, because a skin
