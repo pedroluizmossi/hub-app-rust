@@ -194,6 +194,10 @@ export component AppsView inherits ScrollView {
     in property <bool> desktop-app;
     callback desktop-app-toggled();
     in property <bool> can-place: true;
+    // renderer (index into `popup::Renderer::KEYS`): the chosen one and the one running
+    in property <int> renderer-index;
+    in property <int> renderer-running;
+    callback renderer-chosen(int);
     in property <string> version;
     in property <string> log-dir;
     // CPU and memory now: the hub, each external app and the total (src/hub/usage.rs)
@@ -583,6 +587,16 @@ export component AppsView inherits ScrollView {
                         options: [@tr("Next to the tray icon"), @tr("Center of the screen"), @tr("Top left corner"), @tr("Top right corner"), @tr("Bottom left corner"), @tr("Bottom right corner"), @tr("Where I left it")];
                         index: place-index;
                         chosen(i) => { root.place-chosen(i); }
+                    }
+                    ChoiceRow {
+                        title: @tr("Renderer");
+                        hint: renderer-index != renderer-running
+                            ? @tr("Restart MiniUtils to apply.")
+                            : @tr("Software is light and draws on the CPU. OpenGL uses the graphics card and much more memory, and lets the Terminal run shaders. Applies after a restart.");
+                        // same order as `popup::Renderer::KEYS`
+                        options: [@tr("Software (light)"), @tr("OpenGL (shaders)")];
+                        index: renderer-index;
+                        chosen(i) => { root.renderer-chosen(i); }
                     }
                     HorizontalLayout {
                         spacing: 16px;

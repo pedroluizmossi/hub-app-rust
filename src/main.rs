@@ -315,8 +315,9 @@ fn main() -> anyhow::Result<()> {
     autostart::refresh();
 
     let result = (|| -> anyhow::Result<()> {
-        let positionable = popup::select_backend()?;
-        let hub = hub::Hub::new(hidden, tab, positionable)?;
+        let config = core::config::Config::load();
+        let positionable = popup::select_backend(popup::Renderer::from_setting(&config.renderer))?;
+        let hub = hub::Hub::new(config, hidden, tab, positionable)?;
         if let Some(server) = &server {
             hub.serve_commands(server);
         }

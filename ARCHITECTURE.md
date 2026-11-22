@@ -233,8 +233,10 @@ hub-app-rust/
       todo.rs                 To-do rápido: lista em todo.json, na pasta de dados do app
       terminal/               Terminal: abas com o shell num pseudo-terminal (portable-pty;
                               ConPTY no Windows), emulador VT (vt100) numa thread por aba
-                              (session.rs), a tela em trechos de texto com cor (grid.rs) e
-                              os efeitos da janela, desenhados uma vez por tamanho (fx.rs)
+                              (session.rs), a tela em trechos de texto com cor (grid.rs),
+                              os efeitos da janela, desenhados uma vez por tamanho (fx.rs), e
+                              com o OpenGL os shaders na GPU sobre a tela, no formato do
+                              Ghostty (shader.rs; os embutidos em miniapps/terminal/shaders)
       mascots.rs              Mascotes: importar, janela de gerenciar (renomear, animações,
                               cores do tema, paradas, usar em, remover)
       agents.rs               Agentes de IA: quem trabalha, quem espera o usuário, quem terminou;
@@ -580,7 +582,8 @@ janela comum no GNOME).
 | Decisão | Por quê |
 |---|---|
 | Rust + Slint | Leve para ficar sempre ligado; `.slint` é declarativo como o QML do CyberDock |
-| Renderizador por software do Slint | Com o femtovg (OpenGL) o processo carregava o driver da GPU: ~270 MB de RSS. Por software: ~30 MB. Custo: sem blur nem sombra, gradiente só com 2 cores, `Path` sem rotação (ver DESIGN.md › Limites) |
+| Renderizador por software do Slint (padrão) | Com o femtovg (OpenGL) o processo carregava o driver da GPU: ~270 MB de RSS. Por software: ~30 MB. Custo: sem blur nem sombra, gradiente só com 2 cores, `Path` sem rotação (ver DESIGN.md › Limites) |
+| OpenGL (femtovg) como opção | Os shaders do Terminal precisam de GPU. Os dois renderizadores vão no executável; Configurações › Sistema escolhe (`renderer` na config) e vale ao reiniciar, porque o Slint escolhe uma vez, em `popup::select_backend`. Contexto OpenGL 3.3 core (o padrão do Slint seria GLES 2, sem o GLSL dos shaders do Ghostty). Se a janela não abre, a config volta a `software` e o usuário é avisado; `MINIUTILS_RENDERER` passa por cima da config |
 | Fundos desenhados em Rust | O renderizador por software não tem padrões repetidos nem gradientes radiais baratos; uma imagem pronta custa uma cópia por quadro |
 | Mascote desenhada em Rust | Pixel art nítida em qualquer escala (`image-rendering: pixelated`); humor, piscar e glitch mudam pixels sem assets |
 | Visual e tema como tabelas | Criar um visual ou tema novo não mexe em layout (princípio 7) |

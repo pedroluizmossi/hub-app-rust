@@ -50,6 +50,7 @@ impl Hub {
         ui.on_still_on_hover_toggled(|| with_hub(|h| h.toggle_still_on_hover()));
         ui.on_autostart_toggled(|| with_hub(|h| h.toggle_autostart()));
         ui.on_place_chosen(|i| with_hub(|h| h.choose_place(idx(i))));
+        ui.on_renderer_chosen(|i| with_hub(|h| h.choose_renderer(idx(i))));
         ui.on_desktop_app_toggled(|| with_hub(|h| h.toggle_desktop_app()));
         ui.on_open_logs(|| with_hub(|h| h.open_logs()));
 

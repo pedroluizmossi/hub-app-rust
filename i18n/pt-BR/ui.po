@@ -289,6 +289,21 @@ msgstr "A janela abre"
 msgid "Where the window shows up each time it opens. \"Where I left it\" remembers where you dragged it."
 msgstr "Onde a janela aparece cada vez que abre. \"Onde eu deixei\" lembra onde você a arrastou."
 
+msgid "Renderer"
+msgstr "Renderizador"
+
+msgid "Restart MiniUtils to apply."
+msgstr "Reinicie o MiniUtils para aplicar."
+
+msgid "Software is light and draws on the CPU. OpenGL uses the graphics card and much more memory, and lets the Terminal run shaders. Applies after a restart."
+msgstr "Software é leve e desenha na CPU. OpenGL usa a placa de vídeo e bem mais memória, e deixa o Terminal rodar shaders. Vale depois de reiniciar."
+
+msgid "Software (light)"
+msgstr "Software (leve)"
+
+msgid "OpenGL (shaders)"
+msgstr "OpenGL (shaders)"
+
 msgid "Next to the tray icon"
 msgstr "Junto do ícone da bandeja"
 

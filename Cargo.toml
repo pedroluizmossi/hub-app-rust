@@ -49,6 +49,9 @@ sys-locale = "0.3"
 # it draws (VT100/xterm escape sequences), shown in a window of our own
 portable-pty = "0.9"
 vt100 = "0.18"
+# Terminal app: its shaders, run in the OpenGL context of the femtovg renderer (shader.rs);
+# the same version Slint already pulls in
+glow = "0.18"
 
 # Linux only: tray (StatusNotifierItem), X11 and D-Bus. None of this builds on Windows; the
 # code using them lives in `linux.rs` modules (see "Plataformas" in AGENTS.md).
@@ -88,8 +91,9 @@ windows = { version = "0.62", features = [
 members = ["ui", "tools/sprite-import", "examples/app-hello"]
 
 [workspace.dependencies]
-# Only the software renderer: ~30 MB in use, against ~270 MB loading the OpenGL driver
-slint = { version = "1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "unstable-winit-030"] }
+# Software renderer by default (~30 MB in use); the OpenGL one (femtovg, ~270 MB with the
+# driver loaded) only when chosen in Settings, for the terminal's shaders (`popup::select_backend`)
+slint = { version = "1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "renderer-femtovg", "accessibility", "compat-1-2", "unstable-winit-030"] }
 slint-build = "1.18.1"
 
 # `cargo run` without --release: Slint (software renderer) and the pixel-by-pixel drawing of

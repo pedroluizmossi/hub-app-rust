@@ -61,7 +61,9 @@ impl Hub {
             self.fade_gen.set(self.fade_gen.get() + 1); // cancels a pending fade-out
             popup::set_opacity(self.ui.window(), 0.0);
         }
-        if self.ui.show().is_err() {
+        if let Err(e) = self.ui.show() {
+            log::error!("could not show the window: {e}");
+            self.renderer_failed();
             return;
         }
         self.schedule_backdrop();
@@ -104,6 +106,25 @@ impl Hub {
                 }
             });
         });
+    }
+
+    /// The window didn't open. With OpenGL (a driver without it, a virtual machine) the next
+    /// start goes back to the software renderer, and the user is told why: this run can't
+    /// switch.
+    fn renderer_failed(&self) {
+        if popup::renderer() != popup::Renderer::OpenGl {
+            return;
+        }
+        {
+            let mut cfg = self.host.config.borrow_mut();
+            if cfg.renderer == "software" {
+                return;
+            }
+            cfg.renderer = "software".into();
+            cfg.save();
+        }
+        let body = crate::tr!("OpenGL could not open the window. MiniUtils goes back to the software renderer: restart it.");
+        self.host.notifier.borrow_mut().send("renderer:failed", &crate::core::config::display_name(), body, true);
     }
 
     /// Sets the last window icon (the tray's mascot) on the native window.

@@ -190,10 +190,10 @@ impl TrayState {
 }
 
 impl Hub {
-    pub fn new(start_hidden: bool, tab: Option<String>, positionable: bool) -> anyhow::Result<Rc<Self>> {
+    /// `config` is the one read at start (`main`: the renderer is chosen from it first).
+    pub fn new(config: Config, start_hidden: bool, tab: Option<String>, positionable: bool) -> anyhow::Result<Rc<Self>> {
         let mut bus = Bus::default();
         crate::providers::spawn_all(&mut bus);
-        let config = Config::load();
         // before the apps parse their manifests, which are translated on load
         crate::core::i18n::set(crate::core::i18n::Language::from_setting(&config.language));
         // after the language is set: the notice is translated
