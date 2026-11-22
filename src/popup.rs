@@ -484,16 +484,17 @@ pub fn outer_position(window: &slint::Window) -> Option<(i32, i32)> {
 
 /// Starts moving the (frameless) window with the mouse pressed, as with the system's
 /// title bar.
-pub fn drag_move(window: &slint::Window) {
-    window.with_winit_window(|w| {
+pub fn drag_move<C: slint::ComponentHandle + 'static>(win: &C) {
+    win.window().with_winit_window(|w| {
         if let Err(e) = w.drag_window() {
             log::warn!("could not move the window: {e}");
         }
     });
+    release_after_drag(win);
 }
 
 /// Starts resizing by edge/corner `dir` ("n", "se", …), with the mouse pressed.
-pub fn drag_resize(window: &slint::Window, dir: &str) {
+pub fn drag_resize<C: slint::ComponentHandle + 'static>(win: &C, dir: &str) {
     use winit::window::ResizeDirection as D;
     let d = match dir {
         "n" => D::North,
@@ -506,9 +507,28 @@ pub fn drag_resize(window: &slint::Window, dir: &str) {
         "sw" => D::SouthWest,
         _ => return,
     };
-    window.with_winit_window(|w| {
+    win.window().with_winit_window(|w| {
         if let Err(e) = w.drag_resize_window(d) {
             log::warn!("could not resize: {e}");
+        }
+    });
+    release_after_drag(win);
+}
+
+/// Once the window manager owns a move or resize, the button release goes to it, not to
+/// the window (X11, e.g. xfwm4): Slint would keep the pressed edge or header grabbing the
+/// mouse, with its cursor, and send it every later click. So the window gets a release of its
+/// own, outside it (no `clicked`), on the next turn of the event loop: inside the press
+/// handler Slint is still dispatching. Where the release does arrive, the extra one is ignored.
+fn release_after_drag<C: slint::ComponentHandle + 'static>(win: &C) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let weak = win.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(win) = weak.upgrade() {
+            let position = slint::LogicalPosition::new(-1.0, -1.0);
+            let window = win.window();
+            window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+            window.dispatch_event(WindowEvent::PointerExited);
         }
     });
 }
