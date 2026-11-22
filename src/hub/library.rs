@@ -19,7 +19,8 @@ use super::{Hub, with_hub};
 use crate::library::postfx::{self, Colors, Frame, PostFx, Source};
 use crate::library::{self, Item, Kind, Origin, shaders};
 use crate::tr;
-use crate::ui::{LibItem, LibLink, LibParam, LibraryUi, LibraryWindow};
+use crate::mascot::{Mood, render, sprites};
+use crate::ui::{LibItem, LibLink, LibParam, LibSkin, LibraryUi, LibraryWindow};
 
 /// The app whose `shaders` setting is the chain the Library edits.
 const TERMINAL: &str = "cyber.terminal";
@@ -84,6 +85,8 @@ impl Hub {
             l.win.clone_strong()
         };
         crate::skin::apply_current(&win);
+        // its own size, not a tile of the whole screen (the size is `preferred-*` in ui/library.slint)
+        crate::popup::float_when_shown("library", tr!("Library"), (1000, 680));
         if let Err(e) = win.show() {
             log::warn!("couldn't show the Library: {e}");
             return;
@@ -149,6 +152,7 @@ impl Hub {
         };
         MascotsTab::shown(&mascots, tab == Kind::Mascot);
         with_library(|h, l| {
+            h.library_counts(l);
             h.library_list(l);
             h.library_detail(l);
         });
@@ -179,15 +183,26 @@ impl Hub {
         if l.looks.replace(looks).is_some_and(|before| before != looks) {
             self.reload_looks();
             crate::skin::apply_current(&l.win);
+            self.library_counts(l);
             self.library_list(l);
             self.library_detail(l);
         }
         let stamps = (shaders::current_stamp(), postfx::errors_stamp(), crate::mascot::sprites::generation());
         if stamps != l.stamps {
             l.stamps = stamps;
+            self.library_counts(l);
             self.library_list(l);
             self.library_detail(l);
         }
+    }
+
+    /// How many items each kind has, for the tabs.
+    fn library_counts(&self, l: &Library) {
+        let counts: Vec<i32> = Kind::ALL
+            .iter()
+            .map(|k| if *k == Kind::Mascot { sprites::all().len() } else { library::items(*k).len() } as i32)
+            .collect();
+        l.win.global::<LibraryUi>().set_counts(ModelRc::new(VecModel::from(counts)));
     }
 
     /// The items of the tab that pass the search.
@@ -199,17 +214,24 @@ impl Hub {
             .filter(|i| filter.is_empty() || i.name.to_lowercase().contains(&filter) || i.key.contains(&filter))
             .collect();
         l.listed = shown.iter().map(|i| i.key.clone()).collect();
-        if l.selected.as_ref().is_none_or(|s| !items.iter().any(|i| &i.key == s)) {
+        if l.selected.as_ref().is_none_or(|s| !l.listed.contains(s)) {
             l.selected = shown.first().map(|i| i.key.clone());
         }
+        let chain = self.chain();
+        let skin = crate::skin::current().unwrap_or_else(|| crate::skin::BUILTIN[0].clone());
         let rows: Vec<LibItem> = shown
             .iter()
-            .map(|i| LibItem {
-                key: i.key.clone().into(),
-                name: i.name.clone().into(),
-                origin: i.origin.label().into(),
-                error: self.item_error(l.tab, i).unwrap_or_default().into(),
-                in_use: self.in_use(l.tab, &i.key),
+            .map(|i| {
+                let (swatches, thumb) = thumbnail(l.tab, &i.key, &skin);
+                LibItem {
+                    key: i.key.clone().into(),
+                    name: i.name.clone().into(),
+                    origin: i.origin.label().into(),
+                    error: self.item_error(l.tab, i).unwrap_or_default().into(),
+                    usage: self.usage(l.tab, &i.key, &chain).into(),
+                    swatches: ModelRc::new(VecModel::from(swatches)),
+                    thumb,
+                }
             })
             .collect();
         let g = l.win.global::<LibraryUi>();
@@ -222,17 +244,28 @@ impl Hub {
         item.error.clone().or_else(|| if kind == Kind::Shader { postfx::error(&item.key) } else { None })
     }
 
-    fn in_use(&self, kind: Kind, key: &str) -> bool {
+    /// Where the item is used, for the list ("" = nowhere). `chain`: the Terminal's shaders.
+    fn usage(&self, kind: Kind, key: &str, chain: &[String]) -> String {
         let cfg = self.host.config.borrow();
         match kind {
-            Kind::Shader => self.chain().iter().any(|k| k == key),
-            Kind::Skin => cfg.skin == key,
+            Kind::Shader => chain.iter().position(|k| k == key).map(|i| tr!("#{} in the Terminal", i + 1)).unwrap_or_default(),
+            Kind::Skin if cfg.skin == key => tr!("window skin").to_string(),
+            Kind::Backdrop if crate::skin::get(&cfg.skin).backdrop == key => tr!("the window skin's backdrop").to_string(),
             // an app's own theme, or the skin's for the apps that follow the window
             Kind::Theme => {
-                cfg.tray_theme == key || self.registry.enabled().iter().any(|a| self.host.theme_for(a.borrow().manifest()).key == key)
+                let mut places: Vec<String> = Vec::new();
+                if cfg.tray_theme == key {
+                    places.push(tr!("tray").to_string());
+                }
+                for app in self.registry.enabled() {
+                    let a = app.borrow();
+                    if self.host.theme_for(a.manifest()).key == key {
+                        places.push(a.manifest().name.clone());
+                    }
+                }
+                places.join(", ")
             }
-            Kind::Backdrop => crate::skin::get(&cfg.skin).backdrop == key,
-            Kind::Mascot => false,
+            _ => String::new(),
         }
     }
 
@@ -300,7 +333,6 @@ impl Hub {
         g.set_params(ModelRc::default());
         g.set_params_changed(false);
         g.set_use_label(SharedString::new());
-        let rgb = |c: u32| slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8);
         match l.tab {
             Kind::Shader => {
                 let shader = shaders::find(&item.key);
@@ -343,12 +375,15 @@ impl Hub {
                 if let Some(t) = crate::mascot::themes::find(&item.key) {
                     let colors = [t.fur, t.visor, t.ear, t.blush, t.ok, t.warn, t.alarm, t.sleep, t.bg0, t.bg1, t.text, t.sub, t.muted];
                     g.set_swatches(ModelRc::new(VecModel::from(colors.map(rgb).to_vec())));
+                    g.set_theme_colors(render::colors(t));
+                    g.set_theme_mascot(render::image(sprites::get(PREVIEW_MASCOT), t, Mood::Happy, 0));
                 }
             }
             Kind::Skin => {
                 if let Some(s) = crate::skin::find(&item.key) {
                     let colors = [s.bg, s.panel, s.surface, s.edge, s.field, s.accent, s.accent2, s.ink, s.sub, s.dim, s.bad];
                     g.set_swatches(ModelRc::new(VecModel::from(colors.map(rgb).to_vec())));
+                    g.set_skin_colors(skin_colors(s));
                     if self.host.config.borrow().skin != item.key {
                         g.set_use_label(tr!("Use as the window skin").into());
                     }
@@ -357,7 +392,7 @@ impl Hub {
             Kind::Backdrop => {
                 if let Some(b) = crate::skin::backdrop::find(&item.key) {
                     let skin = crate::skin::current().unwrap_or_else(|| crate::skin::BUILTIN[0].clone());
-                    let pixels = crate::skin::backdrop::render(b, &skin, 480.0, 160.0, 1.0);
+                    let pixels = crate::skin::backdrop::render(b, &skin, 720.0, 200.0, 1.0);
                     g.set_picture(Image::from_rgb8(pixels));
                 }
             }
@@ -574,6 +609,7 @@ impl Hub {
             // already read: the next look at the folders has nothing new
             l.looks = Some(looks_stamp());
         }
+        self.library_counts(l);
         self.library_list(l);
         self.library_detail(l);
     }
@@ -593,6 +629,50 @@ fn looks_stamp() -> u64 {
 /// A float or integer TOML value as f64.
 fn value_f64(v: &toml::Value) -> Option<f64> {
     v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
+}
+
+/// The mascot the theme preview draws.
+const PREVIEW_MASCOT: &str = "neko";
+
+/// 0xRRGGBB as a Slint color.
+fn rgb(c: u32) -> slint::Color {
+    slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
+
+/// The list's small picture of an item: a few colors (themes, skins) or a picture
+/// (backdrops, drawn with `skin`); shaders get neither (the list draws a mark).
+fn thumbnail(kind: Kind, key: &str, skin: &crate::skin::Skin) -> (Vec<slint::Color>, Image) {
+    match kind {
+        Kind::Theme => crate::mascot::themes::find(key)
+            .map(|t| ([t.bg0, t.fur, t.visor, t.ok, t.alarm].map(rgb).to_vec(), Image::default()))
+            .unwrap_or_default(),
+        Kind::Skin => {
+            crate::skin::find(key).map(|s| ([s.bg, s.panel, s.accent, s.accent2, s.ink].map(rgb).to_vec(), Image::default())).unwrap_or_default()
+        }
+        Kind::Backdrop => crate::skin::backdrop::find(key)
+            .map(|b| (Vec::new(), Image::from_rgb8(crate::skin::backdrop::render(b, skin, 80.0, 56.0, 1.0))))
+            .unwrap_or_default(),
+        Kind::Shader | Kind::Mascot => Default::default(),
+    }
+}
+
+/// A skin's colors for its preview (`SkinCard` in ui/library.slint).
+fn skin_colors(s: &crate::skin::Skin) -> LibSkin {
+    LibSkin {
+        bg: rgb(s.bg),
+        panel: rgb(s.panel),
+        edge: rgb(s.edge),
+        surface: rgb(s.surface),
+        surface_edge: rgb(s.surface_edge),
+        field: rgb(s.field),
+        field_edge: rgb(s.field_edge),
+        ink: rgb(s.ink),
+        sub: rgb(s.sub),
+        dim: rgb(s.dim),
+        accent: rgb(s.accent),
+        accent_ink: rgb(s.accent_ink),
+        accent2: rgb(s.accent2),
+    }
 }
 
 /// The colors of the preview's sample screen (`SampleScreen` in ui/library.slint).

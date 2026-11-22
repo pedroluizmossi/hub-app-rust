@@ -292,8 +292,7 @@ fn monitor_of(named: &[(String, Monitor)], pos: (i32, i32), size: (i32, i32)) ->
 /// each call updates where the next mapping lands. `on_monitor`: the monitor and the position
 /// inside it; a desktop app turns the rule off (it opens as any window).
 fn rule(name: &str, class: &str, title: &str, desktop: bool, on_monitor: Option<(&str, (i32, i32))>) -> String {
-    let matcher =
-        format!("match = {{ class = {}, title = {} }}", lua_string(&format!("^{}$", regex_escape(class))), lua_string(&format!("^{}$", regex_escape(title))));
+    let matcher = matcher(class, title);
     let name = lua_string(name);
     if desktop {
         return format!("hl.window_rule({{ name = {name}, enabled = false, {matcher} }})");
@@ -303,6 +302,22 @@ fn rule(name: &str, class: &str, title: &str, desktop: bool, on_monitor: Option<
         None => String::new(),
     };
     format!("hl.window_rule({{ name = {name}, {matcher}, float = true, pin = true{place} }})")
+}
+
+/// The `match` of a rule for our window with this class and title.
+fn matcher(class: &str, title: &str) -> String {
+    format!("match = {{ class = {}, title = {} }}", lua_string(&format!("^{}$", regex_escape(class))), lua_string(&format!("^{}$", regex_escape(title))))
+}
+
+/// Registers a rule so the next mapping of our window `title` floats at `size` (logical),
+/// centered, instead of being tiled. Registering again under `name` replaces it.
+pub fn float_rule(name: &str, class: &str, title: &str, size: (i32, i32)) {
+    let (w, h) = size;
+    run(&format!(
+        "eval hl.window_rule({{ name = {}, {}, float = true, size = \"{w} {h}\", center = true }})",
+        lua_string(name),
+        matcher(class, title)
+    ));
 }
 
 /// `s` as a Lua string literal.

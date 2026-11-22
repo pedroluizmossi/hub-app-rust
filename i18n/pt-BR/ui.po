@@ -498,8 +498,8 @@ msgstr "Biblioteca"
 msgid "{} · does not load"
 msgstr "{} · não carrega"
 
-msgid "in use"
-msgstr "em uso"
+msgid "Nothing here matches the search."
+msgstr "Nada aqui combina com a busca."
 
 msgid "Import…"
 msgstr "Importar…"
@@ -519,8 +519,11 @@ msgstr "Fundos"
 msgid "Search"
 msgstr "Buscar"
 
-msgid "Choose an item on the left."
-msgstr "Escolha um item à esquerda."
+msgid "Sample app"
+msgstr "App de exemplo"
+
+msgid "This is how an app looks in this theme."
+msgstr "É assim que um app fica neste tema."
 
 msgid "The preview and the shaders need the OpenGL renderer: Settings › System › Renderer."
 msgstr "A prévia e os shaders precisam do renderizador OpenGL: Configurações › Sistema › Renderizador."
@@ -531,11 +534,23 @@ msgstr "Não compila:"
 msgid "Does not load:"
 msgstr "Não carrega:"
 
-msgid "In use in the Terminal, in order"
-msgstr "Em uso no Terminal, em ordem"
+msgid "Terminal:"
+msgstr "Terminal:"
 
-msgid "None. Choose a shader and click \"Add to the Terminal\"."
-msgstr "Nenhum. Escolha um shader e clique em \"Adicionar ao Terminal\"."
+msgid "no shaders yet. Choose one and click \"Add to the Terminal\"."
+msgstr "nenhum shader ainda. Escolha um e clique em \"Adicionar ao Terminal\"."
+
+msgid "needs the OpenGL renderer"
+msgstr "precisa do renderizador OpenGL"
+
+msgid "#{} in the Terminal"
+msgstr "nº {} no Terminal"
+
+msgid "window skin"
+msgstr "visual da janela"
+
+msgid "the window skin's backdrop"
+msgstr "fundo do visual da janela"
 
 msgid "Earlier in the chain"
 msgstr "Antes na sequência"

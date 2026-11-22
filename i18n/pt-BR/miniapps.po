@@ -485,8 +485,8 @@ msgstr "Importar mascotes de um .zip"
 msgid "No thread for the import: {}"
 msgstr "Sem thread para a importação: {}"
 
-msgid "Choose a mascot on the left."
-msgstr "Escolha uma mascote à esquerda."
+msgid "Open its folder"
+msgstr "Abrir a pasta dela"
 
 msgid "Name of the mascot"
 msgstr "Nome da mascote"
@@ -523,9 +523,6 @@ msgstr "Comemorando"
 
 msgid "Surprised"
 msgstr "Surpresa"
-
-msgid "Search mascots"
-msgstr "Buscar mascotes"
 
 msgid "Animations"
 msgstr "Animações"
@@ -589,9 +586,6 @@ msgstr "Além de descansar (idle), eles param para fazer as animações ligadas 
 
 msgid "Use in"
 msgstr "Usar em"
-
-msgid "Put this mascot in:"
-msgstr "Colocar esta mascote em:"
 
 msgid "Choose…"
 msgstr "Escolha…"

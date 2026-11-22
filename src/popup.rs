@@ -463,6 +463,19 @@ pub fn label_after_show<C: slint::ComponentHandle + 'static>(win: &C, kind: Kind
 #[cfg(windows)]
 pub fn label_after_show<C: slint::ComponentHandle + 'static>(_: &C, _: Kind) {}
 
+/// A window that should float at `size` (logical), centered, where the compositor would tile
+/// it (Hyprland): call before showing it. `name` tells the windows' rules apart.
+#[cfg(target_os = "linux")]
+pub fn float_when_shown(name: &str, title: &str, size: (i32, i32)) {
+    if hyprland::active() {
+        hyprland::float_rule(&format!("{}-{name}", crate::instance::channel_name()), APP_ID, title, size);
+    }
+}
+
+/// Windows does not tile windows.
+#[cfg(windows)]
+pub fn float_when_shown(_: &str, _: &str, _: (i32, i32)) {}
+
 /// The title of the native window (`None` before it exists).
 #[cfg(target_os = "linux")]
 fn title(window: &slint::Window) -> Option<String> {
