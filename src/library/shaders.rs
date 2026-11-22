@@ -194,6 +194,54 @@ pub fn builtin() -> Vec<Shader> {
             &[("PERSIST", tr!("How long a trace lingers (s)")), ("TINT", tr!("Trace color: own (0) to the cursor's (1)"))],
             &[],
         ),
+        make(
+            "rain",
+            tr!("Rain"),
+            tr!("Thin rain falls over the dark parts of the screen; the text stays clear."),
+            include_str!("../../miniapps/terminal/shaders/rain.glsl"),
+            &[
+                ("COLUMNS", tr!("Columns of rain across the screen")),
+                ("SPEED", tr!("Fall speed (screens per second)")),
+                ("LENGTH", tr!("Streak length (part of the screen)")),
+                ("OPACITY", tr!("How strongly it shows")),
+                ("BEHIND", tr!("Only over the background (1) or over everything (0)")),
+            ],
+            &[],
+        ),
+        make(
+            "scan_sweep",
+            tr!("Scan sweep"),
+            tr!("Every few seconds a light band runs down the screen, like a radar."),
+            include_str!("../../miniapps/terminal/shaders/scan_sweep.glsl"),
+            &[
+                ("PERIOD", tr!("Seconds between sweeps")),
+                ("SWEEP", tr!("How long a sweep takes (s)")),
+                ("BAND", tr!("Band height (px)")),
+                ("STRENGTH", tr!("How bright")),
+            ],
+            &[],
+        ),
+        make(
+            "dither",
+            tr!("Dither"),
+            tr!("A pixel-art look: bigger pixels in four colors of the theme. More for fun than for reading."),
+            include_str!("../../miniapps/terminal/shaders/dither.glsl"),
+            &[("PIXEL", tr!("Pixel size")), ("STRENGTH", tr!("How much of the effect"))],
+            &[],
+        ),
+        make(
+            "mood_vignette",
+            tr!("Mood vignette"),
+            tr!("The corners glow in the color of the mascot's mood, breathing slowly."),
+            include_str!("../../miniapps/terminal/shaders/mood_vignette.glsl"),
+            &[
+                ("SIZE", tr!("How far in it reaches")),
+                ("STRENGTH", tr!("How strong")),
+                ("PERIOD", tr!("Seconds per breath")),
+                ("PULSE", tr!("How much it breathes")),
+            ],
+            &[],
+        ),
     ]
 }
 

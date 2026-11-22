@@ -125,6 +125,8 @@ impl Hub {
         });
         if let Some(fx) = &fx {
             fx.set_colors(sample_colors());
+            // the sample's cursor color, as a calm mascot's
+            fx.set_mood(&win, [0x3d as f32 / 255.0, 0xf2 as f32 / 255.0, 1.0]);
         }
         win.global::<LibraryUi>().set_gl(fx.is_some());
         let mascots = MascotsTab::create(self.host.clone(), &win);

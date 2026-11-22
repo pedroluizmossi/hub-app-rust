@@ -9,9 +9,10 @@
 //! `iTimeFocus`) and the colors (`iBackgroundColor`, `iForegroundColor`, `iCursorColor`,
 //! `iPalette[256]`). Several shaders form a chain, each reading the one before.
 //!
-//! MiniUtils adds two inputs of its own: `iTimeError` (when the shell last rang the bell or
-//! reported a failed command, on the `iTime` clock; far in the past when it never did) and
-//! `iChannel1` (what this same shader drew the frame before, for trails that fade).
+//! MiniUtils adds inputs of its own: `iTimeError` (when the shell last rang the bell or
+//! reported a failed command, on the `iTime` clock; far in the past when it never did),
+//! `iChannel1` (what this same shader drew the frame before, for trails that fade) and
+//! `iMoodColor` (the theme's color for the mood of the window's mascot).
 //!
 //! After Slint draws the window (`RenderingState::AfterRendering`), the area is copied into
 //! a texture and drawn back in place through the chain. Every GL state touched is restored,
@@ -68,6 +69,7 @@ uniform vec4 iDate;
 uniform sampler2D iChannel0;
 uniform sampler2D iChannel1;
 uniform float iTimeError;
+uniform vec3 iMoodColor;
 uniform vec3 iChannelResolution[4];
 uniform vec4 iCurrentCursor;
 uniform vec4 iPreviousCursor;
@@ -226,6 +228,8 @@ struct Shared {
     kicked: Option<Instant>,
     /// When the shell last failed (`iTimeError`).
     error: Option<Instant>,
+    /// The mascot's mood color (`iMoodColor`).
+    mood: [f32; 3],
 }
 
 impl Shared {
@@ -314,6 +318,15 @@ impl PostFx {
         self.shared.borrow_mut().colors = Some(colors);
     }
 
+    /// The color of the window mascot's mood (`iMoodColor`). Draws again when it changed.
+    pub fn set_mood<C: ComponentHandle + 'static>(&self, win: &C, color: [f32; 3]) {
+        let mut shared = self.shared.borrow_mut();
+        if shared.mood != color {
+            shared.mood = color;
+            win.window().request_redraw();
+        }
+    }
+
     /// The shell rang the bell or a command failed (`iTimeError`).
     pub fn error<C: ComponentHandle + 'static>(&self, win: &C) {
         {
@@ -388,7 +401,7 @@ struct Pass {
     history_size: (i32, i32),
 }
 
-const UNIFORMS: [&str; 22] = [
+const UNIFORMS: [&str; 23] = [
     "iResolution",
     "iTime",
     "iTimeDelta",
@@ -398,6 +411,7 @@ const UNIFORMS: [&str; 22] = [
     "iChannel0",
     "iChannel1",
     "iTimeError",
+    "iMoodColor",
     "iChannelResolution",
     "iCurrentCursor",
     "iPreviousCursor",
@@ -630,7 +644,7 @@ impl Gl {
         unsafe {
             let saved = self.save();
             self.ensure_targets(area.w, area.h);
-            self.run(&area, &saved, shared.colors.as_ref());
+            self.run(&area, &saved, shared.colors.as_ref(), shared.mood);
             self.restore(&saved);
         }
         event
@@ -732,7 +746,7 @@ impl Gl {
     }
 
     /// Copies the area out of the frame and draws it back through every pass.
-    unsafe fn run(&mut self, area: &Area, saved: &Saved, colors: Option<&Colors>) {
+    unsafe fn run(&mut self, area: &Area, saved: &Saved, colors: Option<&Colors>, mood: [f32; 3]) {
         let [Some(first), Some(second)] = self.textures else { return };
         let now = Instant::now();
         let time = now.duration_since(self.start).as_secs_f32();
@@ -787,6 +801,7 @@ impl Gl {
                 gl.uniform_1_i32(u("iChannel0"), 0);
                 gl.uniform_1_i32(u("iChannel1"), 1);
                 gl.uniform_1_f32(u("iTimeError"), self.error);
+                gl.uniform_3_f32_slice(u("iMoodColor"), &mood);
                 gl.uniform_3_f32_slice(u("iChannelResolution"), &[w, h, 1.0]);
                 gl.uniform_4_f32_slice(u("iCurrentCursor"), &self.cursor);
                 gl.uniform_4_f32_slice(u("iPreviousCursor"), &self.previous);
@@ -900,9 +915,12 @@ mod tests {
     #[test]
     fn only_shaders_reading_the_clock_redraw() {
         let src = |glsl: &str| Source { name: String::new(), glsl: glsl.into() };
-        // the built-in ones never ask for every frame: still, or only after events
+        // the built-in ones that only follow events say so; only the ambient ones (that move
+        // on their own) ask for every frame
+        let ambient = ["rain", "scan_sweep", "mood_vignette"];
         for s in super::super::shaders::builtin() {
-            assert_ne!(src(&s.glsl).redraw(), Redraw::Always, "{} redraws on every frame", s.key);
+            let redraw = src(&s.glsl).redraw();
+            assert_eq!(redraw == Redraw::Always, ambient.contains(&s.key.as_str()), "{}: {redraw:?}", s.key);
         }
         assert_eq!(src("void mainImage(out vec4 c, in vec2 p) { c = vec4(sin(iTime)); }").redraw(), Redraw::Always);
         // named only in comments: still static; a division is not a comment
