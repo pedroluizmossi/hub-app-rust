@@ -484,3 +484,87 @@ msgstr "Segundos por pulso"
 
 msgid "How much it breathes"
 msgstr "Quanto pulsa"
+
+msgid "Pixel scenes"
+msgstr "Cenas em pixel art"
+
+msgid "A pixel-art landscape behind the text: city, countryside, mountains and lake, coast and avenue, with rain, clear sky or fog, by the time of day."
+msgstr "Uma paisagem em pixel art atrás do texto: cidade, campo, montanhas e lago, litoral e avenida, com chuva, céu limpo ou neblina, conforme a hora do dia."
+
+msgid "Scene"
+msgstr "Cena"
+
+msgid "Weather"
+msgstr "Clima"
+
+msgid "Time of day"
+msgstr "Horário"
+
+msgid "Minutes per scene (when they take turns)"
+msgstr "Minutos por cena (ao revezar)"
+
+msgid "Minutes per weather (when it takes turns)"
+msgstr "Minutos por clima (ao revezar)"
+
+msgid "Brightness"
+msgstr "Brilho"
+
+msgid "Haze toward the background"
+msgstr "Névoa na cor do fundo"
+
+msgid "Lit windows"
+msgstr "Janelas acesas"
+
+msgid "Rain speed"
+msgstr "Velocidade da chuva"
+
+msgid "Rain strength"
+msgstr "Intensidade da chuva"
+
+msgid "Lightning"
+msgstr "Relâmpagos"
+
+msgid "Fog density"
+msgstr "Densidade da neblina"
+
+msgid "Cars on the avenue"
+msgstr "Carros na avenida"
+
+msgid "A new one for each tab"
+msgstr "Uma nova a cada aba"
+
+msgid "Take turns"
+msgstr "Revezar"
+
+msgid "City"
+msgstr "Cidade"
+
+msgid "Countryside"
+msgstr "Campo"
+
+msgid "Mountains and lake"
+msgstr "Montanhas e lago"
+
+msgid "Coast"
+msgstr "Litoral"
+
+msgid "Avenue"
+msgstr "Avenida"
+
+msgid "Clear sky"
+msgstr "Céu limpo"
+
+msgid "Fog"
+msgstr "Neblina"
+
+msgid "From the clock"
+msgstr "Pelo relógio"
+
+msgid "Morning"
+msgstr "Manhã"
+
+msgid "Afternoon"
+msgstr "Tarde"
+
+msgid "Night"
+msgstr "Noite"

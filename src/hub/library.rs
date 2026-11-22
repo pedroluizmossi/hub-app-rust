@@ -16,7 +16,7 @@ use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, TimerMode, Vec
 
 use super::mascots::MascotsTab;
 use super::{Hub, with_hub};
-use crate::library::postfx::{self, Colors, Frame, PostFx, Source};
+use crate::library::postfx::{self, Colors, Frame, PostFx};
 use crate::library::{self, Item, Kind, Origin, shaders};
 use crate::tr;
 use crate::mascot::{Mood, render, sprites};
@@ -364,6 +364,7 @@ impl Hub {
                         .iter()
                         .map(|p| {
                             let value = values.get(&p.name).and_then(value_f64).map_or(p.default, |v| v.clamp(p.min, p.max));
+                            let choice = p.options.iter().position(|(v, _)| (v - value).abs() < 0.001).unwrap_or(0);
                             LibParam {
                                 name: p.name.clone().into(),
                                 label: p.label.clone().into(),
@@ -373,13 +374,18 @@ impl Hub {
                                 step: p.step as f32,
                                 integer: p.integer,
                                 changed: (value - p.default).abs() > f64::EPSILON,
+                                choices: ModelRc::new(VecModel::from(
+                                    p.options.iter().map(|(_, label)| SharedString::from(label.as_str())).collect::<Vec<_>>(),
+                                )),
+                                choice_values: ModelRc::new(VecModel::from(p.options.iter().map(|(v, _)| *v as f32).collect::<Vec<_>>())),
+                                choice: choice as i32,
                             }
                         })
                         .collect();
                     g.set_params_changed(params.iter().any(|p| p.changed));
                     g.set_params(ModelRc::new(VecModel::from(params)));
                     if let Some(fx) = &l.fx {
-                        fx.set(&l.win, vec![Source { name: s.key.clone(), glsl: shaders::with_values(s, &values) }]);
+                        fx.set(&l.win, vec![shaders::source(s, &values)]);
                     }
                 } else if let Some(fx) = &l.fx {
                     fx.set(&l.win, Vec::new());
@@ -451,6 +457,10 @@ impl Hub {
                 match chain.iter().position(|k| *k == key) {
                     Some(i) => {
                         chain.remove(i);
+                    }
+                    // one that paints the background runs under the others: first
+                    None if shaders::find(&key).is_some_and(|s| shaders::source(&s, &toml::Table::new()).paints_background()) => {
+                        chain.insert(0, key)
                     }
                     None => chain.push(key),
                 }

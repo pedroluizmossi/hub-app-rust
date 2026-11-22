@@ -11,7 +11,7 @@
 // (ui/mascots.slint, src/hub/mascots.rs) inside the same frame.
 import { ScrollView } from "std-widgets.slint";
 import { Colors, Skin, Icons } from "theme.slint";
-import { TextButton, HeaderButton, SearchBox, IconButton } from "widgets.slint";
+import { TextButton, HeaderButton, SearchBox, IconButton, Select } from "widgets.slint";
 import { Bar, Frame, ResizeHandles } from "frame.slint";
 import { MascotsPanel, MascotsManager } from "mascots.slint";
 
@@ -40,6 +40,11 @@ export struct LibParam {
     integer: bool,
     // differs from the shader's own value
     changed: bool,
+    // a choice among named values (empty: a number on a slider), their values and the one
+    // chosen
+    choices: [string],
+    choice-values: [float],
+    choice: int,
 }
 
 // One shader of the Terminal's chain, in order.
@@ -808,24 +813,35 @@ component Params inherits VerticalLayout {
                 color: Skin.sub;
                 font-size: 12px * Skin.text-scale;
                 horizontal-stretch: 1;
+                vertical-alignment: center;
                 wrap: word-wrap;
             }
-            Text {
+            if p.choices.length == 0: Text {
                 text: p.integer ? round(p.value) : round(p.value * 1000) / 1000;
                 color: p.changed ? Skin.accent : Skin.ink;
                 font-family: Skin.font-mono;
                 font-size: 12px * Skin.text-scale;
             }
-            if p.changed: IconButton {
-                width: 22px;
-                height: 22px;
-                icon-size: 12px;
-                icon: Icons.reset;
-                label: @tr("Back to the shader's value");
-                clicked => { LibraryUi.param-reset(p.name); }
+            if p.choices.length > 0: Select {
+                width: 190px;
+                options: p.choices;
+                index: p.choice;
+                label: p.label;
+                chosen(i) => { LibraryUi.param-edited(p.name, p.choice-values[i]); }
+            }
+            if p.changed: VerticalLayout {
+                alignment: center;
+                IconButton {
+                    width: 22px;
+                    height: 22px;
+                    icon-size: 12px;
+                    icon: Icons.reset;
+                    label: @tr("Back to the shader's value");
+                    clicked => { LibraryUi.param-reset(p.name); }
+                }
             }
         }
-        ParamSlider {
+        if p.choices.length == 0: ParamSlider {
             value: p.value;
             minimum: p.minimum;
             maximum: p.maximum;
