@@ -415,6 +415,13 @@ msgstr "Página"
 msgid "Page of {}"
 msgstr "Página de {}"
 
+# Settings › Apps: a manifest setting (ui/settings.slint › SettingLine)
+msgid "needs restart"
+msgstr "requer reinício"
+
+msgid "Reset {} to the default"
+msgstr "Voltar {} ao padrão"
+
 msgid "Data"
 msgstr "Dados"
 
@@ -473,3 +480,77 @@ msgstr "local"
 
 msgid "dev"
 msgstr "dev"
+
+# Settings › Apps: an asset setting; Settings › Appearance: the Library button
+msgid "none"
+msgstr "nenhum"
+
+msgid "Library…"
+msgstr "Biblioteca…"
+
+msgid "Library"
+msgstr "Biblioteca"
+
+# The Library window (ui/library.slint)
+msgid "{} · does not load"
+msgstr "{} · não carrega"
+
+msgid "in use"
+msgstr "em uso"
+
+msgid "Import…"
+msgstr "Importar…"
+
+msgid "Shaders"
+msgstr "Shaders"
+
+msgid "App themes"
+msgstr "Temas dos apps"
+
+msgid "Window skins"
+msgstr "Visuais da janela"
+
+msgid "Backdrops"
+msgstr "Fundos"
+
+msgid "Search"
+msgstr "Buscar"
+
+msgid "Choose an item on the left."
+msgstr "Escolha um item à esquerda."
+
+msgid "The preview and the shaders need the OpenGL renderer: Settings › System › Renderer."
+msgstr "A prévia e os shaders precisam do renderizador OpenGL: Configurações › Sistema › Renderizador."
+
+msgid "Does not compile:"
+msgstr "Não compila:"
+
+msgid "Does not load:"
+msgstr "Não carrega:"
+
+msgid "In use in the Terminal, in order"
+msgstr "Em uso no Terminal, em ordem"
+
+msgid "None. Choose a shader and click \"Add to the Terminal\"."
+msgstr "Nenhum. Escolha um shader e clique em \"Adicionar ao Terminal\"."
+
+msgid "Earlier in the chain"
+msgstr "Antes na sequência"
+
+msgid "Later in the chain"
+msgstr "Depois na sequência"
+
+msgid "Adjustments"
+msgstr "Ajustes"
+
+msgid "Reset all"
+msgstr "Voltar todos"
+
+msgid "Back to the shader's value"
+msgstr "Voltar ao valor do shader"
+
+msgid "Copy to edit"
+msgstr "Copiar para editar"
+
+msgid "Open file"
+msgstr "Abrir arquivo"

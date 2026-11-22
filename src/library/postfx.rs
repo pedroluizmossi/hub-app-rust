@@ -1,28 +1,29 @@
-//! Shaders over the terminal screen, with the OpenGL renderer (Settings › Renderer).
+//! Shaders over part of a window, with the OpenGL renderer (Settings › System › Renderer):
+//! the Terminal's screen, and the Library's preview.
 //!
 //! The format is Ghostty's `custom-shader` (which is Shadertoy's): a `mainImage(out vec4,
-//! in vec2)` that reads the screen from `iChannel0`, with `iResolution`, `iTime`,
-//! `iTimeDelta`, `iFrame`, `iDate`, `iChannelResolution` and `iMouse` (always zero here: the
-//! pointer is not tracked). Several shaders form a chain, each reading the one before.
+//! in vec2)` that reads the area from `iChannel0`. It gets Shadertoy's `iResolution`,
+//! `iTime`, `iTimeDelta`, `iFrame`, `iDate`, `iChannelResolution` and `iMouse` (always
+//! zero: the pointer is not tracked), and Ghostty's own: the cursor (`iCurrentCursor`,
+//! `iPreviousCursor`, their colors, `iTimeCursorChange`), the focus (`iFocus`,
+//! `iTimeFocus`) and the colors (`iBackgroundColor`, `iForegroundColor`, `iCursorColor`,
+//! `iPalette[256]`). Several shaders form a chain, each reading the one before.
 //!
-//! After Slint draws the window (`RenderingState::AfterRendering`), the screen area (not the
-//! title bar or the tabs) is copied into a texture and drawn back in place through the
-//! chain. Every GL state touched is restored, since the renderer's own drawing relies on it.
-//! A shader that reads the clock (`iTime`, …) makes the window draw on every frame while it
-//! is open; the others only when something changes, like the rest of the window.
+//! After Slint draws the window (`RenderingState::AfterRendering`), the area is copied into
+//! a texture and drawn back in place through the chain. Every GL state touched is restored,
+//! since the renderer's own drawing relies on it. A shader that reads the clock (`iTime`,
+//! …) makes the window draw on every frame while it is visible; the others only when
+//! something changes, like the rest of the window.
+//!
+//! Compile errors are kept by shader name (`errors`), for the Library to show.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use glow::HasContext;
 use slint::{ComponentHandle, GraphicsAPI, RenderingState, Timer, TimerMode};
-
-use crate::ui::TerminalWindow;
-
-/// The built-in shaders (Settings of the Terminal app).
-pub const CRT: &str = include_str!("../../../miniapps/terminal/shaders/crt.glsl");
-pub const BLOOM: &str = include_str!("../../../miniapps/terminal/shaders/bloom.glsl");
 
 /// How often an animated chain asks for a frame (the display's rate caps it anyway).
 const FRAME: Duration = Duration::from_millis(16);
@@ -46,7 +47,7 @@ void main() {
 ";
 
 /// What a Ghostty shader expects to find declared, and `main` calling its `mainImage` with
-/// the pixel's position inside the screen area (`uOffset`: where that area starts).
+/// the pixel's position inside the area (`uOffset`: where the area starts).
 const PRELUDE: &str = "
 uniform vec3 iResolution;
 uniform float iTime;
@@ -56,6 +57,17 @@ uniform vec4 iMouse;
 uniform vec4 iDate;
 uniform sampler2D iChannel0;
 uniform vec3 iChannelResolution[4];
+uniform vec4 iCurrentCursor;
+uniform vec4 iPreviousCursor;
+uniform vec4 iCurrentCursorColor;
+uniform vec4 iPreviousCursorColor;
+uniform float iTimeCursorChange;
+uniform int iFocus;
+uniform float iTimeFocus;
+uniform vec3 iBackgroundColor;
+uniform vec3 iForegroundColor;
+uniform vec3 iCursorColor;
+uniform vec3 iPalette[256];
 uniform vec2 uOffset;
 out vec4 miniutilsColor;
 ";
@@ -68,7 +80,8 @@ void main() {
 }
 ";
 
-/// One shader of the chain: a name for the log (the file) and its GLSL.
+/// One shader of the chain: its name (the Library key, for errors and the log) and the
+/// GLSL to compile (with the user's adjustments already written in).
 #[derive(Clone, PartialEq)]
 pub struct Source {
     pub name: String,
@@ -80,7 +93,7 @@ impl Source {
     /// shader may say it doesn't use `iTime`).
     fn animated(&self) -> bool {
         let code = without_comments(&self.glsl);
-        ["iTime", "iTimeDelta", "iFrame", "iDate"].iter().any(|u| code.contains(u))
+        ["iTime", "iTimeDelta", "iFrame", "iDate", "iTimeCursorChange", "iTimeFocus"].iter().any(|u| code.contains(u))
     }
 }
 
@@ -104,28 +117,96 @@ fn without_comments(glsl: &str) -> String {
     out
 }
 
-/// The chain asked for and whether the GL side has built it yet.
-#[derive(Default)]
-struct Chain {
-    sources: Vec<Source>,
-    changed: bool,
+/// What the window shows this frame, read by the probe given to `attach`.
+pub struct Frame {
+    /// The area: x, y, width and height in logical pixels from the window's top left.
+    pub area: (f32, f32, f32, f32),
+    /// The text cursor, if one is shown: x, y, width and height in logical pixels from the
+    /// area's top left.
+    pub cursor: Option<(f32, f32, f32, f32)>,
+    pub focused: bool,
 }
 
-/// The shaders of one terminal window.
+/// The colors a shader can ask for, as 0..1 RGB.
+#[derive(Clone)]
+pub struct Colors {
+    pub background: [f32; 3],
+    pub foreground: [f32; 3],
+    pub cursor: [f32; 3],
+    pub palette: Box<[[f32; 3]; 256]>,
+}
+
+impl Colors {
+    /// From the 16 terminal colors; the other 240 are xterm's cube and grays.
+    pub fn new(background: [f32; 3], foreground: [f32; 3], cursor: [f32; 3], ansi: [[f32; 3]; 16]) -> Self {
+        let mut palette = Box::new([[0.0; 3]; 256]);
+        palette[..16].copy_from_slice(&ansi);
+        let level = |i: usize| if i == 0 { 0.0 } else { (55 + 40 * i) as f32 / 255.0 };
+        for i in 0..216 {
+            palette[16 + i] = [level(i / 36), level(i / 6 % 6), level(i % 6)];
+        }
+        for i in 0..24 {
+            let v = (8 + 10 * i) as f32 / 255.0;
+            palette[232 + i] = [v, v, v];
+        }
+        Colors { background, foreground, cursor, palette }
+    }
+}
+
+thread_local! {
+    /// The last compile error of each shader, by name (none = it compiled).
+    static ERRORS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    /// Bumped whenever `ERRORS` changes, so a screen can tell without comparing.
+    static ERRORS_STAMP: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Why shader `name` did not compile the last time it was built (UI thread).
+pub fn error(name: &str) -> Option<String> {
+    ERRORS.with(|e| e.borrow().get(name).cloned())
+}
+
+/// Changes whenever an error appears or goes away.
+pub fn errors_stamp() -> u64 {
+    ERRORS_STAMP.with(Cell::get)
+}
+
+fn set_error(name: &str, error: Option<String>) {
+    let changed = ERRORS.with(|e| {
+        let mut e = e.borrow_mut();
+        match error {
+            Some(msg) => e.insert(name.to_string(), msg.clone()).as_ref() != Some(&msg),
+            None => e.remove(name).is_some(),
+        }
+    });
+    if changed {
+        ERRORS_STAMP.with(|s| s.set(s.get() + 1));
+    }
+}
+
+/// The chain asked for, the colors, and whether the GL side has built it yet.
+#[derive(Default)]
+struct Shared {
+    sources: Vec<Source>,
+    changed: bool,
+    colors: Option<Colors>,
+}
+
+/// The shaders of one window.
 pub struct PostFx {
-    chain: Rc<RefCell<Chain>>,
+    shared: Rc<RefCell<Shared>>,
     /// Asks for frames while an animated chain is on.
     clock: Timer,
 }
 
 impl PostFx {
-    /// Hooks into the window's drawing. `None` with the software renderer (no OpenGL).
-    pub fn attach(win: &TerminalWindow) -> Option<PostFx> {
+    /// Hooks into the window's drawing; `probe` says, each frame, where the area is (`None`:
+    /// nothing to draw over now). `None` with the software renderer (no OpenGL).
+    pub fn attach<C: ComponentHandle + 'static>(win: &C, probe: impl Fn(&C) -> Option<Frame> + 'static) -> Option<PostFx> {
         if crate::popup::renderer() != crate::popup::Renderer::OpenGl {
             return None;
         }
-        let chain = Rc::new(RefCell::new(Chain::default()));
-        let shared = chain.clone();
+        let shared = Rc::new(RefCell::new(Shared::default()));
+        let inner = shared.clone();
         let weak = win.as_weak();
         let mut gl: Option<Gl> = None;
         let hooked = win.window().set_rendering_notifier(move |state, api| match state {
@@ -136,12 +217,15 @@ impl PostFx {
                     let context = unsafe { glow::Context::from_loader_function_cstr(|name| get_proc_address(name)) };
                     gl = Some(Gl::new(context));
                     // a new context: the programs are built again in it
-                    shared.borrow_mut().changed = true;
+                    inner.borrow_mut().changed = true;
                 }
             }
             RenderingState::AfterRendering => {
-                if let (Some(gl), Some(win)) = (gl.as_mut(), weak.upgrade()) {
-                    gl.frame(&win, &mut shared.borrow_mut());
+                if let (Some(gl), Some(win)) = (gl.as_mut(), weak.upgrade())
+                    && let Some(frame) = probe(&win)
+                {
+                    let size = win.window().size();
+                    gl.frame(&frame, win.window().scale_factor(), (size.width as i32, size.height as i32), &mut inner.borrow_mut());
                 }
             }
             RenderingState::RenderingTeardown => {
@@ -152,20 +236,20 @@ impl PostFx {
             _ => {}
         });
         if let Err(e) = hooked {
-            log::warn!("terminal: no shaders ({e:?})");
+            log::warn!("no shaders in this window ({e:?})");
             return None;
         }
-        Some(PostFx { chain, clock: Timer::default() })
+        Some(PostFx { shared, clock: Timer::default() })
     }
 
     /// The shaders to run, in order (empty: none). Draws the window again when they changed.
-    pub fn set(&self, win: &TerminalWindow, sources: Vec<Source>) {
+    pub fn set<C: ComponentHandle + 'static>(&self, win: &C, sources: Vec<Source>) {
         let animated = sources.iter().any(Source::animated);
         {
-            let mut chain = self.chain.borrow_mut();
-            if chain.sources != sources {
-                chain.sources = sources;
-                chain.changed = true;
+            let mut shared = self.shared.borrow_mut();
+            if shared.sources != sources {
+                shared.sources = sources;
+                shared.changed = true;
                 win.window().request_redraw();
             }
         }
@@ -182,6 +266,11 @@ impl PostFx {
             });
         }
     }
+
+    /// The colors the shaders see (`iBackgroundColor`, `iPalette`…).
+    pub fn set_colors(&self, colors: Colors) {
+        self.shared.borrow_mut().colors = Some(colors);
+    }
 }
 
 /// The GL objects of the chain, living in the renderer's context.
@@ -190,28 +279,50 @@ struct Gl {
     /// Needed to draw in a core profile, though the triangle uses no attributes.
     vao: Option<glow::VertexArray>,
     passes: Vec<Pass>,
-    /// The screen copy and the output of every pass but the last, alternating.
+    /// The area's copy and the output of every pass but the last, alternating.
     textures: [Option<glow::Texture>; 2],
     fbo: Option<glow::Framebuffer>,
     size: (i32, i32),
     start: Instant,
     last: Instant,
     frame: i32,
+    /// Cursor now and before its last move (GL pixels: x, top y, width, height), and when
+    /// it moved (seconds since `start`).
+    cursor: [f32; 4],
+    previous: [f32; 4],
+    cursor_changed: f32,
+    focused: bool,
+    focus_changed: f32,
 }
 
 /// One compiled shader and where its inputs go.
 struct Pass {
     program: glow::Program,
-    resolution: Option<glow::UniformLocation>,
-    time: Option<glow::UniformLocation>,
-    delta: Option<glow::UniformLocation>,
-    frame: Option<glow::UniformLocation>,
-    mouse: Option<glow::UniformLocation>,
-    date: Option<glow::UniformLocation>,
-    channel: Option<glow::UniformLocation>,
-    channel_resolution: Option<glow::UniformLocation>,
-    offset: Option<glow::UniformLocation>,
+    at: HashMap<&'static str, glow::UniformLocation>,
 }
+
+const UNIFORMS: [&str; 20] = [
+    "iResolution",
+    "iTime",
+    "iTimeDelta",
+    "iFrame",
+    "iMouse",
+    "iDate",
+    "iChannel0",
+    "iChannelResolution",
+    "iCurrentCursor",
+    "iPreviousCursor",
+    "iCurrentCursorColor",
+    "iPreviousCursorColor",
+    "iTimeCursorChange",
+    "iFocus",
+    "iTimeFocus",
+    "iBackgroundColor",
+    "iForegroundColor",
+    "iCursorColor",
+    "iPalette",
+    "uOffset",
+];
 
 /// The renderer's GL state that a pass changes, to put back afterwards.
 struct Saved {
@@ -227,30 +338,76 @@ struct Saved {
     caps: [(u32, bool); 4],
 }
 
+/// The area in the window's framebuffer: physical pixels, from the bottom (GL's origin),
+/// clipped to the window.
+#[derive(Debug, PartialEq)]
+struct Area {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+
+/// `logical`: x, y, width and height in logical pixels, from the window's top. `None`
+/// when nothing of it is visible.
+fn screen_area(logical: (f32, f32, f32, f32), scale: f32, window: (i32, i32)) -> Option<Area> {
+    let px = |v: f32| (v * scale).round() as i32;
+    let (x, top) = (px(logical.0).max(0), px(logical.1).max(0));
+    let right = px(logical.0 + logical.2).min(window.0);
+    let bottom = px(logical.1 + logical.3).min(window.1);
+    let (w, h) = (right - x, bottom - top);
+    (w > 0 && h > 0).then_some(Area { x, y: window.1 - bottom, w, h })
+}
+
+/// The cursor as Ghostty passes it: x and the TOP edge's y in pixels from the area's
+/// bottom left, width and height.
+fn cursor_rect(c: (f32, f32, f32, f32), scale: f32, area_height: i32) -> [f32; 4] {
+    [c.0 * scale, area_height as f32 - c.1 * scale, c.2 * scale, c.3 * scale]
+}
+
 impl Gl {
     fn new(gl: glow::Context) -> Self {
         // SAFETY: called with the renderer's context current (see `PostFx::attach`).
         let vao = unsafe {
             log::info!(
-                "terminal shaders: OpenGL {}, GLSL {}",
+                "shaders: OpenGL {}, GLSL {}",
                 gl.get_parameter_string(glow::VERSION),
                 gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION)
             );
             gl.create_vertex_array().ok()
         };
         let now = Instant::now();
-        Gl { gl, vao, passes: Vec::new(), textures: [None, None], fbo: None, size: (0, 0), start: now, last: now, frame: 0 }
+        Gl {
+            gl,
+            vao,
+            passes: Vec::new(),
+            textures: [None, None],
+            fbo: None,
+            size: (0, 0),
+            start: now,
+            last: now,
+            frame: 0,
+            cursor: [0.0; 4],
+            previous: [0.0; 4],
+            cursor_changed: -1000.0,
+            focused: true,
+            focus_changed: -1000.0,
+        }
     }
 
     /// Builds the chain anew. One shader that doesn't compile turns them all off (half a
-    /// chain is not what was asked for); the log says why.
+    /// chain is not what was asked for); `errors` says why.
     fn build(&mut self, sources: &[Source]) {
         self.drop_passes();
         for source in sources {
             match self.compile(&source.glsl) {
-                Ok(pass) => self.passes.push(pass),
+                Ok(pass) => {
+                    set_error(&source.name, None);
+                    self.passes.push(pass);
+                }
                 Err(e) => {
-                    log::warn!("terminal shader {}: {e}", source.name);
+                    log::warn!("shader {}: {e}", source.name);
+                    set_error(&source.name, Some(e));
                     self.drop_passes();
                     return;
                 }
@@ -268,7 +425,14 @@ impl Gl {
             let fragment = format!("{header}{PRELUDE}#line 1\n{glsl}\n{MAIN}");
             // SAFETY: the renderer's context is current while it notifies.
             match unsafe { self.program(&format!("{header}{VERTEX}"), &fragment) } {
-                Ok(program) => return Ok(unsafe { self.pass(program) }),
+                Ok(program) => {
+                    let at = UNIFORMS
+                        .iter()
+                        // SAFETY: as above
+                        .filter_map(|name| unsafe { self.gl.get_uniform_location(program, name) }.map(|l| (*name, l)))
+                        .collect();
+                    return Ok(Pass { program, at });
+                }
                 Err(e) => errors.push(format!("[{}] {e}", header.lines().next().unwrap_or_default())),
             }
         }
@@ -311,22 +475,6 @@ impl Gl {
         }
     }
 
-    unsafe fn pass(&self, program: glow::Program) -> Pass {
-        let at = |name: &str| unsafe { self.gl.get_uniform_location(program, name) };
-        Pass {
-            program,
-            resolution: at("iResolution"),
-            time: at("iTime"),
-            delta: at("iTimeDelta"),
-            frame: at("iFrame"),
-            mouse: at("iMouse"),
-            date: at("iDate"),
-            channel: at("iChannel0"),
-            channel_resolution: at("iChannelResolution"),
-            offset: at("uOffset"),
-        }
-    }
-
     fn drop_passes(&mut self) {
         for pass in self.passes.drain(..) {
             // SAFETY: the program was made in this context, which is current.
@@ -350,29 +498,33 @@ impl Gl {
         }
     }
 
-    /// Runs the chain over the screen area of the frame Slint just drew.
-    fn frame(&mut self, win: &TerminalWindow, chain: &mut Chain) {
-        if chain.changed {
-            chain.changed = false;
-            self.build(&chain.sources);
+    /// Runs the chain over the area of the frame Slint just drew.
+    fn frame(&mut self, frame: &Frame, scale: f32, window: (i32, i32), shared: &mut Shared) {
+        if shared.changed {
+            shared.changed = false;
+            self.build(&shared.sources);
         }
         if self.passes.is_empty() {
             return;
         }
-        let window = win.window();
-        let Some(area) = screen_area(
-            (win.get_screen_x(), win.get_screen_y(), win.get_screen_width(), win.get_screen_height()),
-            window.scale_factor(),
-            (window.size().width as i32, window.size().height as i32),
-        ) else {
-            return;
-        };
+        let Some(area) = screen_area(frame.area, scale, window) else { return };
+        let now = self.start.elapsed().as_secs_f32();
+        let cursor = frame.cursor.map_or([0.0; 4], |c| cursor_rect(c, scale, area.h));
+        if cursor != self.cursor {
+            self.previous = self.cursor;
+            self.cursor = cursor;
+            self.cursor_changed = now;
+        }
+        if frame.focused != self.focused {
+            self.focused = frame.focused;
+            self.focus_changed = now;
+        }
         // SAFETY: the renderer's context is current while it notifies; every state changed
         // here is restored before returning.
         unsafe {
             let saved = self.save();
             self.ensure_targets(area.w, area.h);
-            self.run(&area, &saved);
+            self.run(&area, &saved, shared.colors.as_ref());
             self.restore(&saved);
         }
     }
@@ -466,7 +618,7 @@ impl Gl {
     }
 
     /// Copies the area out of the frame and draws it back through every pass.
-    unsafe fn run(&mut self, area: &Area, saved: &Saved) {
+    unsafe fn run(&mut self, area: &Area, saved: &Saved, colors: Option<&Colors>) {
         let [Some(first), Some(second)] = self.textures else { return };
         let now = Instant::now();
         let time = now.duration_since(self.start).as_secs_f32();
@@ -503,43 +655,38 @@ impl Gl {
                 }
                 gl.use_program(Some(pass.program));
                 gl.bind_texture(glow::TEXTURE_2D, Some(input));
+                let u = |name: &str| pass.at.get(name);
                 let (w, h) = (area.w as f32, area.h as f32);
-                gl.uniform_3_f32(pass.resolution.as_ref(), w, h, 1.0);
-                gl.uniform_1_f32(pass.time.as_ref(), time);
-                gl.uniform_1_f32(pass.delta.as_ref(), delta);
-                gl.uniform_1_i32(pass.frame.as_ref(), self.frame);
-                gl.uniform_4_f32(pass.mouse.as_ref(), 0.0, 0.0, 0.0, 0.0);
-                gl.uniform_4_f32(pass.date.as_ref(), date[0], date[1], date[2], date[3]);
-                gl.uniform_1_i32(pass.channel.as_ref(), 0);
-                gl.uniform_3_f32_slice(pass.channel_resolution.as_ref(), &[w, h, 1.0]);
+                gl.uniform_3_f32(u("iResolution"), w, h, 1.0);
+                gl.uniform_1_f32(u("iTime"), time);
+                gl.uniform_1_f32(u("iTimeDelta"), delta);
+                gl.uniform_1_i32(u("iFrame"), self.frame);
+                gl.uniform_4_f32(u("iMouse"), 0.0, 0.0, 0.0, 0.0);
+                gl.uniform_4_f32_slice(u("iDate"), &date);
+                gl.uniform_1_i32(u("iChannel0"), 0);
+                gl.uniform_3_f32_slice(u("iChannelResolution"), &[w, h, 1.0]);
+                gl.uniform_4_f32_slice(u("iCurrentCursor"), &self.cursor);
+                gl.uniform_4_f32_slice(u("iPreviousCursor"), &self.previous);
+                gl.uniform_1_f32(u("iTimeCursorChange"), self.cursor_changed);
+                gl.uniform_1_i32(u("iFocus"), i32::from(self.focused));
+                gl.uniform_1_f32(u("iTimeFocus"), self.focus_changed);
+                if let Some(c) = colors {
+                    let cursor = [c.cursor[0], c.cursor[1], c.cursor[2], 1.0];
+                    gl.uniform_4_f32_slice(u("iCurrentCursorColor"), &cursor);
+                    gl.uniform_4_f32_slice(u("iPreviousCursorColor"), &cursor);
+                    gl.uniform_3_f32_slice(u("iBackgroundColor"), &c.background);
+                    gl.uniform_3_f32_slice(u("iForegroundColor"), &c.foreground);
+                    gl.uniform_3_f32_slice(u("iCursorColor"), &c.cursor);
+                    gl.uniform_3_f32_slice(u("iPalette"), c.palette.as_flattened());
+                }
                 let offset = if last { (area.x as f32, area.y as f32) } else { (0.0, 0.0) };
-                gl.uniform_2_f32(pass.offset.as_ref(), offset.0, offset.1);
+                gl.uniform_2_f32(u("uOffset"), offset.0, offset.1);
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
                 std::mem::swap(&mut input, &mut output);
             }
         }
         self.frame = self.frame.wrapping_add(1);
     }
-}
-
-/// The screen area in the window's framebuffer: physical pixels, from the bottom (GL's
-/// origin), clipped to the window. `None` when nothing of it is visible.
-#[derive(Debug, PartialEq)]
-struct Area {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-
-/// `logical`: x, y, width and height of the area in logical pixels, from the window's top.
-fn screen_area(logical: (f32, f32, f32, f32), scale: f32, window: (i32, i32)) -> Option<Area> {
-    let px = |v: f32| (v * scale).round() as i32;
-    let (x, top) = (px(logical.0).max(0), px(logical.1).max(0));
-    let right = px(logical.0 + logical.2).min(window.0);
-    let bottom = px(logical.1 + logical.3).min(window.1);
-    let (w, h) = (right - x, bottom - top);
-    (w > 0 && h > 0).then_some(Area { x, y: window.1 - bottom, w, h })
 }
 
 /// Shadertoy's `iDate`: year, month (from 0), day and seconds since midnight, local time.
@@ -566,13 +713,32 @@ mod tests {
     }
 
     #[test]
+    fn cursor_is_given_by_its_top_edge_from_the_bottom() {
+        // a 10×20 cell at (30, 40) of a 200 px tall area, at 2×
+        assert_eq!(cursor_rect((30.0, 40.0, 10.0, 20.0), 2.0, 200), [60.0, 120.0, 20.0, 40.0]);
+    }
+
+    #[test]
+    fn palette_follows_xterm_after_the_16_colors() {
+        let c = Colors::new([0.0; 3], [1.0; 3], [1.0; 3], [[0.5; 3]; 16]);
+        assert_eq!(c.palette[15], [0.5; 3]);
+        // 16 is the cube's black, 231 its white, 232 the first gray
+        assert_eq!(c.palette[16], [0.0; 3]);
+        assert_eq!(c.palette[231], [1.0; 3]);
+        assert_eq!(c.palette[232], [8.0 / 255.0; 3]);
+    }
+
+    #[test]
     fn only_shaders_reading_the_clock_animate() {
         let src = |glsl: &str| Source { name: String::new(), glsl: glsl.into() };
-        assert!(!src(CRT).animated());
-        assert!(!src(BLOOM).animated());
+        for s in super::super::shaders::builtin() {
+            assert!(!src(&s.glsl).animated(), "{} animates", s.key);
+        }
         assert!(src("void mainImage(out vec4 c, in vec2 p) { c = vec4(sin(iTime)); }").animated());
         // named only in comments: still static; a division is not a comment
         assert!(!src("// iTime\n/* iFrame */ void mainImage(out vec4 c, in vec2 p) { c = vec4(p / 2.0, 0, 1); }").animated());
         assert!(src("float t = 1.0 / 2.0 * iTime; // clock").animated());
+        // the cursor shaders animate after each move
+        assert!(src("float age = iTime - iTimeCursorChange;").animated());
     }
 }

@@ -12,6 +12,7 @@ mod bind;
 mod chatter;
 mod data;
 mod grid;
+pub mod library;
 mod pages;
 mod settings;
 mod store;
@@ -153,6 +154,8 @@ pub struct Hub {
     usage: RefCell<usage::UsageState>,
     /// What the Settings list shows now (see `rebuild_settings`).
     settings_fingerprint: RefCell<String>,
+    /// The Library window, once opened (`library.rs`).
+    library: RefCell<Option<library::Library>>,
     /// Page open on the panel (index in `config.pages`).
     page: Cell<usize>,
     /// What the sidebar shows now (see `rebuild_pages`).
@@ -248,6 +251,7 @@ impl Hub {
             clock: RefCell::new(String::new()),
             usage: Default::default(),
             settings_fingerprint: RefCell::new(String::new()),
+            library: RefCell::new(None),
             page: Cell::new(0),
             pages_fingerprint: RefCell::new(String::new()),
             chatter: RefCell::new(chatter::Director::default()),

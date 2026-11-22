@@ -8,6 +8,7 @@ mod autostart;
 mod core;
 mod hub;
 mod instance;
+mod library;
 mod mascot;
 mod popup;
 mod providers;

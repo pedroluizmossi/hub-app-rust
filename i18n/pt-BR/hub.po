@@ -249,3 +249,97 @@ msgstr "// 1 APP · {} × {}"
 
 msgid "// {} APPS · {} × {}"
 msgstr "// {} APPS · {} × {}"
+
+# The Library (src/library, src/hub/library.rs)
+msgid "Add to the Terminal"
+msgstr "Adicionar ao Terminal"
+
+msgid "Remove from the Terminal"
+msgstr "Tirar do Terminal"
+
+msgid "Use as the window skin"
+msgstr "Usar como visual da janela"
+
+msgid "Copied as \"{}\": open its file to edit it."
+msgstr "Copiado como \"{}\": abra o arquivo para editar."
+
+msgid "Removed."
+msgstr "Removido."
+
+msgid "Import into the Library"
+msgstr "Importar para a Biblioteca"
+
+msgid "Imported: {}"
+msgstr "Importado: {}"
+
+msgid "{} not found"
+msgstr "{} não encontrado"
+
+msgid "{} (copy)"
+msgstr "{} (cópia)"
+
+msgid "Starts from \"{}\": add here only what changes (see DESIGN.md)."
+msgstr "Parte de \"{}\": ponha aqui só o que muda (veja o DESIGN.md)."
+
+msgid "A built-in backdrop can't be copied; start from the examples in examples/appearance/backdrops."
+msgstr "Um fundo embutido não pode ser copiado; comece pelos exemplos em examples/appearance/backdrops."
+
+msgid "A built-in item can't be removed."
+msgstr "Um item embutido não pode ser removido."
+
+msgid "Mascots are copied in their own tab."
+msgstr "As mascotes são copiadas na aba delas."
+
+msgid "there is already one called \"{}\": rename the file and try again"
+msgstr "já existe um chamado \"{}\": renomeie o arquivo e tente de novo"
+
+msgid "file too large ({} KiB at most)"
+msgstr "arquivo grande demais ({} KiB no máximo)"
+
+msgid "no mainImage function: not a shader in Ghostty's format"
+msgstr "sem a função mainImage: não é um shader no formato do Ghostty"
+
+msgid "CRT"
+msgstr "CRT"
+
+msgid "Curved glass, scanlines, a phosphor grille and dark corners."
+msgstr "Vidro curvo, linhas de varredura, grade de fósforo e cantos escuros."
+
+msgid "Bloom"
+msgstr "Bloom"
+
+msgid "Bright text glows."
+msgstr "O texto claro brilha."
+
+msgid "Glass flatness, across"
+msgstr "Vidro reto, na horizontal"
+
+msgid "Glass flatness, down"
+msgstr "Vidro reto, na vertical"
+
+msgid "Scanline spacing (px)"
+msgstr "Distância das linhas (px)"
+
+msgid "Scanline darkness"
+msgstr "Escuro das linhas"
+
+msgid "Phosphor grille"
+msgstr "Grade de fósforo"
+
+msgid "Color fringing (px)"
+msgstr "Separação das cores (px)"
+
+msgid "Corner darkening"
+msgstr "Cantos escuros"
+
+msgid "Bright middle"
+msgstr "Centro claro"
+
+msgid "Glow size (px)"
+msgstr "Tamanho do brilho (px)"
+
+msgid "Glow starts at brightness"
+msgstr "Brilho começa em"
+
+msgid "Glow strength"
+msgstr "Força do brilho"

@@ -371,6 +371,10 @@ export component Stepper inherits Rectangle {
     in property <int> maximum: 100;
     in property <int> step: 1;
     in property <string> unit;
+    // what is written between − and + (a float setting steps positions and shows its value)
+    in property <string> text: value + unit;
+    // the widest `text` (sizes the box); with no real maximum, the current one
+    in property <string> widest-text: (maximum < 1000000 ? max(maximum, value) : value) + unit;
     in property <color> accent: Skin.accent;
     in property <color> edge: Skin.field-edge;
     // at least this wide; wider when the largest value (or, with no real maximum, the
@@ -388,7 +392,7 @@ export component Stepper inherits Rectangle {
     // measures the widest value; not drawn
     widest := Text {
         visible: false;
-        text: (maximum < 1000000 ? max(maximum, value) : value) + unit;
+        text: root.widest-text;
         font-family: Skin.font-mono;
         font-size: root.font-size;
     }
@@ -402,7 +406,7 @@ export component Stepper inherits Rectangle {
         }
         Text {
             width: max(value-width, widest.preferred-width + 10px);
-            text: value + unit;
+            text: root.text;
             color: Skin.ink;
             font-family: Skin.font-mono;
             font-size: root.font-size;

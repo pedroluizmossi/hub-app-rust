@@ -27,7 +27,7 @@
 //! id = "io.github.someone.uptime"  # unique; `cyber.*` belongs to the built-in apps
 //! name = "Uptime"
 //! icon = "coruja"
-//! api = 1                        # 2 for text/secret settings
+//! api = 1                        # 2 for text/secret settings; 3 for settings v2 (APPS.md)
 //! [permissions]
 //! exec = ["uptime"]                # only these programs may run (no shell)
 //! [run]
@@ -576,32 +576,16 @@ fn with_dev(mut list: Vec<Plugin>, dev: &[PathBuf]) -> Vec<Plugin> {
 fn add_standard_settings(m: &mut Manifest) {
     if m.setting("theme").is_none() {
         // the options (the themes) are filled in by the screen: `SettingDef::live_options`
-        m.settings.push(SettingDef {
-            key: "theme".into(),
-            label: tr!("Theme").into(),
-            kind: SettingKind::Choice,
-            default: toml::Value::String("auto".into()),
-            min: None,
-            max: None,
-            step: None,
-            options: vec!["auto".into()],
-            max_len: None,
-        });
+        let mut theme = SettingDef::new("theme", tr!("Theme"), SettingKind::Choice, toml::Value::String("auto".into()));
+        theme.set_options(vec!["auto".into()]);
+        m.settings.push(theme);
     }
     if m.setting("mascot").is_none() {
         let mut options = vec![m.icon.clone()];
         options.extend(sprites::all().iter().map(|s| s.key.to_string()).filter(|k| *k != m.icon));
-        m.settings.push(SettingDef {
-            key: "mascot".into(),
-            label: tr!("Mascot").into(),
-            kind: SettingKind::Choice,
-            default: toml::Value::String(m.icon.clone()),
-            min: None,
-            max: None,
-            step: None,
-            options,
-            max_len: None,
-        });
+        let mut mascot = SettingDef::new("mascot", tr!("Mascot"), SettingKind::Choice, toml::Value::String(m.icon.clone()));
+        mascot.set_options(options);
+        m.settings.push(mascot);
     }
 }
 

@@ -220,6 +220,14 @@ impl Catalog {
         tr(&mut m.description);
         for s in &mut m.settings {
             tr(&mut s.label);
+            tr(&mut s.help);
+            tr(&mut s.group);
+            // only labels written in the manifest: a plain option's label is its saved value
+            for (value, label) in s.options.iter().zip(&mut s.option_labels) {
+                if label != value {
+                    tr(label);
+                }
+            }
         }
     }
 }
@@ -464,8 +472,15 @@ msgstr "Depois da incerta"
                         }
                     }
                     for s in m.get("settings").and_then(|v| v.as_array()).into_iter().flatten() {
-                        if let Some(l) = s.get("label").and_then(|v| v.as_str()) {
-                            used.insert(l.to_string());
+                        for k in ["label", "help", "group"] {
+                            if let Some(l) = s.get(k).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                                used.insert(l.to_string());
+                            }
+                        }
+                        for o in s.get("options").and_then(|v| v.as_array()).into_iter().flatten() {
+                            if let Some(l) = o.get("label").and_then(|v| v.as_str()) {
+                                used.insert(l.to_string());
+                            }
                         }
                     }
                 }

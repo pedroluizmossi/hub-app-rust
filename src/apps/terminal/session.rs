@@ -120,19 +120,8 @@ impl Launch {
 
 /// The folder `written` names, if it exists: absolute, or starting with `~` (the home folder).
 fn start_dir(written: &str, home: &Path) -> Option<PathBuf> {
-    let path = expand_home(written, home);
+    let path = crate::core::config::expand_home(written, Some(home));
     (!written.is_empty() && path.is_absolute() && path.is_dir()).then_some(path)
-}
-
-/// `written` with a leading `~` (alone, or followed by a separator) as the home folder.
-pub(super) fn expand_home(written: &str, home: &Path) -> PathBuf {
-    if written == "~" {
-        home.to_path_buf()
-    } else if let Some(rest) = written.strip_prefix("~/").or_else(|| written.strip_prefix("~\\")) {
-        home.join(rest)
-    } else {
-        PathBuf::from(written)
-    }
 }
 
 /// A running shell (or one that has just exited, still showing its last screen).

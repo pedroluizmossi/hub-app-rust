@@ -38,13 +38,13 @@ id = "io.github.fulano.meu-app"   # único; cyber.* é reservado aos apps embuti
 name = "Meu app"
 description = "Uma frase sobre o que ele faz."
 icon = "coruja"                   # mascote: lista em src/mascot/sprites.rs
-api = 1                           # 2 se usar opções text ou secret (abaixo)
+api = 1                           # 2 com opções text/secret; 3 com qualquer recurso v2 (abaixo)
 uses = ["sys"]                    # provedores do hub (abaixo); [ui] e [app]
 
 [[settings]]                      # vira formulário em Configurações
 key = "limite"
 label = "Mascote agitada a partir de (%)"   # " (%)" ou " (°C)" no fim viram a unidade
-type = "int"                      # bool, int, choice, text ou secret
+type = "int"                      # bool, int, choice, text, secret, float, color, file, folder, asset ou asset-list
 default = 80
 min = 10
 max = 100
@@ -76,6 +76,92 @@ label = "Access token"
 type = "secret"
 default = ""
 max_len = 200
+```
+
+**Opções v2** (`api = 3`): tipos novos e campos que valem para qualquer tipo. Um manifesto
+com `api` menor que 3 que use qualquer um deles é recusado com uma mensagem clara (o mesmo
+vale para um hub antigo, que só entende até a 2).
+
+| Tipo | Valor | Campo na tela |
+|---|---|---|
+| `float` | número com casas (`default` aceita inteiro) | stepper de `min` a `max` (os dois obrigatórios), de `step` em `step` (padrão `0.1`); o valor é gravado arredondado às casas do `step` e de `min` |
+| `color` | `"#rrggbb"` | amostra da cor e campo de texto; o que não for `#rrggbb` (o `#` pode faltar) volta ao valor salvo |
+| `file` | caminho de um arquivo (`~` vale) | campo de texto e botão "Choose…", que abre o seletor do sistema |
+| `folder` | caminho de uma pasta (`~` vale) | igual ao `file`, escolhendo pasta |
+| `asset` | a chave de um item da Biblioteca do tipo `asset = "…"` (`shader`, `theme`, `skin`, `backdrop` ou `mascot`) | o nome do item e o botão "Library…", que abre a Biblioteca nesse tipo |
+| `asset-list` | lista de chaves, em ordem (ex.: a sequência de shaders do Terminal) | os nomes em ordem ("CRT → Bloom") e o botão "Library…" |
+
+`min`, `max` e `step` são os mesmos campos do `int`: no `int` têm de ser inteiros; no `float`
+aceitam casas. `file` e `folder` também respeitam `max_len`. No Rust, `Config::float` devolve
+o `float` já dentro de `min`/`max`, `Config::setting_path` devolve o caminho com o `~`
+trocado pela pasta do usuário e `Config::list` devolve as chaves de um `asset-list`.
+
+| Campo | Para quê |
+|---|---|
+| `help = "…"` | explicação em letra menor embaixo do rótulo |
+| `group = "…"` | opções seguidas com o mesmo grupo ganham um título acima da primeira |
+| `restart = true` | marca "needs restart" ao lado do rótulo: a mudança só vale depois de reiniciar |
+| `when = "…"` | a opção só aparece enquanto a condição vale (abaixo) |
+| `options = [{ value = "…", label = "…" }]` | no `choice`, o rótulo que a tela mostra no lugar do valor gravado; dá para misturar com strings simples (o rótulo é o próprio valor) e o `label` pode faltar |
+
+`label`, `help`, `group` e o `label` das opções são traduzidos como o `label` da opção
+(catálogo do hub para os embutidos, `i18n/pt-BR.po` do app para plugins). O `default` de um
+`choice` é sempre um `value`.
+
+O `when` aceita quatro formas, com `<nome>` sendo outra opção do mesmo app (pela `key`) ou
+`hub.renderer` (`"software"` ou `"opengl"`, o renderizador em uso):
+
+- `<nome>`: vale se a opção está "ligada" (bool `true`, texto não vazio, número diferente de 0);
+- `!<nome>`: o contrário;
+- `<nome> == '<texto>'` / `<nome> != '<texto>'`: compara o valor escrito como texto (`true`,
+  `42`, `0.5`, o valor da opção ou o próprio texto). Aspas duplas também valem.
+
+Nome desconhecido, a própria opção ou sintaxe fora dessas formas fazem o manifesto ser
+recusado. Ao lado de cada opção mudada aparece um botão que volta ao padrão do manifesto
+(apaga o valor salvo e avisa o app como qualquer mudança).
+
+```toml
+api = 3
+
+[[settings]]
+key = "sort"
+label = "Sort list by"
+type = "choice"
+default = "state"
+options = [{ value = "state", label = "State" }, { value = "cpu", label = "CPU" }, "name"]
+
+[[settings]]
+key = "alert"
+label = "Alert"
+type = "bool"
+default = true
+group = "Alerts"
+
+[[settings]]
+key = "alert_color"
+label = "Alert color"
+type = "color"
+default = "#ff5555"
+group = "Alerts"
+when = "alert"
+
+[[settings]]
+key = "glow"
+label = "Glow strength"
+type = "float"
+default = 0.5
+min = 0
+max = 1
+step = 0.05
+help = "Only drawn with the OpenGL renderer."
+when = "hub.renderer == 'opengl'"
+
+[[settings]]
+key = "export_dir"
+label = "Export to"
+type = "folder"
+default = "~/Documents"
+restart = true
 ```
 
 **Provedores** (`uses`): o hub coleta cada dado uma vez e entrega a quem pediu, só enquanto

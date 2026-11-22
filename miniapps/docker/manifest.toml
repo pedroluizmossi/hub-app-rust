@@ -2,7 +2,7 @@ id = "cyber.docker"
 name = "Docker"
 description = "Containers and stacks with quick actions; the mascot reacts when something goes down."
 icon = "neko"
-api = 1
+api = 3
 uses = ["docker"]
 
 [permissions]
@@ -26,7 +26,13 @@ key = "sort"
 label = "Sort list by"
 type = "choice"
 default = "estado"
-options = ["estado", "nome", "cpu", "ram"]
+# the values are saved in the config; the labels are what the screen shows
+options = [
+    { value = "estado", label = "State" },
+    { value = "nome", label = "Name" },
+    { value = "cpu", label = "CPU" },
+    { value = "ram", label = "Memory" },
+]
 
 [[settings]]
 key = "notify"

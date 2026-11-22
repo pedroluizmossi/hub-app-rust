@@ -6,12 +6,11 @@
 //! runs in a pseudo-terminal (`session.rs`) and keeps running while the window is closed
 //! (setting `keep_running`); the emulator's screen becomes runs of text for the window
 //! (`grid.rs`). The window's effects (skin backdrop, CRT, rain) are drawn once per size
-//! and skin (`fx.rs`), and its mascot follows the shell. With the OpenGL renderer, GPU
-//! shaders run over the screen too (`shader.rs`).
+//! and skin (`fx.rs`), and its mascot follows the shell. With the OpenGL renderer, the
+//! Library's shaders in the `shaders` setting run over the screen (`library::postfx`).
 
 mod fx;
 mod grid;
-mod shader;
 mod session;
 
 use std::cell::RefCell;
@@ -26,6 +25,7 @@ use crate::core::bus::Event;
 use crate::core::manifest::Manifest;
 use crate::core::miniapp::{Host, MiniApp};
 use crate::mascot::anim::Reaction;
+use crate::library::postfx::{Colors, Frame, PostFx, Source};
 use crate::mascot::{Mood, render, sprites};
 use crate::tr;
 use crate::ui::{AmbientItem, Anim, HubWindow, TermLine, TermRun, TermTab, TerminalApp, TerminalScreen, TerminalWindow};
@@ -44,6 +44,8 @@ const FRAME: Duration = Duration::from_millis(125);
 const BUSY_FOR: Duration = Duration::from_millis(1500);
 /// …and dozes off after this long without any.
 const SLEEP_AFTER: Duration = Duration::from_secs(10 * 60);
+/// How often the open window looks for a saved shader file.
+const SHADER_CHECK: Duration = Duration::from_secs(1);
 
 thread_local! {
     /// The app, for the reading threads' wake-ups (they arrive on the UI thread with no
@@ -108,7 +110,12 @@ pub struct TerminalMini {
     focused: bool,
     fx: Fx,
     /// The window's GPU shaders (`None` with the software renderer, or before the window).
-    shaders: Option<shader::PostFx>,
+    shaders: Option<PostFx>,
+    /// The shader folder as last read (`library::shaders::current_stamp`): a saved file
+    /// is compiled again.
+    shader_stamp: u64,
+    /// When the shader folder was last looked at.
+    shaders_checked: Instant,
 }
 
 /// What the effects were last drawn for, and the drawing on its way.
@@ -152,6 +159,8 @@ impl TerminalMini {
             focused: true,
             fx: Fx::default(),
             shaders: None,
+            shader_stamp: 0,
+            shaders_checked: Instant::now(),
         }));
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
 
@@ -197,7 +206,7 @@ impl TerminalMini {
                     Ok(win) => {
                         bind(&win, app);
                         // before the first show: the hook must be there when the GL context is made
-                        me.shaders = shader::PostFx::attach(&win);
+                        me.shaders = PostFx::attach(&win, screen_frame);
                         let g = win.global::<TerminalScreen>();
                         g.set_lines(ModelRc::from(me.lines.clone()));
                         g.set_tabs(ModelRc::from(me.tab_rows.clone()));
@@ -276,6 +285,13 @@ impl TerminalMini {
         if !self.open {
             self.clock.stop();
             return;
+        }
+        // a shader saved from an editor (the window may not have the focus then)
+        if self.shaders.is_some() && self.shaders_checked.elapsed() >= SHADER_CHECK {
+            self.shaders_checked = Instant::now();
+            if crate::library::shaders::current_stamp() != self.shader_stamp {
+                self.apply_shaders();
+            }
         }
         if !self.focused {
             return;
@@ -635,6 +651,7 @@ impl TerminalMini {
             (cfg.bool(m, "theme_colors"), cfg.int(m, "font_size"), cfg.bool(m, "copy_on_select"))
         };
         let theme = render::colors(self.host.theme_for(&self.manifest));
+        let cursor = theme.visor;
         self.palette = Palette::new(&theme, theme_colors);
         if let Some(ui) = self.ui.upgrade() {
             ui.global::<TerminalApp>().set_theme(theme.clone());
@@ -650,34 +667,30 @@ impl TerminalMini {
         self.shown.clear();
         // new skin or settings: the effects too
         self.request_fx();
+        if let Some(fx) = &self.shaders {
+            fx.set_colors(shader_colors(&self.palette, cursor));
+        }
         self.apply_shaders();
     }
 
-    /// The shaders the settings ask for: bloom, then CRT (the glow curves with the glass),
-    /// then the user's files, in the order written.
-    fn apply_shaders(&self) {
+    /// The Library shaders of the `shaders` setting, in its order, each with the user's
+    /// adjustments written in. One that is gone (removed file) is left out.
+    fn apply_shaders(&mut self) {
+        self.shader_stamp = crate::library::shaders::current_stamp();
         let (Some(win), Some(fx)) = (&self.win, &self.shaders) else { return };
-        let (crt, bloom, files) = {
-            let cfg = self.host.config.borrow();
-            let m = &self.manifest;
-            (cfg.bool(m, "shader_crt"), cfg.bool(m, "shader_bloom"), cfg.string(m, "shader_files"))
-        };
-        let builtin = |name: &str, glsl: &str| shader::Source { name: name.into(), glsl: glsl.into() };
-        let mut sources = Vec::new();
-        if bloom {
-            sources.push(builtin("bloom", shader::BLOOM));
-        }
-        if crt {
-            sources.push(builtin("crt", shader::CRT));
-        }
-        let home = dirs::home_dir().unwrap_or_default();
-        for written in files.split(';').map(str::trim).filter(|f| !f.is_empty()) {
-            let path = session::expand_home(written, &home);
-            match std::fs::read_to_string(&path) {
-                Ok(glsl) => sources.push(shader::Source { name: path.display().to_string(), glsl }),
-                Err(e) => log::warn!("terminal: shader {}: {e}", path.display()),
-            }
-        }
+        let cfg = self.host.config.borrow();
+        let sources = cfg
+            .list(&self.manifest, "shaders")
+            .into_iter()
+            .filter_map(|key| {
+                let Some(s) = crate::library::shaders::find(&key) else {
+                    log::warn!("terminal: shader {key} is not in the Library");
+                    return None;
+                };
+                let values = cfg.shader_params.get(&key).cloned().unwrap_or_default();
+                Some(Source { glsl: crate::library::shaders::with_values(&s, &values), name: key })
+            })
+            .collect();
         fx.set(win, sources);
     }
 
@@ -926,6 +939,24 @@ fn bind(win: &TerminalWindow, app: &Rc<RefCell<TerminalMini>>) {
         }
         slint::CloseRequestResponse::HideWindow
     });
+}
+
+/// Where the shaders draw (the screen area, below the bar and the tabs) and where the
+/// text cursor is, for `PostFx`.
+fn screen_frame(win: &TerminalWindow) -> Option<Frame> {
+    Some(Frame {
+        area: (win.get_screen_x(), win.get_screen_y(), win.get_screen_width(), win.get_screen_height()),
+        cursor: win
+            .get_cursor_shown()
+            .then(|| (win.get_cursor_x(), win.get_cursor_y(), win.get_cursor_w(), win.get_cursor_h())),
+        focused: win.get_has_focus(),
+    })
+}
+
+/// The terminal's colors as the shaders see them (`iBackgroundColor`, `iPalette`…).
+fn shader_colors(p: &Palette, cursor: slint::Color) -> Colors {
+    let rgb = |c: slint::Color| [c.red() as f32 / 255.0, c.green() as f32 / 255.0, c.blue() as f32 / 255.0];
+    Colors::new(rgb(p.bg), rgb(p.fg), rgb(cursor), p.ansi.map(rgb))
 }
 
 /// Called on a reading thread: brings the news to the UI thread, once until it is read.

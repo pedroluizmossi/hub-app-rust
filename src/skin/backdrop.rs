@@ -281,6 +281,12 @@ pub fn find(key: &str) -> Option<&'static Backdrop> {
     EXTRA.read().ok()?.iter().copied().find(|f| f.key == key)
 }
 
+/// The built-in backdrops, then the ones from files.
+pub fn all() -> Vec<&'static Backdrop> {
+    let extra = EXTRA.read().map(|e| e.clone()).unwrap_or_default();
+    BUILTIN.iter().chain(extra).collect()
+}
+
 pub fn get(key: &str) -> &'static Backdrop {
     find(key).unwrap_or(&BUILTIN[0])
 }
