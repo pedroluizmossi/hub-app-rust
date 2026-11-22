@@ -1042,7 +1042,19 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 c2 = texture(iChannel0, 1.0 - px * 0.5).rgb;
     vec3 bg = dot(c1, vec3(1.0)) < dot(c2, vec3(1.0)) ? c1 : c2;
     vec3 col = sceneColor(fragCoord, iResolution.xy, iTime, bg);
-    // 1 where the terminal has text, 0 on its background
-    float isText = smoothstep(TEXT_CUT * 0.5, TEXT_CUT, length(term.rgb - bg));
-    fragColor = vec4(mix(col, term.rgb, isText), term.a);
+    // How much of this pixel is text. A glyph's edge pixels are part text, part the dark
+    // background it was smoothed against: the strongest pixel around stands for the full
+    // text color, and this one's share of it is its coverage.
+    float d = length(term.rgb - bg);
+    float strongest = d;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec3 c = texture(iChannel0, (fragCoord + vec2(float(x), float(y))) * px).rgb;
+            strongest = max(strongest, length(c - bg));
+        }
+    }
+    float cover = strongest < TEXT_CUT ? 0.0 : clamp(d / strongest, 0.0, 1.0);
+    // the scene in place of the background inside the pixel too, so the edges show no dark
+    // rim and the strokes keep their full weight
+    fragColor = vec4(term.rgb + (col - bg) * (1.0 - cover), term.a);
 }
