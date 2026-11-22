@@ -441,7 +441,7 @@ execução, **da pasta da pessoa**: `mascots/<chave>/` dentro da pasta de aparê
 - **Cores do tema (`[palette]`)**: no `sprite.toml`, `"#rrggbb" = "K"` liga uma cor do PNG a
   um papel (os mesmos do formato 1); essa cor passa a ser a do tema do app, o olho (`E`)
   segue o humor e `A` vira LED. Cor sem papel fica como no PNG; sem `[palette]`, o PNG
-  inteiro mantém as cores. O app Mascotes edita isso com prévia.
+  inteiro mantém as cores. A aba Mascotes da Biblioteca edita isso com prévia.
 - **Só as animações em uso são lidas** (as dos humores e das reações, mais as dos
   subagentes), e cada grupo ganha **um corte** da borda transparente: a mascote não pula ao
   trocar de animação e preenche a caixa em vez de ficar pequena no meio de um quadro de 32.
@@ -478,23 +478,23 @@ execução, **da pasta da pessoa**: `mascots/<chave>/` dentro da pasta de aparê
 - **Ações livres**: animação que não é humor, reação, jeito de andar (`walk`, `run`, `jump`
   e variações) nem está em `extras` (ex.: `explosion`, `attack`) nunca toca sozinha; fica
   para quando um app pedir. Vale para os dois tipos.
-- Entra pelo **app Mascotes** (Importar pasta… / Importar .zip…) ou por
+- Entra pela **aba Mascotes da Biblioteca** (Importar pasta… / Importar .zip…) ou por
   `miniutils --import-mascot <pasta>`: copia as folhas de cada personagem da pasta e das
   subpastas (até 5 níveis, como vem num zip baixado) e escreve o `sprite.toml`; uma pasta
-  que já tem `sprite.toml` entra como está. Sai apagando a pasta (ou Remover no app).
+  que já tem `sprite.toml` entra como está. Sai apagando a pasta (ou Remover na Biblioteca).
   Depois de mudar a pasta à mão: **Configurações › Aparência › Recarregar** ou
   `miniutils --reload`.
 - **Conferir antes:** `miniutils --check-mascot <pasta ou .toml>` mostra o que a mascote tem
   (humores, reações, se anda e onde para, se segue o tema, ações livres), com os mesmos
-  leitores do hub; a ficha do app Mascotes mostra o mesmo relatório.
+  leitores do hub; a ficha da aba Mascotes mostra o mesmo relatório.
 
-### App Mascotes
+### Aba Mascotes da Biblioteca
 
-O mini-app `cyber.mascots` (`src/apps/mascots.rs`, `miniapps/mascots/`) junta tudo isso
-para quem não quer mexer em arquivo: o cartão conta as mascotes e importa uma pasta ou um
-`.zip` (diálogo do sistema, `rfd`; `src/mascot/import.rs` abre o zip só com `.png`/`.toml`,
-com limites, e recusa caminho que sai da pasta). "Gerenciar" abre uma janela com todas as
-mascotes e a ficha da escolhida: renomear (o nome que aparece; a chave fica), relatório,
+A aba Mascotes da Biblioteca (`src/hub/mascots.rs`, `ui/mascots.slint`) junta tudo isso
+para quem não quer mexer em arquivo: importa uma pasta ou um `.zip` (diálogo do sistema,
+`rfd`; `src/mascot/import.rs` abre o zip só com `.png`/`.toml`, com limites, e recusa
+caminho que sai da pasta) e lista todas as mascotes com a ficha da escolhida: renomear (o
+nome que aparece; a chave fica), relatório,
 animação de cada humor e reação (PNG), cores do tema (`[palette]`, PNG), paradas dos
 subagentes (`extras`), "Usar em" (bandeja, página ou a opção de mascote de um app ligado) e
 remover. Cada mudança vai para o arquivo da própria mascote por `src/mascot/edit.rs`

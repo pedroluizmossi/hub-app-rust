@@ -1,12 +1,12 @@
-//! Mascots mini-app: the person's mascots in one place. Both kinds (code mascots and PNG
-//! sprites) are handled the same way here, with the hub's own readers:
+//! The Library's Mascots tab (`MascotsPanel` in ui/mascots.slint): every mascot, code ones
+//! and PNG sprites alike, read with the hub's own readers.
 //!
-//! - the card counts them, shows the person's own ones and imports a folder or a `.zip`
-//!   (`mascot::import`), chosen in the system's dialog (`rfd`, in a thread);
-//! - the editor, the Library's Mascots tab (`hub::library`), lists every mascot and edits the chosen one's file
-//!   (`mascot::edit`): name, the animation of each mood (PNG), the `[palette]` colors (PNG),
-//!   the walking stops (`extras`); shows what it has (`mascot::check`); puts it to use (an
-//!   app's mascot setting, a page, the tray) and removes the person's own ones.
+//! - lists them and edits the chosen one's file (`mascot::edit`): name, the animation of each
+//!   mood (PNG), the `[palette]` colors (PNG), the walking stops (`extras`); shows what it has
+//!   (`mascot::check`); puts it to use (an app's mascot setting, a page, the tray) and removes
+//!   the person's own ones;
+//! - imports a folder or a `.zip` (`mascot::import`), chosen in the system's dialog (`rfd`,
+//!   in a thread).
 //!
 //! After any change the hub rereads the appearance folder (`hub::request_plugin_reload`);
 //! the new mascot list arrives here as a new `sprites::generation`.
@@ -16,19 +16,17 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use slint::{ComponentHandle, ModelRc, VecModel};
 
-use super::kit::HeaderMascot;
-use crate::core::bus::Event;
-use crate::core::manifest::Manifest;
-use crate::core::miniapp::{Host, MiniApp, Report, mascot_targets};
-use crate::mascot::anim::{Animator, Look, Reaction};
+use crate::core::miniapp::{Host, mascot_targets};
+use crate::mascot::anim::{Animator, Reaction};
 use crate::mascot::check;
 use crate::mascot::sprites::{self, Sprite};
+use crate::mascot::themes::Theme;
 use crate::mascot::walkers::{self, Walker};
 use crate::mascot::{Mood, edit, file, pack, render};
 use crate::tr;
-use crate::ui::{Anim, HubWindow, LibraryWindow, MascotItem, MascotsApp, MascotsManager, PaletteRow, StopRow};
+use crate::ui::{Anim, LibraryWindow, MascotItem, MascotsManager, PaletteRow, StopRow};
 
 /// The color roles a PNG color can take, in the order of the "role" list (after "keeps its
 /// own color").
@@ -37,33 +35,17 @@ const ROLES: &[u8] = b"KPSHMCEWBTFDA";
 const MAPPED: [&str; 7] = ["sleep", "idle", "happy", "busy", "alarm", "celebrate", "surprised"];
 /// Second click of "Remove": valid for this long.
 const ARM: Duration = Duration::from_secs(6);
-/// Most person's mascots on the card.
-const GALLERY: usize = 10;
-/// Pace of the editor's preview (its own timer: the hub may be hidden).
-const MANAGER_TICK: Duration = Duration::from_millis(125);
+/// Pace of the preview (its own timer: the hub may be hidden).
+const TICK: Duration = Duration::from_millis(125);
 
-pub struct MascotsMini {
+/// The tab and what it shows.
+pub(super) struct MascotsTab {
     host: Rc<Host>,
-    manifest: Manifest,
-    face: HeaderMascot,
-    /// `sprites::generation` last shown (a new one: the list changed).
-    generation: Option<u64>,
-    /// The card's line: the summary of the last import, or its error.
-    status: String,
-    status_bad: bool,
-    busy: bool,
-    /// The person's own mascots on the card, each with its last frame: a row's image is
-    /// only replaced when its pixels change.
-    gallery: Vec<(&'static Sprite, render::Cache)>,
-    gallery_model: Rc<VecModel<slint::Image>>,
-    manager: Option<Manager>,
-}
-
-/// The manager window and what it shows.
-struct Manager {
-    /// The Library window, whose Mascots tab is this editor.
+    /// The Library window, whose Mascots tab this is.
     win: LibraryWindow,
     open: bool,
+    /// An import is running (its dialog or the copy).
+    busy: bool,
     /// The chosen mascot's key.
     selected: Option<String>,
     /// What the preview list offers for the chosen one, in its order, and the choice.
@@ -73,7 +55,7 @@ struct Manager {
     armed: Option<Instant>,
     /// What "Use in" lists, in order (the first entry is "Choose…").
     targets: Vec<Place>,
-    /// Drives the preview and the end of "Confirm removal" while the window is open: the
+    /// Drives the preview and the end of "Confirm removal" while the tab is shown: the
     /// hub's frame stops when its popup hides, and the Library stays on screen.
     timer: slint::Timer,
     ticks: u32,
@@ -124,177 +106,20 @@ fn preview_modes(walks: bool) -> Vec<(Preview, &'static str)> {
     modes
 }
 
-/// Whether `s` passes the manager's search: by name, key or origin, ignoring case.
+/// Whether `s` passes the search: by name, key or origin, ignoring case.
 fn matches(filter: &str, name: &str, key: &str, origin: &str) -> bool {
     let f = filter.trim().to_lowercase();
     f.is_empty() || [name, key, origin].iter().any(|t| t.to_lowercase().contains(&f))
 }
 
-impl MascotsMini {
-    pub fn create(host: Rc<Host>, ui: &HubWindow) -> Rc<RefCell<Self>> {
-        let manifest = Manifest::parse(include_str!("../../miniapps/mascots/manifest.toml")).expect("invalid Mascots manifest");
-        let app = Rc::new(RefCell::new(MascotsMini {
+impl MascotsTab {
+    /// The tab of a new Library window, bound to it.
+    pub(super) fn create(host: Rc<Host>, win: &LibraryWindow) -> Rc<RefCell<Self>> {
+        let tab = Rc::new(RefCell::new(MascotsTab {
             host,
-            manifest,
-            face: HeaderMascot::new(41),
-            generation: None,
-            status: String::new(),
-            status_bad: false,
-            busy: false,
-            gallery: Vec::new(),
-            gallery_model: Rc::new(VecModel::default()),
-            manager: None,
-        }));
-        Self::bind(&app, ui);
-        let a = Rc::downgrade(&app);
-        crate::hub::library::on_created(move |win| {
-            if let Some(a) = a.upgrade() {
-                Self::attach(&a, win);
-            }
-        });
-        let a = Rc::downgrade(&app);
-        crate::hub::library::on_mascots_tab(move |shown| {
-            if let Some(a) = a.upgrade() {
-                Self::tab_shown(&a, shown);
-            }
-        });
-        app
-    }
-
-    fn bind(app: &Rc<RefCell<Self>>, ui: &HubWindow) {
-        let g = ui.global::<MascotsApp>();
-        let a = Rc::downgrade(app);
-        g.on_import_folder(move || {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().pick(false);
-            }
-        });
-        let a = Rc::downgrade(app);
-        g.on_import_zip(move || {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().pick(true);
-            }
-        });
-        g.on_manage(Self::open_manager);
-        let (a, w) = (Rc::downgrade(app), ui.as_weak());
-        g.on_mascot_poked(move || {
-            if let (Some(a), Some(ui)) = (a.upgrade(), w.upgrade()) {
-                let mut a = a.borrow_mut();
-                let calm = a.host.config.borrow().reduce_motion;
-                if a.face.poke(Mood::Idle, calm) {
-                    a.push_face(&ui);
-                }
-            }
-        });
-    }
-
-    fn theme(&self) -> &'static crate::mascot::themes::Theme {
-        self.host.theme_for(&self.manifest)
-    }
-
-    // ---- import ---------------------------------------------------------------------
-
-    /// Asks the system for a folder (or a `.zip`) in a thread and imports it there; the
-    /// result comes back through `on_report`.
-    fn pick(&mut self, zip: bool) {
-        if self.busy {
-            return;
-        }
-        self.busy = true;
-        self.push_busy();
-        let reporter = self.host.reporter(&self.manifest);
-        let failed = reporter.clone();
-        let appearance = crate::skin::user::dir();
-        let spawned = std::thread::Builder::new().name("mascots-import".into()).spawn(move || {
-            let chosen = if zip {
-                rfd::FileDialog::new().set_title(tr!("Import mascots from a .zip")).add_filter("zip", &["zip", "ZIP"]).pick_file()
-            } else {
-                rfd::FileDialog::new().set_title(tr!("Import mascots from a folder")).pick_folder()
-            };
-            // cancelled: nothing to say
-            let Some(path) = chosen else { return reporter.done() };
-            // first line: the summary for the card; then one line per mascot
-            match crate::mascot::import::import(&path, &appearance) {
-                Ok(out) => {
-                    let text = format!("{}\n{}", out.summary(), out.lines.join("\n"));
-                    if out.count > 0 { reporter.output(text) } else { reporter.error(text) }
-                }
-                Err(e) => reporter.error(e),
-            }
-        });
-        if let Err(e) = spawned {
-            failed.error(tr!("No thread for the import: {}", e));
-        }
-    }
-
-    fn push_busy(&self) {
-        if let Some(ui) = crate::hub::ui_handle() {
-            ui.global::<MascotsApp>().set_busy(self.busy);
-        }
-        if let Some(m) = &self.manager {
-            m.win.global::<MascotsManager>().set_busy(self.busy);
-        }
-    }
-
-    // ---- card -----------------------------------------------------------------------
-
-    fn push_face(&mut self, ui: &HubWindow) {
-        let sprite = sprites::get(&self.mascot_key());
-        self.face.refresh(sprite, self.theme(), Mood::Idle);
-        let g = ui.global::<MascotsApp>();
-        g.set_mascot(self.face.image());
-        g.set_reaction(self.face.reaction());
-    }
-
-    /// Counts, kinds and the status line: only when the list, the settings or the status
-    /// change.
-    fn push_counts(&self, ui: &HubWindow) {
-        let all = sprites::all();
-        let own = all.iter().filter(|s| !builtin(s)).count();
-        let walking = all.iter().filter(|s| walkers::walks(s)).count();
-        let png = all.iter().filter(|s| !builtin(s) && pack::art(s).is_some()).count();
-        let g = ui.global::<MascotsApp>();
-        g.set_counts(tr!("{} mascots · {} walk", all.len(), walking).into());
-        g.set_kinds(tr!("{} of your own: {} in code · {} PNG sprites", own, own - png, png).into());
-        g.set_status(self.status.as_str().into());
-        g.set_status_bad(self.status_bad);
-        g.set_busy(self.busy);
-    }
-
-    /// The gallery's mascots, again (the list changed).
-    fn rebuild_gallery(&mut self) {
-        let own: Vec<&'static Sprite> = sprites::all().into_iter().filter(|s| !builtin(s)).collect();
-        self.gallery = own.into_iter().rev().take(GALLERY).map(|s| (s, render::Cache::default())).collect();
-        self.gallery_model.set_vec(vec![slint::Image::default(); self.gallery.len()]);
-    }
-
-    /// The gallery at `frame`: only the rows whose pixels changed are replaced.
-    fn push_gallery(&mut self, frame: u32) {
-        let theme = self.theme();
-        // reduce motion: a still gallery
-        let frame = if self.host.config.borrow().reduce_motion { 0 } else { frame };
-        let look = Look::from_frame(Mood::Idle, frame);
-        for (i, (s, cache)) in self.gallery.iter_mut().enumerate() {
-            if cache.update_look(s, theme, &look) {
-                self.gallery_model.set_row_data(i, cache.image());
-            }
-        }
-    }
-
-    // ---- editor (the Library's Mascots tab) -----------------------------------------
-
-    /// "Manage": the Library, on the Mascots tab.
-    fn open_manager() {
-        crate::hub::library::open(Some(crate::library::Kind::Mascot), None);
-    }
-
-    /// The Library window exists: the editor binds to its Mascots tab.
-    fn attach(app: &Rc<RefCell<Self>>, win: &LibraryWindow) {
-        Self::bind_manager(win, app);
-        let mut me = app.borrow_mut();
-        me.manager = Some(Manager {
             win: win.clone_strong(),
             open: false,
+            busy: false,
             selected: None,
             modes: Vec::new(),
             mode: 0,
@@ -309,129 +134,190 @@ impl MascotsMini {
             generation: None,
             filter: String::new(),
             listed: Vec::new(),
-        });
-        me.style_manager();
+        }));
+        Self::bind(win, &tab);
+        tab.borrow().style();
+        tab
     }
 
-    /// The Mascots tab came into view (`true`) or left it: the preview runs only meanwhile.
-    fn tab_shown(app: &Rc<RefCell<Self>>, shown: bool) {
-        let mut me = app.borrow_mut();
-        let Some(m) = me.manager.as_mut() else { return };
+    /// The tab came into view (`true`) or left it, the window included: the preview runs
+    /// only meanwhile.
+    pub(super) fn shown(tab: &Rc<RefCell<Self>>, shown: bool) {
+        let mut me = tab.borrow_mut();
         if !shown {
-            m.closed();
+            me.open = false;
+            me.armed = None;
+            me.timer.stop();
             return;
         }
-        m.open = true;
-        let a = Rc::downgrade(app);
-        m.timer.start(slint::TimerMode::Repeated, MANAGER_TICK, move || {
+        me.open = true;
+        let t = Rc::downgrade(tab);
+        me.timer.start(slint::TimerMode::Repeated, TICK, move || {
             // already borrowed (a callback running): this tick is skipped
-            if let Some(a) = a.upgrade()
-                && let Ok(mut a) = a.try_borrow_mut()
+            if let Some(t) = t.upgrade()
+                && let Ok(mut t) = t.try_borrow_mut()
             {
-                a.manager_tick();
+                t.tick();
             }
         });
-        me.style_manager();
-        me.fill_manager();
+        me.style();
+        me.fill();
     }
 
-    fn bind_manager(win: &LibraryWindow, app: &Rc<RefCell<Self>>) {
+    fn bind(win: &LibraryWindow, tab: &Rc<RefCell<Self>>) {
         let g = win.global::<MascotsManager>();
-        // an action on the open window, with the app borrowed
-        let on = |run: fn(&mut MascotsMini, i32)| {
-            let a = Rc::downgrade(app);
+        // an action on the tab, borrowed
+        let on = |run: fn(&mut MascotsTab, i32)| {
+            let t = Rc::downgrade(tab);
             move |i: i32| {
-                if let Some(a) = a.upgrade() {
-                    run(&mut a.borrow_mut(), i);
+                if let Some(t) = t.upgrade() {
+                    run(&mut t.borrow_mut(), i);
                 }
             }
         };
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_select(move |key| {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().select(&key);
+            if let Some(t) = t.upgrade() {
+                t.borrow_mut().select(&key);
             }
         });
         g.on_step(on(|m, d| m.step(d)));
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_filter_edited(move |text| {
-            if let Some(a) = a.upgrade() {
-                let mut a = a.borrow_mut();
-                if let Some(m) = a.manager.as_mut() {
-                    m.filter = text.to_string();
-                }
-                a.fill_list();
+            if let Some(t) = t.upgrade() {
+                let mut t = t.borrow_mut();
+                t.filter = text.to_string();
+                t.fill_list();
             }
         });
         g.on_preview_mode(on(|m, i| {
-            if let Some(mg) = m.manager.as_mut() {
-                mg.mode = usize::try_from(i).unwrap_or(0).min(mg.modes.len().saturating_sub(1));
-                mg.restart_preview();
-            }
+            m.mode = usize::try_from(i).unwrap_or(0).min(m.modes.len().saturating_sub(1));
+            m.restart_preview();
             m.push_preview();
         }));
         g.on_stop_toggled(on(|m, i| m.toggle_stop(i)));
         g.on_use_in(on(|m, i| m.use_in(i)));
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_map(move |which, k| {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().map(which, k);
+            if let Some(t) = t.upgrade() {
+                t.borrow_mut().map(which, k);
             }
         });
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_palette_role(move |row, k| {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().palette_role(row, k);
+            if let Some(t) = t.upgrade() {
+                t.borrow_mut().palette_role(row, k);
             }
         });
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_rename(move |name| {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().rename(&name);
+            if let Some(t) = t.upgrade() {
+                t.borrow_mut().rename(&name);
             }
         });
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_remove(move || {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().remove();
+            if let Some(t) = t.upgrade() {
+                t.borrow_mut().remove();
             }
         });
-        let a = Rc::downgrade(app);
+        let t = Rc::downgrade(tab);
         g.on_open_folder(move || {
-            if let Some(a) = a.upgrade() {
-                a.borrow().open_folder();
+            if let Some(t) = t.upgrade() {
+                t.borrow().open_folder();
             }
         });
-        let a = Rc::downgrade(app);
-        g.on_import_folder(move || {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().pick(false);
+        for zip in [false, true] {
+            let t = Rc::downgrade(tab);
+            let pick = move || {
+                if let Some(t) = t.upgrade() {
+                    t.borrow_mut().pick(zip);
+                }
+            };
+            if zip {
+                g.on_import_zip(pick);
+            } else {
+                g.on_import_folder(pick);
             }
-        });
-        let a = Rc::downgrade(app);
-        g.on_import_zip(move || {
-            if let Some(a) = a.upgrade() {
-                a.borrow_mut().pick(true);
-            }
-        });
+        }
     }
 
-    /// The editor follows the hub's look and the app's theme.
-    fn style_manager(&self) {
-        let Some(m) = &self.manager else { return };
-        crate::skin::apply_current(&m.win);
-        m.win.global::<Anim>().set_calm(true);
-        m.win.global::<MascotsManager>().set_theme(render::colors(self.theme()));
+    /// The colors the mascots are drawn in: the window skin's app theme.
+    fn theme(&self) -> &'static Theme {
+        crate::mascot::themes::get(crate::skin::get(&self.host.config.borrow().skin).app_theme)
     }
+
+    /// The tab follows the hub's look.
+    fn style(&self) {
+        self.win.global::<Anim>().set_calm(true);
+        self.win.global::<MascotsManager>().set_theme(render::colors(self.theme()));
+    }
+
+    // ---- import ---------------------------------------------------------------------
+
+    /// Asks the system for a folder (or a `.zip`) in a thread and imports it there; the
+    /// result comes back through `imported`.
+    fn pick(&mut self, zip: bool) {
+        if self.busy {
+            return;
+        }
+        self.set_busy(true);
+        let appearance = crate::skin::user::dir();
+        let spawned = std::thread::Builder::new().name("mascots-import".into()).spawn(move || {
+            let chosen = if zip {
+                rfd::FileDialog::new().set_title(tr!("Import mascots from a .zip")).add_filter("zip", &["zip", "ZIP"]).pick_file()
+            } else {
+                rfd::FileDialog::new().set_title(tr!("Import mascots from a folder")).pick_folder()
+            };
+            // cancelled: nothing to say
+            let result = chosen.map(|path| match crate::mascot::import::import(&path, &appearance) {
+                // first line: the summary; then one line per mascot
+                Ok(out) => {
+                    let text = format!("{}\n{}", out.summary(), out.lines.join("\n"));
+                    if out.count > 0 { Ok(text) } else { Err(text) }
+                }
+                Err(e) => Err(e.to_string()),
+            });
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(tab) = super::library::mascots_tab() {
+                    tab.borrow_mut().imported(result);
+                }
+            });
+        });
+        if let Err(e) = spawned {
+            self.imported(Some(Err(tr!("No thread for the import: {}", e))));
+        }
+    }
+
+    /// The end of an import (`None`: the dialog was cancelled).
+    fn imported(&mut self, result: Option<Result<String, String>>) {
+        self.set_busy(false);
+        let Some(result) = result else { return };
+        let (text, ok) = match result {
+            Ok(text) => (text, true),
+            Err(text) => (text, false),
+        };
+        log::info!("mascot import:\n{text}");
+        self.say(text, !ok);
+        // something came in
+        if ok {
+            crate::hub::request_plugin_reload();
+        }
+    }
+
+    fn set_busy(&mut self, busy: bool) {
+        self.busy = busy;
+        self.win.global::<MascotsManager>().set_busy(busy);
+    }
+
+    // ---- list and card --------------------------------------------------------------
 
     /// The list and the chosen one's card, from scratch.
-    fn fill_manager(&mut self) {
-        if let Some(m) = self.manager.as_mut() {
-            m.generation = Some(sprites::generation());
-            // the chosen one may have left (removed, folder changed)
-            if m.selected.as_deref().is_some_and(|k| sprites::find(k).is_none()) {
-                m.selected = None;
-            }
+    fn fill(&mut self) {
+        self.generation = Some(sprites::generation());
+        // the chosen one may have left (removed, folder changed)
+        if self.selected.as_deref().is_some_and(|k| sprites::find(k).is_none()) {
+            self.selected = None;
         }
         self.fill_list();
         self.fill_card();
@@ -440,7 +326,6 @@ impl MascotsMini {
     /// The list on the left: every mascot that passes the search.
     fn fill_list(&mut self) {
         let theme = self.theme();
-        let Some(m) = self.manager.as_mut() else { return };
         let store = store_keys();
         let mut listed = Vec::new();
         let items: Vec<MascotItem> = sprites::all()
@@ -453,7 +338,7 @@ impl MascotsMini {
                 } else {
                     tr!("yours")
                 };
-                if !matches(&m.filter, s.name(), s.key, origin) {
+                if !matches(&self.filter, s.name(), s.key, origin) {
                     return None;
                 }
                 listed.push(s.key.to_string());
@@ -468,88 +353,81 @@ impl MascotsMini {
                 })
             })
             .collect();
-        m.listed = listed;
-        m.win.global::<MascotsManager>().set_items(ModelRc::new(VecModel::from(items)));
+        self.listed = listed;
+        self.win.global::<MascotsManager>().set_items(ModelRc::new(VecModel::from(items)));
     }
 
     fn select(&mut self, key: &str) {
         if sprites::find(key).is_none() {
             return;
         }
-        if let Some(m) = self.manager.as_mut() {
-            m.selected = Some(key.to_string());
-            m.mode = 0;
-            m.armed = None;
-            m.restart_preview();
-            m.win.global::<MascotsManager>().set_status("".into());
-        }
+        self.selected = Some(key.to_string());
+        self.mode = 0;
+        self.armed = None;
+        self.restart_preview();
+        self.win.global::<MascotsManager>().set_status("".into());
         self.fill_card();
     }
 
     /// Up/Down in the window: the previous or next mascot of the (searched) list.
     fn step(&mut self, delta: i32) {
-        let Some(m) = &self.manager else { return };
-        if m.listed.is_empty() {
+        if self.listed.is_empty() {
             return;
         }
-        let last = m.listed.len() as i32 - 1;
-        let next = match m.selected.as_deref().and_then(|k| m.listed.iter().position(|x| x == k)) {
+        let last = self.listed.len() as i32 - 1;
+        let next = match self.selected.as_deref().and_then(|k| self.listed.iter().position(|x| x == k)) {
             Some(i) => (i as i32 + delta).clamp(0, last),
             None if delta < 0 => last,
             None => 0,
         };
-        let key = m.listed[next as usize].clone();
-        if m.selected.as_deref() != Some(key.as_str()) {
+        let key = self.listed[next as usize].clone();
+        if self.selected.as_deref() != Some(key.as_str()) {
             self.select(&key);
         }
     }
 
     fn chosen(&self) -> Option<&'static Sprite> {
-        sprites::find(self.manager.as_ref()?.selected.as_deref()?)
+        sprites::find(self.selected.as_deref()?)
     }
 
     /// The chosen mascot's card: name, report, animations, colors, stops, places.
     fn fill_card(&mut self) {
         let theme = self.theme();
+        let win = self.win.clone_strong();
+        let g = win.global::<MascotsManager>();
         let Some(s) = self.chosen() else {
             // none chosen (removed, or the folder changed): no card left on screen
-            if let Some(m) = self.manager.as_mut() {
-                m.walker = None;
-                let g = m.win.global::<MascotsManager>();
-                g.set_key("".into());
-                g.set_editable(false);
-                g.set_can_map(false);
-                g.set_can_palette(false);
-                g.set_can_stops(false);
-            }
+            self.walker = None;
+            g.set_key("".into());
+            g.set_editable(false);
+            g.set_can_map(false);
+            g.set_can_palette(false);
+            g.set_can_stops(false);
             return;
         };
         let report = check::of_sprite(s);
         let art = pack::art(s);
         // a mascot from the store isn't changed here: an update would undo the change
         let from_store = store_keys().iter().any(|k| k == s.key);
-        let Some(m) = self.manager.as_mut() else { return };
-        let g = m.win.global::<MascotsManager>();
+        let editable = !builtin(s) && !from_store;
         g.set_name(s.name().into());
         g.set_key(s.key.into());
-        g.set_editable(!builtin(s) && !from_store);
+        g.set_editable(editable);
         g.set_from_store(from_store);
         g.set_report(report.text().into());
         g.set_armed_remove(false);
-        m.walker = walkers::walker(s, theme);
+        self.walker = walkers::walker(s, theme);
         // the same preview stays chosen when it is still offered (after an edit, a reload)
-        let before = m.modes.get(m.mode).copied();
-        let offered = preview_modes(m.walker.is_some());
-        m.modes = offered.iter().map(|(p, _)| *p).collect();
-        m.mode = before.and_then(|b| m.modes.iter().position(|p| *p == b)).unwrap_or(0);
-        m.restart_preview();
-        let g = m.win.global::<MascotsManager>();
+        let before = self.modes.get(self.mode).copied();
+        let offered = preview_modes(self.walker.is_some());
+        self.modes = offered.iter().map(|(p, _)| *p).collect();
+        self.mode = before.and_then(|b| self.modes.iter().position(|p| *p == b)).unwrap_or(0);
+        self.restart_preview();
         let labels: Vec<slint::SharedString> = offered.iter().map(|(_, l)| (*l).into()).collect();
         g.set_preview_modes(ModelRc::new(VecModel::from(labels)));
-        g.set_preview_index(m.mode as i32);
+        g.set_preview_index(self.mode as i32);
 
         // animations of each mood and reaction (PNG sprite)
-        let editable = !builtin(s) && !from_store;
         g.set_can_map(art.is_some() && editable);
         if let Some(art) = art {
             let names = art.declared_names();
@@ -619,7 +497,7 @@ impl MascotsMini {
             places.push(Place::App { app: t.app.clone(), setting: t.setting.clone() });
         }
         drop(cfg);
-        m.targets = places;
+        self.targets = places;
         g.set_targets(ModelRc::new(VecModel::from(labels)));
         self.push_preview();
     }
@@ -629,16 +507,15 @@ impl MascotsMini {
     fn push_preview(&mut self) {
         let theme = self.theme();
         let Some(s) = self.chosen() else { return };
-        let Some(m) = self.manager.as_mut() else { return };
         let now = Instant::now();
-        let img = match (m.modes.get(m.mode).copied().unwrap_or(Preview::Mood(Mood::Idle)), &m.walker) {
+        let img = match (self.modes.get(self.mode).copied().unwrap_or(Preview::Mood(Mood::Idle)), &self.walker) {
             (Preview::Walking, Some(w)) => {
                 let (right, _) = &w.frames[w.script.walk];
-                let i = (m.ticks / 2) as usize % right.len().max(1);
-                if m.walk_shown == Some(i) {
+                let i = (self.ticks / 2) as usize % right.len().max(1);
+                if self.walk_shown == Some(i) {
                     return;
                 }
-                m.walk_shown = Some(i);
+                self.walk_shown = Some(i);
                 right.get(i).cloned().unwrap_or_default()
             }
             (preview, _) => {
@@ -647,48 +524,58 @@ impl MascotsMini {
                     _ => Mood::Idle,
                 };
                 if let Preview::React(r) = preview
-                    && m.animator.current(now).is_none()
+                    && self.animator.current(now).is_none()
                 {
                     // played to the end: again (a new animator has no cooldown)
-                    m.animator = Animator::new(43);
-                    m.animator.trigger(r, now);
+                    self.animator = Animator::new(43);
+                    self.animator.trigger(r, now);
                 }
-                let look = m.animator.look_with(s, mood, now);
-                if !m.cache.update_look(s, theme, &look) {
+                let look = self.animator.look_with(s, mood, now);
+                if !self.cache.update_look(s, theme, &look) {
                     return;
                 }
-                m.cache.image()
+                self.cache.image()
             }
         };
-        m.win.global::<MascotsManager>().set_preview(img);
+        self.win.global::<MascotsManager>().set_preview(img);
     }
 
-    /// One tick of the manager's own timer: the preview, the end of "Confirm removal" and
-    /// the list, when the mascots changed (the hub's tick may not be running).
-    fn manager_tick(&mut self) {
-        let Some(m) = self.manager.as_mut() else { return };
-        if !m.open {
-            m.timer.stop();
+    /// Another mascot or preview: drawn from the start (the next `push_preview` always
+    /// hands over an image).
+    fn restart_preview(&mut self) {
+        self.animator = Animator::new(43);
+        self.cache = render::Cache::default();
+        self.walk_shown = None;
+        if let Some(Preview::React(r)) = self.modes.get(self.mode) {
+            self.animator.trigger(*r, Instant::now());
+        }
+    }
+
+    /// One tick of the tab's own timer: the preview, the end of "Confirm removal" and the
+    /// list, when the mascots changed (the hub's tick may not be running).
+    fn tick(&mut self) {
+        if !self.open {
+            self.timer.stop();
             return;
         }
-        m.ticks = m.ticks.wrapping_add(1);
-        if m.armed.is_some_and(|at| at.elapsed() >= ARM) {
-            m.armed = None;
-            m.win.global::<MascotsManager>().set_armed_remove(false);
+        self.ticks = self.ticks.wrapping_add(1);
+        if self.armed.is_some_and(|at| at.elapsed() >= ARM) {
+            self.armed = None;
+            self.win.global::<MascotsManager>().set_armed_remove(false);
         }
-        if m.generation != Some(sprites::generation()) {
-            self.fill_manager();
+        if self.generation != Some(sprites::generation()) {
+            self.fill();
         }
         self.push_preview();
     }
 
     fn say(&self, text: String, bad: bool) {
-        if let Some(m) = &self.manager {
-            let g = m.win.global::<MascotsManager>();
-            g.set_status(text.into());
-            g.set_status_bad(bad);
-        }
+        let g = self.win.global::<MascotsManager>();
+        g.set_status(text.into());
+        g.set_status_bad(bad);
     }
+
+    // ---- changes --------------------------------------------------------------------
 
     /// Runs a change on the chosen mascot's file and asks the hub to reread the mascots.
     fn change(&mut self, what: impl FnOnce(&edit::Target) -> Result<(), String>, done: &str) {
@@ -731,10 +618,8 @@ impl MascotsMini {
     }
 
     fn toggle_stop(&mut self, i: i32) {
-        let Some(m) = &self.manager else { return };
         let Some(s) = self.chosen() else { return };
-        let g = m.win.global::<MascotsManager>();
-        let rows: Vec<StopRow> = slint::Model::iter(&g.get_stops()).collect();
+        let rows: Vec<StopRow> = slint::Model::iter(&self.win.global::<MascotsManager>().get_stops()).collect();
         let Some(row) = usize::try_from(i).ok().and_then(|i| rows.get(i)) else { return };
         // from what the file lists now (it may name animations the switches don't show):
         // only the clicked one changes; `idle` is set_extras' business
@@ -750,8 +635,7 @@ impl MascotsMini {
 
     fn use_in(&mut self, i: i32) {
         let Some(s) = self.chosen() else { return };
-        let Some(place) = self.manager.as_ref().and_then(|m| usize::try_from(i).ok().filter(|i| *i > 0).and_then(|i| m.targets.get(i).cloned()))
-        else {
+        let Some(place) = usize::try_from(i).ok().filter(|i| *i > 0).and_then(|i| self.targets.get(i).cloned()) else {
             return;
         };
         {
@@ -790,14 +674,13 @@ impl MascotsMini {
             self.say(tr!("Installed by the store: remove it in the Store tab.").to_string(), true);
             return;
         }
-        let Some(m) = self.manager.as_mut() else { return };
-        if !m.armed.is_some_and(|at| at.elapsed() < ARM) {
-            m.armed = Some(Instant::now());
-            m.win.global::<MascotsManager>().set_armed_remove(true);
+        if !self.armed.is_some_and(|at| at.elapsed() < ARM) {
+            self.armed = Some(Instant::now());
+            self.win.global::<MascotsManager>().set_armed_remove(true);
             self.say(tr!("Click again to remove {}. Whatever uses it goes back to the first mascot.", s.name()), true);
             return;
         }
-        m.armed = None;
+        self.armed = None;
         let appearance = crate::skin::user::dir();
         let result = if pack::art(s).is_some() {
             std::fs::remove_dir_all(appearance.join(pack::DIR).join(s.key))
@@ -807,9 +690,7 @@ impl MascotsMini {
         match result {
             Ok(()) => {
                 self.say(tr!("{} removed.", s.name()), false);
-                if let Some(m) = self.manager.as_mut() {
-                    m.selected = None;
-                }
+                self.selected = None;
                 crate::hub::request_plugin_reload();
             }
             Err(e) => self.say(e.to_string(), true),
@@ -822,116 +703,6 @@ impl MascotsMini {
         let dir: PathBuf = if pack::art(s).is_some() { appearance.join(pack::DIR).join(s.key) } else { appearance.join(file::DIR) };
         if !crate::core::exec::open_dir(&dir) {
             log::warn!("could not open {}", dir.display());
-        }
-    }
-}
-
-impl MiniApp for MascotsMini {
-    fn manifest(&self) -> &Manifest {
-        &self.manifest
-    }
-
-    fn enable(&mut self, ui: &HubWindow) {
-        let g = ui.global::<MascotsApp>();
-        g.set_theme(render::colors(self.theme()));
-        g.set_gallery(ModelRc::from(self.gallery_model.clone()));
-        self.generation = Some(sprites::generation());
-        self.rebuild_gallery();
-        self.push_face(ui);
-        self.push_counts(ui);
-        self.push_gallery(0);
-    }
-
-    fn disable(&mut self, _ui: &HubWindow) {
-        if let Some(m) = self.manager.as_mut() {
-            m.closed();
-        }
-    }
-
-    fn on_event(&mut self, _ev: &Event, _ui: &HubWindow) {}
-
-    fn on_report(&mut self, report: &Report, ui: &HubWindow) {
-        self.busy = false;
-        match report {
-            Report::Done => {}
-            // an import: the card shows the summary (its first line), the manager and the
-            // log every line
-            Report::Output(text) | Report::Error(text) => {
-                let ok = matches!(report, Report::Output(_));
-                log::info!("mascot import:\n{text}");
-                self.status = text.lines().next().unwrap_or_default().to_string();
-                self.status_bad = !ok;
-                self.say(text.clone(), !ok);
-                // something came in
-                if ok {
-                    self.face.react(Reaction::Celebrate);
-                    crate::hub::request_plugin_reload();
-                }
-            }
-        }
-        self.push_busy();
-        self.push_face(ui);
-        self.push_counts(ui);
-    }
-
-    fn tick(&mut self, frame: u32, ui: &HubWindow) {
-        if self.face.refresh(sprites::get(&self.mascot_key()), self.theme(), Mood::Idle) {
-            let g = ui.global::<MascotsApp>();
-            g.set_mascot(self.face.image());
-            g.set_reaction(self.face.reaction());
-        }
-        // the mascot list changed (import, edit, removal, Reload): the card again (the
-        // manager window follows the list with its own timer)
-        let generation = sprites::generation();
-        if self.generation != Some(generation) {
-            self.generation = Some(generation);
-            self.rebuild_gallery();
-            self.push_counts(ui);
-        }
-        // only the rows whose pixels changed are replaced
-        self.push_gallery(frame);
-    }
-
-    fn settings_changed(&mut self, ui: &HubWindow) {
-        ui.global::<MascotsApp>().set_theme(render::colors(self.theme()));
-        self.push_face(ui);
-        self.push_counts(ui);
-        self.push_gallery(0);
-        self.style_manager();
-        if self.manager.as_ref().is_some_and(|m| m.open) {
-            self.fill_manager();
-        }
-    }
-
-    fn mood(&self) -> Mood {
-        Mood::Idle
-    }
-
-    fn mascot_key(&self) -> String {
-        self.host.config.borrow().string(&self.manifest, "mascot")
-    }
-
-    fn summary(&self) -> String {
-        tr!("Mascots: {}", sprites::all().len())
-    }
-}
-
-impl Manager {
-    /// The Mascots tab left view (another tab, the Library closed): the timer stops with it.
-    fn closed(&mut self) {
-        self.open = false;
-        self.armed = None;
-        self.timer.stop();
-    }
-
-    /// Another mascot or preview: drawn from the start (the next `push_preview` always
-    /// hands over an image).
-    fn restart_preview(&mut self) {
-        self.animator = Animator::new(43);
-        self.cache = render::Cache::default();
-        self.walk_shown = None;
-        if let Some(Preview::React(r)) = self.modes.get(self.mode) {
-            self.animator.trigger(*r, Instant::now());
         }
     }
 }
@@ -999,7 +770,7 @@ mod tests {
 
     #[test]
     fn store_keys_come_from_the_receipts() {
-        let d = std::env::temp_dir().join(format!("miniutils-mascots-app-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("miniutils-mascots-tab-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("store")).unwrap();
         std::fs::write(d.join("store/io.x.json"), r#"{"id":"io.x","sprites":["owl"],"packs":["knight"]}"#).unwrap();

@@ -4,8 +4,8 @@
 //! What it changes goes where the rest of the hub reads it: the Terminal's chain is its
 //! `shaders` setting, a shader's adjustments are `[shader_params.<key>]` in the config, the
 //! skin is the config's `skin`. Files it writes (copies, imports, removals) are read back by
-//! the usual reload. The Mascots tab is the Mascots app's own editor, which binds itself to
-//! this window through `on_created` and `on_mascots_tab`.
+//! the usual reload. The Mascots tab is its own module (`hub::mascots`), told when it comes
+//! into view and when it leaves.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
+use super::mascots::MascotsTab;
 use super::{Hub, with_hub};
 use crate::library::postfx::{self, Colors, Frame, PostFx, Source};
 use crate::library::{self, Item, Kind, Origin, shaders};
@@ -46,56 +47,14 @@ pub(super) struct Library {
     stamps: (u64, u64, u64),
     /// The theme, skin and backdrop folders as last read (`None` before the first look).
     looks: Option<u64>,
+    mascots: Rc<RefCell<MascotsTab>>,
 }
 
-thread_local! {
-    /// Who wants to know about the window: the Mascots app binds its editor to it.
-    static HOOKS: RefCell<Hooks> = RefCell::new(Hooks::default());
-}
-
-/// Something that wants the Library window when it is created.
-type OnCreated = Rc<dyn Fn(&LibraryWindow)>;
-
-#[derive(Default)]
-struct Hooks {
-    created: Vec<OnCreated>,
-    /// The Mascots tab came into view (`true`) or left it, the window included (`false`).
-    mascots: Vec<Rc<dyn Fn(bool)>>,
-}
-
-/// Runs `f` with the Library window as soon as it exists (now, if it already does).
-pub fn on_created(f: impl Fn(&LibraryWindow) + 'static) {
-    if let Some(win) = window() {
-        f(&win);
-    }
-    HOOKS.with(|h| h.borrow_mut().created.push(Rc::new(f)));
-}
-
-/// Runs `f(true)` when the Mascots tab comes into view, `f(false)` when it goes (the same
-/// value may come twice in a row).
-pub fn on_mascots_tab(f: impl Fn(bool) + 'static) {
-    HOOKS.with(|h| h.borrow_mut().mascots.push(Rc::new(f)));
-}
-
-fn tell_mascots(shown: bool) {
-    // run outside the borrow: a hook may open the Library itself
-    let hooks = HOOKS.with(|h| h.borrow().mascots.clone());
-    for f in hooks {
-        f(shown);
-    }
-}
-
-/// The Library window, if it was created.
-pub fn window() -> Option<LibraryWindow> {
+/// The Library's Mascots tab, if the window was created.
+pub(super) fn mascots_tab() -> Option<Rc<RefCell<MascotsTab>>> {
     let mut out = None;
-    with_hub(|h| out = h.library.borrow().as_ref().map(|l| l.win.clone_strong()));
+    with_hub(|h| out = h.library.borrow().as_ref().map(|l| l.mascots.clone()));
     out
-}
-
-/// Opens the Library on `kind` (the current tab with `None`), with `select` chosen.
-pub fn open(kind: Option<Kind>, select: Option<&str>) {
-    let select = select.map(str::to_string);
-    with_hub(|h| h.open_library(kind, select));
 }
 
 /// With the Library borrowed (UI thread).
@@ -161,8 +120,9 @@ impl Hub {
             fx.set_colors(sample_colors());
         }
         win.global::<LibraryUi>().set_gl(fx.is_some());
+        let mascots = MascotsTab::create(self.host.clone(), &win);
         *self.library.borrow_mut() = Some(Library {
-            win: win.clone_strong(),
+            win,
             fx,
             tab: Kind::Shader,
             filter: String::new(),
@@ -173,25 +133,21 @@ impl Hub {
             settle: Timer::default(),
             stamps: (0, 0, 0),
             looks: None,
+            mascots,
         });
-        // after the borrow above ends: a hook reads `window()`
-        let hooks = HOOKS.with(|h| h.borrow().created.clone());
-        for f in hooks {
-            f(&win);
-        }
         true
     }
 
-    /// A new tab (or the window opened): the list from scratch; the Mascots app is told.
+    /// A new tab (or the window opened): the list from scratch; the Mascots tab is told.
     fn library_tab_changed(&self) {
-        let tab = {
+        let (tab, mascots) = {
             let mut lib = self.library.borrow_mut();
             let Some(l) = lib.as_mut() else { return };
             l.armed = None;
             l.win.global::<LibraryUi>().set_tab(l.tab.key().into());
-            l.tab
+            (l.tab, l.mascots.clone())
         };
-        tell_mascots(tab == Kind::Mascot);
+        MascotsTab::shown(&mascots, tab == Kind::Mascot);
         with_library(|h, l| {
             h.library_list(l);
             h.library_detail(l);
@@ -199,16 +155,14 @@ impl Hub {
     }
 
     fn library_close(&self) {
-        let open = {
+        let mascots = {
             let lib = self.library.borrow();
             let Some(l) = lib.as_ref() else { return };
             l.poll.stop();
             let _ = l.win.hide();
-            l.tab == Kind::Mascot
+            l.mascots.clone()
         };
-        if open {
-            tell_mascots(false);
-        }
+        MascotsTab::shown(&mascots, false);
     }
 
     /// Changed files, new compile errors, reloaded looks: the list and the detail again.

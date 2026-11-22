@@ -1,13 +1,13 @@
-// The Mascots app's editor (src/apps/mascots.rs), shown as the Mascots tab of the Library
-// window (ui/library.slint).
+// The Library's Mascots tab (src/hub/mascots.rs), shown inside the Library window
+// (ui/library.slint).
 //
 // Left: every mascot (built-in, yours, from the store), with its kind. Right: the card of
 // the chosen one: preview, name, what it has (the same report as `--check-mascot`), which
 // animation shows each mood (PNG sprite), the [palette] colors (PNG sprite), the walking
 // stops, and where to use it. Every change is written to the mascot's own file.
 import { ScrollView } from "std-widgets.slint";
-import { Colors, Skin, Icons } from "../../ui/theme.slint";
-import { TextButton, Select, SqSwitch, SearchBox } from "../../ui/widgets.slint";
+import { Colors, Skin, Icons } from "theme.slint";
+import { TextButton, Select, SqSwitch, SearchBox } from "widgets.slint";
 
 export struct MascotItem {
     key: string,

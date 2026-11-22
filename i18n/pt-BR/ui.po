@@ -63,6 +63,9 @@ msgstr "Loja de plugins"
 msgid "store"
 msgstr "loja"
 
+msgid "library"
+msgstr "biblioteca"
+
 msgid "Quit {}"
 msgstr "Encerrar {}"
 

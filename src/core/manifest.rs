@@ -556,7 +556,6 @@ mod tests {
             include_str!("../../miniapps/todo/manifest.toml"),
             include_str!("../../miniapps/terminal/manifest.toml"),
             include_str!("../../miniapps/agents/manifest.toml"),
-            include_str!("../../miniapps/mascots/manifest.toml"),
         ] {
             // parse checks the types, ranges and options; the theme and mascot choices are
             // completed at runtime, so their defaults are checked here
