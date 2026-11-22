@@ -30,6 +30,8 @@ const POLL: Duration = Duration::from_millis(700);
 const ARM: Duration = Duration::from_secs(6);
 /// A dragged adjustment is applied this long after the last move (each change compiles).
 const SETTLE: Duration = Duration::from_millis(60);
+/// Polls between the preview's pretend errors (`POLL` each).
+const DEMO_ERROR: u32 = 4;
 
 /// The window and what it shows.
 pub(super) struct Library {
@@ -49,6 +51,8 @@ pub(super) struct Library {
     /// The theme, skin and backdrop folders as last read (`None` before the first look).
     looks: Option<u64>,
     mascots: Rc<RefCell<MascotsTab>>,
+    /// Polls since the preview last showed a pretend error (for shaders reading `iTimeError`).
+    demo: u32,
 }
 
 /// The Library's Mascots tab, if the window was created.
@@ -137,6 +141,7 @@ impl Hub {
             stamps: (0, 0, 0),
             looks: None,
             mascots,
+            demo: 0,
         });
         true
     }
@@ -174,6 +179,17 @@ impl Hub {
         if l.armed.is_some_and(|at| at.elapsed() >= ARM) {
             l.armed = None;
             l.win.global::<LibraryUi>().set_armed_remove(false);
+        }
+        // a shader that reacts to errors: the preview shows one every few seconds
+        if l.tab == Kind::Shader
+            && let (Some(fx), Some(key)) = (&l.fx, &l.selected)
+            && shaders::find(key).is_some_and(|s| s.glsl.contains("iTimeError"))
+        {
+            l.demo += 1;
+            if l.demo >= DEMO_ERROR {
+                l.demo = 0;
+                fx.error(&l.win);
+            }
         }
         if l.tab == Kind::Mascot {
             return;

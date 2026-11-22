@@ -343,3 +343,81 @@ msgstr "Brilho começa em"
 
 msgid "Glow strength"
 msgstr "Força do brilho"
+
+msgid "Cursor trail"
+msgstr "Rastro do cursor"
+
+msgid "When the cursor jumps, a streak follows it and fades. Typing leaves none."
+msgstr "Quando o cursor salta, um rastro o segue e some. Digitar não deixa rastro."
+
+msgid "How long the streak lasts (s)"
+msgstr "Quanto dura o rastro (s)"
+
+msgid "Shorter moves leave no streak (cursor widths)"
+msgstr "Saltos menores não deixam rastro (larguras do cursor)"
+
+msgid "Streak width (part of the cursor's height)"
+msgstr "Largura do rastro (parte da altura do cursor)"
+
+msgid "How strongly it shows"
+msgstr "Quanto aparece"
+
+msgid "Focus dim"
+msgstr "Escurecer sem foco"
+
+msgid "Darker and grayer while the window is not in focus."
+msgstr "Mais escuro e mais cinza enquanto a janela não está em foco."
+
+msgid "How much darker without focus"
+msgstr "Quanto escurece sem foco"
+
+msgid "How much color goes without focus"
+msgstr "Quanta cor some sem foco"
+
+msgid "Fade time (s)"
+msgstr "Tempo da transição (s)"
+
+msgid "Theme tint"
+msgstr "Tom do tema"
+
+msgid "Pulls the screen toward the theme's colors, keeping the text as readable."
+msgstr "Puxa a tela para as cores do tema, sem perder a leitura do texto."
+
+msgid "How much of the theme's colors"
+msgstr "Quanto das cores do tema"
+
+msgid "Where the light color starts (brightness)"
+msgstr "Onde começa a cor clara (brilho)"
+
+msgid "Glitch on error"
+msgstr "Falha no erro"
+
+msgid "A short shake when the shell rings the bell or a command fails."
+msgstr "Um tremor curto quando o shell toca o sino ou um comando falha."
+
+msgid "How long it lasts (s)"
+msgstr "Quanto dura (s)"
+
+msgid "How strong"
+msgstr "Intensidade"
+
+msgid "Color split (px)"
+msgstr "Separação de cores (px)"
+
+msgid "Slice slide (px)"
+msgstr "Deslize das faixas (px)"
+
+msgid "Slices across the screen"
+msgstr "Faixas na tela"
+
+msgid "Phosphor"
+msgstr "Fósforo"
+
+msgid "What leaves the screen fades slowly, like an old monitor's glow."
+msgstr "O que sai da tela some devagar, como o brilho de um monitor antigo."
+
+msgid "How long a trace lingers (s)"
+msgstr "Quanto o rastro dura (s)"
+
+msgid "Trace color: own (0) to the cursor's (1)"
+msgstr "Cor do rastro: a própria (0) até a do cursor (1)"

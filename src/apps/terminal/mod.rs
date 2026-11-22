@@ -518,18 +518,29 @@ impl TerminalMini {
         self.pending.store(false, Ordering::Release);
         let close_on_exit = self.host.config.borrow().bool(&self.manifest, "close_on_exit");
         let mut exited = Vec::new();
+        let mut error = false;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             let Some(s) = &tab.session else { continue };
-            if std::mem::take(&mut s.parser().callbacks_mut().bell) {
+            let (bell, failed) = {
+                let mut parser = s.parser();
+                let ev = parser.callbacks_mut();
+                (std::mem::take(&mut ev.bell), std::mem::take(&mut ev.failed))
+            };
+            if bell {
                 self.face.react(Reaction::Surprised);
                 self.win_face.react(Reaction::Surprised);
             }
+            // the shaders' `iTimeError`: only the tab on screen
+            error |= (bell || failed) && i == self.active;
             if let Some(code) = s.exited()
                 && !tab.exit_seen
             {
                 tab.exit_seen = true;
                 exited.push((i, code));
             }
+        }
+        if error && let (Some(win), Some(fx)) = (&self.win, &self.shaders) {
+            fx.error(win);
         }
         if exited.is_empty() {
             self.redraw();

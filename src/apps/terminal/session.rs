@@ -14,18 +14,28 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-/// What the emulator hears besides the screen: the window title, the bell and the queries
-/// a program makes to the terminal (answered on the same thread that reads the shell).
+/// What the emulator hears besides the screen: the window title, the bell, a command that
+/// failed and the queries a program makes to the terminal (answered on the same thread that
+/// reads the shell).
 #[derive(Default)]
 pub struct Events {
     pub title: Option<String>,
     pub bell: bool,
+    /// A command ended with an error: the shell's prompt said so (OSC 133 `D;<code>`, sent
+    /// by shells with prompt marks: fish, starship, Ghostty's or VS Code's integration…).
+    pub failed: bool,
     replies: Vec<u8>,
 }
 
 impl vt100::Callbacks for Events {
     fn audible_bell(&mut self, _: &mut vt100::Screen) {
         self.bell = true;
+    }
+
+    fn unhandled_osc(&mut self, _: &mut vt100::Screen, params: &[&[u8]]) {
+        if command_failed(params) {
+            self.failed = true;
+        }
     }
 
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
@@ -56,6 +66,14 @@ impl vt100::Callbacks for Events {
 }
 
 pub type Parser = vt100::Parser<Events>;
+
+/// OSC 133 `D;<code>`: the end of a command, with its exit code; anything but 0 failed.
+fn command_failed(params: &[&[u8]]) -> bool {
+    match params {
+        [b"133", b"D", code, ..] => std::str::from_utf8(code).ok().and_then(|c| c.trim().parse::<i64>().ok()).is_some_and(|c| c != 0),
+        _ => false,
+    }
+}
 
 /// State shared with the thread that reads the shell.
 struct Shared {
@@ -288,6 +306,17 @@ mod tests {
         assert_eq!(std::mem::take(&mut ev.replies), b"\x1b[1;3R\x1b[0n\x1b[?1;2c");
         assert_eq!(ev.title.as_deref(), Some("my title"));
         assert!(ev.bell);
+    }
+
+    #[test]
+    fn a_failed_command_is_heard_from_the_prompt_marks() {
+        let mut p = vt100::Parser::new_with_callbacks(5.try_into().unwrap(), 20.try_into().unwrap(), 0, Events::default());
+        // a command that went fine, the next prompt, then a start of command: nothing
+        p.process(b"\x1b]133;D;0\x07\x1b]133;A\x07\x1b]133;C\x07");
+        assert!(!p.callbacks().failed);
+        // exit code 2, with the extra fields some shells add
+        p.process(b"\x1b]133;D;2;aid=42\x1b\\");
+        assert!(p.callbacks().failed);
     }
 
     #[test]
