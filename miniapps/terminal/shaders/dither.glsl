@@ -26,7 +26,14 @@ float bayer(vec2 cell) {
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 cell = floor(fragCoord / PIXEL);
     vec4 c = texture(iChannel0, (cell + 0.5) * PIXEL / iResolution.xy);
-    float l = clamp(dot(c.rgb, vec3(0.299, 0.587, 0.114)), 0.0, 1.0) * 3.0;
+    vec3 luma = vec3(0.299, 0.587, 0.114);
+    float l = clamp(dot(c.rgb, luma), 0.0, 1.0);
+    // the four colors go from the background to the text: on a light theme the background
+    // is the light end, so the scale is turned around
+    if (dot(iBackgroundColor, luma) > 0.5) {
+        l = 1.0 - l;
+    }
+    l *= 3.0;
     float level = floor(l);
     float pick = level + step(bayer(cell), l - level);
     vec3 color = pick < 0.5 ? iBackgroundColor

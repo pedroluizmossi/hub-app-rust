@@ -1,4 +1,4 @@
-// Rain: thin streaks fall over the dark parts of the screen; the text stays clear.
+// Rain: thin streaks fall over the background of the screen; the text stays clear.
 // Ghostty's custom-shader format (mainImage, iChannel0 = the terminal screen). Animated:
 // the window draws on every frame while it shows.
 //
@@ -44,8 +44,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // each pass of a column rains or not
     float raining = step(0.45, hash(column * 3.1 + floor(fall)));
     float rain = streak * streak * line * raining * OPACITY;
-    float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-    float behind = mix(1.0, 1.0 - smoothstep(0.12, 0.35, l), BEHIND);
+    // the background: on a dark theme the dark parts (a skin's backdrop included), on a
+    // light one what is near the theme's background color
+    vec3 luma = vec3(0.299, 0.587, 0.114);
+    bool light = dot(iBackgroundColor, luma) > 0.5;
+    float clear = light ? 1.0 - smoothstep(0.08, 0.25, length(c.rgb - iBackgroundColor))
+                        : 1.0 - smoothstep(0.12, 0.35, dot(c.rgb, luma));
+    float behind = mix(1.0, clear, BEHIND);
     vec3 color = mix(iBackgroundColor, iCursorColor, 0.7);
     fragColor = vec4(mix(c.rgb, color, rain * behind), c.a);
 }

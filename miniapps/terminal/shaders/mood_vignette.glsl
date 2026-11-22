@@ -26,5 +26,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float r = length(uv * 2.0 - 1.0) / 1.41421356;
     float edge = smoothstep(1.0 - SIZE, 1.0, r);
     float breath = 1.0 - PULSE * 0.5 * (1.0 + cos(6.2831853 * iTime / PERIOD));
-    fragColor = vec4(clamp(c.rgb + iMoodColor * edge * STRENGTH * breath, 0.0, 1.0), c.a);
+    float k = edge * STRENGTH * breath;
+    // light on a dark theme; on a light one (where light would not show) a tint
+    bool light = dot(iBackgroundColor, vec3(0.299, 0.587, 0.114)) > 0.5;
+    vec3 color = light ? mix(c.rgb, iMoodColor, k) : c.rgb + iMoodColor * k;
+    fragColor = vec4(clamp(color, 0.0, 1.0), c.a);
 }

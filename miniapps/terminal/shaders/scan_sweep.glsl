@@ -30,5 +30,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float edge = iResolution.y * (1.0 - t / SWEEP);
     float above = fragCoord.y - edge;
     float band = above >= 0.0 && above < BAND ? 1.0 - above / BAND : 0.0;
-    fragColor = vec4(clamp(c.rgb + iCursorColor * band * band * STRENGTH, 0.0, 1.0), c.a);
+    float k = band * band * STRENGTH;
+    // light on a dark theme; on a light one (where light would not show) a tint
+    bool light = dot(iBackgroundColor, vec3(0.299, 0.587, 0.114)) > 0.5;
+    vec3 color = light ? mix(c.rgb, iCursorColor, k) : c.rgb + iCursorColor * k;
+    fragColor = vec4(clamp(color, 0.0, 1.0), c.a);
 }

@@ -287,6 +287,8 @@ pub fn builtin() -> Vec<Shader> {
                 ("PIXEL", tr!("Pixel size")),
                 ("BRIGHTNESS", tr!("Brightness")),
                 ("HAZE", tr!("Haze toward the background")),
+                ("LIGHT_SHADE", tr!("Light theme: darkest tone of the scene")),
+                ("LIGHT_COLOR", tr!("Light theme: how much of the scene's colors")),
                 ("WINDOWS", tr!("Lit windows")),
                 ("RAIN_SPEED", tr!("Rain speed")),
                 ("RAIN_OPACITY", tr!("Rain strength")),
