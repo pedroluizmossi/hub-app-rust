@@ -47,7 +47,7 @@ O MiniUtils é a reescrita do plasmoid CyberDock em **Rust + Slint**, sem depend
 | **Assinaturas de IA** | Janelas de uso do Codex, Claude Code e OpenCode Go e créditos do Kiro, com previsão de quando o limite acaba. [Detalhes](#assinaturas-de-ia) | desligado |
 | **Portas abertas** | Quem escuta em cada porta, se é só local ou aberta para a rede, atalho para abrir no navegador e botão de encerrar (dois cliques). | desligado |
 | **To-do rápido** | Lista curta de tarefas: Enter acrescenta, clique marca como feita, e a mascote comemora quando a lista zera. | desligado |
-| **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. Com o renderizador OpenGL (Configurações › Sistema), shaders na GPU em sequência, escolhidos e ajustados na [Biblioteca](#biblioteca): CRT e Bloom embutidos e os seus, no formato do Ghostty (cursor, cores e paleta incluídos). O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
+| **Terminal** | Seu shell numa janela do MiniUtils, nas cores do tema: várias abas, histórico com a roda do mouse, seleção com o mouse, copiar e colar (Ctrl+Shift+C/V); o fundo do visual atrás do texto e, se quiser, efeito CRT, chuva e a mascote reagindo ao shell. Com o renderizador OpenGL (Configurações › Sistema), shaders na GPU em sequência, escolhidos e ajustados na [Biblioteca](#biblioteca): sete embutidos (CRT, Bloom, rastro do cursor, escurecer sem foco, tom do tema, falha no erro, fósforo) e os seus, no formato do Ghostty (cursor, cores e paleta incluídos). O shell continua rodando com a janela fechada, e o cartão mostra as últimas linhas. | desligado |
 | **Agentes de IA** | Sessões do Claude Code, Codex, OpenCode e Oh My Pi (OMP): quem trabalha (e em quê), quem espera por você e quem terminou, com os subagentes e os workflows do Claude Code (fases e agentes de cada uma). Abre a pasta, um terminal ou retoma a sessão. | desligado |
 
 Os apps desligados se ligam em **Configurações › Apps**.
@@ -148,6 +148,16 @@ carrega, o porquê, ali mesmo.
   vai para a config (`[shader_params.<shader>]`); o arquivo não muda. Um `.toml` ao lado do
   shader (`nome.toml`, ou `shader.toml` numa pasta `nome/`) pode dar nome, autor, licença e
   rótulos ou faixas próprias (`[params.NOME]`). Erro de compilação aparece no item.
+- **Shaders embutidos**: CRT, Bloom, **Rastro do cursor** (um rastro quando o cursor salta),
+  **Escurecer sem foco**, **Tom do tema** (puxa a tela para as cores do tema sem perder a
+  leitura), **Falha no erro** (um tremor curto quando o shell toca o sino ou um comando
+  falha; o comando falho só é visto em shells que marcam o prompt com OSC 133, como fish,
+  starship ou a integração do Ghostty) e **Fósforo** (o que sai da tela some devagar).
+- **Para quem escreve shaders**: além do que o Ghostty passa, há `iTimeError` (quando foi o
+  último erro, no relógio do `iTime`) e `iChannel1` (o que o próprio shader desenhou no
+  quadro anterior). Um shader que usa o relógio só para animar depois de um evento (cursor,
+  foco, erro) pode dizer `#pragma miniutils events`: a janela então só redesenha a cada
+  quadro por 2,5 s depois de cada evento, em vez de o tempo todo.
 - **Mascotes**: suas mascotes num lugar só: importa uma pasta ou um `.zip` baixado
   (mascotes em código e sprites PNG), renomeia, escolhe a animação de cada humor, as cores
   que seguem o tema, onde os subagentes param, e coloca a mascote num app, numa página ou

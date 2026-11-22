@@ -317,9 +317,18 @@ component ParamSlider inherits Rectangle {
 }
 
 // A few lines that look like a terminal, for the shaders' preview (drawn over in Rust).
+// The cursor jumps between the prompt and the top now and then, for the shaders that
+// follow it.
 component SampleScreen inherits Rectangle {
     background: #0c0c14;
     clip: true;
+    // 0: after the prompt; 1: at the top left
+    property <int> spot;
+    Timer {
+        interval: 1.8s;
+        running: LibraryUi.tab == "shader";
+        triggered => { root.spot = 1 - root.spot; }
+    }
     VerticalLayout {
         padding: 10px;
         spacing: 2px;
@@ -338,7 +347,7 @@ component SampleScreen inherits Rectangle {
             font-size: 13px;
             overflow: clip;
         }
-        // the prompt, and the cursor right after it
+        // the prompt, and where the cursor sits after it
         HorizontalLayout {
             alignment: start;
             Text {
@@ -347,15 +356,19 @@ component SampleScreen inherits Rectangle {
                 font-family: "JetBrains Mono";
                 font-size: 13px;
             }
-            cursor := Rectangle {
-                width: 8px;
-                background: #3df2ff.with-alpha(0.7);
-            }
+            home := Rectangle { width: 8px; }
         }
     }
+    cursor := Rectangle {
+        x: root.spot == 0 ? home.absolute-position.x - root.absolute-position.x : 10px;
+        y: root.spot == 0 ? home.absolute-position.y - root.absolute-position.y : 10px;
+        width: 8px;
+        height: home.height;
+        background: #3df2ff.with-alpha(0.7);
+    }
     // relative to this screen (the shaders' area), like a terminal's cursor
-    out property <length> cursor-x: cursor.absolute-position.x - root.absolute-position.x;
-    out property <length> cursor-y: cursor.absolute-position.y - root.absolute-position.y;
+    out property <length> cursor-x: cursor.x;
+    out property <length> cursor-y: cursor.y;
     out property <length> cursor-w: cursor.width;
     out property <length> cursor-h: cursor.height;
 }

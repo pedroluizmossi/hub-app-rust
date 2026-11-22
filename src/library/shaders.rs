@@ -139,6 +139,61 @@ pub fn builtin() -> Vec<Shader> {
             &[("SPREAD", tr!("Glow size (px)")), ("THRESHOLD", tr!("Glow starts at brightness")), ("STRENGTH", tr!("Glow strength"))],
             &["SAMPLES"],
         ),
+        make(
+            "cursor_trail",
+            tr!("Cursor trail"),
+            tr!("When the cursor jumps, a streak follows it and fades. Typing leaves none."),
+            include_str!("../../miniapps/terminal/shaders/cursor_trail.glsl"),
+            &[
+                ("DURATION", tr!("How long the streak lasts (s)")),
+                ("MIN_JUMP", tr!("Shorter moves leave no streak (cursor widths)")),
+                ("WIDTH", tr!("Streak width (part of the cursor's height)")),
+                ("OPACITY", tr!("How strongly it shows")),
+            ],
+            &[],
+        ),
+        make(
+            "focus_dim",
+            tr!("Focus dim"),
+            tr!("Darker and grayer while the window is not in focus."),
+            include_str!("../../miniapps/terminal/shaders/focus_dim.glsl"),
+            &[
+                ("DIM", tr!("How much darker without focus")),
+                ("DESATURATE", tr!("How much color goes without focus")),
+                ("FADE", tr!("Fade time (s)")),
+            ],
+            &[],
+        ),
+        make(
+            "theme_tint",
+            tr!("Theme tint"),
+            tr!("Pulls the screen toward the theme's colors, keeping the text as readable."),
+            include_str!("../../miniapps/terminal/shaders/theme_tint.glsl"),
+            &[("STRENGTH", tr!("How much of the theme's colors")), ("MIDPOINT", tr!("Where the light color starts (brightness)"))],
+            &[],
+        ),
+        make(
+            "glitch",
+            tr!("Glitch on error"),
+            tr!("A short shake when the shell rings the bell or a command fails."),
+            include_str!("../../miniapps/terminal/shaders/glitch.glsl"),
+            &[
+                ("DURATION", tr!("How long it lasts (s)")),
+                ("INTENSITY", tr!("How strong")),
+                ("SPLIT", tr!("Color split (px)")),
+                ("SHIFT", tr!("Slice slide (px)")),
+                ("SLICES", tr!("Slices across the screen")),
+            ],
+            &[],
+        ),
+        make(
+            "phosphor",
+            tr!("Phosphor"),
+            tr!("What leaves the screen fades slowly, like an old monitor's glow."),
+            include_str!("../../miniapps/terminal/shaders/phosphor.glsl"),
+            &[("PERSIST", tr!("How long a trace lingers (s)")), ("TINT", tr!("Trace color: own (0) to the cursor's (1)"))],
+            &[],
+        ),
     ]
 }
 

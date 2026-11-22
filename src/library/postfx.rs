@@ -9,11 +9,17 @@
 //! `iTimeFocus`) and the colors (`iBackgroundColor`, `iForegroundColor`, `iCursorColor`,
 //! `iPalette[256]`). Several shaders form a chain, each reading the one before.
 //!
+//! MiniUtils adds two inputs of its own: `iTimeError` (when the shell last rang the bell or
+//! reported a failed command, on the `iTime` clock; far in the past when it never did) and
+//! `iChannel1` (what this same shader drew the frame before, for trails that fade).
+//!
 //! After Slint draws the window (`RenderingState::AfterRendering`), the area is copied into
 //! a texture and drawn back in place through the chain. Every GL state touched is restored,
 //! since the renderer's own drawing relies on it. A shader that reads the clock (`iTime`,
 //! …) makes the window draw on every frame while it is visible; the others only when
-//! something changes, like the rest of the window.
+//! something changes, like the rest of the window. A shader whose animation only follows
+//! events says so with `#pragma miniutils events`: the window then draws on every frame
+//! only for `EVENT_TAIL` after the cursor moves, the focus changes or an error comes.
 //!
 //! Compile errors are kept by shader name (`errors`), for the Library to show.
 
@@ -27,6 +33,10 @@ use slint::{ComponentHandle, GraphicsAPI, RenderingState, Timer, TimerMode};
 
 /// How often an animated chain asks for a frame (the display's rate caps it anyway).
 const FRAME: Duration = Duration::from_millis(16);
+/// How long a chain that animates on events keeps drawing after the last one.
+const EVENT_TAIL: Duration = Duration::from_millis(2500);
+/// The line that makes a shader animate on events only (see the module's comment).
+const EVENTS_PRAGMA: &str = "#pragma miniutils events";
 
 /// GLSL headers tried, newest first. 4.30 takes what Ghostty shaders use (array
 /// initializers); 3.30 gets the same through an extension, for a driver that gives exactly
@@ -56,6 +66,8 @@ uniform int iFrame;
 uniform vec4 iMouse;
 uniform vec4 iDate;
 uniform sampler2D iChannel0;
+uniform sampler2D iChannel1;
+uniform float iTimeError;
 uniform vec3 iChannelResolution[4];
 uniform vec4 iCurrentCursor;
 uniform vec4 iPreviousCursor;
@@ -89,12 +101,32 @@ pub struct Source {
 }
 
 impl Source {
-    /// It reads the clock, so its picture changes on its own. Comments don't count (a
-    /// shader may say it doesn't use `iTime`).
-    fn animated(&self) -> bool {
+    /// How the window must draw for it: a shader that reads the clock changes on its own
+    /// (on every frame, or after events when it says so). Comments don't count (a shader
+    /// may say it doesn't use `iTime`).
+    fn redraw(&self) -> Redraw {
         let code = without_comments(&self.glsl);
-        ["iTime", "iTimeDelta", "iFrame", "iDate", "iTimeCursorChange", "iTimeFocus"].iter().any(|u| code.contains(u))
+        let clock = ["iTime", "iTimeDelta", "iFrame", "iDate", "iTimeCursorChange", "iTimeFocus", "iTimeError", "iChannel1"];
+        if !clock.iter().any(|u| code.contains(u)) {
+            Redraw::Still
+        } else if code.contains(EVENTS_PRAGMA) {
+            Redraw::Events
+        } else {
+            Redraw::Always
+        }
     }
+}
+
+/// When a chain needs frames of its own, besides the window's.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+enum Redraw {
+    /// Never: it only changes with the window.
+    #[default]
+    Still,
+    /// For `EVENT_TAIL` after each event.
+    Events,
+    /// On every frame.
+    Always,
 }
 
 /// GLSL without its `//` and `/* */` comments.
@@ -189,13 +221,29 @@ struct Shared {
     sources: Vec<Source>,
     changed: bool,
     colors: Option<Colors>,
+    /// What the chain needs to keep moving, and the last event that set it going.
+    redraw: Redraw,
+    kicked: Option<Instant>,
+    /// When the shell last failed (`iTimeError`).
+    error: Option<Instant>,
+}
+
+impl Shared {
+    /// The clock has frames to ask for now.
+    fn moving(&self) -> bool {
+        match self.redraw {
+            Redraw::Still => false,
+            Redraw::Events => self.kicked.is_some_and(|at| at.elapsed() < EVENT_TAIL),
+            Redraw::Always => true,
+        }
+    }
 }
 
 /// The shaders of one window.
 pub struct PostFx {
     shared: Rc<RefCell<Shared>>,
-    /// Asks for frames while an animated chain is on.
-    clock: Timer,
+    /// Asks for frames while the chain is moving (`Shared::moving`).
+    clock: Rc<Timer>,
 }
 
 impl PostFx {
@@ -206,7 +254,8 @@ impl PostFx {
             return None;
         }
         let shared = Rc::new(RefCell::new(Shared::default()));
-        let inner = shared.clone();
+        let clock = Rc::new(Timer::default());
+        let (inner, ticker) = (shared.clone(), clock.clone());
         let weak = win.as_weak();
         let mut gl: Option<Gl> = None;
         let hooked = win.window().set_rendering_notifier(move |state, api| match state {
@@ -225,7 +274,11 @@ impl PostFx {
                     && let Some(frame) = probe(&win)
                 {
                     let size = win.window().size();
-                    gl.frame(&frame, win.window().scale_factor(), (size.width as i32, size.height as i32), &mut inner.borrow_mut());
+                    let event = gl.frame(&frame, win.window().scale_factor(), (size.width as i32, size.height as i32), &mut inner.borrow_mut());
+                    if event {
+                        inner.borrow_mut().kicked = Some(Instant::now());
+                        run_clock(&ticker, weak.clone(), &inner);
+                    }
                 }
             }
             RenderingState::RenderingTeardown => {
@@ -239,38 +292,66 @@ impl PostFx {
             log::warn!("no shaders in this window ({e:?})");
             return None;
         }
-        Some(PostFx { shared, clock: Timer::default() })
+        Some(PostFx { shared, clock })
     }
 
     /// The shaders to run, in order (empty: none). Draws the window again when they changed.
     pub fn set<C: ComponentHandle + 'static>(&self, win: &C, sources: Vec<Source>) {
-        let animated = sources.iter().any(Source::animated);
         {
             let mut shared = self.shared.borrow_mut();
+            shared.redraw = sources.iter().map(Source::redraw).max_by_key(|r| *r as u8).unwrap_or_default();
             if shared.sources != sources {
                 shared.sources = sources;
                 shared.changed = true;
                 win.window().request_redraw();
             }
         }
-        if !animated {
-            self.clock.stop();
-        } else if !self.clock.running() {
-            let weak = win.as_weak();
-            self.clock.start(TimerMode::Repeated, FRAME, move || {
-                if let Some(win) = weak.upgrade()
-                    && win.window().is_visible()
-                {
-                    win.window().request_redraw();
-                }
-            });
-        }
+        run_clock(&self.clock, win.as_weak(), &self.shared);
     }
 
     /// The colors the shaders see (`iBackgroundColor`, `iPalette`…).
     pub fn set_colors(&self, colors: Colors) {
         self.shared.borrow_mut().colors = Some(colors);
     }
+
+    /// The shell rang the bell or a command failed (`iTimeError`).
+    pub fn error<C: ComponentHandle + 'static>(&self, win: &C) {
+        {
+            let mut shared = self.shared.borrow_mut();
+            let now = Instant::now();
+            shared.error = Some(now);
+            shared.kicked = Some(now);
+        }
+        win.window().request_redraw();
+        run_clock(&self.clock, win.as_weak(), &self.shared);
+    }
+}
+
+/// Starts the clock if the chain is moving; it stops itself once the chain is not.
+fn run_clock<C: ComponentHandle + 'static>(clock: &Rc<Timer>, weak: slint::Weak<C>, shared: &Rc<RefCell<Shared>>) {
+    if !shared.borrow().moving() {
+        clock.stop();
+        return;
+    }
+    if clock.running() {
+        return;
+    }
+    let (me, shared) = (Rc::downgrade(clock), shared.clone());
+    clock.start(TimerMode::Repeated, FRAME, move || {
+        // drawing: the notifier has the state borrowed, and this frame is asked anyway
+        let Ok(state) = shared.try_borrow() else { return };
+        if !state.moving() {
+            if let Some(me) = me.upgrade() {
+                me.stop();
+            }
+            return;
+        }
+        if let Some(win) = weak.upgrade()
+            && win.window().is_visible()
+        {
+            win.window().request_redraw();
+        }
+    });
 }
 
 /// The GL objects of the chain, living in the renderer's context.
@@ -293,15 +374,21 @@ struct Gl {
     cursor_changed: f32,
     focused: bool,
     focus_changed: f32,
+    /// The last error (`iTimeError`), seconds since `start`.
+    error: f32,
 }
 
 /// One compiled shader and where its inputs go.
 struct Pass {
     program: glow::Program,
     at: HashMap<&'static str, glow::UniformLocation>,
+    /// What it drew the frame before (`iChannel1`), at `size`; only for a shader that
+    /// reads it.
+    history: Option<glow::Texture>,
+    history_size: (i32, i32),
 }
 
-const UNIFORMS: [&str; 20] = [
+const UNIFORMS: [&str; 22] = [
     "iResolution",
     "iTime",
     "iTimeDelta",
@@ -309,6 +396,8 @@ const UNIFORMS: [&str; 20] = [
     "iMouse",
     "iDate",
     "iChannel0",
+    "iChannel1",
+    "iTimeError",
     "iChannelResolution",
     "iCurrentCursor",
     "iPreviousCursor",
@@ -330,6 +419,8 @@ struct Saved {
     vao: Option<glow::VertexArray>,
     active_texture: i32,
     texture: Option<glow::Texture>,
+    /// What texture unit 1 had (`iChannel1` uses it).
+    texture1: Option<glow::Texture>,
     draw_fb: Option<glow::Framebuffer>,
     read_fb: Option<glow::Framebuffer>,
     viewport: [i32; 4],
@@ -392,6 +483,7 @@ impl Gl {
             cursor_changed: -1000.0,
             focused: true,
             focus_changed: -1000.0,
+            error: -1000.0,
         }
     }
 
@@ -431,7 +523,7 @@ impl Gl {
                         // SAFETY: as above
                         .filter_map(|name| unsafe { self.gl.get_uniform_location(program, name) }.map(|l| (*name, l)))
                         .collect();
-                    return Ok(Pass { program, at });
+                    return Ok(Pass { program, at, history: None, history_size: (0, 0) });
                 }
                 Err(e) => errors.push(format!("[{}] {e}", header.lines().next().unwrap_or_default())),
             }
@@ -477,8 +569,13 @@ impl Gl {
 
     fn drop_passes(&mut self) {
         for pass in self.passes.drain(..) {
-            // SAFETY: the program was made in this context, which is current.
-            unsafe { self.gl.delete_program(pass.program) };
+            // SAFETY: the program and texture were made in this context, which is current.
+            unsafe {
+                self.gl.delete_program(pass.program);
+                if let Some(t) = pass.history {
+                    self.gl.delete_texture(t);
+                }
+            }
         }
     }
 
@@ -498,27 +595,36 @@ impl Gl {
         }
     }
 
-    /// Runs the chain over the area of the frame Slint just drew.
-    fn frame(&mut self, frame: &Frame, scale: f32, window: (i32, i32), shared: &mut Shared) {
+    /// Runs the chain over the area of the frame Slint just drew. `true` when an event
+    /// came (the cursor moved, the focus changed): a chain that animates on events goes on.
+    fn frame(&mut self, frame: &Frame, scale: f32, window: (i32, i32), shared: &mut Shared) -> bool {
         if shared.changed {
             shared.changed = false;
             self.build(&shared.sources);
         }
         if self.passes.is_empty() {
-            return;
+            return false;
         }
-        let Some(area) = screen_area(frame.area, scale, window) else { return };
+        let Some(area) = screen_area(frame.area, scale, window) else { return false };
         let now = self.start.elapsed().as_secs_f32();
-        let cursor = frame.cursor.map_or([0.0; 4], |c| cursor_rect(c, scale, area.h));
-        if cursor != self.cursor {
-            self.previous = self.cursor;
-            self.cursor = cursor;
-            self.cursor_changed = now;
+        let mut event = false;
+        // a hidden cursor (blinking, a program hiding it) stays where it was: a trail
+        // follows moves, not blinks
+        if let Some(c) = frame.cursor {
+            let cursor = cursor_rect(c, scale, area.h);
+            if cursor != self.cursor {
+                self.previous = if self.cursor == [0.0; 4] { cursor } else { self.cursor };
+                self.cursor = cursor;
+                self.cursor_changed = now;
+                event = true;
+            }
         }
         if frame.focused != self.focused {
             self.focused = frame.focused;
             self.focus_changed = now;
+            event = true;
         }
+        self.error = shared.error.and_then(|at| at.checked_duration_since(self.start)).map_or(-1000.0, |d| d.as_secs_f32());
         // SAFETY: the renderer's context is current while it notifies; every state changed
         // here is restored before returning.
         unsafe {
@@ -527,6 +633,7 @@ impl Gl {
             self.run(&area, &saved, shared.colors.as_ref());
             self.restore(&saved);
         }
+        event
     }
 
     unsafe fn save(&self) -> Saved {
@@ -535,6 +642,9 @@ impl Gl {
             let active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE);
             gl.active_texture(glow::TEXTURE0);
             let texture = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+            gl.active_texture(glow::TEXTURE1);
+            let texture1 = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+            gl.active_texture(glow::TEXTURE0);
             let mut viewport = [0; 4];
             gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
             let mut scissor = [0; 4];
@@ -545,6 +655,7 @@ impl Gl {
                 vao: gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING),
                 active_texture,
                 texture,
+                texture1,
                 draw_fb: gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING),
                 read_fb: gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING),
                 viewport,
@@ -560,6 +671,9 @@ impl Gl {
         unsafe {
             gl.use_program(s.program);
             gl.bind_vertex_array(s.vao);
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, s.texture1);
+            gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, s.texture);
             gl.active_texture(s.active_texture as u32);
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, s.draw_fb);
@@ -637,7 +751,8 @@ impl Gl {
 
             let (mut input, mut output) = (first, second);
             let count = self.passes.len();
-            for (i, pass) in self.passes.iter().enumerate() {
+            let (w, h) = (area.w as f32, area.h as f32);
+            for (i, pass) in self.passes.iter_mut().enumerate() {
                 let last = i + 1 == count;
                 if last {
                     // back into the window, in place; its alpha (the cut corners) stays
@@ -655,8 +770,14 @@ impl Gl {
                 }
                 gl.use_program(Some(pass.program));
                 gl.bind_texture(glow::TEXTURE_2D, Some(input));
+                // what this shader drew the frame before, on unit 1
+                let history = if pass.at.contains_key("iChannel1") { history_texture(gl, pass, area.w, area.h) } else { None };
+                if let Some(t) = history {
+                    gl.active_texture(glow::TEXTURE1);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(t));
+                    gl.active_texture(glow::TEXTURE0);
+                }
                 let u = |name: &str| pass.at.get(name);
-                let (w, h) = (area.w as f32, area.h as f32);
                 gl.uniform_3_f32(u("iResolution"), w, h, 1.0);
                 gl.uniform_1_f32(u("iTime"), time);
                 gl.uniform_1_f32(u("iTimeDelta"), delta);
@@ -664,6 +785,8 @@ impl Gl {
                 gl.uniform_4_f32(u("iMouse"), 0.0, 0.0, 0.0, 0.0);
                 gl.uniform_4_f32_slice(u("iDate"), &date);
                 gl.uniform_1_i32(u("iChannel0"), 0);
+                gl.uniform_1_i32(u("iChannel1"), 1);
+                gl.uniform_1_f32(u("iTimeError"), self.error);
                 gl.uniform_3_f32_slice(u("iChannelResolution"), &[w, h, 1.0]);
                 gl.uniform_4_f32_slice(u("iCurrentCursor"), &self.cursor);
                 gl.uniform_4_f32_slice(u("iPreviousCursor"), &self.previous);
@@ -682,10 +805,56 @@ impl Gl {
                 let offset = if last { (area.x as f32, area.y as f32) } else { (0.0, 0.0) };
                 gl.uniform_2_f32(u("uOffset"), offset.0, offset.1);
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                if let Some(t) = history {
+                    // keep what was just drawn for the next frame
+                    let (fb, x, y) = if last { (saved.draw_fb, area.x, area.y) } else { (self.fbo, 0, 0) };
+                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, fb);
+                    gl.active_texture(glow::TEXTURE1);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(t));
+                    gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, x, y, area.w, area.h);
+                    gl.active_texture(glow::TEXTURE0);
+                }
                 std::mem::swap(&mut input, &mut output);
             }
         }
         self.frame = self.frame.wrapping_add(1);
+    }
+}
+
+/// The pass's `iChannel1` texture at `w`×`h`, made (black) when missing or resized.
+///
+/// # Safety
+/// The context `gl` belongs to must be current.
+unsafe fn history_texture(gl: &glow::Context, pass: &mut Pass, w: i32, h: i32) -> Option<glow::Texture> {
+    unsafe {
+        if pass.history.is_some() && pass.history_size == (w, h) {
+            return pass.history;
+        }
+        let texture = match pass.history {
+            Some(t) => t,
+            None => *pass.history.insert(gl.create_texture().ok()?),
+        };
+        gl.active_texture(glow::TEXTURE1);
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        let black = vec![0u8; (w * h * 4).max(0) as usize];
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            w,
+            h,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(&black)),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.active_texture(glow::TEXTURE0);
+        pass.history_size = (w, h);
+        Some(texture)
     }
 }
 
@@ -729,16 +898,18 @@ mod tests {
     }
 
     #[test]
-    fn only_shaders_reading_the_clock_animate() {
+    fn only_shaders_reading_the_clock_redraw() {
         let src = |glsl: &str| Source { name: String::new(), glsl: glsl.into() };
+        // the built-in ones never ask for every frame: still, or only after events
         for s in super::super::shaders::builtin() {
-            assert!(!src(&s.glsl).animated(), "{} animates", s.key);
+            assert_ne!(src(&s.glsl).redraw(), Redraw::Always, "{} redraws on every frame", s.key);
         }
-        assert!(src("void mainImage(out vec4 c, in vec2 p) { c = vec4(sin(iTime)); }").animated());
+        assert_eq!(src("void mainImage(out vec4 c, in vec2 p) { c = vec4(sin(iTime)); }").redraw(), Redraw::Always);
         // named only in comments: still static; a division is not a comment
-        assert!(!src("// iTime\n/* iFrame */ void mainImage(out vec4 c, in vec2 p) { c = vec4(p / 2.0, 0, 1); }").animated());
-        assert!(src("float t = 1.0 / 2.0 * iTime; // clock").animated());
-        // the cursor shaders animate after each move
-        assert!(src("float age = iTime - iTimeCursorChange;").animated());
+        assert_eq!(src("// iTime\n/* iFrame */ void mainImage(out vec4 c, in vec2 p) { c = vec4(p / 2.0, 0, 1); }").redraw(), Redraw::Still);
+        assert_eq!(src("float t = 1.0 / 2.0 * iTime; // clock").redraw(), Redraw::Always);
+        // a cursor shader without the pragma (Ghostty's): every frame, as Ghostty does
+        assert_eq!(src("float age = iTime - iTimeCursorChange;").redraw(), Redraw::Always);
+        assert_eq!(src("#pragma miniutils events\nfloat age = iTime - iTimeCursorChange;").redraw(), Redraw::Events);
     }
 }
