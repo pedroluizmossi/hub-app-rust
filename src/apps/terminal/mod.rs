@@ -328,6 +328,11 @@ impl TerminalMini {
         let sprite = sprites::get(&self.mascot_key());
         let changed = self.win_face.refresh(sprite, self.host.theme_for(&self.manifest), mood);
         if changed || mood != self.win_mood {
+            if mood != self.win_mood
+                && let Some(fx) = &self.shaders
+            {
+                fx.set_mood(win, mood_color(self.host.theme_for(&self.manifest), mood));
+            }
             self.win_mood = mood;
             let g = win.global::<TerminalScreen>();
             g.set_mascot(self.win_face.image());
@@ -680,6 +685,9 @@ impl TerminalMini {
         self.request_fx();
         if let Some(fx) = &self.shaders {
             fx.set_colors(shader_colors(&self.palette, cursor));
+            if let Some(win) = &self.win {
+                fx.set_mood(win, mood_color(self.host.theme_for(&self.manifest), self.win_mood));
+            }
         }
         self.apply_shaders();
     }
@@ -968,6 +976,19 @@ fn screen_frame(win: &TerminalWindow) -> Option<Frame> {
 fn shader_colors(p: &Palette, cursor: slint::Color) -> Colors {
     let rgb = |c: slint::Color| [c.red() as f32 / 255.0, c.green() as f32 / 255.0, c.blue() as f32 / 255.0];
     Colors::new(rgb(p.bg), rgb(p.fg), rgb(cursor), p.ansi.map(rgb))
+}
+
+/// The theme's color for the window mascot's `mood`, as the shaders see it (`iMoodColor`;
+/// the same choice as `Moods.color` in ui/theme.slint).
+fn mood_color(t: &crate::mascot::themes::Theme, mood: Mood) -> [f32; 3] {
+    let c = match mood {
+        Mood::Alarm => t.alarm,
+        Mood::Busy => t.warn,
+        Mood::Happy => t.ok,
+        Mood::Sleep => t.sleep,
+        _ => t.visor,
+    };
+    [((c >> 16) & 0xff) as f32 / 255.0, ((c >> 8) & 0xff) as f32 / 255.0, (c & 0xff) as f32 / 255.0]
 }
 
 /// Called on a reading thread: brings the news to the UI thread, once until it is read.

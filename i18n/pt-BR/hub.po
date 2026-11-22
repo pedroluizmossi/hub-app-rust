@@ -421,3 +421,66 @@ msgstr "Quanto o rastro dura (s)"
 
 msgid "Trace color: own (0) to the cursor's (1)"
 msgstr "Cor do rastro: a própria (0) até a do cursor (1)"
+
+msgid "Rain"
+msgstr "Chuva"
+
+msgid "Thin rain falls over the dark parts of the screen; the text stays clear."
+msgstr "Chuva fina cai sobre as partes escuras da tela; o texto fica limpo."
+
+msgid "Columns of rain across the screen"
+msgstr "Colunas de chuva na tela"
+
+msgid "Fall speed (screens per second)"
+msgstr "Velocidade da queda (telas por segundo)"
+
+msgid "Streak length (part of the screen)"
+msgstr "Tamanho do pingo (parte da tela)"
+
+msgid "Only over the background (1) or over everything (0)"
+msgstr "Só sobre o fundo (1) ou sobre tudo (0)"
+
+msgid "Scan sweep"
+msgstr "Varredura"
+
+msgid "Every few seconds a light band runs down the screen, like a radar."
+msgstr "A cada poucos segundos uma faixa de luz desce a tela, como um radar."
+
+msgid "Seconds between sweeps"
+msgstr "Segundos entre varreduras"
+
+msgid "How long a sweep takes (s)"
+msgstr "Quanto dura a varredura (s)"
+
+msgid "Band height (px)"
+msgstr "Altura da faixa (px)"
+
+msgid "How bright"
+msgstr "Brilho"
+
+msgid "Dither"
+msgstr "Pontilhado"
+
+msgid "A pixel-art look: bigger pixels in four colors of the theme. More for fun than for reading."
+msgstr "Visual de pixel art: pixels maiores em quatro cores do tema. Mais para brincar do que para ler."
+
+msgid "Pixel size"
+msgstr "Tamanho do pixel"
+
+msgid "How much of the effect"
+msgstr "Quanto do efeito"
+
+msgid "Mood vignette"
+msgstr "Vinheta do humor"
+
+msgid "The corners glow in the color of the mascot's mood, breathing slowly."
+msgstr "Os cantos brilham na cor do humor da mascote, pulsando devagar."
+
+msgid "How far in it reaches"
+msgstr "Até onde entra"
+
+msgid "Seconds per breath"
+msgstr "Segundos por pulso"
+
+msgid "How much it breathes"
+msgstr "Quanto pulsa"
