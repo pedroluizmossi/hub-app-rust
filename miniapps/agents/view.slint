@@ -455,8 +455,8 @@ component Row inherits Rectangle {
     property <length> runs-h: compact || a.runs.length == 0 ? 0 : a.run-lines * sub-h + a.runs.length * run-gap;
     property <length> details-h: chips-h + stats-h + prompt-h + subs-h + runs-h
         + (has-chips || has-stats || has-prompt || sub-lines > 0 || runs-h > 0 ? 8px : 0);
-    // strip of working subagents (taller with the imported mascots, up to 32 px)
-    property <length> walk-h: a.heroes.length > 0 ? 42px : a.walkers > 0 ? 30px : 0;
+    // Keep the original ground and headroom while scaling the sprites.
+    property <length> walk-h: a.heroes.length > 0 ? 42px + 32px * 2 : a.walkers > 0 ? 30px + 22px * 14 / 16 * 2 : 0;
     property <length> options-h: a.open ? max(1, Skin.text-scale) * 46px : 0;
 
     height: base + details-h + walk-h + options-h;
@@ -672,12 +672,11 @@ component Row inherits Rectangle {
         for h in a.heroes: Image {
             source: h.frame;
             image-rendering: pixelated;
-            // at the drawing size (crisp), up to 32 px tall; a small drawing (a 16×14 code
-            // mascot) doubles, so it isn't a speck next to the others
-            property <length> hero-h: h.frame.height <= 16 ? h.frame.height * 2px : min(32px, h.frame.height * 1px);
+            // Triple the original drawing size, including its 32 px height cap.
+            property <length> hero-h: (h.frame.height <= 16 ? h.frame.height * 2px : min(32px, h.frame.height * 1px)) * 3;
             height: hero-h;
             width: hero-h * h.frame.width / max(1, h.frame.height);
-            x: h.x * (parent.width - self.width);
+            x: h.x * max(0px, parent.width - self.width);
             y: parent.height - 8px - self.height;
             animate x { duration: 250ms; easing: linear; }
         }
@@ -688,9 +687,9 @@ component Row inherits Rectangle {
             property <float> pos: Anim.calm ? (k + 0.5) / a.walkers : (step < span ? step : span * 2 - step) / span;
             source: a.walker;
             image-rendering: pixelated;
-            height: 22px * 14 / 16;
-            width: 22px;
-            x: pos * (parent.width - self.width);
+            height: 22px * 14 / 16 * 3;
+            width: 22px * 3;
+            x: pos * max(0px, parent.width - self.width);
             // little step: up and down every frame
             y: parent.height - 8px - self.height - (!Anim.calm && mod(Anim.frame + k, 2) == 0 ? 2px : 0);
             animate x { duration: 220ms; easing: linear; }
